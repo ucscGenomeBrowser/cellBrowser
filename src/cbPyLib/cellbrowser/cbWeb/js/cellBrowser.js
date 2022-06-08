@@ -320,7 +320,7 @@ var cellbrowser = function() {
 
     function cleanString(s) {
         /* make sure that string only contains normal characters. Good when printing something that may contain
-         * dangerous */
+         * dangerous ones */
         if (s===undefined)
             return undefined;
         return s.replace(/[^0-9a-zA-Z _-]/g, '');
@@ -588,7 +588,7 @@ var cellbrowser = function() {
         "doi" : "Publication Fulltext",
         "arrayexpress" : "ArrayExpress",
         "ena_project" : "European Nucleotide Archive",
-        "hca_dcp" : "Human Cell Atlas DCP",
+        "hca_dcp" : "Human Cell Atlas Data Portal",
         "cirm_dataset" : "California Institute of Regenerative Medicine Dataset",
     };
 
@@ -930,6 +930,7 @@ var cellbrowser = function() {
         htmlAddLink(htmls, desc, "cirm_dataset");
         htmlAddLink(htmls, desc, "ega_study");
         htmlAddLink(htmls, desc, "ena_project");
+        htmlAddLink(htmls, desc, "hca_dcp");
 
         if (desc.urls) {
             for (let key in desc.urls)
@@ -984,8 +985,14 @@ var cellbrowser = function() {
                     htmls.push("<br>");
             }
 
-            htmls.push("<p style='padding-top: 15px'><small>Cell Browser dataset ID: "+datasetInfo.name+
+            htmls.push("<p style='padding-top: 8px'>If you use the Cell Browser of this dataset, please cite " +
+                    "<a href='https://academic.oup.com/bioinformatics/article/37/23/4578/6318386' target=_blank>" +
+                    "Speir et al. 2021</a>. Thanks! Feature ideas? -> cells@ucsc.edu" +
+                    "</p>");
+
+            htmls.push("<p style='padding-top: 8px'><small>Cell Browser dataset ID: "+datasetInfo.name+
                     "</small></p>");
+
             }
         }
 
@@ -1054,12 +1061,12 @@ var cellbrowser = function() {
                 lifeStr = dataset.lifeStages.join("|");
             }
 
-            var line = "<a id='tpDatasetButton_"+i+"' "+"data-body='"+bodyPartStr+"' "+
-                "data-dis='"+disStr+"' "+
-                "data-org='"+orgStr+"' "+
-                "data-proj='"+projStr+"' "+
-                "data-dom='"+domStr+"' "+
-                "data-stage='"+lifeStr+"' "+
+            var line = "<a id='tpDatasetButton_"+i+"' "+"data-body='"+cleanString(bodyPartStr)+"' "+
+                "data-dis='"+cleanString(disStr)+"' "+
+                "data-org='"+cleanString(orgStr)+"' "+
+                "data-proj='"+cleanString(projStr)+"' "+
+                "data-dom='"+cleanString(domStr)+"' "+
+                "data-stage='"+cleanString(lifeStr)+"' "+
                 "role='button' class='tpListItem list-group-item "+clickClass+"' data-datasetid='"+i+"'>"; // bootstrap seems to remove the id
             htmls.push(line);
 
@@ -1115,10 +1122,22 @@ var cellbrowser = function() {
         // read the current filter values of the dropboxes
         var categories = ["Body", "Dis", "Org", "Proj"];
         var filtVals = {};
-        for (var category of categories)
-            filtVals[category] = $("#tp"+category+"Combo").val();
+        for (var category of categories) {
+            var vals = $("#tp"+category+"Combo").val();
+            if (vals===undefined)
+                vals = [];
+
+            // strip special chars
+            var cleanVals = [];
+            for (var val of vals)
+                cleanVals.push(cleanString(val));
+
+            filtVals[category] = cleanVals;
+        }
 
         let elList = $(".tpListItem");
+        var shownCount = 0;
+        var hideCount = 0;
         for (let el of elList) {
             // never touch the first/summary element
             if (el.getAttribute("data-body")==="summary")
@@ -1147,11 +1166,19 @@ var cellbrowser = function() {
                 }
             }
             
-            if (isShown)
+            if (isShown) {
                 el.style.display="";
-            else
+                shownCount++;
+            }
+            else {
                 el.style.display="none";
+                hideCount++;
+            }
         }
+        if (hideCount!==0)
+            $('#tpDatasetCount').text("(filters active, "+shownCount+" datasets shown)");
+        else
+            $('#tpDatasetCount').text("("+shownCount+" dataset collections)");
     }
 
     function openDatasetDialog(openDsInfo, selName) {
@@ -1295,7 +1322,7 @@ var cellbrowser = function() {
                 doFilters = true;
 
             if (doFilters) {
-                noteLines.push("<div style='margin-right: 10px; font-weight: bold'>Filters:</div>");
+                noteLines.push("<div style='margin-right: 10px; font-weight: bold'>Filters: <span id='tpDatasetCount'></span></div>");
 
                 buildFilter(noteLines, bodyParts, "Organ", "body", "tpBodyCombo", "select organs...");
                 buildFilter(noteLines, diseases, "Disease", "dis", "tpDisCombo", "select diseases...");
@@ -7455,19 +7482,22 @@ var cellbrowser = function() {
         if (datasetName===undefined)
             datasetName = "";
         // hacks for July 2018 and for backwards compatibility with previous version
-        if (datasetName==="autism10X" || datasetName==="autism10x")
+        else if (datasetName==="autism10X" || datasetName==="autism10x")
             datasetName = "autism";
-        if (datasetName==="aparna")
+        else if (datasetName==="aparna")
             datasetName = "cortex-dev";
-
+        else if (datasetName && datasetName.toLowerCase()==="adultpancreas")
+            datasetName = "adultPancreas"
+        else
         // adult pancreas is the only dataset with an uppercase letter
         // make sure that at least at UCSC, dataset names are always lowercased.
-        // The reason is that at UCSC, the datasetname can be part of the URL,
+        // The reason is that at UCSC, the datasetname can be part of the URL as a hostname,
         // e.g. cortex-dev.cells.ucsc.edu, which the user could enter as CoRTex-dev.cells.ucsc.edu
         // On all other servers, this is not an issue
-        // But never do this for subdatasets, because they often include uppercase letters
-        if (datasetName && datasetName!=="adultPancreas" && pageAtUcsc() && datasetName.indexOf("/")===-1 )
-            datasetName = datasetName.toLowerCase();
+        // (But never do this for subdatasets, because they often include uppercase letters and are not
+        // in the URL hostname part)
+            if (datasetName && pageAtUcsc() && datasetName.indexOf("/")===-1 )
+                datasetName = datasetName.toLowerCase();
         return datasetName;
     }
 
