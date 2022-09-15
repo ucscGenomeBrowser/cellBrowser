@@ -1291,7 +1291,7 @@ var cellbrowser = function() {
             lifeStages = getDatasetAttrs(openDsInfo.datasets, "life_stages");
 
             // mirror websites are not using the filters at all. So switch off the entire UI for it then.
-            if (bodyParts.length!==0 || disease.length!==0 || organisms.length!==0 || projects.length!==0 || domains.length!==0 || lifeStages.length!==0)
+            if (bodyParts.length!==0 || diseases.length!==0 || organisms.length!==0 || projects.length!==0 || domains.length!==0 || lifeStages.length!==0)
                 doFilters = true;
 
             if (doFilters) {
