@@ -1459,7 +1459,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         console.timeEnd("draw");
 
-        if (self.doDrawLabels===true && self.coords.labels!==null) {
+        if (self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined) {
             self.redrawLabels();
         }
 
