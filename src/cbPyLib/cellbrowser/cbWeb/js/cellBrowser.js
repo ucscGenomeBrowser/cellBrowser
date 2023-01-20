@@ -3266,7 +3266,7 @@ var cellbrowser = function() {
 
         console.log("Loading gene expression vector for "+locusStr);
 
-        db.loadExprAndDiscretize(locusStr, gotGeneVec, onProgress);
+        db.loadExprAndDiscretize(locusStr, gotGeneVec, onProgress, db.conf.binStrategy);
 
     }
 
@@ -3300,8 +3300,10 @@ var cellbrowser = function() {
             clusterMids = [];
          }
 
-        opts["lines"] = clusterInfo.lines;
-        opts["lineWidth"] = db.conf.lineWidth;
+        if (clusterInfo && clusterInfo.lines) {
+            opts["lines"] = clusterInfo.lines;
+            opts["lineWidth"] = db.conf.lineWidth;
+        }
 
         renderer.setCoords(coords, clusterMids, info, opts);
     }
@@ -3442,7 +3444,9 @@ var cellbrowser = function() {
            loadsDone +=1;
            if (loadsDone===2) {
                buildLegendBar();
-               setLabelField(db.conf.labelField);
+
+               if (db.conf.labelField)
+                   setLabelField(db.conf.labelField);
 
                if (forcePalName!==null) {
                    legendChangePaletteAndRebuild(forcePalName);
@@ -3542,7 +3546,7 @@ var cellbrowser = function() {
                    updateGeneTableColors(null);
                    if (getVar("heat")==="1")
                        onHeatClick();
-                }, onProgressConsole);
+                }, onProgressConsole, db.conf.binStrategy);
            db.preloadAllMeta();
         //}
     }

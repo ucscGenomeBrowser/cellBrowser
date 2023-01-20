@@ -1600,6 +1600,7 @@ class MatrixTsvReader:
         for (geneId, sym, arr) in self.oldRows:
             # for the integer case though we have to fix up the type now
             if self.matType=="int" or self.matType=="forceInt":
+                logging.debug("spoolback: fix up integer")
                 if numpyLoaded:
                     arr = arr.astype(int)
                 else:
@@ -1910,7 +1911,8 @@ def digitize_np(arr, matType):
 def maxVal(a):
     if numpyLoaded:
         return np.amax(a)
-    # if MTX old old numpy is loaded, so isNumpy is false but var is still an ndarray - weird construct to avoid syntax error on undefined "np"
+    # if MTX old old numpy is loaded, so isNumpy is false but var is still an ndarray ->
+    # weird syntax to avoid syntax error on undefined "np"
     elif 'np' in dir():
         if isinstance(a, np.ndarray):
             return np.amax(a)
@@ -2031,7 +2033,8 @@ def indexByChrom(exprIndex):
 
     return dict(byChrom)
 
-def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJsonFname, metaSampleNames, matType=None, genesAreRanges=False):
+def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJsonFname, \
+        metaSampleNames, matType=None, genesAreRanges=False):
     """ convert gene expression vectors to vectors of deciles
         and make json gene symbol -> (file offset, line length)
     """
@@ -3375,7 +3378,7 @@ def guessGeneIdType(inputObj):
     elif geneId.startswith("KH2013:"):
         geneType = "ciona-kh2013"
     elif geneId.startswith("ENS"):
-        errAbort("geneID starts with ENS but is neither mouse nor human. Auto-detection doesn't work. Please specify the geneIdType in cellbrowser.conf")
+        errAbort("geneID starts with ENS but is neither mouse nor human. Auto-detection doesn't work. Please specify the geneIdType in cellbrowser.conf. If you do not want geneIDs to be resolved to symbols specify 'symbol' or 'raw'.")
     elif geneId.isdigit():
         geneType = "entrez" # currently contains human and mouse symbols
     else:
@@ -3419,10 +3422,14 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
 
     if isMtx(outMatrixFname) and needFilterMatrix:
         #errAbort("Some cell identifiers are in the matrix but not in the meta. trimming .mtx files is not supported, only for the tsv.gz format. Consider using cbTool mtx2tsv and edit cellbrowser.conf or remove unannotated cells with Seurat or Scanpy from the expression matrix.Or manually add the missing cells to the meta.tsv. Usually 'cbTool mtx2tsv' is the easiest way forward.")
-        logging.warn("Some cell identifiers are in the matrix but not in the meta. trimming .mtx files is not supported, only for the tsv.gz format. This means that the matrix.mtx.gz file that the user can download has more data than the meta file, but that may not be a problem for most users. You can use cbTool mtx2tsv and edit cellbrowser.conf or remove unannotated cells with Seurat or Scanpy from the expression matrix. Or manually add the missing cells to the meta.tsv. In most cases, this is fine to leave as it is.")
+        logging.warn("Some cell identifiers are in the matrix but not in the meta. trimming .mtx files is not supported, "
+        "only for the tsv.gz format. This means that the matrix.mtx.gz file that the user can download has more data "
+        "than the meta file, but that may not be a problem for most users. You can use cbTool mtx2tsv and edit "
+        "cellbrowser.conf or remove unannotated cells with Seurat or Scanpy from the expression matrix. Or manually "
+        "add the missing cells to the meta.tsv. In most cases, this is fine to leave as it is.")
 
-    # step1: copy expression matrix, so people can download it, potentially
-    # removing those sample names that are not in the meta data
+    # step1: copy expression matrix, so people can download it. If needed,
+    # remove sample data from the matrix that are not in the meta data
     matrixFname = getAbsPath(inConf, "exprMatrix")
     try:
         matType = copyMatrixTrim(matrixFname, outMatrixFname, metaSampleNames, needFilterMatrix, geneToSym, outConf, matType)
@@ -3538,6 +3545,7 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
         minX, maxX, minY, maxY = getLimits(allPoints, inCoordInfo)
         # now that we have the global limits, scale everything
         scaleX, scaleY, minX, maxX, minY, maxY = calcScaleFact(minX, maxX, minY, maxY, useTwoBytes)
+
         limits = (minX, maxX, minY, maxY, scaleX, scaleY, useTwoBytes, flipY)
 
         coordDict = scaleCoords(coords, limits)
@@ -4255,7 +4263,8 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     for tag in ["shortLabel", "radius", "alpha", "priority", "tags", "sampleDesc", "geneLabel",
         "clusterField", "defColorField", "xenaPhenoId", "xenaId", "hubUrl", "showLabels", "ucscDb",
         "unit", "violinField", "visibility", "coordLabel", "lineWidth", "hideDataset", "hideDownload",
-        "metaBarWidth", "supplFiles", "defQuantPal", "defCatPal", "clusterPngDir", "wrangler", "shepherd"
+        "metaBarWidth", "supplFiles", "defQuantPal", "defCatPal", "clusterPngDir", "wrangler", "shepherd",
+        "binStrategy",
         # the following are there only for old datasets, they are now nested under "facets"
         "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays", # these are just here for backwards-compatibility and will eventually get removed
         "facets", "multiModal"]:

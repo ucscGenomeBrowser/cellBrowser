@@ -1,8 +1,8 @@
 # various format converters for single cell data:
 # - cellranger, mtx to tsv, matcat, metaCat etc
 
-import logging, optparse, io, sys, os, shutil, operator, glob, re, json
-from collections import defaultdict
+import logging, optparse, io, sys, os, shutil, operator, glob, re, json, subprocess
+from collections import defaultdict, OrderedDict
 
 from .cellbrowser import runGzip, openFile, errAbort, setDebug, moveOrGzip, makeDir, iterItems
 from .cellbrowser import mtxToTsvGz, writeCellbrowserConf, getAllFields, readMatrixAnndata, adataStringFix
@@ -66,7 +66,7 @@ def cbToolCli():
 
     cmd = args[0]
 
-    cmds = ["mtx2tsv", "matCatCells", "matCatGenes" "metaCat", "reorder"]
+    cmds = ["mtx2tsv", "matCatCells", "matCatGenes" "metaCat", "reorder", "cxg"]
 
     if cmd=="mtx2tsv":
         mtxFname = args[1]
@@ -82,6 +82,26 @@ def cbToolCli():
         inFnames = args[1:-1]
         outFname = args[-1]
         matCatGenes(inFnames, outFname)
+    elif cmd=="cxg":
+        subCmd = args[1]
+        if subCmd=="allDatasets":
+            printRows(getCxgAllDatasets())
+        elif subCmd=="asset":
+            dsIds = args[2:]
+            getCxgAssets(dsIds)
+        elif subCmd=="allAssets":
+            getCxgAllAssets()
+        elif subCmd=="cp":
+            dsId = args[2]
+            assetId = args[3]
+            outFname = args[4]
+            url = getCxgAssetUrl(dsId, assetId)
+            cmd = ["curl", url, "--output", outFname]
+            subprocess.run(cmd)
+        elif subCmd=="desc":
+            collId = args[2]
+            getCxgColl(collId)
+
     elif cmd=="metaCat" or cmd=="reorder":
         inFnames = args[1:-1]
         outFname = args[-1]
@@ -101,6 +121,87 @@ def cbToolCli():
         metaCat(inFnames, outFname, options)
     else:
         errAbort("Command %s is not a valid command. Valid commands are: %s" % (cmd, ", ".join(cmds)))
+
+def getLabels(l):
+    " given a list of dicts, return a |-sep list of 'label' values "
+    labels = []
+    for d in l:
+        if type(d)==str:
+            labels.append(d)
+        else:
+            labels.append(d["label"])
+    return "|".join(labels)
+
+def printRows(iterator, headDone=False):
+    " print all rows gotten from an iterator "
+    #headDone = False
+    for row in iterator:
+        if headDone is False:
+            print("\t".join(row.keys()))
+            headDone = True
+        print("\t".join(row.values()))
+
+def getCxgAssetUrl(datasetId, assetId):
+    " cxg has signed links, get one for an asset ID "
+    url = 'https://api.cellxgene.cziscience.com/dp/v1/datasets/%s/asset/%s' % (datasetId, assetId)
+    import requests
+    ret = requests.post(url=url).json()
+    # keys: dataset_id, file_name, presigned_url
+    return ret["presigned_url"]
+
+def getCxgAllDatasets():
+    " yield all cxg datasets as ordered dicts "
+    import requests
+    url = "https://api.cellxgene.cziscience.com/dp/v1/datasets/index"
+    datasets = requests.get(url=url).json()
+    attrs = ['id', 'name', 'organism', 'collection_id', 'assay', 'explorer_url', 'is_primary_data', \
+            'cell_count', 'mean_genes_per_cell',
+            'development_stage', 'development_stage_ancestors', \
+            'disease', \
+            'published_at', 'revised_at', 'schema_version', 'self_reported_ethnicity', 'sex', 'tissue', \
+            'tissue_ancestors', 'cell_type', 'cell_type_ancestors']
+    for dataset in datasets:
+        row = OrderedDict()
+        for attr in attrs:
+            val = dataset.get(attr, "UNDEFINED")
+            if type(val)==type([]):
+                strVal = getLabels(val)
+            else:
+                strVal = str(val)
+            row[attr] = strVal
+        yield row
+
+def getCxgAllAssets():
+    ""
+    headDone = False
+    for ds in getCxgAllDatasets():
+        printRows(getCxgAssets([ds["id"]]), headDone)
+        headDone = True
+
+def getCxgAssets(dsIds, headDone=False):
+    " download assets for a list of cxg datasets "
+    import requests
+    attrs = ['dataset_id', 'dataset', 'filename', 'filetype', 'id', 's3_uri', 'created_at', 'updated_at', 'user_submitted']
+    #if not headDone:
+        #print("\t".join(attrs))
+
+    for dsId in dsIds:
+        url = "https://api.cellxgene.cziscience.com/dp/v1/datasets/%s/assets" % dsId
+        ret = requests.get(url=url).json()
+        for asset in ret["assets"]:
+            #row = []
+            row = OrderedDict()
+            for attr in attrs:
+                val = asset[attr]
+                if attr == "dataset":
+                    val = val["name"]
+                #row.append(str(val))
+                row[attr] = str(val)
+            #print("\t".join(row))
+            yield row
+
+def getCxgColl(collId):
+    " "
 
 def matCat(inFnames, outFname):
     tmpFname = outFname+".tmp"
@@ -205,24 +306,20 @@ def matCatGenes(inFnames, outFname):
             if headers is None:
                 headers = row
                 if (headers != otherHeaders): # all files must have identical columns = identical header line
-                    #logging.error("first file column headers were (only first ten fields shown): %s" % otherHeaders[:10])
-                    #logging.error("This file has the column headers (only first ten fields): %s" % headers[:10])
-                    #logging.error("The header lines of all files to be concatenated must be identical. Consider editing them manually or reorder them manually with AWK or pandas.")
                     logging.warn("Headers are not identical, need to re-order columns, this will be pretty slow")
                     doReorder = True
 
-                    fields = headers[1:]
-                    fieldOrder = []
+                    fieldOrder = [0]
                     for h in otherHeaders[1:]:
-                        fieldOrder.append( fields.index(h) ) # if this fails, then one file has a column that the other one doesn't have. Not clear what should happen then -> just fail.
+                        idx = headers.index(h)
+                        assert(idx!=0) # internal logic error. Should never happen.
+                        fieldOrder.append( idx ) # if this fails, then one file has a column that the other one doesn't have. Not clear what should happen then -> just fail.
                 continue
 
             if prefix!="":
                 row[0] = prefix+row[0]
 
             if doReorder:
-                ofh.write(row[0])
-                ofh.write("\t")
                 ofh.write("\t".join([row[i] for i in fieldOrder]))
             else:
                 ofh.write("\t".join(row))
