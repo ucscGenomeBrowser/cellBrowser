@@ -591,7 +591,8 @@ var cellbrowser = function() {
         "pmid" : "PubMed Abstract",
         "pmcid" : "PubMed Fulltext",
         "sra_study" : "NCBI Short-Read Archive",
-        "ega_study" : "European Genotype-Phenot. Archive",
+        "ega_study" : "European Genotype-Phenot. Archive Study",
+	    "ega_dataset" : "European Genotype-Phenot. Archive Dataset",
         "bioproject" : "NCBI Bioproject",
         "dbgap" : "NCBI DbGaP",
         "biorxiv_url" : "BioRxiv preprint",
@@ -607,6 +608,7 @@ var cellbrowser = function() {
         "sra_study" : "https://trace.ncbi.nlm.nih.gov/Traces/sra/?study=",
         "bioproject" : "https://www.ncbi.nlm.nih.gov/bioproject/",
         "ega_study" : "https://ega-archive.org/studies/",
+        "ega_dataset" : "https://ega-archive.org/datasets/",
         "pmid" : "https://www.ncbi.nlm.nih.gov/pubmed/",
         "pmcid" : "https://www.ncbi.nlm.nih.gov/pmc/articles/",
         "dbgap" : "https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=",
@@ -959,6 +961,7 @@ var cellbrowser = function() {
         htmlAddLink(htmls, desc, "arrayexpress");
         htmlAddLink(htmls, desc, "cirm_dataset");
         htmlAddLink(htmls, desc, "ega_study");
+        htmlAddLink(htmls, desc, "ega_dataset");
         htmlAddLink(htmls, desc, "ena_project");
         htmlAddLink(htmls, desc, "hca_dcp");
 
