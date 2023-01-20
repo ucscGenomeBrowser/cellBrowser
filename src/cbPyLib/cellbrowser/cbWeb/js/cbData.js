@@ -908,8 +908,8 @@ function CbDbFile(url) {
      * - a single gene or locus name, prefixed by "+", to add to the current array
      * - a single gene or locus name, prefixed by "-", to substract from the current array
 
-     * "strategy" can be "cells" or "size". If "cells", bins will have an ideally equal number of cells.
-     * if "size", bins will have an equal size between min-max (and somtimes no cells at all). If undefined,
+     * "strategy" can be "cells" or "range". If "cells", bins will have an ideally equal number of cells.
+     * if "range", bins will have an equal range between min-max (and somtimes no cells at all). If undefined,
      * is "cells"
      * */
 
@@ -961,7 +961,7 @@ function CbDbFile(url) {
                 newArr = sumAllArrs(ArrType, arrs);
 
             var discFunc = null;
-            if (strategy==="size")
+            if (strategy==="range")
                 discFunc = discretizeArray_binSize;
             else
                 discFunc = discretizeArray;
