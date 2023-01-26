@@ -2759,6 +2759,9 @@ def parseMarkerTable(filename, geneToSym):
     data = defaultdict(list)
     otherColumns = defaultdict(list)
     for row in reader:
+        if row[0].startswith("#"):
+            continue
+
         clusterName = row[clusterIdx]
 
         if clusterName=="":
