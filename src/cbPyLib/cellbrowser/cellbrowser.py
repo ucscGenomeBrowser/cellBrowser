@@ -264,6 +264,7 @@ def getDownloadsUrl():
     " return the big static file downloads URL on cells.ucsc.edu "
     cbHomeUrl = CBHOMEURL
     if getConfig("useTest"):
+        logging.debug("Using test server")
         cbHomeUrl = CBHOMEURL_TEST
     return cbHomeUrl
 
@@ -848,8 +849,14 @@ def parseDict(fname):
     if fname.endswith(".csv"):
         sep = ","
 
+    lno = 0
     for line in fh:
-        key, val = line.rstrip("\r\n").split(sep)
+        lno+=1
+        parts = line.rstrip("\r\n").split(sep)
+        if len(parts)!=2:
+            errAbort("Error in line %d of file %s: Should contain two values, it seems to contain only a single value. " \
+                    "This can also happen if in a .tsv file a space was used instead of a tab." % (lno, fname))
+        key, val = parts
         d[key] = val
     return d
 
@@ -5180,6 +5187,8 @@ def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None
         else:
             # This is an actual dataset - the main function that does all the work is convertDataset()
             copyGenes(inConf, outConf, outDir)
+            #print(outConf)
+            #asd
             isTopLevel = ("parents" in outConf and len(outConf["parents"])==1) # important for facet checking
             convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel)
 
