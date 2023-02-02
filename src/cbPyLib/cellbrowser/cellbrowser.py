@@ -449,9 +449,10 @@ def loadConfig(fname, ignoreName=False, reqTags=[], addTo=None, addName=False):
     if "name" in conf and "/" in conf["name"]:
         errAbort("Config file %s contains a slash in the name. Slashes in names are no allowed" % fname)
 
-    if not fname.endswith(".cellbrowser.conf") and getConfig("onlyLower", False) and "name" in conf and conf["name"].isupper():
-        errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
-                "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
+    if not fname.endswith(".cellbrowser.conf") and not fname.endswith(".cellbrowser"):
+        if getConfig("onlyLower", False) and "name" in conf and conf["name"].isupper():
+            errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
+                    "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
     return conf
 
 def maybeLoadConfig(confFname):
@@ -464,10 +465,10 @@ def maybeLoadConfig(confFname):
 
 cbConf = None
 def getConfig(tag, defValue=None):
-    " get a global cellbrowser config value from ~/.cbDefaults.conf (old value ~/.cellbrowser.conf still accepted, but that filename was too confusing for people)"
+    " get a global cellbrowser config value from ~/.cellbrowser (old value ~/.cellbrowser.conf still accepted, but that filename was too confusing for people)"
     global cbConf
     if cbConf is None:
-        confPath = expanduser("~/.cbDefaults.conf")
+        confPath = expanduser("~/.cellbrowser")
         if not isfile(confPath):
             confPath = expanduser("~/.cellbrowser.conf")
 
@@ -525,7 +526,7 @@ def cbBuild_parseArgs(showHelp=False):
     parser.add_option("-i", "--inConf", dest="inConf", action="append",
         help="a cellbrowser.conf file that specifies labels and all input files, default is ./cellbrowser.conf, can be specified multiple times")
 
-    parser.add_option("-o", "--outDir", dest="outDir", action="store", help="output directory, default can be set through the env. variable CBOUT or ~/.cbDefaults.conf, current value: %default", default=defOutDir)
+    parser.add_option("-o", "--outDir", dest="outDir", action="store", help="output directory, default can be set through the env. variable CBOUT or ~/.cellbrowser, current value: %default", default=defOutDir)
 
     parser.add_option("-p", "--port", dest="port", action="store",
         help="if build is successful, start an http server on this port and serve the result via http://localhost:port", type="int")
@@ -5061,7 +5062,7 @@ def findRoot(inDir=None):
         dataRoot = getConfig("dataRoot")
     
     if dataRoot is None:
-        logging.info("dataRoot is not set in ~/.cbDefaults.conf or via $CBDATAROOT. Dataset hierarchies are not supported.")
+        logging.info("dataRoot is not set in ~/.cellbrowser or via $CBDATAROOT. Dataset hierarchies are not supported.")
         return None
 
     dataRoot = abspath(expanduser(dataRoot).rstrip("/"))
@@ -5074,7 +5075,7 @@ def findRoot(inDir=None):
     return dataRoot
 
 def resolveOutDir(outDir):
-    """ user can define mapping e.g. {"alpha" : "/usr/local/apache/htdocs-cells"} in ~/.cbDefaults.conf """
+    """ user can define mapping e.g. {"alpha" : "/usr/local/apache/htdocs-cells"} in ~/.cellbrowser """
     confDirs = getConfig("outDirs")
     if confDirs:
         if outDir in confDirs:
@@ -5102,7 +5103,7 @@ def addParents(inConfFname, dataRoot, dsName, outConf, todoConfigs):
     # find all parent cellbrowser.conf-files and fixup the dataset's "name"
     # keep a list of parent config files in todoConfigs (they will need to be updated later)
     if dataRoot is None:
-        logging.info("dataRoot not set in ~/.cbDefaults.conf, no need to rebuild hierarchy")
+        logging.info("dataRoot not set in ~/.cellbrowser, no need to rebuild hierarchy")
         dataRoot = None
     else:
         if not "fileVersions" in outConf:
@@ -5330,7 +5331,7 @@ def cbBuildCli():
             cbBuild_parseArgs(showHelp=True)
 
     if options.outDir is None:
-        logging.error("You have to specify at least the output directory via -o or set the env. variable CBOUT or set htmlDir in ~/.cbDefaults.conf.")
+        logging.error("You have to specify at least the output directory via -o or set the env. variable CBOUT or set htmlDir in ~/.cellbrowser")
         cbBuild_parseArgs(showHelp=True)
 
 
