@@ -15,28 +15,33 @@ def cbGenes_parseArgs():
     " setup logging, parse command line arguments and options. -h shows auto-generated help page "
     parser = optparse.OptionParser("""usage: %prog [options] command - download gene model files and auto-detect the version.
 
-    Commands:
+    Commands for using gene models:
     fetch <geneType> - download pre-built geneId -> symbol table from UCSC
     fetch <assembly>.<geneType> - download pre-built gene models and symbol table from UCSC
+    guess <inFile> <organism> - Guess best gene type. Reads the first tab-sep field from inFile and prints genetypes sorted by % of matching unique IDs to inFile.
+    check <inFile> <geneType> - Check how well genes match given geneType
+
+    Commands for building new gene model files:
     build <assembly>.<geneType> - Download a gene model file from UCSC, pick one transcript per gene and save to ~/cellbrowserData/genes/<db>.<geneType>.bed.gz and <geneType>.symbols.tsv.gz
     allSyms [human|mouse] - Build one big table with geneId <-> symbol, valid for all Gencode versions, always use most recent symbol
+    index - Build the -unique index files and also run 'allSyms' for both human and mouse
 
     Run "fetch" or "build" without arguments to list the available files at UCSC.
 
     ls - list all available (built or downloaded)  gene models on this machine
 
-    guess <inFile> <organism> - Guess best gene type. Reads the first tab-sep field from inFile and prints genetypes sorted by % of matching unique IDs to inFile.
-    check <inFile> <geneType> - Check how well genes match given geneType
-
-    Examples:
+    Examples (common):
     %prog fetch                   # show the files that are available
     %prog fetch gencode-34        # geneId -> symbol mapping for human gencode relase 34
     %prog fetch hg38.gencode-34   # gene -> chrom mapping for human gencode relase 34
+    %prog ls
+    %prog guess genes.txt mouse   # guess the best gencode version for this file
+    %prog check features.tsv.gz gencode-40 # check if the genes match gencode-40 and which ones don't
+
+    Examples (rare - if you build your own gene models):
     %prog build                   # show the files that are available
     %prog build mm10 gencode-M25
-    %prog ls
-    %prog guess genes.txt mouse
-    %prog index # only used at UCSC to prepare the files for 'guess'
+    %prog index # used at UCSC to prepare the files for 'guess'
     %prog allSyms human # build big geneId -> symbol table from all 
     """)
 
@@ -511,6 +516,8 @@ def buildGuessIndex():
     dataDir = join(findCbData(), "genes")
     uniqueIds("human")
     uniqueIds("mouse")
+    bigSymTable("human")
+    bigSymTable("mouse")
 
 def fetch(fileDesc):
     " download symbol or gene files to local dir "
