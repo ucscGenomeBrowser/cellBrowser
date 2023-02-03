@@ -255,7 +255,13 @@ def downloadUrlLines(url):
         errAbort("Cannot download %s" % url)
 
     if url.endswith(".gz"):
-        data = gzip.decompress(data)
+        if isPy3:
+            data = gzip.decompress(data)
+        else:
+            # weird hack, but works, from https://stackoverflow.com/questions/41432800/decompress-zip-string-in-python-2-7
+            from gzip import GzipFile
+            from StringIO import StringIO
+            data = GzipFile(fileobj=StringIO(data)).read()
     lines = data.splitlines()
     lines = [l.decode("latin1") for l in lines]
     return lines
