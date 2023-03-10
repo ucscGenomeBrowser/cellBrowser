@@ -4154,7 +4154,7 @@ def checkConfig(inConf, isTopLevel):
 
     for tag in reqTagsDataset:
         if tag not in inConf:
-            errAbort("tag '%s' must be defined in cellbrowser.conf" % tag)
+            errAbort("As required by ~/.cellbrowser: tag '%s' must be defined in cellbrowser.conf" % tag)
         if tag=="visibility":
             if tag in inConf and inConf[tag] not in ["hide", "show"]:
                 errAbort("Error in cellbrowser.conf: '%s' can only have values: 'hide' or 'show'" % (tag))
@@ -4826,6 +4826,7 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
 
         if check_nonnegative_integers(adata.X):
             logging.info("Looks like expression matrix has no negatives and is all integers: taking log2 of data before running rank_groups")
+            sc = importScanpy()
             sc.pp.log1p(adata)
         else:
             logging.info("Looks like expression matrix has already been log2-ed before")
