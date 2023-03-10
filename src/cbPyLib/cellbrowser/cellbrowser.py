@@ -5197,6 +5197,7 @@ def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None
             #print(outConf)
             #asd
             isTopLevel = ("parents" in outConf and len(outConf["parents"])==1) # important for facet checking
+            logging.debug("Datasets parents: %s" % outConf.get("parents"))
             convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel)
 
         outConf = copyFacets(inConf, outConf)
