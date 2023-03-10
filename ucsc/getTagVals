@@ -63,6 +63,10 @@ def main():
     # If datasets file has info for the tag already
     # get column num so we can replace it
     header = dfh.readline().rstrip().split(dsep)
+    if not header[0].startswith("#"):
+        print("First line needs to be a header line with column names and must start with '#'")
+        exit(1)
+    #header = ["#datasetName"]
     # Want to get index for each input tag
     for tag in tags:
         try:
