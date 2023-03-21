@@ -3554,14 +3554,15 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
                 logging.debug("Not using 2byte mode")
                 useTwoBytes = False
 
+
+        hasLines = False
+        allPoints = [justPoints(coords)]
+
         minX, maxX, minY, maxY = getLimits(allPoints, inCoordInfo)
         # now that we have the global limits, scale everything
         scaleX, scaleY, minX, maxX, minY, maxY = calcScaleFact(minX, maxX, minY, maxY, useTwoBytes)
 
         limits = (minX, maxX, minY, maxY, scaleX, scaleY, useTwoBytes, flipY)
-
-        hasLines = False
-        allPoints = [justPoints(coords)]
         # parse lines, updating the min-max ranges
         if "lineFile" in inCoordInfo:
             lineCoords, linePoints = parseLineInfo(inCoordInfo["lineFile"], limits)
