@@ -521,6 +521,9 @@ def cbBuild_parseArgs(showHelp=False):
     matrix will not be copied again. This means that an update of a few meta data attributes
     is quite quick.
 
+    Gene symbol/annotation files are downloaded to ~/cellbrowserData when
+    needed. Config defaults can be specified in ~/.cellbrowser. See
+    documentation at https://cellbrowser.readthedocs.io/
     """)
 
     parser.add_option("", "--init", dest="init", action="store_true",
@@ -3551,6 +3554,12 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
                 logging.debug("Not using 2byte mode")
                 useTwoBytes = False
 
+        minX, maxX, minY, maxY = getLimits(allPoints, inCoordInfo)
+        # now that we have the global limits, scale everything
+        scaleX, scaleY, minX, maxX, minY, maxY = calcScaleFact(minX, maxX, minY, maxY, useTwoBytes)
+
+        limits = (minX, maxX, minY, maxY, scaleX, scaleY, useTwoBytes, flipY)
+
         hasLines = False
         allPoints = [justPoints(coords)]
         # parse lines, updating the min-max ranges
@@ -3558,12 +3567,6 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
             lineCoords, linePoints = parseLineInfo(inCoordInfo["lineFile"], limits)
             allPoints.append(linePoints)
             hasLines = True
-
-        minX, maxX, minY, maxY = getLimits(allPoints, inCoordInfo)
-        # now that we have the global limits, scale everything
-        scaleX, scaleY, minX, maxX, minY, maxY = calcScaleFact(minX, maxX, minY, maxY, useTwoBytes)
-
-        limits = (minX, maxX, minY, maxY, scaleX, scaleY, useTwoBytes, flipY)
 
         coordDict = scaleCoords(coords, limits)
 
