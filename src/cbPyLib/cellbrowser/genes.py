@@ -418,6 +418,7 @@ def bigSymTable(org):
         for line in openFile(fname):
             row = line.rstrip("\n").split("\t")
             geneId, sym = row[:2]
+            geneId = geneId.split(".")[0]
             geneToSym[geneId] = sym
 
     outFname = getStaticPath(getGeneSymPath("gencode-"+org))
