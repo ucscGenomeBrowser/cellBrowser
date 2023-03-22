@@ -6290,7 +6290,10 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname):
     logging.info("Using cluster annotation from field: %s" % clusterField)
 
     if "tsne" in doLayouts:
-        sc.pl.tsne(adata, color=clusterField)
+        try:
+            sc.pl.tsne(adata, color=clusterField)
+        except:
+            logging.error("Error while plotting with Scanpy, ignoring the error")
 
     #Clustering. Default Resolution: 1
     #res = 1.0
@@ -6559,6 +6562,11 @@ def cbScanpyCli():
     adata, params = cbScanpy(matrixFname, metaFname, inCluster, confFname, figDir, logFname)
 
     logging.info("Writing final result as an anndata object to %s" % adFname)
+
+    # work around scanpy bug for objects that were converted from seurat, https://github.com/theislab/scvelo/issues/255
+    if "_raw" in dir(adata) and "_var" in dir(adata.raw) and "_index" in list(adata.raw.var.columns):
+        adata._raw._var.rename(columns={'_index': 'features'}, inplace=True)
+
     adata.write(adFname)
 
     scanpyToCellbrowser(adata, outDir, datasetName=datasetName, skipMarkers=skipMarkers,
