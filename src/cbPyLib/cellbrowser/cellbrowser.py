@@ -6081,7 +6081,11 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname):
     conf["doLouvain"] = conf.get("doLouvain", True)
     conf["louvainNeighbors"] = int(conf.get("louvainNeighbors", 6))
     conf["louvainRes"] = float(conf.get("louvainRes", 1.0))
+
     conf["doMarkers"] = conf.get("doMarkers", True)
+    if skipMarkers:
+        conf["doMarkers"] = False
+
     conf["markerCount"] = int(conf.get("markerCount", 20))
     conf["inMeta"] = conf.get("inMeta", inMeta)
     conf["inCluster"] = conf.get("inCluster", inCluster)
