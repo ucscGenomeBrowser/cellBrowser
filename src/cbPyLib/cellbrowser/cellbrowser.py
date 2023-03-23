@@ -3454,7 +3454,8 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
     try:
         matType = copyMatrixTrim(matrixFname, outMatrixFname, metaSampleNames, needFilterMatrix, geneToSym, outConf, matType)
     except ValueError:
-        logging.warn("This is rare: mis-guessed the matrix data type, trying again and using floating point numbers. To avoid this message in the future, you can set matrixType='float' in cellbrowser.conf.")
+        logging.warn("This is rare: mis-guessed the matrix data type, trying again and using floating point numbers. To avoid this message in the " \
+            "future, you can set matrixType='float' in cellbrowser.conf.")
         matType = copyMatrixTrim(matrixFname, outMatrixFname, metaSampleNames, needFilterMatrix, geneToSym, outConf, "float")
 
     # step2: compress matrix and index to file
@@ -4144,7 +4145,8 @@ def checkConfig(inConf, isTopLevel):
     if isTopLevel:
         if not "facets" in inConf:
             # tolerate if there are no facets in the dataset at all - third party installs may use collections but not facets.
-            logging.warn("No 'facets' declared in cellbrowser.conf, but is a top-level dataset and using dataset hierarchies. If this is an old dataset, consider moving facets into their own object.")
+            logging.warn("No 'facets' declared in cellbrowser.conf, but is a top-level dataset and using dataset hierarchies. If this is an old dataset, "\
+                "consider moving facets into their own object.")
         else:
             facets = inConf["facets"]
             reqFacets = ["body_parts", "diseases", "domains", "life_stages", "organisms", "assays", "sources"]
@@ -6015,7 +6017,7 @@ def getObsmKeys(adata):
         obsmKeys = list(adata.obsm.keys()) # this seems to work with newer versions
     return obsmKeys
 
-def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname):
+def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname, skipMarkers):
     """ run expr matrix through scanpy, output a cellbrowser.conf, a matrix and the meta data.
     Return an adata object. Optionally keeps a copy of the raw matrix in adata.raw """
     sc = importScanpy()
@@ -6263,12 +6265,16 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname):
         pipeLog("Estimating number of useful PCs based on Shekar et al, Cell 2016")
         pipeLog("PC weight cutoff used is (sqrt(# of Genes/# of cells) + 1)^2")
         pipeLog("See http://www.cell.com/cell/fulltext/S0092-8674(16)31007-8, STAR methods")
-        pc_cutoff= (np.sqrt((adata.n_vars/adata.n_obs))+1)**2
-        pc_nb=0
+        pc_cutoff = ( np.sqrt(float(len(adata.var))/len(adata.obs)) +1 ) **2
+        pc_nb = 0
         for i in adata.uns['pca']['variance']:
-            if i>pc_cutoff:
+            if i > pc_cutoff:
                 pc_nb+=1
         pipeLog('%d PCs will be used for tSNE and clustering' % pc_nb)
+        if pc_nb <= 2:
+            errAbort("Number of useful PCs is too small. The formula from Shekar et all did not work (not gene expression data?). Please set the "
+                    "number of PCs manually via the pcCount variable in scanpy.conf")
+
     else:
         pc_nb = int(pcCount)
         pipeLog("Using %d PCs as configured in config" % pcCount)
@@ -6563,7 +6569,7 @@ def cbScanpyCli():
     if isfile(logFname):
         os.remove(logFname)
 
-    adata, params = cbScanpy(matrixFname, metaFname, inCluster, confFname, figDir, logFname)
+    adata, params = cbScanpy(matrixFname, metaFname, inCluster, confFname, figDir, logFname, skipMarkers)
 
     logging.info("Writing final result as an anndata object to %s" % adFname)
 
