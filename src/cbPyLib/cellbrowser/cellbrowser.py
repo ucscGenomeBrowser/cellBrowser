@@ -4392,15 +4392,19 @@ coords=%(coordStr)s
     ofh.close()
     logging.info("Wrote %s" % ofh.name)
 
-def geneSeriesToStrings(var, geneKey, indexFirst=False, sep="|"):
+def geneSeriesToStrings(var, geneKey, indexFirst=False, sep="|", justValues=False):
     " convert a pandas data series to a list of |-separated strings "
     geneIdSeries = var[geneKey]
     logging.info("To get the gene names, using the field %s of the .var attribute" % geneKey)
-    if indexFirst:
-        geneIdAndSyms = list(zip(geneIdSeries.index, geneIdSeries.values))
+    if justValues:
+        genes = geneIdSeries.values
+        genes = [str(x) for x in genes]
     else:
-        geneIdAndSyms = list(zip(geneIdSeries.values, geneIdSeries.index))
-    genes = [str(x)+sep+str(y) for (x,y) in geneIdAndSyms]
+        if indexFirst:
+            geneIdAndSyms = list(zip(geneIdSeries.index, geneIdSeries.values))
+        else:
+            geneIdAndSyms = list(zip(geneIdSeries.values, geneIdSeries.index))
+        genes = [str(x)+sep+str(y) for (x,y) in geneIdAndSyms]
     return genes
 
 def geneStringsFromVar(var, sep="|"):
@@ -4414,6 +4418,10 @@ def geneStringsFromVar(var, sep="|"):
     elif "Accession" in var:  # only seen this in the ABA Loom files
         logging.debug("Found 'Accession' attribute in var")
         genes = geneSeriesToStrings(var, "Accession", indexFirst=False, sep=sep)
+    elif "features" in var:
+        # the files in retina-atac had only one 'feature' keys
+        logging.debug("Found 'features' attribute in var, using just those")
+        genes = var["features"].tolist()
     else:
         logging.debug("Using index of var")
         genes = var.index.tolist()
@@ -4541,7 +4549,7 @@ def anndataMatrixToTsv(ad, matFname, usePandas=False, useRaw=False):
             ofh.write(geneName)
             ofh.write("\t")
             if scipy.sparse.issparse(mat):
-                logging.debug("Converting csr row to dense")
+                #logging.debug("Converting csr row to dense")
                 row = mat.getrow(i).todense()
             else:
                 row = mat[i,:]
