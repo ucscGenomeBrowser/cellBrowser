@@ -45,6 +45,8 @@ parser.add_argument("-u","--update", action='store_true',
     help='if a tag already exists in the cellbrowser.conf, update it with value from datasetsFile')
 parser.add_argument("-i","--inDir", action='store', default="/hive/data/inside/cells/datasets",
     help='directory where datasets are searched, default is /hive/data/inside/cells/datasets')
+parser.add_argument('-d', '--descConf', action='store_true', help='search for tag in desc.conf instead of cellbrowser.conf')
+
 args = parser.parse_args()
 
 # From https://stackoverflow.com/questions/541390/extracting-extension-from-filename-in-python
@@ -60,12 +62,16 @@ dfh = open(args.datasetFile)
 # Peel off header so we can know which tags we're working with
 header = dfh.readline().rstrip().split('\t')
 
+fname = "cellbrowser.conf"
+if args.descConf:
+    fname = "desc.conf"
+
 # Now process rest of datasetFile
 for line in dfh:
     splitLine = line.rstrip('\n').split('\t')
     dname = splitLine[0]
     print("adding tag/values for:",dname)
-    confName = join(inDir,dname,"cellbrowser.conf")
+    confName = join(inDir,dname,fname)
     # Turn conf into dict
     conf = loadConfig(confName)
 
