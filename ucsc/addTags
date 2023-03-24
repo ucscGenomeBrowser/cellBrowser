@@ -43,10 +43,13 @@ and any tags to add/update in subsequent columns. Header should contain tag name
 those in the example cellbrowser.conf, e.g. body_parts.')
 parser.add_argument("-u","--update", action='store_true',
     help='if a tag already exists in the cellbrowser.conf, update it with value from datasetsFile')
+parser.add_argument("-i","--inDir", action='store', default="/hive/data/inside/cells/datasets",
+    help='directory where datasets are searched, default is /hive/data/inside/cells/datasets')
 args = parser.parse_args()
 
 # From https://stackoverflow.com/questions/541390/extracting-extension-from-filename-in-python
 dFtype = Path(args.datasetFile).suffix
+inDir = args.inDir
 
 if dFtype == ".csv":
     print("datasetFile must be tsv")
@@ -62,7 +65,7 @@ for line in dfh:
     splitLine = line.rstrip('\n').split('\t')
     dname = splitLine[0]
     print("adding tag/values for:",dname)
-    confName = join("/hive/data/inside/cells/datasets",dname,"cellbrowser.conf")
+    confName = join(inDir,dname,"cellbrowser.conf")
     # Turn conf into dict
     conf = loadConfig(confName)
 
