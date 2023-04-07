@@ -37,7 +37,7 @@ def loadConfig(fname):
 # Set up script arguments
 parser = argparse.ArgumentParser(
     formatter_class=argparse.RawDescriptionHelpFormatter,
-    description="Add/update tag values for a list of datasets")
+    description="Add/update tag values for a list of datasets. Requires a directory and tab-sep file with one column per new or updated tag. The tab-sep file must have a header line, the field names are the names of the tags. Tags are assumed to be lists, unless the tag name contains a pipe symbol followed by the data type. Valid data types are list, float, int and str.")
 parser.add_argument('datasetFile', type=str, help='file containing list of datasets in first column \
 and any tags to add/update in subsequent columns. Header should contain tag names that should match \
 those in the example cellbrowser.conf, e.g. body_parts.')
