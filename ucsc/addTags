@@ -41,8 +41,8 @@ parser = argparse.ArgumentParser(
 parser.add_argument('datasetFile', type=str, help='file containing list of datasets in first column \
 and any tags to add/update in subsequent columns. Header should contain tag names that should match \
 those in the example cellbrowser.conf, e.g. body_parts.')
-parser.add_argument("-u","--update", action='store_true',
-    help='if a tag already exists in the cellbrowser.conf, update it with value from datasetsFile')
+#parser.add_argument("-u","--update", action='store_true',
+#help='if a tag already exists in the cellbrowser.conf, update it with value from datasetsFile')
 parser.add_argument("-i","--inDir", action='store', default="/hive/data/inside/cells/datasets",
     help='directory where datasets are searched, default is /hive/data/inside/cells/datasets')
 parser.add_argument('-d', '--descConf', action='store_true', help='search for tag in desc.conf instead of cellbrowser.conf')
@@ -76,12 +76,17 @@ for line in dfh:
     conf = loadConfig(confName)
 
     # go through each tag in the header
+    headerNoType = [x.split("|")[0] for x in header]
     for tag in header:
         # Skip first column
+        dataType = "list"
+        if "|" in tag:
+            tag, dataType = tag.split("|")
+
         if tag != "dataset":
             # Get index of tag in the header so that we can use position to get values
             # for the current tag of our current dataset later
-            n = header.index(tag)
+            n = headerNoType.index(tag)
 
             # Case where we're dealing with a new tag
             if tag not in conf.keys():
@@ -89,14 +94,27 @@ for line in dfh:
                 # no need to add an empty tag to cellbrowser.conf
                 if splitLine[n] != '':
                     # Turn vals into a list
-                    vals = splitLine[n].strip().split(',')
-                    # code adapated from https://stackoverflow.com/questions/4071396/split-by-comma-and-strip-whitespace-in-python
-                    vals = [x.strip() for x in splitLine[n].split(',')]
+                    newVal = splitLine[n]
+                    if dataType=="list":
+                        #vals = splitLine[n].strip().split(',')
+                        # code adapated from https://stackoverflow.com/questions/4071396/split-by-comma-and-strip-whitespace-in-python
+                        vals = [x.strip() for x in newVal.split(',')]
+                        valStr = str(vals)
+                    elif dataType=="str":
+                        valStr = repr(newVal)
+                    elif dataType=="int":
+                        valStr = repr(int(newVal))
+                    elif dataType=="float":
+                        valStr = repr(float(newVal))
+                    else:
+                        assert(False) # unknown dataType after pipe character
+
                     # Append to file
                     with open(confName,"a") as f:
-                        f.write(tag + "=" + str(vals) + "\n")
-            # Case where tag already exists in conf file, so we're updating it
-            if args.update:
+                        f.write(tag + "=" + valStr + "\n")
+            else:
+                # Case where tag already exists in conf file, so we're updating it
+                #if args.update:
                 # empty string to hold outConf if we're dealing with updates to current tags
                 # doing it this way should keep the formatting of the lines we're not changing intact
                 outConf = ""
