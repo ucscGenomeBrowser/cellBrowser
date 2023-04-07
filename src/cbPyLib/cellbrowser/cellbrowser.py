@@ -6520,6 +6520,8 @@ def importScanpy():
         print("$ conda install seaborn scikit-learn statsmodels numba pytables")
         print("$ conda install -c conda-forge python-igraph leiden")
         print("Then re-run this command.")
+        from traceback import format_exc
+        print(format_exc())
         sys.exit(1)
     return sc
 
