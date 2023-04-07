@@ -5423,8 +5423,8 @@ def readMatrixAnndata(matrixFname, samplesOnRows=False, genome="hg38", reqCoords
     """
     sc = importScanpy()
 
-    if matrixFname.endswith(".mtx.gz"):
-        errAbort("For cellranger3-style .mtx files, please specify the directory, not the .mtx.gz file name")
+    #if matrixFname.endswith(".mtx.gz"):
+        #errAbort("For cellranger3-style .mtx files, please specify the directory, not the .mtx.gz file name")
 
     if matrixFname.endswith(".h5ad"):
         logging.info("File name ends with .h5ad: Loading %s using sc.read" % matrixFname)
@@ -5436,7 +5436,7 @@ def readMatrixAnndata(matrixFname, samplesOnRows=False, genome="hg38", reqCoords
     elif isMtx(matrixFname):
         import pandas as pd
         logging.info("Loading expression matrix: mtx format")
-        adata = sc.read(matrixFname, cache=False).T
+        adata = sc.read_mtx(matrixFname, cache=False).T
 
         _mtxFname, geneFname, barcodeFname = findMtxFiles(matrixFname)
         adata.var_names = pd.read_csv(geneFname, header=None, sep='\t')[1]
