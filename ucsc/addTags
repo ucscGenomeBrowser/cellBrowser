@@ -103,13 +103,19 @@ for line in dfh:
                 # go through line by line
                 for tagLine in open(confName):
                     splitTag = tagLine.strip().split("=",1)
-                    confTag = splitTag[0]
+                    confTag = splitTag[0].strip()
                     # find those tags we've referenced in the header
                     if confTag == tag:
                         # take the values from datasetFile and add to output string
                         # code adapated from https://stackoverflow.com/questions/4071396/split-by-comma-and-strip-whitespace-in-python
-                        vals = [x.strip() for x in splitLine[n].split(',')]
-                        outConf += tag + "=" + str(vals) + "\n"
+                        oldVal = splitTag[1].strip()
+                        if "[" in oldVal:
+                            vals = [x.strip() for x in splitLine[n].split(',')]
+                            outConf += tag + "=" + str(vals) + "\n"
+                        else:
+                            newVal = splitLine[n]
+                            outConf += tag + "=" + repr(newVal) + "\n"
+
                     # Just add other lines to the output string
                     else:
                         outConf += tagLine
