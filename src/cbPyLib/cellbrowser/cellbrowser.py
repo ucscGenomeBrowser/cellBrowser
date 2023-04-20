@@ -3464,7 +3464,7 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
     discretBinMat = join(outDir, "discretMat.bin")
     discretMatrixIndex = join(outDir, "discretMat.json")
 
-    genesAreRanges = inConf.get("atacSearch")
+    genesAreRanges = (inConf.get("atacSearch")!=None)
 
     matType = matrixToBin(outMatrixFname, geneToSym, binMat, binMatIndex, discretBinMat, \
             discretMatrixIndex, metaSampleNames, matType=matType, genesAreRanges=genesAreRanges)
@@ -4746,6 +4746,8 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
         skipMarkers=False, markerField='rank_genes_groups', matrixFormat="tsv"):
     """
     Mostly written by Lucas Seninge, lucas.seninge@etu.unistra.fr
+
+    Used by cbImportScanpy and cbScanpy
 
     Given a scanpy object, write dataset to a dataset directory under path.
 
