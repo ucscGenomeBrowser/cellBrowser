@@ -728,6 +728,40 @@ function MaxPlot(div, top, left, width, height, args) {
         ctx.restore();
     }
 
+    function drawLabelsSvg(svgLines, labelCoords, winWidth, winHeight, zoomFact) {
+        /* given an array of [x, y, text], draw the text. returns bounding
+         * boxes as array of [x1, y1, x2, y2]  */
+
+        //ctx.strokeStyle = '#EEEEEE';
+        //ctx.lineWidth = 5;
+        //ctx.miterLimit =2;
+        //ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+        //ctx.textBaseline = "top";
+//
+        //ctx.shadowBlur=6;
+        //ctx.shadowColor="white";
+        //ctx.fillStyle = "rgba(0,0,0,0.8)";
+        //ctx.textAlign = "left";
+//
+        for (var i=0; i < labelCoords.length; i++) {
+            var coord = labelCoords[i];
+            if (coord===null) { // outside of view range, push a null to avoid messing up the order of bboxArr
+                continue;
+            }
+
+            var x = coord[0];
+            var y = coord[1];
+            var text = coord[2];
+
+            // don't draw labels where the midpoint is off-screen
+            if (x<0 || y<0 || x>winWidth || y>winHeight) {
+                continue;
+            }
+
+            svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' text-anchor='middle' x='"+x+"' y='"+y+"'>"+text+"</text>");
+        }
+    }
+
     function drawLabels(ctx, labelCoords, winWidth, winHeight, zoomFact) {
         /* given an array of [x, y, text], draw the text. returns bounding
          * boxes as array of [x1, y1, x2, y2]  */
@@ -771,35 +805,6 @@ function MaxPlot(div, top, left, width, height, args) {
             var textX2 = Math.round(x+textWidth);
             var textY2 = y+gTextSize;
 
-            //if (zoomFact===1.0) {
-                // at 100% zoom, make some minimal effort to keep labels on screen
-                //if (x < 0)
-                    //x = 0;
-                //if ((x + textWidth) > winWidth)
-                    //x = winWidth - textWidth;
-                //if (y+gTextSize > winHeight)
-                    //y = winHeight-gTextSize;
-
-                // also only at 100% zoom, make a minimal effort to avoid label overlaps
-                // a perfect solution would take much more time
-                //for (var j=0; j < bboxArr.length; j++) {
-                    //var bbox = bboxArr[j];
-                    //if (bbox===null) // = outside of screen
-                        //continue;
-                    //var bx1 = bbox[0];
-                    //var by1 = bbox[1];
-                    //var bx2 = bbox[2];
-                    //var by2 = bbox[3];
-                    //if (intersectRect(textX1, textX2, textY1, textY2, bx1, bx2, by1, by2)) {
-                            // push the overlapping label away a little
-                            //var diff = Math.round(0.75*gTextSize);
-                            //if (textY1 < by1)
-                                //y -= diff;
-                            //else
-                                //y += diff;
-                        //}
-                //}
-            //}
             // don't draw labels where the midpoint is off-screen
             if (x<0 || y<0 || x>winWidth || y>winHeight) {
                 bboxArr.push( null );
@@ -1411,7 +1416,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.port.radius = radius;
     }
 
-    this.drawDots = function() {
+    this.drawDots = function(doSvg) {
         /* draw coordinates to canvas with current colors */
         console.time("draw");
 
@@ -1431,6 +1436,15 @@ function MaxPlot(div, top, left, width, height, args) {
              alert("internal error: cannot draw if coordinates are not set yet");
         if (colArr.length !== (coords.length>>1))
             alert("internal error: cbDraw.drawDots - colorArr is not 1/2 of coords array. Got "+pal.length+" color values but coordinates for "+(coords.length/2)+" cells.");
+
+        if (doSvg!==undefined) {
+            self.svgLines = [];
+            self.svgLines.push("<svg  xmlns='http://www.w3.org/2000/svg' height='"+self.canvas.height+"' width='"+self.canvas.width+"'>\n");
+            drawCirclesSvg(self.svgLines, coords, colArr, pal, radius, alpha, self.selCells);
+            drawLabelsSvg(self.svgLines, self.coords.pxLabels, self.canvas.width, self.canvas.height, self.port.zoomFact);
+            self.svgLines.push("</svg>\n");
+            return;
+        }
 
         drawBackground(self.ctx, self.background)
 
@@ -1472,6 +1486,13 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.childPlot)
             self.childPlot.drawDots();
     };
+
+    this.getSvgText = function() {
+        /* return the accumulated svg lines and clear the svg line buffer */
+        var svgLines = self.svgLines;
+        self.svgLines = null;
+        return svgLines;
+    }
 
     this.redrawLabels = function() {
         /* draw only the labels */
@@ -2151,6 +2172,23 @@ function MaxPlot(div, top, left, width, height, args) {
 
        self.drawDots();
     };
+
+    function drawCirclesSvg(svgLines, pxCoords, coordColors, colors, radius, alpha, selCells) {
+    /* add SVG text to the array svgLines */
+       debug("Drawing "+coordColors.length+" circles with SVG renderer");
+       var count = 0;
+       for (var i = 0; i < pxCoords.length/2; i++) {
+           var pxX = pxCoords[2*i];
+           var pxY = pxCoords[2*i+1];
+           if (isHidden(pxX, pxY))
+               continue;
+           var col = colors[coordColors[i]];
+
+           svgLines.push("<circle cx='"+pxX+"' cy='"+pxY+"' r='"+radius+"' fill-opacity='"+alpha+"' fill='#"+col+"' />");
+           count++;
+       }
+       return count;
+    }
 
     this.onWheel = function(ev) {
         /* called when the user moves the mouse wheel */
