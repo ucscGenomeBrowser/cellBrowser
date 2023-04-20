@@ -118,8 +118,13 @@ for line in dfh:
                 # empty string to hold outConf if we're dealing with updates to current tags
                 # doing it this way should keep the formatting of the lines we're not changing intact
                 outConf = ""
+                removeTriplets = False
                 # go through line by line
                 for tagLine in open(confName):
+                    if removeTriplets:
+                        if '"""' in tagLine:
+                            removeTriplets=False
+                        continue
                     splitTag = tagLine.strip().split("=",1)
                     confTag = splitTag[0].strip()
                     # find those tags we've referenced in the header
@@ -133,6 +138,8 @@ for line in dfh:
                         else:
                             newVal = splitLine[n]
                             outConf += tag + "=" + repr(newVal) + "\n"
+                            if '"""' in tagLine:
+                                removeTriplets=True
 
                     # Just add other lines to the output string
                     else:
