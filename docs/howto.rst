@@ -405,7 +405,12 @@ You will the following three files:
 Step 2: Download the gene model files
 """"
 
-Once you know the version, download the appropriate files to your cellbrowserData directory:
+Pick a current gene model version, either by asking the authors or use current
+one. Use ``cbGenes fetch`` to list the gene model files we have prebuilt for you at UCSC, then
+use ``cbGenes fetch`` followed by the name of the file to download it. Also download the
+gene symbol <-> ID mapping to the user can search for both gene IDs and gene symbols.
+
+Examples:
 
 ::
 
