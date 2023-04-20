@@ -106,6 +106,8 @@ for line in dfh:
                         valStr = repr(int(newVal))
                     elif dataType=="float":
                         valStr = repr(float(newVal))
+                    elif dataType=="list":
+                        valStr = repr(list(newVal))
                     else:
                         assert(False) # unknown dataType after pipe character
 
@@ -121,6 +123,8 @@ for line in dfh:
                 removeTriplets = False
                 # go through line by line
                 for tagLine in open(confName):
+                    # whenever we have found a line with a triplequote, we skip all the lines
+                    # up to the next triple quotes. Terrible hack.
                     if removeTriplets:
                         if '"""' in tagLine:
                             removeTriplets=False
