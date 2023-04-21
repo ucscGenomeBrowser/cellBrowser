@@ -1620,6 +1620,7 @@ var cellbrowser = function() {
     function onSaveAsSvgClick() {
     /* File - Save Image as vector ... */
         renderer.drawDots("svg")
+        renderer.drawLegendSvg(gLegend, 200)
         var lines = renderer.getSvgText()
         var blob = new Blob(lines, {type:"image/svg+xml"});
         window.saveAs( blob , "cellBrowser.svg");

@@ -762,6 +762,77 @@ function MaxPlot(div, top, left, width, height, args) {
         }
     }
 
+    self.drawLegendSvg = function (legend, legWidth) {
+        /* draw a legend onto the SVG given a legend object. */
+        var svgLines = self.svgLines;
+
+        var rows = legend.rows;
+
+        var legTitle = legend.title;
+        var subTitle = legend.subTitle;
+
+        var left = self.canvas.width; // x position where legend starts
+
+        var lineHeight = 18;
+
+        var x = left + 11;
+        var y = lineHeight;
+        svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' x='"+x+"' y='"+y+"'>"+legTitle+"</text>");
+        y += lineHeight;
+
+        if (subTitle) {
+            htmls.push('<div id="tpLegendSubTitle" >'+subTitle+"</div>");
+            svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' text-anchor='middle' x='"+x+"' y='"+y+"'>"+subTitle+"</text>");
+            y += lineHeight;
+        }
+
+        y += lineHeight;
+
+        // get the sum of all rows, to calculate frequency
+        var sum = 0;
+        for (var i = 0; i < rows.length; i++) {
+            let count = rows[i].count;
+            sum += count;
+        }
+
+        for (i = 0; i < rows.length; i++) {
+            // a lot was copied from cellBrowser:buildLegend(), could use some refactoring to reduce duplication
+            var row = rows[i];
+            var colorHex = row.color; // manual color
+            if (colorHex===null)
+                colorHex = row.defColor; // default color
+
+            var label = row.label;
+            var longLabel = row.longLabel;
+
+            let count = row.count;
+            var valueIndex = row.intKey;
+            var freq  = 100*count/sum;
+
+            if (count===0) // never output categories with 0 count.
+                continue;
+
+            // this was copied from cellbrowser:buildLegend - refactor soon
+            label = label.replace(/_/g, " ").replace(/'/g, "&#39;").trim();
+            if (label==="") {
+                label = "(empty)";
+            }
+
+            svgLines.push("<rect width='15' height='15' fill='#"+colorHex+"' x='"+x+"' y='"+y+"'></rect>");
+            y+= lineHeight;
+
+            var prec = 1;
+            if (freq<1)
+                prec = 2;
+
+            svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' text-anchor='start' x='"+(x+18)+"' y='"+(y-4)+"'>"+label+"</text>");
+            svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' text-anchor='end' x='"+(left+legWidth-3)+"' y='"+y+"'>"+freq.toFixed(prec)+"%</text>");
+            y+= lineHeight;
+
+        }
+        // cannot draw violin plots in SVG right now
+    };
+
     function drawLabels(ctx, labelCoords, winWidth, winHeight, zoomFact) {
         /* given an array of [x, y, text], draw the text. returns bounding
          * boxes as array of [x1, y1, x2, y2]  */
@@ -1439,10 +1510,10 @@ function MaxPlot(div, top, left, width, height, args) {
 
         if (doSvg!==undefined) {
             self.svgLines = [];
-            self.svgLines.push("<svg  xmlns='http://www.w3.org/2000/svg' height='"+self.canvas.height+"' width='"+self.canvas.width+"'>\n");
+            var legWidth = 200;
+            self.svgLines.push("<svg  xmlns='http://www.w3.org/2000/svg' height='"+self.canvas.height+"' width='"+(self.canvas.width+legWidth)+"'>\n");
             drawCirclesSvg(self.svgLines, coords, colArr, pal, radius, alpha, self.selCells);
             drawLabelsSvg(self.svgLines, self.coords.pxLabels, self.canvas.width, self.canvas.height, self.port.zoomFact);
-            self.svgLines.push("</svg>\n");
             return;
         }
 
@@ -1488,8 +1559,9 @@ function MaxPlot(div, top, left, width, height, args) {
     };
 
     this.getSvgText = function() {
-        /* return the accumulated svg lines and clear the svg line buffer */
+        /* close and return the accumulated svg lines and clear the svg line buffer */
         var svgLines = self.svgLines;
+        svgLines.push("</svg>\n");
         self.svgLines = null;
         return svgLines;
     }
