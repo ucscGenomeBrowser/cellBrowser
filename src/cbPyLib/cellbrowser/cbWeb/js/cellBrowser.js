@@ -3321,6 +3321,8 @@ var cellbrowser = function() {
         if (clusterInfo && clusterInfo.lines) {
             opts["lines"] = clusterInfo.lines;
             opts["lineWidth"] = db.conf.lineWidth;
+            opts["lineColor"] = db.conf.lineColor;
+            opts["lineAlpha"] = db.conf.lineAlpha;
         }
 
         renderer.setCoords(coords, clusterMids, info, opts);

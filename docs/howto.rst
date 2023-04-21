@@ -366,6 +366,10 @@ You will specifically need to edit these lines to point to the flies that you ex
 
   meta="meta.tsv"
 
+  lineWidth=3
+  lineColor="#220011"
+  lineAlpha=0.2
+
   coords=[
     {
       "file":"urd.coords.tsv",

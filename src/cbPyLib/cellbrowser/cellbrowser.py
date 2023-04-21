@@ -4288,6 +4288,7 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         "unit", "violinField", "visibility", "coordLabel", "lineWidth", "hideDataset", "hideDownload",
         "metaBarWidth", "supplFiles", "defQuantPal", "defCatPal", "clusterPngDir", "wrangler", "shepherd",
         "binStrategy",
+        "lineAlpha", "lineWidth", "lineColor",
         # the following are there only for old datasets, they are now nested under "facets"
         "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays", # these are just here for backwards-compatibility and will eventually get removed
         "facets", "multiModal"]:
