@@ -1415,17 +1415,21 @@ var cellbrowser = function() {
             noteLines.push("Go back to: " );
             // make the back links
             let backLinks = [];
+            let allParents = [];
             let parents = openDsInfo.parents;
             for (let i=0; i<parents.length; i++) {
                 let parentInfo = parents[i];
                 let parName = parentInfo[0];
+
                 let parLabel = parentInfo[1];
                 let childName = null;
                 if (i === parents.length-1)
                     childName = openDsInfo.name;
                 else
                     childName = parents[i+1][0];
-                backLinks.push("<span class='tpBackLink link' data-open-dataset='"+parName+"' data-sel-dataset='"+childName+"'>"+parLabel+"</span>");
+
+                allParents.push(parName);
+                backLinks.push("<span class='tpBackLink link' data-open-dataset='"+allParents.join("/")+"' data-sel-dataset='"+childName+"'>"+parLabel+"</span>");
             }
             noteLines.push(backLinks.join("&nbsp;&gt;&nbsp;"));
         }
