@@ -1316,7 +1316,7 @@ def metaToBin(inDir, inConf, outConf, fname, outDir):
     logging.info("Converting to numbers and compressing meta data fields")
     makeDir(outDir)
 
-    colData = parseIntoColumns(fname)
+    colData = list(parseIntoColumns(fname))
 
     colors = parseColors(inDir, inConf, outConf, colData)
     acronyms = readAcronyms(inConf, outConf) # XX no md5 yet for acronyms
