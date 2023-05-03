@@ -1119,7 +1119,7 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
     - if int or float: replace 0 or NaN with the FLOATNAN global (-inf)
     - if uniqueString: 'maxLen' is the length of the longest string
     - if enum: 'values' is a list of all possible values
-    - if colors is not None: 'colors' is a dict of value -> color
+    - if colors is not None: 'colors' is a dict of fieldName -> value -> color. The fieldname "__default" is always tried to look up colors.
     """
     unknownCount = 0
     intCount = 0
@@ -1194,13 +1194,18 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
             valCounts = valCounts.items()
             valCounts = list(sorted(valCounts, key=operator.itemgetter(1), reverse=True)) # = (label, count)
 
-        if colors!=None:
+
+        fieldColors = colors.get(fieldMeta["name"])
+        if fieldColors is None:
+            fieldColors = colors.get("__default__")
+
+        if fieldColors!=None:
             colArr = []
             foundColors = 0
             notFound = set()
             for val, _ in valCounts:
-                if val in colors:
-                    colArr.append(colors[val])
+                if val in fieldColors:
+                    colArr.append(fieldColors[val])
                     foundColors +=1
                 else:
                     notFound.add(val)
@@ -1301,17 +1306,20 @@ def addDesc(fieldDescs, fieldMeta):
         fieldMeta["desc"] = desc
     return fieldMeta
 
-def metaToBin(inConf, outConf, fname, colorFname, outDir, enumFields):
+def metaToBin(inDir, inConf, outConf, fname, outDir):
     """ convert meta table to binary files. outputs fields.json and one binary file per field.
     adds names of metadata fields to outConf and returns outConf
     """
+    colorFname = inConf.get("colors")
+    enumFields = inConf.get("enumFields")
+
     logging.info("Converting to numbers and compressing meta data fields")
     makeDir(outDir)
 
     colData = parseIntoColumns(fname)
 
-    colors = parseColors(colorFname)
-    acronyms = readAcronyms(inConf, outConf)
+    colors = parseColors(inDir, inConf, outConf, colData)
+    acronyms = readAcronyms(inConf, outConf) # XX no md5 yet for acronyms
     metaDescs = parseMetaDesc(inConf)
     enumOrder = inConf.get("enumOrder")
 
@@ -2218,28 +2226,28 @@ def indexMeta(fname, outFname):
 
 # ----------- main --------------
 
-def parseColors(fname):
-    " parse color table and return as dict value -> color "
-    if fname==None:
-        return {}
-
-    if not isfile(fname):
-        logging.warn("File %s does not exist" % fname)
-        return None
-
-    ifh = openFile(fname)
-    sep = sepForFile(fname)
+def parseOneColorFile(fname):
+    " read key-val file that defines colors "
     lineNo = 0
     newDict = dict()
-    for line in ifh:
+    invColumns = False
+
+    for row in textFileRows(fname):
         lineNo +=1
-        row = line.rstrip("\n\r").split(sep)
         if len(row)!=2:
             errAbort("color file %s - line %d does not contain exactly two fields: %s" % (fname, lineNo, row))
         metaVal, color = row
 
-        if color.lower()=="color":
+        if metaVal.lower().startswith("color") or metaVal.lower().startswith("colour"):
+            # tolerate a header line, otherwise will stop with "color not found"
+            invColumns = True
             continue
+        if color.lower().startswith("color") or color.lower().startswith("colour"):
+            # tolerate a header line, otherwise will stop with "color not found"
+            continue
+
+        if invColumns:
+            color, metaVal = row
 
         color = color.strip().strip("#") # hbeale had a file with trailing spaces
 
@@ -2265,6 +2273,41 @@ def parseColors(fname):
 
         newDict[metaVal] = color
     return newDict
+
+def parseColors(inDir, inConf, outConf, colData):
+    """ parse color table and return as dict fieldName -> value -> color. Can
+    be a single filename (backwards compat) or a dict fieldName -> filename """
+
+    if not "colors" in inConf:
+        return {}
+
+    metaFieldNames = [x for x,y in colData] # so we can check that fieldnames are valid
+
+    colorConf = inConf["colors"]
+
+    if type(colorConf)==type(""):
+        logging.debug("Color config is a single string, falling back to old behavior")
+        colorConf = { "__default__":colorConf }
+
+    colors = {}
+    for fieldName, fname in colorConf.items():
+        if fieldName != "__default__" and fieldName not in metaFieldNames:
+            errAbort("fieldName %s from 'colors' specification is not a valid meta data field name. Possible names are: %s" % (repr(fieldName), repr(metaFieldNames)))
+
+        fname = abspath(join(inDir, fname))
+        if isfile(fname):
+            outConf["fileVersions"]["colors:"+fieldName] = getFileVersion(fname)
+        else:
+            if fieldName=="__default__":
+                # old behavior was to tolerate missing color files. Not sure why. Tolerating this now only for the default field.
+                logging.warn("Color file %s does not exist, skipping it" % fname)
+                continue
+            else:
+                errAbort("Color file %s does not exist, skipping it" % fname)
+
+        colors[fieldName] = parseOneColorFile(fname)
+
+    return colors
 
 def scalePoint(scaleX, scaleY, minX, maxX, minY, maxY, flipY, useTwoBytes, x, y):
     " scale a point to the new coordinate system. used for either lines or points "
@@ -3796,11 +3839,6 @@ def convertMeta(inDir, inConf, outConf, outDir, finalMetaFname):
 
     metaFname = getAbsPath(inConf, "meta")
     outConf["fileVersions"]["inMeta"] = getFileVersion(metaFname)
-    if "colors" in inConf:
-        fullColorFname = abspath(join(inDir, inConf["colors"]))
-        if isfile(fullColorFname):
-            inConf["colors"] = fullColorFname
-            outConf["fileVersions"]["colors"] = getFileVersion(fullColorFname)
 
     metaDir = join(outDir, "metaFields")
     makeDir(metaDir)
@@ -3812,9 +3850,7 @@ def convertMeta(inDir, inConf, outConf, outDir, finalMetaFname):
     outConf["sampleCount"] = len(sampleNames)
     outConf["matrixWasFiltered"] = needFilterMatrix
 
-    colorFname = inConf.get("colors")
-    enumFields = inConf.get("enumFields")
-    fieldConf, validFieldNames = metaToBin(inConf, outConf, finalMetaFname, colorFname, metaDir, enumFields)
+    fieldConf, validFieldNames = metaToBin(inDir, inConf, outConf, finalMetaFname, metaDir)
     outConf["metaFields"] = fieldConf
 
     labelField = outConf.get("labelField")
