@@ -4012,8 +4012,11 @@ def md5ForFile(fname, isSmall=False):
 def readOldSampleNames(datasetDir, lastConf):
     """ reads the old cell identifiers from the dataset directory """
     # this obscure command gets file with the the cell identifiers in the dataset directory "
-    sampleNameFname = join(datasetDir, "metaFields", lastConf["metaFields"][0]["name"]+".bin.gz")
-    logging.debug("Reading meta sample names from %s" % sampleNameFname)
+    if len(lastConf["metaFields"])==0:
+        sampleNameFname = "does_not_exist" # this almost never happens, only if the output dataset is broken
+    else:
+        sampleNameFname = join(datasetDir, "metaFields", lastConf["metaFields"][0]["name"]+".bin.gz")
+        logging.debug("Reading meta sample names from %s" % sampleNameFname)
 
     # python3's gzip has 'text mode' but python2 doesn't have that so decode explicitly
     metaSampleNames = []
@@ -4089,6 +4092,8 @@ def matrixOrSamplesHaveChanged(datasetDir, inMatrixFname, outMatrixFname, outCon
     outConf["matrixArrType"] = lastConf["matrixArrType"]
 
     metaSampleNames = readOldSampleNames(datasetDir, lastConf)
+    if metaSampleNames is None:
+        return False # this can only happen if the old dataset directory is broken somehow
 
     matrixSampleNames = readMatrixSampleNames(outMatrixFname)
     assert(len(matrixSampleNames)!=0)
