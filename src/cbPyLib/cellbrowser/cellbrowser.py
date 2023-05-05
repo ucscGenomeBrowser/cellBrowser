@@ -1119,7 +1119,7 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
     - if int or float: replace 0 or NaN with the FLOATNAN global (-inf)
     - if uniqueString: 'maxLen' is the length of the longest string
     - if enum: 'values' is a list of all possible values
-    - if colors is not None: 'colors' is a dict of fieldName -> value -> color. The fieldname "__default" is always tried to look up colors.
+    - if colors is not None: 'colors' is a dict of fieldName -> value -> color. The fieldname "__default__" is always tried to look up colors.
     """
     unknownCount = 0
     intCount = 0
@@ -1195,7 +1195,10 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
             valCounts = list(sorted(valCounts, key=operator.itemgetter(1), reverse=True)) # = (label, count)
 
 
-        fieldColors = colors.get(fieldMeta["name"])
+        fieldColors = colors.get(fieldMeta["name"]) # this is the no-special characters name of the field
+        if fieldColors is None:
+            fieldColors = colors.get(fieldMeta["label"])
+
         if fieldColors is None:
             fieldColors = colors.get("__default__")
 
@@ -1221,7 +1224,7 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
 
         if fieldMeta["arrType"].endswith("32"):
             errAbort("Meta field %s has more than 32k different values and makes little sense to keep. "
-                "Please or remove the field from the meta data table or contact us, cells@ucsc.edu."% fieldMeta["name"])
+                "Please or remove the field from the meta data table or contact us, cells@ucsc.edu."% fieldMeta["label"])
 
         valToInt = dict([(y[0],x) for (x,y) in enumerate(valCounts)]) # dict with value -> index in valCounts
         newVals = [valToInt[x] for x in valList] #
@@ -2228,6 +2231,7 @@ def indexMeta(fname, outFname):
 
 def parseOneColorFile(fname):
     " read key-val file that defines colors "
+    logging.debug("Parsing color file %s" % fname)
     lineNo = 0
     newDict = dict()
     invColumns = False
