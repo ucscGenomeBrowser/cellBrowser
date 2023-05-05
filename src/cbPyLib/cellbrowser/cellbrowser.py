@@ -1212,12 +1212,13 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
                     foundColors +=1
                 else:
                     notFound.add(val)
-                    colArr.append(None) # maybe I should fail hard here?
+                    colArr.append(None)
+
 
             if foundColors > 0:
                 fieldMeta["colors"] = colArr
                 if len(notFound)!=0:
-                    logging.warn("No default color found for field values %s. They were set to defaults." % notFound)
+                    errAbort("No color found for field values %s. They were set to defaults." % notFound)
 
         fieldMeta["valCounts"] = valCounts
         fieldMeta["arrType"], fieldMeta["_fmt"] = bytesAndFmt(len(valArr))
