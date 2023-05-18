@@ -1194,15 +1194,19 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
             valCounts = valCounts.items()
             valCounts = list(sorted(valCounts, key=operator.itemgetter(1), reverse=True)) # = (label, count)
 
-
         fieldColors = colors.get(fieldMeta["name"]) # this is the no-special characters name of the field
+
         if fieldColors is None:
             fieldColors = colors.get(fieldMeta["label"])
 
+        isDefColors = False
         if fieldColors is None:
+            logging.debug("Using default colors for field")
             fieldColors = colors.get("__default__")
+            isDefColors = True
 
         if fieldColors!=None:
+            logging.debug("Collecting color values")
             colArr = []
             foundColors = 0
             notFound = set()
@@ -1214,11 +1218,18 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
                     notFound.add(val)
                     colArr.append(None)
 
+            logging.debug("Colors: found %d colors, isDefaultColors: %s" % (foundColors, isDefColors))
 
             if foundColors > 0:
                 fieldMeta["colors"] = colArr
-                if len(notFound)!=0:
-                    errAbort("No color found for field values %s. They were set to defaults." % notFound)
+
+            if len(notFound)!=0:
+                msg = "No colors found for field values %s. These are going to be palette-defaults." % list(notFound)
+                if isDefColors:
+                    if foundColors > 0: # otherwise would print warning on every field
+                        logging.warn(msg)
+                else:
+                    errAbort(msg)
 
         fieldMeta["valCounts"] = valCounts
         fieldMeta["arrType"], fieldMeta["_fmt"] = bytesAndFmt(len(valArr))
@@ -4256,6 +4267,7 @@ def makeFilesTxt(outConf, datasetDir):
 def copyFacets(inConf, outConf):
     """ for backwards compatibility with old Javascript UI, we copy the inConf["facets"] directly into outConf """
     if "facets" in inConf:
+        logging.debug("Copying facets into object")
         for key, val in inConf["facets"].items():
             assert(type(val)==type([])) # facets must be lists
             outConf[key] = val
