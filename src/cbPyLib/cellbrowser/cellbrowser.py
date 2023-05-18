@@ -1224,10 +1224,10 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
                 fieldMeta["colors"] = colArr
 
             if len(notFound)!=0:
-                msg = "No colors found for field values %s. These are going to be palette-defaults." % list(notFound)
+                msg = "No colors found for field values %s." % list(notFound)
                 if isDefColors:
                     if foundColors > 0: # otherwise would print warning on every field
-                        logging.warn(msg)
+                        logging.warn(msg+" These will fall back to palette default colors")
                 else:
                     errAbort(msg)
 
