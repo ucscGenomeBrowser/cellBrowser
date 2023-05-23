@@ -348,6 +348,7 @@ def reorderFields(row, firstFields, skipFields):
 
 def metaCat(inFnames, outFname, options):
     " merge all tsv/csv columns in inFnames into a new file, outFname. Column 1 is ID to join on. "
+    logging.debug("In fnames: %s, out fname: %s" % (repr(inFnames), repr(outFname)))
     allHeaders = ["cellId"]
     allRows = defaultdict(dict) # cellId -> fileIdx -> list of non-ID fields
     fieldCounts = {} # fileIdx -> number of non-ID fields
