@@ -1,6 +1,17 @@
 How To...
 ____
 
+How to determine the correct gene model version
+^^^^
+
+If you don't know the GENCODE version used, cbGenes can determine the most likely version:
+
+::
+
+ cbGenes guess exprMatrix.tsv.gz human
+
+The first column of this file should be gene symbols of GENCODE gene IDs.
+
 How to create a cell browser using a Seurat RDS file
 ^^^^
 
@@ -348,6 +359,10 @@ You will specifically need to edit these lines to point to the flies that you ex
 
   meta="meta.tsv"
 
+  lineWidth=3
+  lineColor="#220011"
+  lineAlpha=0.2
+
   coords=[
     {
       "file":"urd.coords.tsv",
@@ -385,21 +400,15 @@ You will the following three files:
 * Cell annotations/metadata
 * Layout coordinats (e.g. UMAP)
 
-Step 2: Determine GENCODE Gene Model version (optional)
+Step 2: Download the gene model files
 """"
 
-If you don't know the GENCODE version used, cbGenes can determine the most likely version used from a list of gene identifiers:
+Pick a current gene model version, either by asking the authors or use current
+one. Use ``cbGenes fetch`` to list the gene model files we have prebuilt for you at UCSC, then
+use ``cbGenes fetch`` followed by the name of the file to download it. Also download the
+gene symbol <-> ID mapping to the user can search for both gene IDs and gene symbols.
 
-::
-
- cbGenes guess exprMatrix.tsv.gz human
-
-The first column of this file should be the gene symbols of GENCODE gene IDs (e.g. ENSG00000184779).
-
-Step 3: Download the gene model files
-""""
-
-Once you know the version, download the appropriate files to your cellbrowserData directory:
+Examples:
 
 ::
 
@@ -408,7 +417,7 @@ Once you know the version, download the appropriate files to your cellbrowserDat
 
 Both files are required for this to work.
 
-Step 4: Set up your cellbrowser.conf
+Step 3: Set up your cellbrowser.conf
 """"
 
 You will need to add the following lines to your ``cellbrowser.conf``:

@@ -1415,17 +1415,21 @@ var cellbrowser = function() {
             noteLines.push("Go back to: " );
             // make the back links
             let backLinks = [];
+            let allParents = [];
             let parents = openDsInfo.parents;
             for (let i=0; i<parents.length; i++) {
                 let parentInfo = parents[i];
                 let parName = parentInfo[0];
+
                 let parLabel = parentInfo[1];
                 let childName = null;
                 if (i === parents.length-1)
                     childName = openDsInfo.name;
                 else
                     childName = parents[i+1][0];
-                backLinks.push("<span class='tpBackLink link' data-open-dataset='"+parName+"' data-sel-dataset='"+childName+"'>"+parLabel+"</span>");
+
+                allParents.push(parName);
+                backLinks.push("<span class='tpBackLink link' data-open-dataset='"+allParents.join("/")+"' data-sel-dataset='"+childName+"'>"+parLabel+"</span>");
             }
             noteLines.push(backLinks.join("&nbsp;&gt;&nbsp;"));
         }
@@ -1615,6 +1619,15 @@ var cellbrowser = function() {
     /* File - Save Image as ... */
         var canvas = $("canvas")[0];
         canvas.toBlob(function(blob) { saveAs( blob , "cellBrowser.png"); } , "image/png");
+    }
+
+    function onSaveAsSvgClick() {
+    /* File - Save Image as vector ... */
+        renderer.drawDots("svg")
+        renderer.drawLegendSvg(gLegend, 200)
+        var lines = renderer.getSvgText()
+        var blob = new Blob(lines, {type:"image/svg+xml"});
+        window.saveAs( blob , "cellBrowser.svg");
     }
 
     function onSelectAllClick() {
@@ -2637,7 +2650,8 @@ var cellbrowser = function() {
                  //htmls.push('<li><a href="#" id="tpDownload_meta">Cell Metadata</a></li>');
                  //htmls.push('<li><a href="#" id="tpDownload_coords">Visible coordinates</a></li>');
                //htmls.push('</ul>'); // Download sub-menu
-             htmls.push('<li><a href="#" id="tpSaveImage">Download current image</a></li>');
+             htmls.push('<li><a href="#" id="tpSaveImage">Download bitmap image (PNG)</a></li>');
+             htmls.push('<li><a href="#" id="tpSaveImageSvg">Download vector image (SVG)</a></li>');
              htmls.push('</li>');   // sub-menu container
 
            htmls.push('</ul>'); // File menu
@@ -2750,6 +2764,7 @@ var cellbrowser = function() {
        $('#tpAboutButton').click( onAboutClick );
        $('#tpOpenDatasetLink').click( openCurrentDataset );
        $('#tpSaveImage').click( onSaveAsClick );
+       $('#tpSaveImageSvg').click( onSaveAsSvgClick );
        $('#tpSelectAll').click( onSelectAllClick );
        $('#tpSelectNone').click( onSelectNoneClick );
        $('#tpSelectInvert').click( onSelectInvertClick );
@@ -3306,6 +3321,8 @@ var cellbrowser = function() {
         if (clusterInfo && clusterInfo.lines) {
             opts["lines"] = clusterInfo.lines;
             opts["lineWidth"] = db.conf.lineWidth;
+            opts["lineColor"] = db.conf.lineColor;
+            opts["lineAlpha"] = db.conf.lineAlpha;
         }
 
         renderer.setCoords(coords, clusterMids, info, opts);
