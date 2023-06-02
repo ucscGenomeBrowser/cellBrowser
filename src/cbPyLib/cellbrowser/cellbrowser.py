@@ -5270,8 +5270,6 @@ def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None
         else:
             # This is an actual dataset - the main function that does all the work is convertDataset()
             copyGenes(inConf, outConf, outDir)
-            #print(outConf)
-            #asd
             isTopLevel = ("parents" in outConf and len(outConf["parents"])==1) # important for facet checking
             logging.debug("Datasets parents: %s" % outConf.get("parents"))
             convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel)
@@ -5745,7 +5743,7 @@ def summarizeDatasets(datasets):
         summDs = {
             "shortLabel" : ds["shortLabel"],
             "name" : ds["name"],
-            "md5" : ds["md5"]
+            "md5" : ds["md5"],
         }
 
         # these are copied if they are present
@@ -5755,6 +5753,7 @@ def summarizeDatasets(datasets):
                 #summDs[t] = ds[t]
 
         # these are copied and checked for the correct type
+        # DEPRECATE in 2025: duplicated facets
         for optListTag in ["tags", "hasFiles", "body_parts", "diseases", "organisms", "projects", "life_stages", \
                 "domains", "sources", "assays"]:
             if optListTag in ds:
@@ -5763,6 +5762,10 @@ def summarizeDatasets(datasets):
                 else:
                     logging.error("Dataset: %s" % ds["name"])
                     logging.error("Setting '%s' must be a list of values, not a number or string." % optListTag)
+
+        # the above tags are replaced with the more modern dictionary 'facets' (the old code is still there, for backwards compatibility
+        if "facets" in ds:
+            summDs["facets"] = ds["facets"]
 
         # these are generated
         if "sampleCount" in ds:

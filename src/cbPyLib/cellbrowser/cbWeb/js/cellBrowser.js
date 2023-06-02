@@ -871,18 +871,19 @@ var cellbrowser = function() {
     }
 
     function buildClassification(htmls, datasetInfo, attrName, label, addSep) {
-        if ( datasetInfo[attrName] ) {
-                var values;
-                // in Nov 2022, the facets moved into their own object, old dataasets have them in the dataset itself as attributes
-                if (datasetInfo.facets)
-                    values = datasetInfo.facets[attrName];
-                else
-                    values = datasetInfo[attrName];
+        if (datasetInfo[attrName]===undefined && (datasetInfo.facets===undefined || datasetInfo.facets[attrName]===undefined))
+            return;
 
-                htmls.push(label+"=" + values.join(","));
-                if (addSep)
-                    htmls.push("; ");
-        }
+        var values;
+        // in Nov 2022, the facets moved into their own object, old dataasets have them in the dataset itself as attributes
+        if (datasetInfo.facets)
+            values = datasetInfo.facets[attrName];
+        else
+            values = datasetInfo[attrName];
+
+        htmls.push(label+"=" + values.join(","));
+        if (addSep)
+            htmls.push("; ");
     }
 
     function datasetDescToHtml(datasetInfo, desc) {
@@ -1157,10 +1158,13 @@ var cellbrowser = function() {
         /* return an array of (attrName, "attrName (count)") of all attrNames (e.g. body_parts) in a dataset array */
         var valCounts = {};
         for (let i=0; i < datasets.length; i++) {
-            let ds = datasets[i];
-            if (ds[attrName]===undefined)
+            let facetObj = datasets[i];
+            if (facetObj.facets) // facets can be stored on the objects (old) or on a separate ds.facets object (new)
+                facetObj = facetObj.facets;
+
+            if (facetObj[attrName]===undefined)
                 continue
-            for (let bp of ds[attrName])
+            for (let bp of facetObj[attrName])
                 if (bp in valCounts)
                     valCounts[bp]++;
                 else
@@ -1624,7 +1628,8 @@ var cellbrowser = function() {
     function onSaveAsSvgClick() {
     /* File - Save Image as vector ... */
         renderer.drawDots("svg")
-        renderer.drawLegendSvg(gLegend, 200)
+        renderer.svgLabelWidth = 300;
+        renderer.drawLegendSvg(gLegend)
         var lines = renderer.getSvgText()
         var blob = new Blob(lines, {type:"image/svg+xml"});
         window.saveAs( blob , "cellBrowser.svg");
@@ -3500,7 +3505,7 @@ var cellbrowser = function() {
                return [3, 0.5];
            if (dotCount<35000)
                return [2, 0.3];
-           if (dotCount<60000)
+           if (dotCount<80000)
                return [1, 0.5];
            // everything else
            return [0, 0.3];
