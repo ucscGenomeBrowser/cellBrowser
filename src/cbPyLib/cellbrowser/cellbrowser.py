@@ -4481,6 +4481,10 @@ def geneStringsFromVar(var, sep="|"):
         # the files in retina-atac had only one 'feature' keys
         logging.debug("Found 'features' attribute in var, using just those")
         genes = var["features"].tolist()
+    elif "_index" in var:
+        # mouse-striatal-dev, but only when opened in cbImportScanpy, as the "features" transformed to "_index"
+        logging.debug("Found '_index' attribute in var")
+        genes = geneSeriesToStrings(var, "_index", justValues=True, sep=sep)
     else:
         logging.debug("Using index of var")
         genes = var.index.tolist()
