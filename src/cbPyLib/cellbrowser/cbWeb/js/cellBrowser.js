@@ -1062,6 +1062,17 @@ var cellbrowser = function() {
 
     }
 
+    function getFacetString(ds, facetName) {
+        /* search for an attribute under ds.facets or directly under ds, for backwards compatibility, and return as a |-sep string */
+        let facets = [];
+        if (ds.facets!==undefined && ds.facets[facetName]!==undefined)
+            facets =  ds.facets[facetName];
+        if (ds[facetName]!==undefined)
+            facets =  ds[facetName];
+        facets = cleanStrings(facets);
+        let facetStr = facets.join("|");
+        return facetStr;
+    }
     function buildListPanel(datasetList, listGroupHeight, leftPaneWidth, htmls, selName) {
         /* make a dataset list and append its html lines to htmls */
         htmls.push("<div id='tpDatasetList' class='list-group' style='float: left; margin-top: 1em; height:"+listGroupHeight+"px; overflow-y:scroll; width:"+leftPaneWidth+"px'>");
@@ -1083,35 +1094,13 @@ var cellbrowser = function() {
                 selIdx = i;
             }
 
-            var bodyPartStr = "";
-            var disStr = "";
-            var orgStr = "";
-            var projStr = "";
-            var domStr = "";
-            var lifeStr = "";
-            var sourceStr = "";
-
-            if (dataset.body_parts) {
-                bodyPartStr = cleanStrings(dataset.body_parts).join("|");
-            }
-            if (dataset.diseases) {
-                disStr = cleanStrings(dataset.diseases).join("|");
-            }
-            if (dataset.organisms) {
-                orgStr = cleanStrings(dataset.organisms).join("|");
-            }
-            if (dataset.projects) {
-                projStr = cleanStrings(dataset.projects).join("|");
-            }
-            if (dataset.domains) {
-                domStr = cleanStrings(dataset.domains).join("|");
-            }
-            if (dataset.life_stages) {
-                lifeStr = cleanStrings(dataset.life_stages).join("|");
-            }
-            if (dataset.sources) {
-                sourceStr = cleanStrings(dataset.sources).join("|");
-            }
+            let bodyPartStr = getFacetString(dataset, "body_parts");
+            let disStr = getFacetString(dataset, "diseases");
+            let orgStr = getFacetString(dataset, "organisms");
+            let projStr = getFacetString(dataset, "projects");
+            let domStr = getFacetString(dataset, "domains");
+            let lifeStr = getFacetString(dataset, "life_stages");
+            let sourceStr = getFacetString(dataset, "sources");
 
             var line = "<a id='tpDatasetButton_"+i+"' "+
                 "data-body='"+bodyPartStr+"' "+
