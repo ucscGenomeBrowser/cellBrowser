@@ -1120,6 +1120,7 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
     - if uniqueString: 'maxLen' is the length of the longest string
     - if enum: 'values' is a list of all possible values
     - if colors is not None: 'colors' is a dict of fieldName -> value -> color. The fieldname "__default__" is always tried to look up colors.
+    - arrType is the Javascript TypedArray type of the array: float32, uint8, uint16, uint32
     """
     unknownCount = 0
     intCount = 0
@@ -1224,7 +1225,7 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
                 fieldMeta["colors"] = colArr
 
             if len(notFound)!=0:
-                msg = "No colors found for field values %s." % list(notFound)
+                msg = "No colors found for field %s, values %s." % (repr(fieldMeta), list(notFound))
                 if isDefColors:
                     if foundColors > 0: # otherwise would print warning on every field
                         logging.warn(msg+" These will fall back to palette default colors")
@@ -5733,7 +5734,6 @@ def writeGaScript(ofh, gaTag):
 def summarizeDatasets(datasets):
     """ keep only the most important fields of a list of datasets and return them as a list of dicts.
     Also create a new md5 from all the datasets. """
-    #allMd5s = []
     dsList = []
     for ds in datasets:
         if ds.get("visibility")=="hide" or ds.get("hideDataset") in [True, "True", "true", 1, "1"]:
@@ -5769,7 +5769,7 @@ def summarizeDatasets(datasets):
 
         # the above tags are replaced with the more modern dictionary 'facets' (the old code is still there, for backwards compatibility
         if "facets" in ds:
-            summDs["facets"] = ds["facets"]
+            summDs["facets"] = dict(ds["facets"])
 
         # these are generated
         if "sampleCount" in ds:
@@ -5832,6 +5832,8 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         "ext/selectize.bootstrap3.css",
         #"ext/selectize.0.12.4.min.css",
         "ext/OverlayScrollbars.min.css", # 1.6.2, from https://cdnjs.com/libraries/overlayscrollbars
+        #"ext/theme.default.css", #  tablesorter
+        "ext/theme.bootstrap_3.css", #  tablesorter
         "css/cellBrowser.css"
         ]
 
@@ -5847,13 +5849,16 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         "ext/jquery.tipsy.min.js", "ext/intro.min.js", "ext/papaparse.min.js",
         "ext/bootstrap.min.js", "ext/bootstrap-submenu.js", "ext/pako_inflate.min.js",
         "ext/FastBitSet.js", "ext/hamster.js", "ext/split.js", "ext/normalizeWheel.js",
-        "ext/tablesort.js", "ext/tablesort.number.min.js", "ext/Chart.bundle.min.js",
+        #"ext/tablesort.js", "ext/tablesort.number.min.js", 
+        "ext/Chart.bundle.min.js",
         "ext/chartjs-chart-box-and-violin-plot.js", "ext/jquery-ui.min.js",
         "ext/select2.min.js",
         "ext/selectize.js", # 0.12.16
         "ext/jquery.sparkline.min.js",
         "ext/jquery.overlayScrollbars.min.js", # 1.6.2 from https://cdnjs.com/libraries/overlayscrollbars
         "ext/jquery.event.drag-2.3.0.js", # for slickgrid 2.4.5
+        "ext/jquery.tablesorter.js",
+        "ext/jquery.tablesorter.widgets.js",
         "ext/lz-string.js",  # 1.4.4, https://raw.githubusercontent.com/pieroxy/lz-string/master/libs/lz-string.js
         "ext/slick.core.js",
         "ext/slick.cellrangedecorator.js", "ext/slick.cellrangeselector.js", "ext/slick.cellselectionmodel.js",

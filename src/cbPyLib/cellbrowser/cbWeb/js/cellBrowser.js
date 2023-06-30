@@ -7214,7 +7214,7 @@ var cellbrowser = function() {
                 "To add marker genes, contact the original authors of the dataset and ask them to add " +
                 " them to the cell browser.");
         } else {
-            htmls.push("Click gene symbols below to color plot by gene<br>");
+            htmls.push("Sorted by the column which is highlighted. Click gene symbols below to color plot by gene<br>");
             buttons.push({
                 text:"Download as file",
                 click: function() {
@@ -7314,15 +7314,22 @@ var cellbrowser = function() {
         var htmls = [];
 
         var markerListIdx = parseInt(divId.split("-")[1]);
-        var selectOnClick = db.conf.markers[markerListIdx].selectOnClick;
+        var markerInfo = db.conf.markers[markerListIdx];
+        var selectOnClick = markerInfo.selectOnClick;
+        var sortColumn = markerInfo.sortColumn || 1;
+        var sortOrder = markerInfo.sortOrder || "asc";
+        var sortOrderNum = 0;
+        if (sortOrder==="desc")
+            sortOrderNum = 1;
 
-        htmls.push("<table class='table' id='tpMarkerTable'>");
+        //htmls.push("<table class='table' data-sortlist='[[1,1],[4,0]]' id='tpMarkerTable'>");
+        htmls.push("<table class='table' data-sortlist='[["+sortColumn+","+sortOrder+"]]' id='tpMarkerTable'>");
         htmls.push("<thead>");
         var hprdCol = null;
         var geneListCol = null;
         var exprCol = null;
         var pValCol = null
-        //var doDescSort = false;
+        var doDescSort = false;
         for (var i = 1; i < headerRow.length; i++) {
             var colLabel = headerRow[i];
             var isNumber = false;
@@ -7340,11 +7347,11 @@ var cellbrowser = function() {
                 colLabel = "Gene Lists";
                 geneListCol = i;
             }
-            else if (colLabel==="P_value" || colLabel==="p_val" || colLabel==="pVal") {
+            else if (colLabel==="P_value" || colLabel==="pVal" || colLabel.startsWith("p_val")) {
                 colLabel = "P-value";
                 pValCol = i;
-                //if (i===2)
-                    //doDescSort = true;
+                if (i===2)
+                    doDescSort = true;
             }
 
             else if (colLabel==="_expr") {
@@ -7448,10 +7455,12 @@ var cellbrowser = function() {
         // ----
 
         $("#"+divId).html(htmls.join(""));
-        var sortOpt = {};
-        //if (doDescSort)
-            //sortOpt.descending=true;
-        new Tablesort(document.getElementById('tpMarkerTable'));
+        var tableOpt = { sortList: [[1,0]], theme: "bootstrap", widgets : [ "uitheme", "filter", "columns", "zebra" ],
+        };
+        if (doDescSort)
+            tableOpt.sortList = [[1,1]]; // = sort first column descending
+        //new Tablesort(document.getElementById('tpMarkerTable'), tableOpt);
+        $("#tpMarkerTable").tablesorter(tableOpt);
         $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
         activateTooltip(".link");
 
