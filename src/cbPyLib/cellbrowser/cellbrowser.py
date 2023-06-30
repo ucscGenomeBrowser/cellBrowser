@@ -4703,7 +4703,7 @@ def saveMarkers(adata, markerField, nb_marker, fname):
 
     sep = "\t"
     with open(fname, "w") as ofh:
-        ofh.write(sep.join(["cluster_name", "z_score", "gene"]))
+        ofh.write(sep.join(["cluster_name", "gene", "z_score"]))
         ofh.write("\n")
         for cluster, score, gene in zip(clusterCol, scoreCol, geneCol):
             if isinstance(gene, (bytes, bytearray)):
