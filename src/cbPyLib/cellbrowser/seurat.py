@@ -481,8 +481,10 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
     matrixPath = join(outDir, "matrix.mtx")
     logPath = join(outDir, "analysisLog.txt")
 
-    cmds = ["require(methods)"] # for the 'slots()' function
-    cmds.append("require(Seurat)")
+    cmds = ["library(methods)", # for the 'slots()' function
+            "library(Matrix)", # for the writeMM() function
+            "library(Seurat)"
+           ]
 
     cmds = readExportScript(cmds)
 
