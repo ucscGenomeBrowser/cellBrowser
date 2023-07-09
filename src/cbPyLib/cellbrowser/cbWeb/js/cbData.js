@@ -516,9 +516,9 @@ function CbDbFile(url) {
     this.getDefaultColorField = function() {
         /* return a pair: [0] is "meta" or "gene" and [1] is the field name or the gene */
         if (self.conf.clusterField)
-            return ["meta", self.conf.clusterField]; // just for backwards-compat. with old datasets
+            return self.conf.clusterField; // just for backwards-compat. with old datasets
         else
-            return ["meta", self.conf.defColorField];
+            return self.conf.defColorField;
     };
 
     this.findMetaInfo= function(findName) {
@@ -1077,6 +1077,14 @@ function CbDbFile(url) {
         else
             return self.geneOffsets;
     };
+
+    this.getRandomLocus = function() {
+        if (self.isAtacMode())
+            alert("getRandomLocus() not implemented for ATAC mode yet.")
+        else {
+            return cbUtil.keys(self.geneOffsets)[0];
+            }
+    }
 
     this.getGeneInfo = function(geneId) {
         /* given geneId, return an object with .geneId and .sym */

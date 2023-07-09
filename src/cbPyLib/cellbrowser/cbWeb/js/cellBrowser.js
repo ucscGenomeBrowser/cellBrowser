@@ -1668,12 +1668,21 @@ var cellbrowser = function() {
         htmls.push('<p>');
     }
 
+    function chosenSetValue(elId, value) {
+        //var el = getById(elId);
+        //el.value = ("tpMetaVal_"+fieldIdx);
+        //el.trigger('chosen:updated'); // update the meta dropdown
+        // looks like this needs jquery
+        $('#'+elId).val(value).trigger('chosen:updated'); // somehow chosen needs this?
+    }
+
     function findCellsUpdateMetaCombo(rowIdx, fieldIdx) {
         /* given the row and the ID name of the field, setup the combo box row */
         var metaInfo = db.getMetaFields()[fieldIdx];
         var valCounts = metaInfo.valCounts;
         var shortLabels = metaInfo.ui.shortLabels;
-        $('#tpSelectMetaCombo_'+rowIdx).val("tpMetaVal_"+fieldIdx).trigger('chosen:updated'); // update the meta dropdown
+        //$('#tpSelectMetaCombo_'+rowIdx).val("tpMetaVal_"+fieldIdx).trigger('chosen:updated'); // update the meta dropdown
+        chosenSetValue('#tpSelectMetaCombo_'+rowIdx, "tpMetaVal_"+fieldIdx);
 
         if (valCounts===undefined) {
             // this is a numeric field
@@ -1746,7 +1755,7 @@ var cellbrowser = function() {
         if (metaName===undefined) {
             // this is a gene query
             findCellsUpdateRowType(rowIdx, rowType);
-            selectizeSetValue("#tpSelectGeneCombo_"+rowIdx, query["g"]);
+            selectizeSetValue("tpSelectGeneCombo_"+rowIdx, query["g"]);
             $("#tpSelectValue_"+rowIdx).val(query[op]);
         } else {
             // it's a meta query
@@ -2924,7 +2933,7 @@ var cellbrowser = function() {
        if (db.lastExprArr)
            delete db.lastExprArr;
 
-       var defaultMetaField = db.getDefaultColorField()[1];
+       var defaultMetaField = db.getDefaultColorField();
 
        // internal field names cannot contain non-alpha chars, so tolerate user errors here
        // otherwise throw an error
@@ -2981,14 +2990,35 @@ var cellbrowser = function() {
         return arr2;
     }
 
-    function splitExprByMeta(exprVec, splitArr, selCells) {
+    function splitExprByMeta(metaArr, metaCounts, exprArr) {
+        /* split expression values by meta annotation, return array metaIdx -> array of expression values  */
+        var metaValToExprArr = [];
+        // initialize result array
+        for (var i=0; i < keys(metaCounts).length; i++) {
+            metaValToExprArr.push([]);
+        }
+
+        let exprMax = exprArr[0];
+        for (var i=0; i < exprArr.length; i++) {
+            var exprVal = exprArr[i];
+            var metaVal = metaArr[i];
+            metaValToExprArr[metaVal].push(exprVal);
+            exprMax = Math.max(exprMax, exprVal);
+            if (exprMax > 50)
+                exprMax = Math.round(exprMax);
+
+        }
+        return [metaValToExprArr, exprMax];
+    }
+
+    function splitExprByMetaSelected(exprVec, splitArr, selCells) {
         /* split the expression vector into two vectors. splitArr is an array with 0/1, indicates where values go.
          * if selCells is not null, restrict the splitting to just indices in selCells.
          * Returns array of the two arrays.
          * */
         console.time("findCellsWithMeta");
         if (exprVec.length!==splitArr.length) {
-            warn("internal error - splitExprByMeta: exprVec has diff length from splitArr");
+            warn("internal error - splitExprByMetaSelected: exprVec has diff length from splitArr");
         }
 
         var arr1 = [];
@@ -3121,7 +3151,7 @@ var cellbrowser = function() {
         var labelList = [metaInfo.valCounts[0][0], metaInfo.valCounts[1][0]];
         db.loadMetaVec( metaInfo,
                 function(metaArr) {
-                    var dataList = splitExprByMeta(exprVec, metaArr, selCells);
+                    var dataList = splitExprByMetaSelected(exprVec, metaArr, selCells);
                     buildViolinFromValues(labelList, dataList);
                 },
                 null);
@@ -3168,7 +3198,7 @@ var cellbrowser = function() {
             exprVec = result;
             selCells = renamedSelCells;
         }
-        // if we have a violin meta field to split on, make two violin plots, one meta vs, the other meta
+        // if we have a violin meta field to split on, make two violin plots, metavalue vs rest
         // restrict the plot to the selected cells, if any
         if (db.conf.violinField!==undefined) {
             buildViolinFromMeta(exprVec, db.conf.violinField, selCells);
@@ -3200,12 +3230,12 @@ var cellbrowser = function() {
         }
     }
 
-    function selectizeSetValue(selector, name) {
+    function selectizeSetValue(elId, name) {
         /* little convenience method to set a selective dropdown to a given
          * value. does not trigger the change event. */
         if (name===undefined)
             return;
-        var sel = $(selector)[0].selectize;
+        var sel = getById(elId).selectize;
         sel.addOption({id: name, text: name});
         sel.setValue(name, 1); // 1 = do not fire change
     }
@@ -3351,21 +3381,22 @@ var cellbrowser = function() {
    function setColorByDropdown(fieldName) {
        /* set the meta 'color by' dropdown to a given value. The value is the meta field name, not its label, nor its index */
        var fieldIdx  = db.fieldNameToIndex(fieldName);
-       $('#tpMetaCombo').val("tpMetaVal_"+fieldIdx).trigger('chosen:updated');
+       chosenSetValue("tpMetaCombo", "tpMetaVal_"+fieldIdx);
+       //$('#tpMetaCombo').val("tpMetaVal_"+fieldIdx).trigger('chosen:updated');
    }
 
    function setLabelDropdown(fieldName) {
        /* set the meta 'label by' dropdown to a given value. The value is the meta field name, nor its short label, nor its index */
        var fieldIdx  = db.fieldNameToIndex(fieldName);
-       $('#tpLabelCombo').val("tpMetaVal_"+fieldIdx).trigger('chosen:updated');
+       //$('#tpLabelCombo').val("tpMetaVal_"+fieldIdx).trigger('chosen:updated');
+       chosenSetValue("tpLabelCombo", "tpMetaVal_"+fieldIdx);
    }
 
    function colorByDefaultField(onDone) {
-       /* get the default coloring field from the config or the URL and start coloring by it.
+       /* get the default color field from the config or the URL and start coloring by it.
         * Call onDone() when done. */
-       var colorByInfo = db.getDefaultColorField();
-       var colorType = colorByInfo[0];
-       var colorBy = colorByInfo[1];
+       var colorType = "meta";
+       var colorBy = db.getDefaultColorField();
 
        // allow to override coloring by URL args
        if (getVar("gene")!==undefined) {
@@ -4176,81 +4207,6 @@ var cellbrowser = function() {
 
     }
 
-    //function onReceiveExprLineProgress(line) {
-        /* called when a line of the expression matrix has been loaded: parse line and upd. progressbar */
-        //var symbol = this.geneSymbol;
-        //console.log("Got gene "+symbol);
-        //var exprTuple = parseMatrixLine(line);
-        //var exprVec = exprTuple[1];
-        //exprTuple.push( getDeciles(exprVec) );
-        //gLoad_geneExpr[symbol] = exprTuple;
-//
-        //var progressbar = $( "#tpGeneProgress" );
-        //var val = progressbar.progressbar( "value" ) || 0 ;
-        //val++;
-        //progressbar.progressbar( "value", val );
-        //$( "#tpProgressLabel" ).text(symbol);
-//
-        //var progrMax = progressbar.progressbar("option", "max");
-        //if (val >= progrMax)
-            //onGeneLoadComplete();
-    //}
-
-    //function singleExprDone() {
-    ///* called when both cellIds(header) and single line of the expr matrix have been read */
-    //    var sExpr = gCurrentDataset.singleExpr;
-    //    if (sExpr.exprVec===undefined || gCurrentDataset.matrixCellIds==undefined)
-    //        // don't proceed if one part of the data is not here yet
-    //        return;
-
-    //    // convert the expression vector to a dict cellId -> array of float, with a single value
-    //    var cellToExpr = {};
-    //    var exprVec = sExpr.exprVec;
-    //    var cellIds = gCurrentDataset.matrixCellIds;
-    //    for (var i = 0; i < cellIds.length; i++) {
-    //        var cellId = cellIds[i];
-    //        var val = [exprVec[i]];
-    //        cellToExpr[cellId] = val;
-    //    }
-
-    //    var geneSym = sExpr.symbol;
-    //    console.log("XX here with symbol"+geneSym);
-    //    if (geneSym !== null) {
-    //        console.log("XX adding to combo"+geneSym);
-    //        var select = $("#tpGeneCombo").selectize();
-    //        var selectize = select[0].selectize;
-    //        //var optId = selectize.search(geneSym);
-    //        selectize.addOption({text: geneSym, value: geneSym});
-    //        selectize.refreshOptions();
-    //        selectize.setTextboxValue(geneSym);
-    //    }
-
-
-    //}
-
-    //function onReceiveMatrixSingleExprLine(line) {
-    //    /* got a single expression line from the matrix, no progressbar */
-    //    var sExpr = gCurrentDataset.singleExpr;
-    //    sExpr.symbol = this.geneSymbol;
-    //    console.log("Got gene vector for "+sExpr.symbol);
-    //    var exprTuple = parseMatrixLine(line);
-    //    sExpr.geneId  = exprTuple[0];
-    //    sExpr.exprVec = exprTuple[1];
-    //    sExpr.deciles = getDeciles(sExpr.exprVec);
-
-    //    singleExprDone();
-    //}
-
-    //function onReceiveMatrixHeader(line) {
-    //    /* received the */
-    //    line = line.trim(); // old scripts always kept the newline
-    //    var fields = line.split("\t");
-    //    var cellIds = fields.slice(1); // copy all but first
-    //    console.log("Got header, cellCount="+cellIds.length);
-    //    gCurrentDataset.matrixCellIds = cellIds;
-    //    singleExprDone();
-    //}
-
     function onGeneDialogOkClick(ev) {
     /* called the user clicks the OK button on the 'paste your genes' dialog box */
         var genes = $('#tpGeneListBox').val().replace(/\r\n/g, "\n").split("\n");
@@ -4835,6 +4791,7 @@ var cellbrowser = function() {
         var geneId = ev.target.value;
         if (geneId==="")
             return; // do nothing if user just deleted the current gene
+
         if (db.conf.atacSearch) {
             updatePeakListWithGene(geneId);
         } else {
@@ -4870,56 +4827,67 @@ var cellbrowser = function() {
     }
 
     function onConfigLoaded(datasetName) {
-            // this is a collection if it does not have any field information
-            if (db.conf.sampleDesc)
-                gSampleDesc = db.conf.sampleDesc;
+        /* dataset config JSON is loaded -> build the entire user interface */
+        // this is a collection if it does not have any field information
+        if (db.conf.sampleDesc)
+            gSampleDesc = db.conf.sampleDesc;
+        else
+            gSampleDesc = "cell";
+
+        // allow config to override the default palettes
+        datasetGradPalette = cDefGradPalette;
+        datasetQualPalette = cDefQualPalette;
+        if (db.conf.defQuantPal)
+            datasetGradPalette = db.conf.defQuantPal;
+        if (db.conf.defCatPal)
+            datasetQualPalette = db.conf.defCatPal;
+
+        if (db.conf.metaBarWidth)
+            metaBarWidth = db.conf.metaBarWidth;
+        else
+            metaBarWidth = 250;
+
+        renderer.setPos(null, metaBarWidth+metaBarMargin);
+
+        if (!db.conf.metaFields) {
+            // pablo often has single-dataset installations, there is no need to open the
+            // dataset selection box then.
+            if (db.conf.datasets && db.conf.datasets.length===1 && datasetName==="") // "" is the root dataset
+                loadDataset(db.conf.datasets[0].name, false);
             else
-                gSampleDesc = "cell";
+                showCollectionDialog(datasetName);
+            return;
+        }
 
-            // allow config to override the default palettes
-            datasetGradPalette = cDefGradPalette;
-            datasetQualPalette = cDefQualPalette;
-            if (db.conf.defQuantPal)
-                datasetGradPalette = db.conf.defQuantPal;
-            if (db.conf.defCatPal)
-                datasetQualPalette = db.conf.defCatPal;
+        let binData = localStorage.getItem(db.name+"|custom");
+        if (binData) {
+            let jsonStr = LZString.decompress(binData);
+            let customMeta = JSON.parse(jsonStr);
+            db.conf.metaFields.unshift(customMeta);
+        }
 
-            if (db.conf.metaBarWidth)
-                metaBarWidth = db.conf.metaBarWidth;
-            else
-                metaBarWidth = 250;
+        cartLoad(db);
+        renderData();
+        resizeDivs(true);
 
-            renderer.setPos(null, metaBarWidth+metaBarMargin);
+        let showTutorial = true;
 
-            if (!db.conf.metaFields) {
-                // pablo often has single-dataset installations, there is no need to open the
-                // dataset selection box then.
-                if (db.conf.datasets && db.conf.datasets.length===1 && datasetName==="") // "" is the root dataset
-                    loadDataset(db.conf.datasets[0].name, false);
-                else
-                    showCollectionDialog(datasetName);
-                return;
-            }
+        // special URL argument allows to force the info dialog to open
+        if (getVar("openDialog")) {
+            openDatasetDialog(db.conf, db.name); // open Info dialog
+            showTutorial = false;
+        }
+        cartSave(db); // = set the current URL from local storage settings
 
-            let binData = localStorage.getItem(db.name+"|custom");
-            if (binData) {
-                let jsonStr = LZString.decompress(binData);
-                let customMeta = JSON.parse(jsonStr);
-                db.conf.metaFields.unshift(customMeta);
-            }
-
-            cartLoad(db);
-            renderData();
-            resizeDivs(true);
-
-            if (getVar("openDialog"))
-                openDatasetDialog(db.conf, db.name); // open Info dialog
-            cartSave(db); // = set the current URL from local storage settings
-
-            // start the tutorial after a while
-            var introShownBefore = localStorage.getItem("introShown");
-            if (introShownBefore===undefined)
-               setTimeout(function(){ showIntro(true); }, 3000); // shown after 5 secs
+        // users can save bookmarks directly to the expr viewer
+        if (getVar("exprGene")) {
+            buildExprView()
+            showTutorial = false;
+        }
+        // start the tutorial after a while
+        var introShownBefore = localStorage.getItem("introShown");
+        if (introShownBefore===undefined)
+           setTimeout(function(){ showIntro(true); }, 3000); // shown after 5 secs
     }
 
     function loadDataset(datasetName, resetVars, md5) {
@@ -4966,12 +4934,13 @@ var cellbrowser = function() {
         loadDataset(datasetName, true, md5);
     }
 
-    function buildLayoutCombo(coordLabel, htmls, files, id, width, left, top) {
+    function buildLayoutCombo(coordLabel, htmls, files, id, left, top) {
         /* files is a list of elements with a shortLabel attribute. Build combobox for them. */
         if (!coordLabel)
             coordLabel = "Layout";
 
-        htmls.push('<div class="tpToolBarItem" style="position:absolute;left:'+left+'px;top:'+top+'px"><label for="'+id+'">');
+        //htmls.push('<div class="tpToolBarItem" style="position:absolute;left:'+left+'px;top:'+top+'px"><label for="'+id+'">');
+        htmls.push('<div class="tpLeftSideItem"><label for="'+id+'">');
         htmls.push(coordLabel);
         htmls.push("</label>");
 
@@ -4983,8 +4952,18 @@ var cellbrowser = function() {
                 warn("Layout coordinate file "+i+" has no .shortLabel attribute");
             entries.push([i, label]);
         }
-        buildComboBox(htmls, id, entries, 0, "Select a layout algorithm...", width);
+        buildComboBox(htmls, id, entries, 0, "Select a layout algorithm...", "100%");
         htmls.push('</div>');
+
+        htmls.push('<div class="tpLeftSideItem">');
+        htmls.push('<label for="tpSizeInput">Dot size</label>');
+        htmls.push('<input id="tpSizeInput" type="text" size="6"></input>');
+        htmls.push('</div>'); // tpLeftSideItem
+
+        htmls.push('<div class="tpLeftSideItem">');
+        htmls.push('<label for="tpAlphaInput">Transparency</label>');
+        htmls.push('<input id="tpAlphaInput" type="text" size="6"></input>');
+        htmls.push('</div>'); // tpLeftSideItem
     }
 
     function buildCollectionCombo(htmls, id, width, left, top) {
@@ -5039,7 +5018,7 @@ var cellbrowser = function() {
 
     function buildGeneCombo(htmls, id, left, width) {
         /* Combobox that allows searching for genes */
-        htmls.push('<div class="tpToolBarItem" style="padding-left: 3px">');
+        htmls.push('<div class="tpLeftSideItem" style="padding-left: 3px">');
         var title = "Color by "+getGeneLabel();
         if (db.conf.atacSearch)
             title = "Find peaks at or close to:"
@@ -5051,7 +5030,6 @@ var cellbrowser = function() {
         htmls.push('<select style="width:'+width+'px" id="'+id+'" placeholder="'+boxLabel+'" class="tpCombo">');
         htmls.push('</select>');
         htmls.push('</div>');
-        //htmls.push("<button>Multi-Gene</button>");
     }
 
 
@@ -5506,6 +5484,265 @@ var cellbrowser = function() {
             });
     }
 
+    function activateGeneCombo(id, onGeneComboChange) {
+    /* initialize the gene search combo box with selectize */
+        // selectize: gene or ATAC Color by search box
+        var comboLoad = comboLoadGene;
+        if (db.conf.atacSearch) {
+            comboLoad = comboLoadAtac;
+            getById("tpPeakListUpstream").addEventListener("click", onPeakUpstream);
+            getById("tpPeakListAll").addEventListener("click", onPeakAll);
+            getById("tpPeakListNone").addEventListener("click", onPeakNone);
+            activateTooltip("#tpPeakListButtons > button");
+
+        }
+
+        var select = $("#"+id).selectize({
+                maxItems: 1,
+                valueField : 'id',
+                labelField : 'text',
+                searchField : 'text',
+                closeAfterSelect: true,
+                load : comboLoad,
+                render : {option : comboRender }
+        });
+
+        select.on("change", onGeneComboChange);
+    }
+
+    function onGeneExprMetaComboChange(ev, choice) {
+        /* gene expression viewer: called when user changes the meta field combo box */
+        var fieldId = parseInt(choice.selected.split("_")[1]);
+        var metaName = db.getMetaFields()[fieldId].name;
+        debug("changed meta on gene expr view", ev);
+        buildGeneExprViolins(null, metaName);
+    }
+
+    function onGeneExprGeneComboChange(ev) {
+        /* on the expr violin viewer: user selected a gene */
+        var geneId = ev.target.value;
+        if (geneId==="") // "" = user deleted the gene.
+            return;
+        //var geneId = db.getGeneInfo(geneId).;
+        buildGeneExprViolins(geneId, null);
+    }
+
+    function promiseGene(locusStr) {
+        /* a promise for loading the gene data. resolves with a geneData object with gene-related attributes.  */
+        return new Promise(function(resolve, reject) {
+
+            function gotGeneData(exprArr, decArr, locusStr, geneDesc, binInfo) {
+                /* called when the expression vector has been loaded and binning is done */
+                debug("Promise - Received expression vector, for "+locusStr+", desc: "+geneDesc);
+                // update the URL and possibly the gene combo box
+                var geneData = {};
+                geneData.exprArr = exprArr;
+                geneData.decArr = decArr;
+                geneData.locusStr = locusStr;
+                geneData.geneDesc = geneDesc;
+                geneData.binInfo = binInfo;
+                resolve(geneData);
+            }
+            db.loadExprAndDiscretize(locusStr, gotGeneData, onProgress);
+        });
+    }
+
+    function promiseMeta(metaName) {
+        /* a promise for loading the meta data. Resolves with a metaInfo object that has an .arr attribute. */
+        return new Promise(function(resolve, reject) {
+            var metaInfo = db.findMetaInfo(metaName);
+            // don't do anything if the data has already been loaded
+            if (metaInfo.arr !== undefined) {
+                debug("Promise: meta data already loaded")
+                resolve(metaInfo);
+                return;
+            }
+
+            function gotMetaArray(metaArr, metaInfo) {
+                debug("Promise: meta data finished loading")
+                metaInfo.arr = metaArr;
+                resolve(metaInfo);
+            }
+
+            db.loadMetaVec(metaInfo, gotMetaArray, onProgress);
+        });
+    }
+
+    function buildGeneExprViolins(geneSym, metaName) {
+        /* build the violin plots for the gene expression viewer */
+        // get gene symbol from function call or dropdown
+        if (geneSym===null)
+            geneSym = getById("tpGeneExprGeneCombo").value;
+        else
+            selectizeSetValue("tpGeneExprGeneCombo", geneSym);
+
+        // get meta field from function call or dropdown
+        if (metaName==null) {
+            let metaIdx = document.getElementById("tpGeneExprMetaCombo").value.split("_")[1]; // e.g. tpMetaVal_1
+            metaName = db.conf.metaFields[metaIdx].name;
+        } else {
+            let metaIdx = db.findMetaInfo(metaName).index
+            chosenSetValue("tpGeneExprMetaCombo", "tpMetaVal_"+metaIdx);
+        }
+
+        // get maximum from URL
+        let exprMax = getVar("exprMax");
+        if (exprMax) {
+            getById("tpGeneExprYLimitCheck").checked = true;
+            getById("tpGeneExprYLimit").value = exprMax;
+        } else {
+            getById("tpGeneExprYLimit").disabled = true;
+            getById("tpGeneExprApply").disabled = true;
+        }
+
+        changeUrl({"exprGene":geneSym, "exprMeta":metaName, "exprMax":exprMax});
+
+        Promise.all([promiseGene(geneSym), promiseMeta(metaName)]).then( function(resArr) {
+            console.log("promises are all loaded", resArr);
+            let geneData = resArr[0];
+            let exprArr = geneData.exprArr;
+
+            let metaData = resArr[1];
+            let metaArr = metaData.arr;
+
+            let res = splitExprByMeta(metaArr, metaData.valCounts, exprArr);
+            let metaToExpr = res[0];
+            let exprMax = res[1];
+            getById("tpGeneExprYLimit").value = exprMax;
+
+            // first make the canvas DOM objects
+            let htmls = [];
+            for (let i=0; i < metaToExpr.length; i++) {
+                htmls.push("<div class='tpExprViolin' id='tpExprViolin_"+i+"'>");
+                htmls.push("<canvas style='width:200px;height:150px' class='tpExprViolinCanvas' id='tpExprViolinCanvas_"+i+"'></canvas>");
+                htmls.push("</div>"); // violin
+            }
+            getById("tpExprViewPlot").innerHTML = htmls.join("");
+
+            // then fill them with violin plots
+
+            let vioData = {};
+
+            for (let i=0; i < metaToExpr.length; i++) {
+                let labelLines = [[metaData.ui.shortLabels[i], metaToExpr[i].length+" cells"]];
+                let dataList = [metaToExpr[i]];
+                let violinData = {
+                  labels : labelLines,
+                  datasets: [{
+                    data : dataList,
+                    label: 'Mean',
+                    backgroundColor: 'rgba(255,0,0,0.5)',
+                    borderColor: 'red',
+                    borderWidth: 1,
+                    outlierColor: '#999999',
+                    padding: 7,
+                    itemRadius: 1
+                  }]
+                };
+
+                vioData[i] = violinData;
+            }
+
+            let optDict = {
+                maintainAspectRatio: false,
+                legend: { display: false },
+                title: { display: false }
+            };
+
+            // finally build the charts
+            window.violinCharts = [];
+
+            for (let i=0; i < metaToExpr.length; i++) {
+                const ctx = getById("tpExprViolinCanvas_"+i).getContext("2d");
+                window.setTimeout(function() {
+                    console.time("violinDraw_"+i);
+                    window.violinCharts.push( new Chart(ctx, {
+                        type: 'violin',
+                        data: vioData[i],
+                        options: optDict
+                    }));
+                    console.timeEnd("violinDraw_"+i);
+                }, 5);
+            }
+    });
+    }
+
+    function closeExprView() {
+    /* close the expression viewer dialog window, remove the key handler, destroy the chart objects */
+        changeUrl({"exprGene":null, "exprMeta":null});
+        getById("tpExprView").remove();
+        window.violinCharts = [];
+        window.removeEventListener("keyup", onEscapeCloseExprView); 
+    }
+
+    function onEscapeCloseExprView(e) {
+        if(e.keyCode == 27) closeExprView(); 
+    }
+
+    function buildExprView() {
+        /* build the expression viewer dialog box */
+        var htmls = [];
+        htmls.push("<div id='tpExprView'>");
+
+        htmls.push("<div id='tpExprViewTitle'>");
+        htmls.push("<b>Gene Expression: Violin Plots</b>");
+        htmls.push("<span id='tpCloseButton' class='ui-button-icon ui-icon ui-icon-closethick' style='float:right'></span>");
+        htmls.push("</div>"); //tpExprViewTitle
+
+        htmls.push('<div id="tpExprViewContent">');
+
+        htmls.push("<div id='tpExprViewHeader'>");
+        htmls.push('<label id="tpGeneExprLabel" for="tpGeneExprGeneCombo">Show expression of </label>');
+        htmls.push('<select style="width:200px" id="tpGeneExprGeneCombo" placeholder="Gene" class="tpCombo"></select>');
+
+        htmls.push('<label id="tpGeneExprMetaLabel" for="'+"tpGeneExprMetaCombo"+'">split by cell annotation</label>');
+        buildMetaFieldCombo(htmls, "tpGeneExprMetaComboBox", "tpGeneExprMetaCombo", 0);
+
+        htmls.push('<input style="margin-left:4em" type="checkbox" id="tpGeneExprYLimitCheck"></input>');
+        htmls.push('<label style="margin-left:0.6em" for="tpGeneExprYLimitCheck">Set maximum to</label>');
+        htmls.push('<input style="margin-left:0.6em" type="text" id="tpGeneExprYLimit" size="7"></input>');
+        htmls.push('<button style="margin-left:0.6em" type="button" id="tpGeneExprApply">Apply</button>');
+
+        htmls.push("</div>"); //tpExprViewHeader
+
+        htmls.push('<div style="display:flex; flex-direction: row; flex-flow: wrap; height:100%; padding-top:10px" id="tpExprViewPlot"></div>'); // empty div, will be filled later
+
+        htmls.push("</div>"); //tpExprViewContent
+        htmls.push("</div>"); //tpExprView
+
+        $(document.body).append(htmls.join(""));
+        window.addEventListener("keyup", onEscapeCloseExprView);
+
+        activateGeneCombo("tpGeneExprGeneCombo", onGeneExprGeneComboChange);
+
+        activateCombobox("tpGeneExprMetaCombo", metaBarWidth-10);
+        $("#tpGeneExprMetaCombo").change( onGeneExprMetaComboChange );
+
+        $('#tpCloseButton').click( function() { $('#tpExprView').remove(); } );
+
+        getById("tpGeneExprYLimitCheck").addEventListener("change", function(ev) {
+            // if the checkbox is on, enable the input field
+            let isDisabled = !ev.target.checked;
+            getById("tpGeneExprYLimit").disabled = isDisabled;
+            getById("tpGeneExprApply").disabled = isDisabled;
+        });
+        
+        // pick a reasonable default gene and meta var
+        let geneSym;
+        if (db.conf.quickGenes)
+            geneSym = db.conf.quickGenes[0][0];
+        else
+            geneSym = db.getRandomLocus();
+
+        let metaName = db.getDefaultColorField();
+
+        // URL variables can override the defaults
+        geneSym = getVar("exprGene", geneSym);
+        metaName = getVar("exprMeta", metaName);
+
+        buildGeneExprViolins(geneSym, metaName); 
+    }
+
     function buildToolBar (coordInfo, dataset, fromLeft, fromTop) {
     /* add the tool bar with icons of tools and add under body to the DOM */
         $("#tpToolBar").remove();
@@ -5514,6 +5751,8 @@ var cellbrowser = function() {
 
         htmls.push("<div id='tpToolBar' style='position:absolute;left:"+fromLeft+"px;top:"+fromTop+"px'>");
         htmls.push('<button title="More info about this dataset: abstract, methods, data download, etc." id="tpButtonInfo" type="button" class="ui-button tpIconButton" data-placement="bottom">Info &amp; Download</button>');
+
+        htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Violin Plot Viewer" data-placement="bottom">Gene Expression</button>');
 
         if (!getVar("suppressOpenButton", false))
             htmls.push('<button id="tpOpenDatasetButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Open another dataset" data-placement="bottom">Open...</button>');
@@ -5533,8 +5772,9 @@ var cellbrowser = function() {
         if (coordInfo[coordInfo.length-1].shortLabel.length > 20)
             //$('.chosen-drop').css({"width": "300px"});
             layoutComboWidth += 50
-        buildLayoutCombo(dataset.coordLabel, htmls, coordInfo, "tpLayoutCombo", layoutComboWidth, nextLeft, 2);
-        nextLeft += 65+layoutComboWidth;
+
+        //buildLayoutCombo(dataset.coordLabel, htmls, coordInfo, "tpLayoutCombo", layoutComboWidth, nextLeft, 2);
+        //nextLeft += 65+layoutComboWidth;
 
         var nameParts = dataset.name.split("/");
         var parentName = null;
@@ -5554,6 +5794,7 @@ var cellbrowser = function() {
         activateTooltip('.tpIconButton');
         activateTooltip('#tpOpenUcsc');
         activateTooltip('#tpOpenDatasetButton');
+        activateTooltip('#tpOpenExprButton');
 
         $('#tpButtonInfo').click( function() { openDatasetDialog(db.conf, db.name) } );
 
@@ -5592,22 +5833,12 @@ var cellbrowser = function() {
             }
         };
 
-        var select = $('#tpGeneCombo').selectize({
-                maxItems: 1,
-                valueField : 'id',
-                labelField : 'text',
-                searchField : 'text',
-                closeAfterSelect: true,
-                load : comboLoad,
-                render : {option : comboRender }
-        });
-
-        select.on("change", onGeneComboChange);
-
+        activateGeneCombo("tpGeneCombo", onGeneComboChange);
         $('#tpCollectionCombo').change(onDatasetChange);
         // update the combobox, select the right dataset
         $('#tpLayoutCombo').change(onLayoutChange);
         $('#tpOpenDatasetButton').click(openCurrentDataset);
+        $('#tpOpenExprButton').click(buildExprView);
     }
 
     function metaFieldToLabel(fieldName) {
@@ -5722,7 +5953,7 @@ var cellbrowser = function() {
         htmls.push("<ul>");
         htmls.push("<li><a href='#tpAnnotTab'>Annotation</a></li>");
         htmls.push("<li><a href='#tpGeneTab'>"+getGeneLabel()+"</a></li>");
-        //htmls.push("<li><a href='#tpLayoutTab'>Layout</a></li>");
+        htmls.push("<li><a href='#tpLayoutTab'>Layout</a></li>");
         htmls.push("</ul>");
 
         htmls.push("<div id='tpAnnotTab'>");
@@ -5767,9 +5998,9 @@ var cellbrowser = function() {
 
         htmls.push("</div>"); // tpGeneTab
 
-        //htmls.push("<div id='tpLayoutTab'>");
-        //buildLayoutCombo(dataset.coordLabel, htmls, coordInfo, "tpLayoutCombo", layoutComboWidth, nextLeft, 2);
-        //htmls.push("</div>");
+        htmls.push("<div id='tpLayoutTab'>");
+        buildLayoutCombo(db.conf.coordLabel, htmls, db.conf.coords, "tpLayoutCombo", 0, 2);
+        htmls.push("</div>"); // tpLayoutTab
 
         htmls.push("</div>"); // tpLeftSidebar
 
@@ -6672,7 +6903,6 @@ var cellbrowser = function() {
     function updateMetaBarManyCells(cellIds) {
     /* update the meta fields on the left to reflect/summarize a list of cellIds */
         var metaFieldInfos = db.getMetaFields();
-        //var metaData = gCurrentDataset.metaData;
         var cellCount = cellIds.length;
 
         if (db.allMeta===undefined) {
@@ -6944,7 +7174,8 @@ var cellbrowser = function() {
         renderer.legend = gLegend;
         renderer = otherRend;
         gLegend = otherRend.legend;
-        $("#tpLayoutCombo").val( otherRend.coordIdx ).trigger('chosen:updated');
+        //$("#tpLayoutCombo").val( otherRend.coordIdx ).trigger('chosen:updated');
+        chosenSetValue("tpLayoutCombo", otherRend.coordIdx);
         buildLegendBar();
     }
 
@@ -7488,8 +7719,11 @@ var cellbrowser = function() {
         return data;
     }
 
-    function changeUrl(vars, oldVars) {
-    /* push the variables (object) into the history as the current URL. key=null deletes a variable. */
+    function changeUrl(vars, doReset) {
+    /* push the variables (object) into the history as the current URL. key=null deletes a variable. 
+     * To remove all current URL vars, call with doReset = True
+     * */
+
        // first get the current variables from the URL of the window
        var myUrl = window.location.href;
        myUrl = myUrl.replace("#", "");
@@ -7497,11 +7731,11 @@ var cellbrowser = function() {
        var baseUrl = urlParts[0];
 
        let urlVars;
-       if (oldVars===undefined) {
+       if (doReset===undefined || doReset===false) {
            var queryStr = urlParts[1];
            urlVars = deparam(queryStr); // parse key=val&... string to object
        } else {
-           urlVars = oldVars;
+           urlVars = {}; // ignore all current vars
        }
 
        // overwrite everthing that we got
