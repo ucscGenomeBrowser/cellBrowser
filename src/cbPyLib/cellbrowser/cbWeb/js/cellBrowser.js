@@ -591,7 +591,8 @@ var cellbrowser = function() {
         "pmid" : "PubMed Abstract",
         "pmcid" : "PubMed Fulltext",
         "sra_study" : "NCBI Short-Read Archive",
-        "ega_study" : "European Genotype-Phenot. Archive",
+        "ega_study" : "European Genotype-Phenot. Archive Study",
+	    "ega_dataset" : "European Genotype-Phenot. Archive Dataset",
         "bioproject" : "NCBI Bioproject",
         "dbgap" : "NCBI DbGaP",
         "biorxiv_url" : "BioRxiv preprint",
@@ -607,6 +608,7 @@ var cellbrowser = function() {
         "sra_study" : "https://trace.ncbi.nlm.nih.gov/Traces/sra/?study=",
         "bioproject" : "https://www.ncbi.nlm.nih.gov/bioproject/",
         "ega_study" : "https://ega-archive.org/studies/",
+        "ega_dataset" : "https://ega-archive.org/datasets/",
         "pmid" : "https://www.ncbi.nlm.nih.gov/pubmed/",
         "pmcid" : "https://www.ncbi.nlm.nih.gov/pmc/articles/",
         "dbgap" : "https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=",
@@ -869,18 +871,19 @@ var cellbrowser = function() {
     }
 
     function buildClassification(htmls, datasetInfo, attrName, label, addSep) {
-        if ( datasetInfo[attrName] ) {
-                var values;
-                // in Nov 2022, the facets moved into their own object, old dataasets have them in the dataset itself as attributes
-                if (datasetInfo.facets)
-                    values = datasetInfo.facets[attrName];
-                else
-                    values = datasetInfo[attrName];
+        if (datasetInfo[attrName]===undefined && (datasetInfo.facets===undefined || datasetInfo.facets[attrName]===undefined))
+            return;
 
-                htmls.push(label+"=" + values.join(","));
-                if (addSep)
-                    htmls.push("; ");
-        }
+        var values;
+        // in Nov 2022, the facets moved into their own object, old dataasets have them in the dataset itself as attributes
+        if (datasetInfo.facets)
+            values = datasetInfo.facets[attrName];
+        else
+            values = datasetInfo[attrName];
+
+        htmls.push(label+"=" + values.join(","));
+        if (addSep)
+            htmls.push("; ");
     }
 
     function datasetDescToHtml(datasetInfo, desc) {
@@ -959,6 +962,7 @@ var cellbrowser = function() {
         htmlAddLink(htmls, desc, "arrayexpress");
         htmlAddLink(htmls, desc, "cirm_dataset");
         htmlAddLink(htmls, desc, "ega_study");
+        htmlAddLink(htmls, desc, "ega_dataset");
         htmlAddLink(htmls, desc, "ena_project");
         htmlAddLink(htmls, desc, "hca_dcp");
 
@@ -1058,6 +1062,17 @@ var cellbrowser = function() {
 
     }
 
+    function getFacetString(ds, facetName) {
+        /* search for an attribute under ds.facets or directly under ds, for backwards compatibility, and return as a |-sep string */
+        let facets = [];
+        if (ds.facets!==undefined && ds.facets[facetName]!==undefined)
+            facets =  ds.facets[facetName];
+        if (ds[facetName]!==undefined)
+            facets =  ds[facetName];
+        facets = cleanStrings(facets);
+        let facetStr = facets.join("|");
+        return facetStr;
+    }
     function buildListPanel(datasetList, listGroupHeight, leftPaneWidth, htmls, selName) {
         /* make a dataset list and append its html lines to htmls */
         htmls.push("<div id='tpDatasetList' class='list-group' style='float: left; margin-top: 1em; height:"+listGroupHeight+"px; overflow-y:scroll; width:"+leftPaneWidth+"px'>");
@@ -1079,35 +1094,13 @@ var cellbrowser = function() {
                 selIdx = i;
             }
 
-            var bodyPartStr = "";
-            var disStr = "";
-            var orgStr = "";
-            var projStr = "";
-            var domStr = "";
-            var lifeStr = "";
-            var sourceStr = "";
-
-            if (dataset.body_parts) {
-                bodyPartStr = cleanStrings(dataset.body_parts).join("|");
-            }
-            if (dataset.diseases) {
-                disStr = cleanStrings(dataset.diseases).join("|");
-            }
-            if (dataset.organisms) {
-                orgStr = cleanStrings(dataset.organisms).join("|");
-            }
-            if (dataset.projects) {
-                projStr = cleanStrings(dataset.projects).join("|");
-            }
-            if (dataset.domains) {
-                domStr = cleanStrings(dataset.domains).join("|");
-            }
-            if (dataset.life_stages) {
-                lifeStr = cleanStrings(dataset.life_stages).join("|");
-            }
-            if (dataset.sources) {
-                sourceStr = cleanStrings(dataset.sources).join("|");
-            }
+            let bodyPartStr = getFacetString(dataset, "body_parts");
+            let disStr = getFacetString(dataset, "diseases");
+            let orgStr = getFacetString(dataset, "organisms");
+            let projStr = getFacetString(dataset, "projects");
+            let domStr = getFacetString(dataset, "domains");
+            let lifeStr = getFacetString(dataset, "life_stages");
+            let sourceStr = getFacetString(dataset, "sources");
 
             var line = "<a id='tpDatasetButton_"+i+"' "+
                 "data-body='"+bodyPartStr+"' "+
@@ -1154,10 +1147,13 @@ var cellbrowser = function() {
         /* return an array of (attrName, "attrName (count)") of all attrNames (e.g. body_parts) in a dataset array */
         var valCounts = {};
         for (let i=0; i < datasets.length; i++) {
-            let ds = datasets[i];
-            if (ds[attrName]===undefined)
+            let facetObj = datasets[i];
+            if (facetObj.facets) // facets can be stored on the objects (old) or on a separate ds.facets object (new)
+                facetObj = facetObj.facets;
+
+            if (facetObj[attrName]===undefined)
                 continue
-            for (let bp of ds[attrName])
+            for (let bp of facetObj[attrName])
                 if (bp in valCounts)
                     valCounts[bp]++;
                 else
@@ -1412,17 +1408,21 @@ var cellbrowser = function() {
             noteLines.push("Go back to: " );
             // make the back links
             let backLinks = [];
+            let allParents = [];
             let parents = openDsInfo.parents;
             for (let i=0; i<parents.length; i++) {
                 let parentInfo = parents[i];
                 let parName = parentInfo[0];
+
                 let parLabel = parentInfo[1];
                 let childName = null;
                 if (i === parents.length-1)
                     childName = openDsInfo.name;
                 else
                     childName = parents[i+1][0];
-                backLinks.push("<span class='tpBackLink link' data-open-dataset='"+parName+"' data-sel-dataset='"+childName+"'>"+parLabel+"</span>");
+
+                allParents.push(parName);
+                backLinks.push("<span class='tpBackLink link' data-open-dataset='"+allParents.join("/")+"' data-sel-dataset='"+childName+"'>"+parLabel+"</span>");
             }
             noteLines.push(backLinks.join("&nbsp;&gt;&nbsp;"));
         }
@@ -1612,6 +1612,16 @@ var cellbrowser = function() {
     /* File - Save Image as ... */
         var canvas = $("canvas")[0];
         canvas.toBlob(function(blob) { saveAs( blob , "cellBrowser.png"); } , "image/png");
+    }
+
+    function onSaveAsSvgClick() {
+    /* File - Save Image as vector ... */
+        renderer.drawDots("svg")
+        renderer.svgLabelWidth = 300;
+        renderer.drawLegendSvg(gLegend)
+        var lines = renderer.getSvgText()
+        var blob = new Blob(lines, {type:"image/svg+xml"});
+        window.saveAs( blob , "cellBrowser.svg");
     }
 
     function onSelectAllClick() {
@@ -2643,7 +2653,8 @@ var cellbrowser = function() {
                  //htmls.push('<li><a href="#" id="tpDownload_meta">Cell Metadata</a></li>');
                  //htmls.push('<li><a href="#" id="tpDownload_coords">Visible coordinates</a></li>');
                //htmls.push('</ul>'); // Download sub-menu
-             htmls.push('<li><a href="#" id="tpSaveImage">Download current image</a></li>');
+             htmls.push('<li><a href="#" id="tpSaveImage">Download bitmap image (PNG)</a></li>');
+             htmls.push('<li><a href="#" id="tpSaveImageSvg">Download vector image (SVG)</a></li>');
              htmls.push('</li>');   // sub-menu container
 
            htmls.push('</ul>'); // File menu
@@ -2756,6 +2767,7 @@ var cellbrowser = function() {
        $('#tpAboutButton').click( onAboutClick );
        $('#tpOpenDatasetLink').click( openCurrentDataset );
        $('#tpSaveImage').click( onSaveAsClick );
+       $('#tpSaveImageSvg').click( onSaveAsSvgClick );
        $('#tpSelectAll').click( onSelectAllClick );
        $('#tpSelectNone').click( onSelectNoneClick );
        $('#tpSelectInvert').click( onSelectInvertClick );
@@ -3296,7 +3308,7 @@ var cellbrowser = function() {
 
         console.log("Loading gene expression vector for "+locusStr);
 
-        db.loadExprAndDiscretize(locusStr, gotGeneVec, onProgress);
+        db.loadExprAndDiscretize(locusStr, gotGeneVec, onProgress, db.conf.binStrategy);
 
     }
 
@@ -3330,8 +3342,12 @@ var cellbrowser = function() {
             clusterMids = [];
          }
 
-        opts["lines"] = clusterInfo.lines;
-        opts["lineWidth"] = db.conf.lineWidth;
+        if (clusterInfo && clusterInfo.lines) {
+            opts["lines"] = clusterInfo.lines;
+            opts["lineWidth"] = db.conf.lineWidth;
+            opts["lineColor"] = db.conf.lineColor;
+            opts["lineAlpha"] = db.conf.lineAlpha;
+        }
 
         renderer.setCoords(coords, clusterMids, info, opts);
     }
@@ -3473,7 +3489,9 @@ var cellbrowser = function() {
            loadsDone +=1;
            if (loadsDone===2) {
                buildLegendBar();
-               setLabelField(db.conf.labelField);
+
+               if (db.conf.labelField)
+                   setLabelField(db.conf.labelField);
 
                if (forcePalName!==null) {
                    legendChangePaletteAndRebuild(forcePalName);
@@ -3507,7 +3525,7 @@ var cellbrowser = function() {
                return [3, 0.5];
            if (dotCount<35000)
                return [2, 0.3];
-           if (dotCount<60000)
+           if (dotCount<80000)
                return [1, 0.5];
            // everything else
            return [0, 0.3];
@@ -3573,7 +3591,7 @@ var cellbrowser = function() {
                    updateGeneTableColors(null);
                    if (getVar("heat")==="1")
                        onHeatClick();
-                }, onProgressConsole);
+                }, onProgressConsole, db.conf.binStrategy);
            db.preloadAllMeta();
         //}
     }
@@ -7427,7 +7445,7 @@ var cellbrowser = function() {
                 "To add marker genes, contact the original authors of the dataset and ask them to add " +
                 " them to the cell browser.");
         } else {
-            htmls.push("Click gene symbols below to color plot by gene<br>");
+            htmls.push("Sorted by the column which is highlighted. Click gene symbols below to color plot by gene<br>");
             buttons.push({
                 text:"Download as file",
                 click: function() {
@@ -7527,15 +7545,22 @@ var cellbrowser = function() {
         var htmls = [];
 
         var markerListIdx = parseInt(divId.split("-")[1]);
-        var selectOnClick = db.conf.markers[markerListIdx].selectOnClick;
+        var markerInfo = db.conf.markers[markerListIdx];
+        var selectOnClick = markerInfo.selectOnClick;
+        var sortColumn = markerInfo.sortColumn || 1;
+        var sortOrder = markerInfo.sortOrder || "asc";
+        var sortOrderNum = 0;
+        if (sortOrder==="desc")
+            sortOrderNum = 1;
 
-        htmls.push("<table class='table' id='tpMarkerTable'>");
+        //htmls.push("<table class='table' data-sortlist='[[1,1],[4,0]]' id='tpMarkerTable'>");
+        htmls.push("<table class='table' data-sortlist='[["+sortColumn+","+sortOrder+"]]' id='tpMarkerTable'>");
         htmls.push("<thead>");
         var hprdCol = null;
         var geneListCol = null;
         var exprCol = null;
         var pValCol = null
-        //var doDescSort = false;
+        var doDescSort = false;
         for (var i = 1; i < headerRow.length; i++) {
             var colLabel = headerRow[i];
             var isNumber = false;
@@ -7553,11 +7578,11 @@ var cellbrowser = function() {
                 colLabel = "Gene Lists";
                 geneListCol = i;
             }
-            else if (colLabel==="P_value" || colLabel==="p_val" || colLabel==="pVal") {
+            else if (colLabel==="P_value" || colLabel==="pVal" || colLabel.startsWith("p_val")) {
                 colLabel = "P-value";
                 pValCol = i;
-                //if (i===2)
-                    //doDescSort = true;
+                if (i===2)
+                    doDescSort = true;
             }
 
             else if (colLabel==="_expr") {
@@ -7661,10 +7686,12 @@ var cellbrowser = function() {
         // ----
 
         $("#"+divId).html(htmls.join(""));
-        var sortOpt = {};
-        //if (doDescSort)
-            //sortOpt.descending=true;
-        new Tablesort(document.getElementById('tpMarkerTable'));
+        var tableOpt = { sortList: [[1,0]], theme: "bootstrap", widgets : [ "uitheme", "filter", "columns", "zebra" ],
+        };
+        if (doDescSort)
+            tableOpt.sortList = [[1,1]]; // = sort first column descending
+        //new Tablesort(document.getElementById('tpMarkerTable'), tableOpt);
+        $("#tpMarkerTable").tablesorter(tableOpt);
         $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
         activateTooltip(".link");
 

@@ -42,10 +42,10 @@ your ~/.bashrc to point to your html directory::
 
 Replace ``/var/www`` with whatever you want the default output directory to be.
 
-Alternatively, you can create a file called ``.cellbrowser.conf`` in your home directory
+Alternatively, you can create a file called ``.cellbrowser`` in your home directory
 and assign a value to htmlDir::
 
-    echo 'htmlDir = "/var/www"' >> ~/.cellbrowser.conf
+    echo 'htmlDir = "/var/www"' >> ~/.cellbrowser
 
 
 Again, replace ``/var/www`` with your own dorectory. 

@@ -52,9 +52,9 @@ saveMatrix <- function(counts, dir, prefix, use.mtx) {
         write.table(as.data.frame(cbind(rownames(counts), rownames(counts))), file=genesPath, sep="\t", row.names=F, col.names=F, quote=F)
         write(colnames(counts), file = barcodesPath)
         message("Gzipping expression matrix")
-        gzip(matrixPath)
-        gzip(genesPath)
-        gzip(barcodesPath)
+        gzip(matrixPath, overwrite=TRUE)
+        gzip(genesPath, overwrite=TRUE)
+        gzip(barcodesPath, overwrite=TRUE)
   } else {
       # we can write the matrix as a tsv file
       gzPath <- file.path(dir, paste(prefix, "exprMatrix.tsv.gz", sep=""))
