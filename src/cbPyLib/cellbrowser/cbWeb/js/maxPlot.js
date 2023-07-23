@@ -758,12 +758,13 @@ function MaxPlot(div, top, left, width, height, args) {
                 continue;
             }
 
-            svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' text-anchor='middle' x='"+x+"' y='"+y+"'>"+text+"</text>");
+            svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize+2)+"' fill='black' text-anchor='middle' x='"+x+"' y='"+y+"'>"+text+"</text>");
         }
     }
 
-    self.drawLegendSvg = function (legend, legWidth) {
+    self.drawLegendSvg = function (legend) {
         /* draw a legend onto the SVG given a legend object. */
+        var legWidth = self.svgLabelWidth;
         var svgLines = self.svgLines;
 
         var rows = legend.rows;
@@ -781,7 +782,6 @@ function MaxPlot(div, top, left, width, height, args) {
         y += lineHeight;
 
         if (subTitle) {
-            htmls.push('<div id="tpLegendSubTitle" >'+subTitle+"</div>");
             svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' text-anchor='middle' x='"+x+"' y='"+y+"'>"+subTitle+"</text>");
             y += lineHeight;
         }
@@ -789,6 +789,7 @@ function MaxPlot(div, top, left, width, height, args) {
         y += lineHeight;
 
         // get the sum of all rows, to calculate frequency
+        // this code was copied from buildLegend -> refactor one day
         var sum = 0;
         for (var i = 0; i < rows.length; i++) {
             let count = rows[i].count;
@@ -817,6 +818,7 @@ function MaxPlot(div, top, left, width, height, args) {
             if (label==="") {
                 label = "(empty)";
             }
+            label = label.replace("&ndash;", "-");
 
             svgLines.push("<rect width='15' height='15' fill='#"+colorHex+"' x='"+x+"' y='"+y+"'></rect>");
             y+= lineHeight;
@@ -825,8 +827,14 @@ function MaxPlot(div, top, left, width, height, args) {
             if (freq<1)
                 prec = 2;
 
-            svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' text-anchor='start' x='"+(x+18)+"' y='"+(y-4)+"'>"+label+"</text>");
-            svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' text-anchor='end' x='"+(left+legWidth-3)+"' y='"+y+"'>"+freq.toFixed(prec)+"%</text>");
+            var textSize = gTextSize-2;
+            //var lines = label;
+            //for (var lineCount=0; lineCount < lines.length; lineCount++) {
+                //var lineText = lines[lineCount];
+            var lineCount = 0;
+            svgLines.push("<text font-family='sans-serif' font-size='"+textSize+"' fill='black' text-anchor='start' x='"+(x+18)+"' y='"+((y-4)+lineCount*lineHeight)+"'>"+label+"</text>");
+            //}
+            svgLines.push("<text font-family='sans-serif' font-size='"+textSize+"' fill='black' text-anchor='end' x='"+(left+legWidth-3)+"' y='"+(y+7)+"'>"+freq.toFixed(prec)+"%</text>");
             y+= lineHeight;
 
         }
@@ -1510,10 +1518,10 @@ function MaxPlot(div, top, left, width, height, args) {
 
         if (doSvg!==undefined) {
             self.svgLines = [];
-            var legWidth = 200;
-            self.svgLines.push("<svg  xmlns='http://www.w3.org/2000/svg' height='"+self.canvas.height+"' width='"+(self.canvas.width+legWidth)+"'>\n");
+            self.svgLines.push("<svg  xmlns='http://www.w3.org/2000/svg' height='"+self.canvas.height+"' width='"+(self.canvas.width+self.svgLabelWidth)+"'>\n");
             drawCirclesSvg(self.svgLines, coords, colArr, pal, radius, alpha, self.selCells);
-            drawLabelsSvg(self.svgLines, self.coords.pxLabels, self.canvas.width, self.canvas.height, self.port.zoomFact);
+            if (self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined)
+                drawLabelsSvg(self.svgLines, self.coords.pxLabels, self.canvas.width, self.canvas.height, self.port.zoomFact);
             return;
         }
 

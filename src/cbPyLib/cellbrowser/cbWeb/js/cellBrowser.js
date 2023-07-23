@@ -1622,6 +1622,7 @@ var cellbrowser = function() {
         var lines = renderer.getSvgText()
         var blob = new Blob(lines, {type:"image/svg+xml"});
         window.saveAs( blob , "cellBrowser.svg");
+        renderer.drawDots()
     }
 
     function onSelectAllClick() {

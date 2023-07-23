@@ -151,8 +151,28 @@ def setDebug(doDebug):
         logging.getLogger().setLevel(logging.INFO)
     debugDone = True
 
-def isDebugMode():
+def sendDebugToFile(fname):
     return debugMode
+
+    logger = logging.getLogger('')
+    logger.setLevel(logging.DEBUG) #By default, logs all messages
+
+    # log to console
+    ch = logging.StreamHandler() #StreamHandler logs to console
+    ch.setLevel(consLevel)
+    ch_format = logging.Formatter('%(asctime)s - %(message)s')
+    ch.setFormatter(ch_format)
+    
+    # also always log everything to file
+    fh = logging.FileHandler(fname, "w+") # w+ means to overwrite the old file, "a" = append
+    #fh.setLevel(logging.DEBUG)
+    fh.setLevel(logging.INFO)
+    fh_format = logging.Formatter('%(asctime)s - %(lineno)d - %(levelname)-8s - %(message)s')
+    fh.setFormatter(fh_format)
+
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+    logging.info("Logging messages to %s" % fname)
 
 def makeDir(outDir):
     if not isdir(outDir):
@@ -4380,6 +4400,9 @@ def writeAnndataCoords(anndata, coordFields, outDir, desc):
         # X_draw_graph_tsne - old versions
         # X_tsne - newer versions
         # also seen in the wild: X_Compartment_tSNE
+        if fieldName=="spatial" and "spatial" in anndata.uns and len(anndata.uns["spatial"])>1:
+            logging.debug("Not exporting spatial coords, because more than one slide")
+            continue
         coordName = fieldName.replace("X_draw_graph_","").replace("X_","")
         fullName = coordLabels.get(coordName, coordName)
 
@@ -4389,7 +4412,7 @@ def writeAnndataCoords(anndata, coordFields, outDir, desc):
         logging.info("Writing %s coords to %s" % (fullName, fname))
         coordDf=pd.DataFrame(anndata.obsm[fieldName],index=anndata.obs.index)
 
-        # why they usually only have (x,y), some objects like PCA have more than 2 dimensions
+        # they usually only have (x,y), but some objects like PCA have more than 2 dimensions
         if len(coordDf.columns)==2:
             coordDf.columns=['x','y']
 
@@ -4721,70 +4744,93 @@ def exportScanpySpatial(adata, outDir, configData, coordDescs):
     from scanpy.plotting._tools.scatterplots import _check_spatial_data, _check_img, _empty, _check_spot_size, \
         _check_scale_factor, _check_crop_coord, _check_na_color
 
-    imgConfigs = []
 
-    # copied from https://github.com/scverse/scanpy/blob/034ca2823804645e0d4874c9b16ba2eb8c13ac0f/scanpy/plotting/_tools/scatterplots.py#L988
-    library_id = _empty
-    coordsDone = False
-    for img_key in ["hires", "lowres"]:
-        crop_coord = None
-        na_color = None
-        size = 1.0
-        spot_size = None
-        scale_factor = None
-        bw = False
-        img = None
+    #library_id = _empty
+    import pandas as pd
+    coordDf=pd.DataFrame(adata.obsm["spatial"],index=adata.obs.index)
 
-        library_id, spatial_data = _check_spatial_data(adata.uns, library_id)
-        img, img_key = _check_img(spatial_data, img, img_key, bw=bw)
-        spot_size = _check_spot_size(spatial_data, spot_size)
-        assert(spot_size!=None)
-        scale_factor = _check_scale_factor(
-            spatial_data, img_key=img_key, scale_factor=scale_factor
-        )
-        crop_coord = _check_crop_coord(crop_coord, scale_factor)
-        na_color = _check_na_color(na_color, img=img)
-        circle_radius = size * scale_factor * spot_size * 0.5
-        # end copy
+    libraries = adata.uns["spatial"].keys()
+    for library_id in libraries:
+    #Out[8]: dict_keys(['C47', 'C50', 'C56', 'IBM29', 'IBM31', 'IBM35', 'SRP1', 'SRP4'])
 
-        import matplotlib
-        imgFname = img_key+".jpg"
-        matplotlib.image.imsave(join(outDir, imgFname), img)
-        imgConfigs.append({"file":imgFname, "label":img_key, "radius":circle_radius, \
-                "scale_factor":scale_factor})
+        coordsDone = False
+        imgConfigs = []
+        for img_key in ["hires", "lowres"]:
+            crop_coord = None
+            na_color = None
+            size = 1.0
+            spot_size = None
+            scale_factor = None
+            bw = False
+            img = None
 
-        if not coordsDone:
-            # the 10X scale_factor indicates the relationship between pixels in the lowres/hires
-            # images and the original TIFFs. 
-            # https://support.10xgenomics.com/spatial-gene-expression/software/pipelines/latest/output/spatial
-            # Here, we use it to derive the min/max limits which the javascript needs to make sure
-            # that the bitmap is really under the spots
-            width, height = img.shape[:2]
-            invScale = 1.0 / scale_factor
-            yMax = round(width * invScale)
-            xMax = round(height * invScale)
-            coordsDone = True
-            #coordInfo = outConf["coords"][0]
+            # copied from https://github.com/scverse/scanpy/blob/034ca2823804645e0d4874c9b16ba2eb8c13ac0f/scanpy/plotting/_tools/scatterplots.py#L988
+            library_id, spatial_data = _check_spatial_data(adata.uns, library_id)
+            img, img_key = _check_img(spatial_data, img, img_key, bw=bw)
+            spot_size = _check_spot_size(spatial_data, spot_size)
+            assert(spot_size!=None)
+            scale_factor = _check_scale_factor(
+                spatial_data, img_key=img_key, scale_factor=scale_factor
+            )
+            crop_coord = _check_crop_coord(crop_coord, scale_factor)
+            na_color = _check_na_color(na_color, img=img)
+            circle_radius = size * scale_factor * spot_size * 0.5
+            # end copy
 
-    # the origin of the image is top-left, for the spots it's bottom-left. Fixing this for now by flipping the spots on the y.
-    for c in coordDescs:
-        c["flipY"] = 1
+            import matplotlib
+            imgFname = library_id+"_"+img_key+".jpg"
+            matplotlib.image.imsave(join(outDir, imgFname), img)
+
+            imgConfigs.append({"file":imgFname, "label":library_id+"_"+img_key, "radius":circle_radius, \
+                    "scale_factor":scale_factor})
+
+            meta = dict(spatial_data["metadata"])
+            meta["py_spot_size"] = spot_size
+            meta["py_radius"] = circle_radius
+            meta["py_size"] = size
+            meta["scalefactors"] = spatial_data["scalefactors"]
+            configData["spatialMeta"] = meta
+
+
+            if not coordsDone:
+                # the 10X scale_factor indicates the relationship between pixels in the lowres/hires
+                # images and the original TIFFs. 
+                # https://support.10xgenomics.com/spatial-gene-expression/software/pipelines/latest/output/spatial
+                # Here, we use it to derive the min/max limits which the javascript needs to make sure
+                # that the bitmap is really under the spots
+                width, height = img.shape[:2]
+                yMax = round(width / scale_factor)
+                xMax = round(height / scale_factor)
+                coordsDone = True
+                print(xMax, yMax)
+                #coordInfo = outConf["coords"][0]
+
+        #configData["spatial"] = imgConfigs
+
+        fileBase = "spatial_"+library_id+"_coords.tsv"
+        fname = join(outDir, fileBase)
+
+        logging.info("Writing spatial coords of library %s to %s" % (library_id, fname))
+
+        suffix = "-"+library_id.lower()
+        filtCoords = coordDf[coordDf.index.str.endswith(suffix,na=False)]
+        filtCoords.to_csv(fname,sep='\t')
+        # the origin of the image is top-left, for the spots it's bottom-left. Fixing this for now by flipping the spots on the y.
+        coordConf = {}
+        coordConf["images"]  = imgConfigs
+        coordConf["file"] = fileBase
+        coordConf["shortLabel"] = library_id
+        coordConf["flipY"] = 1
         # by default, cbBuild moves the circles to the minX/minY of the coords. Must switch this off here to align the image with 
         # the spots
-        c["useRaw"] = 1 # switch off: moving the minX/minY and scaling of data to uint16
-        c["minX"] = 0
-        c["minY"] = 0
-        c["maxX"] = xMax
-        c["maxY"] = yMax
+        coordConf["useRaw"] = 1 # switch off: moving the minX/minY and scaling of data to uint16
+        coordConf["minX"] = 0
+        coordConf["minY"] = 0
+        coordConf["maxX"] = xMax
+        coordConf["maxY"] = yMax
 
-    configData["spatial"] = imgConfigs
+        coordDescs.append( coordConf )
 
-    meta = dict(spatial_data["metadata"])
-    meta["py_spot_size"] = spot_size
-    meta["py_radius"] = circle_radius
-    meta["py_size"] = size
-    meta["scalefactors"] = spatial_data["scalefactors"]
-    configData["spatialMeta"] = meta
     return configData, coordDescs
 
 # copied from https://github.com/scverse/scanpy/blob/d7e13025b931ad4afd03b4344ef5ff4a46f78b2b/scanpy/_utils/__init__.py#L487
@@ -4866,7 +4912,7 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
         raise ValueError("No valid embeddings were found in anndata.obsm but at least one array of coordinates is required. Keys  obsm: %s" % (coordFields))
 
     ##Check for cluster markers
-    if markerField not in adata.uns and not skipMarkers:
+    if (markerField not in adata.uns or clusterField is not None) and not skipMarkers:
         logging.warn("Couldnt find list of cluster marker genes in the h5ad file in adata.uns with the key '%s'. "
             "In the future, from Python, try running sc.tl.rank_genes_groups(adata) to "
             "create the cluster annotation and write the h5ad file then." % markerField)
