@@ -2348,7 +2348,7 @@ def parseColors(inDir, inConf, outConf, colData):
 
 def scalePoint(scaleX, scaleY, minX, maxX, minY, maxY, flipY, useTwoBytes, x, y):
     " scale a point to the new coordinate system. used for either lines or points "
-    if useTwoBytes:
+    if useTwoBytes or scaleY!=1.0 or scaleX!=1.0:
         x = int(scaleX * (x - minX))
         y = int(scaleY * (y - minY))
     if flipY:
@@ -3566,13 +3566,14 @@ def copyConf(inConf, outConf, keyName):
 
 def getLimits(coordsList, extLimits):
     " get x-y-limits, either from data or from externally provided dictionary "
-    minX = 2^32
-    minY = 2^32
-    maxX = -2^32
-    maxY = -2^32
+    minX = 2**32
+    minY = 2**32
+    maxX = -2**32
+    maxY = -2**32
 
     for coords in coordsList:
         for x, y in coords:
+            #logging.debug("x %f y %f, maxY %f" % (x, y, maxY))
             # special values (12345,12345) mean "unknown cellId"
             if x!=HIDDENCOORD and y!=HIDDENCOORD:
                 minX = min(x, minX)
@@ -3642,6 +3643,11 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
         minX, maxX, minY, maxY = getLimits(allPoints, inCoordInfo)
         # now that we have the global limits, scale everything
         scaleX, scaleY, minX, maxX, minY, maxY = calcScaleFact(minX, maxX, minY, maxY, useTwoBytes)
+
+        scaleYFact = inCoordInfo.get("scaleYFact")
+        if scaleYFact:
+            scaleY = scaleYFact
+            logging.debug("Override scale factor on y by config: %f" % scaleY)
 
         limits = (minX, maxX, minY, maxY, scaleX, scaleY, useTwoBytes, flipY)
         # parse lines, updating the min-max ranges
