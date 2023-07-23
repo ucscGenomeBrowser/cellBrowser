@@ -513,7 +513,6 @@ function CbDbFile(url) {
             }
         }
 
-
         var binUrl = cbUtil.joinPaths([self.url, "coords", coordInfo.name, "coords.bin"]);
         if (coordInfo.md5)
             binUrl += "?"+coordInfo.md5;
