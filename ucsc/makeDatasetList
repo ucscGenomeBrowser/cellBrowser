@@ -1,0 +1,108 @@
+#! /usr/bin/env python3
+
+import argparse, sys
+from subprocess import Popen,PIPE
+from os.path import isdir,isfile
+
+# Set up script arguments
+parser = argparse.ArgumentParser(
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    description="Build a list of datasets on the cells-test, cells-beta, or the RR. By default, only shows top-level datasets.")
+parser.add_argument("-t","--test", action='store_true',
+    help='build dataset list for cells-test')
+parser.add_argument("-b","--beta", action='store_true',
+    help='build dataset list for cells-beta')
+parser.add_argument("-r","--rr", action='store_true',
+    help='build dataset list for the RR')
+parser.add_argument("-e","--everything", action='store_true',
+    help='show all datasets for the specified machine')
+args = parser.parse_args()
+
+def main():
+    """Main function of makeDatasetList. Runs all of the other functions of the program."""
+    # get list of datasets on cells-test
+    if args.test == True:
+        # Command to find all of the dataset dirs active on cells-test
+        bash_cmd = 'find ' + '/usr/local/apache/htdocs-cells/' + ' -name dataset.json | cut -f6- -d "/" | sed "s/\/dataset.json//g" | sort'
+        p = Popen([bash_cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        cmdout, cmderr = p.communicate()
+        # Take Popen output and make it into a list
+        ct_datasets_raw = set(cmdout.decode().strip().split('\n'))
+        # Get rid of the dataset.json that controls list of datasets displayed
+        ct_datasets_raw.remove('dataset.json')
+        ct_datasets_filtered = set() # new set to filter out that list of datasets to show only those with directories on hgwdev
+        for dname in ct_datasets_raw:
+            # Check to see if an dataset has a desc/cellbrowser.conf files on hgwdev
+            # This means that the output of this should be able to used as input to getTagVals/addVals 
+            if isfile("/hive/data/inside/cells/datasets/" + dname + "/desc.conf") and isfile("/hive/data/inside/cells/datasets/" + dname + "/cellbrowser.conf"):
+                # By default, we want to output only top-level datasets
+                if not args.everything:
+                    if "/" not in dname:
+                        ct_datasets_filtered.add(dname)
+                else:
+                    ct_datasets_filtered.add(dname)
+        # Sort and output list of datasets
+        print("#dataset")
+        print(*sorted(list(ct_datasets_filtered)), sep="\n")
+
+    # get list of datasets on cells-beta
+    elif args.beta == True:
+        bash_cmd = 'find ' + '/usr/local/apache/htdocs-cells-beta/' + ' -name dataset.json | cut -f6- -d "/" | sed "s/\/dataset.json//g" | sort'
+        p = Popen([bash_cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        cmdout, cmderr = p.communicate()
+        cb_datasets_raw = set(cmdout.decode().strip().split('\n'))
+        cb_datasets_raw.remove('dataset.json')
+        cb_datasets_filtered = set()
+        for dname in cb_datasets_raw:
+            if isdir("/hive/data/inside/cells/datasets/" + dname):
+                # By default, we want to output only top-level datasets
+                if not args.everything:
+                    if "/" not in dname:
+                        cb_datasets_filtered.add(dname)
+                else:
+                    cb_datasets_filtered.add(dname)
+        # Sort and output list of datasets
+        print("#dataset")
+        print(*sorted(list(cb_datasets_filtered)), sep="\n")
+
+    # get list of datasets on the RR
+    elif args.rr == True:
+        rr_base = "/usr/local/apache/htdocs-cells/"
+        rr_datasets = set() # holds names of all datasets on rr
+        # Get list of dataset.json files for rr
+        cmd = ['ssh', 'qateam@hgw0.soe.ucsc.edu', 'find', rr_base, '-name', 'dataset.json']
+        p = Popen(cmd, shell=False, stdout=PIPE, stderr=PIPE)
+        cmdout, cmderr = p.communicate()
+        rr_files = set(cmdout.decode().rstrip().split('\n'))
+        # go through rr_files
+        for fname in rr_files:
+            # turn full path name into a simple dataset name
+            fsplit = fname.strip().split('/')
+            final_index = int(len(fsplit)-2)
+            # Had to do this next part in two lines as I couldn't get slicing to work on one line
+            # This gets rid of the /usr/local/apache/htdocs-cells bit
+            indicies = fsplit[5:]
+            # This gets ride of the /dataset.json at the end
+            indicies = indicies[:-1]
+            # from https://stackoverflow.com/questions/12453580/how-do-i-concatenate-items-in-a-list-to-a-single-string
+            dname = '/'.join(indicies)
+            # I think at least one of the entries is empty, so skip over that
+            if dname != '':
+                # Check to see if an RR dataset is has a desc/cellbrowser.conf file on hgwdev
+                if isfile("/hive/data/inside/cells/datasets/" + dname + "/desc.conf") and isfile("/hive/data/inside/cells/datasets/" + dname + "/cellbrowser.conf"):
+                    # By default, we want to output only top-level datasets
+                    if not args.everything:
+                        if "/" not in dname:
+                            rr_datasets.add(dname)
+                    else:
+                        rr_datasets.add(dname)
+        # Sort and output list of datasets
+        print("#dataset")
+        print(*sorted(list(rr_datasets)), sep="\n")
+
+    else:
+        parser.print_help(sys.stderr)
+        exit(1)
+
+if __name__ == "__main__":
+    main()
