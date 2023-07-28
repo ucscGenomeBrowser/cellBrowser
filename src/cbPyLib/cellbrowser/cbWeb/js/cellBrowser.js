@@ -1255,6 +1255,7 @@ var cellbrowser = function() {
         // inline functions
         function openCollOrDataset(selDatasetIdx) {
             /* click handler, opens either a collection or a dataset */
+            history.pushState({}, "Cell Browser Main Page", window.location.href);
             var dsInfo = datasetList[selDatasetIdx];
             var datasetName = dsInfo.name;
             if (dsInfo.isCollection)
@@ -3556,9 +3557,12 @@ var cellbrowser = function() {
            return rendConf;
         }
 
+       var coordIdx = parseInt(getVar("layout", "0"))
+
        function gotFirstCoords(coords, info, clusterMids) {
            /* XX very ugly way to implement promises. Need a better approach one day. */
            gotCoords(coords, info, clusterMids);
+           chosenSetValue("tpLayoutCombo", coordIdx);
            doneOnePart();
        }
 
@@ -3571,7 +3575,7 @@ var cellbrowser = function() {
        buildLeftSidebar();
        buildToolBar(db.conf.coords, db.conf, metaBarWidth+metaBarMargin, menuBarHeight);
 
-       db.loadCoords(0, gotFirstCoords, gotSpatial, onProgress);
+       db.loadCoords(coordIdx, gotFirstCoords, gotSpatial, onProgress);
 
        if (getVar("select")!==undefined) {
            selList = JSURL.parse(getVar("select"));
@@ -5494,14 +5498,14 @@ var cellbrowser = function() {
     }
 
     function openCurrentDataset() {
-            /* open dataset dialog with current dataset highlighted */
-            $(this).blur();  // remove focus = tooltip disappears
-            var parentNames = db.name.split("/");
-            parentNames.pop();
-            var newPath = cbUtil.joinPaths([parentNames.join("/"), "dataset.json"]);
-            cbUtil.loadJson(newPath, function(parentConf) {
-                openDatasetDialog(parentConf, db.name);
-            });
+        /* open dataset dialog with current dataset highlighted */
+        $(this).blur();  // remove focus = tooltip disappears
+        var parentNames = db.name.split("/");
+        parentNames.pop();
+        var newPath = cbUtil.joinPaths([parentNames.join("/"), "dataset.json"]);
+        cbUtil.loadJson(newPath, function(parentConf) {
+            openDatasetDialog(parentConf, db.name);
+        });
     }
 
     function activateGeneCombo(id, onGeneComboChange) {
@@ -5775,7 +5779,7 @@ var cellbrowser = function() {
         if (!getVar("suppressOpenButton", false))
             htmls.push('<button id="tpOpenDatasetButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Open another dataset" data-placement="bottom">Open...</button>');
 
-        htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Violin Plot Viewer" data-placement="bottom">Gene Expression</button>');
+        htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Violin Plot Viewer" data-placement="bottom">Gene Expression</button>');
 
         //var nextLeft = 220;
         if (db.conf.hubUrl!==undefined) {

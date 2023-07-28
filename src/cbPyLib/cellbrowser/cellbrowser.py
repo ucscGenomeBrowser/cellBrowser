@@ -4795,6 +4795,7 @@ def exportScanpySpatial(adata, outDir, configData, coordDescs):
             meta["py_radius"] = circle_radius
             meta["py_size"] = size
             meta["scalefactors"] = spatial_data["scalefactors"]
+            meta["crop_coord"] = crop_coord
             configData["spatialMeta"] = meta
 
 

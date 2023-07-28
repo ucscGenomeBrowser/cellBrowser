@@ -1395,7 +1395,7 @@ function MaxPlot(div, top, left, width, height, args) {
        copyObj(opts, coordOpts);
 
        var oldRadius = self.port.initRadius;
-       var oldAlpha = self.port.initAlpha;
+       var oldAlpha  = self.port.initAlpha;
        var oldLabels = self.coords.pxLabels;
        self.port = {};
        self.initPort(coordOpts);
