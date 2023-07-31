@@ -732,17 +732,6 @@ function MaxPlot(div, top, left, width, height, args) {
         /* given an array of [x, y, text], draw the text. returns bounding
          * boxes as array of [x1, y1, x2, y2]  */
 
-        //ctx.strokeStyle = '#EEEEEE';
-        //ctx.lineWidth = 5;
-        //ctx.miterLimit =2;
-        //ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
-        //ctx.textBaseline = "top";
-//
-        //ctx.shadowBlur=6;
-        //ctx.shadowColor="white";
-        //ctx.fillStyle = "rgba(0,0,0,0.8)";
-        //ctx.textAlign = "left";
-//
         for (var i=0; i < labelCoords.length; i++) {
             var coord = labelCoords[i];
             if (coord===null) { // outside of view range, push a null to avoid messing up the order of bboxArr
@@ -760,6 +749,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
             svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize+2)+"' fill='black' text-anchor='middle' x='"+x+"' y='"+y+"'>"+text+"</text>");
         }
+
     }
 
     self.drawLegendSvg = function (legend) {
@@ -774,7 +764,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         var left = self.canvas.width; // x position where legend starts
 
-        var lineHeight = 18;
+        var lineHeight = gTextSize;
 
         var x = left + 11;
         var y = lineHeight;
@@ -820,25 +810,25 @@ function MaxPlot(div, top, left, width, height, args) {
             }
             label = label.replace("&ndash;", "-");
 
+            // draw colored rectangle first
+
+            var textSize = gTextSize-3;
+
             svgLines.push("<rect width='15' height='15' fill='#"+colorHex+"' x='"+x+"' y='"+y+"'></rect>");
-            y+= lineHeight;
 
             var prec = 1;
             if (freq<1)
                 prec = 2;
 
-            var textSize = gTextSize-2;
-            //var lines = label;
-            //for (var lineCount=0; lineCount < lines.length; lineCount++) {
-                //var lineText = lines[lineCount];
-            var lineCount = 0;
-            svgLines.push("<text font-family='sans-serif' font-size='"+textSize+"' fill='black' text-anchor='start' x='"+(x+18)+"' y='"+((y-4)+lineCount*lineHeight)+"'>"+label+"</text>");
+            //var lineCount = 0;
+            //svgLines.push("<text font-family='sans-serif' font-size='"+textSize+"' fill='black' text-anchor='start' x='"+(x+18)+"' y='"+((y-4)+lineCount*textSize)+"'>"+label+"</text>");
+            svgLines.push("<text font-family='sans-serif' font-size='"+textSize+"' fill='black' text-anchor='start' x='"+(x+18)+"' y='"+(y+8)+"'>"+label+"</text>");
             //}
-            svgLines.push("<text font-family='sans-serif' font-size='"+textSize+"' fill='black' text-anchor='end' x='"+(left+legWidth-3)+"' y='"+(y+7)+"'>"+freq.toFixed(prec)+"%</text>");
-            y+= lineHeight;
+            svgLines.push("<text font-family='sans-serif' font-size='"+textSize+"' fill='black' text-anchor='end' x='"+(left+legWidth-3)+"' y='"+(y+15)+"'>"+freq.toFixed(prec)+"%</text>");
+            y+= textSize;
 
         }
-        // cannot draw violin plots in SVG right now
+        // cannot draw violin plots in SVG - no library for it
     };
 
     function drawLabels(ctx, labelCoords, winWidth, winHeight, zoomFact) {
@@ -1405,7 +1395,7 @@ function MaxPlot(div, top, left, width, height, args) {
        copyObj(opts, coordOpts);
 
        var oldRadius = self.port.initRadius;
-       var oldAlpha = self.port.initAlpha;
+       var oldAlpha  = self.port.initAlpha;
        var oldLabels = self.coords.pxLabels;
        self.port = {};
        self.initPort(coordOpts);
@@ -1495,6 +1485,31 @@ function MaxPlot(div, top, left, width, height, args) {
         self.port.radius = radius;
     }
 
+    this.drawSvg = function(alpha, radius, coords, colArr, pal) {
+        self.svgLines = [];
+        var plotHeight = self.canvas.height;
+        var plotWidth = self.canvas.width;
+        var width = plotWidth+self.svgLabelWidth;
+        var height = 1500; // enough space for 100 lines in the legend
+        self.svgLines.push("<svg  xmlns='http://www.w3.org/2000/svg' height='"+height+"' width='"+width+"'>\n");
+        drawCirclesSvg(self.svgLines, coords, colArr, pal, radius, alpha, self.selCells);
+        if (self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined)
+            drawLabelsSvg(self.svgLines, self.coords.pxLabels, plotWidth, plotHeight, self.port.zoomFact);
+        // axis lines
+        self.svgLines.push('<line x1="2" y1="2" x2="2" y2="'+plotHeight+'" stroke="black" stroke-width="2"/>');
+        self.svgLines.push('<line x1="2" y1="2" x2="'+plotWidth+'" y2="2" stroke="black" stroke-width="2"/>');
+
+        // draw axis labels
+        var initZoom = self.port.initZoom;
+        // x axis
+        self.svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize)+"' fill='black' text-anchor='left' x='"+10+"' y='"+(gTextSize+20)+"'>"+initZoom.minY+"</text>");
+        self.svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize)+"' fill='black' text-anchor='left' x='"+10+"' y='"+(plotHeight-gTextSize-2)+"'>"+initZoom.maxY+"</text>");
+        // y axis
+        self.svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize)+"' fill='black' text-anchor='left' x='"+10+"' y='"+(gTextSize+3)+"'>"+initZoom.minX+"</text>");
+        self.svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize)+"' fill='black' text-anchor='left' x='"+(plotWidth-40)+"' y='"+(gTextSize+3)+"'>"+initZoom.maxX+"</text>");
+        return;
+    }
+
     this.drawDots = function(doSvg) {
         /* draw coordinates to canvas with current colors */
         console.time("draw");
@@ -1517,11 +1532,7 @@ function MaxPlot(div, top, left, width, height, args) {
             alert("internal error: cbDraw.drawDots - colorArr is not 1/2 of coords array. Got "+pal.length+" color values but coordinates for "+(coords.length/2)+" cells.");
 
         if (doSvg!==undefined) {
-            self.svgLines = [];
-            self.svgLines.push("<svg  xmlns='http://www.w3.org/2000/svg' height='"+self.canvas.height+"' width='"+(self.canvas.width+self.svgLabelWidth)+"'>\n");
-            drawCirclesSvg(self.svgLines, coords, colArr, pal, radius, alpha, self.selCells);
-            if (self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined)
-                drawLabelsSvg(self.svgLines, self.coords.pxLabels, self.canvas.width, self.canvas.height, self.port.zoomFact);
+            self.drawSvg(alpha, radius, coords, colArr, pal);
             return;
         }
 
@@ -2280,7 +2291,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var pxX = ev.clientX - self.left;
         var pxY = ev.clientY - self.top;
         var spinFact = 0.1;
-        if (ev.ctrlKey) // = OSX pinch and zoom gesture (and no other OS/mouse combination?)
+       if (ev.ctrlKey) // = OSX pinch and zoom gesture (and no other OS/mouse combination?)
             spinFact = 0.08;  // is too fast, so slow it down a little
         var zoomFact = 1-(spinFact*normWheel.spinY);
         debug("Wheel Zoom by "+zoomFact);

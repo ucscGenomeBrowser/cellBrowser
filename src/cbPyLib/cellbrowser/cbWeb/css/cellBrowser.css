@@ -24,6 +24,39 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         border: 1px solid grey;
 }
 
+#tpGeneExprMetaLabel {
+        margin-left: 6px;
+        margin-right: 6px;
+}
+
+#tpExprViewPlot {
+        display:flex;
+        flex-direction: row;
+        flex-flow: wrap;
+        height:100%;
+        padding-top:10px;
+        overflow: scroll;
+}
+
+#tpExprViewContent {
+        padding: 6px;
+        height: 100%;
+}
+
+#tpGeneExprLabel {
+        margin-right: 6px;
+}
+
+.tpGeneExprCombo {
+        margin-left: 6px;
+        margin-right: 6px;
+}
+
+/* selectize dropdown triangle is black by default, make light grey like chosen's triangle */
+.selectize-control.single .selectize-input:after {
+        border-color: #888 transparent transparent transparent;
+}
+
 #tpLegendBar { 
         cursor:default; 
         padding-left: 2px; 
@@ -183,7 +216,7 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 }
 
 input[type=checkbox], input[type=radio] {
-        vertical-align : -2px; // https://stackoverflow.com/a/2806786/233871
+        vertical-align : -2px; /* https://stackoverflow.com/a/2806786/233871 */
 }
 
 
@@ -223,7 +256,7 @@ input[type=checkbox], input[type=radio] {
         height: 100%;
 }
 
-#tpGeneTab, #tpAnnotTab { 
+#tpGeneTab, #tpAnnotTab, #tpLayoutTab { 
         border-top: 1px solid #AAA;
         padding:0;
         padding-top: 5px;
@@ -291,6 +324,25 @@ button { line-height: 12px }
 
 .tpToolBarItem { display:inline-block; white-space: nowrap }
 .tpToolBarItem > label { margin-right: 7px; display: inline} 
+
+.tpLeftSideItem { 
+        display:inline-block; 
+        white-space: nowrap;
+        width:100%
+}
+.tpLeftSideItem > label { 
+        margin-right: 7px; 
+        display: inline; 
+        display:block; 
+        margin-bottom:8px; 
+        padding-top: 8px;
+        padding-left:4px
+} 
+#tpLayoutCombo_chosen {
+        width:100%;
+        padding-left:4px;
+        padding-right:2px;
+}
 
 .tpCombo { display: inline-block} 
 
