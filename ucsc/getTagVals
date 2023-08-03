@@ -7,11 +7,8 @@ from pathlib import Path
 
 # These two functions copied and modified from cellbrowser.py
 def readLines(lines, fname):
-    " recursively read lines from fname"
-    # 'rb' and decode from 3rd comment under 1st answer here:
-    # https://stackoverflow.com/questions/27453879/unicode-decode-error-how-to-skip-invalid-characters
-    for line in open(fname,'rb'):
-        line = line.decode('utf-8',errors='ignore')
+    "recursively read lines from fname"
+    for line in open(fname):
         line = line.rstrip("\r\n")
         lines.append(line)
     return lines
