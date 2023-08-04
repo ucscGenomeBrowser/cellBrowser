@@ -151,6 +151,9 @@ def setDebug(doDebug):
         logging.getLogger().setLevel(logging.INFO)
     debugDone = True
 
+def isDebugMode():
+    return debugMode
+
 def sendDebugToFile(fname):
     return debugMode
 
