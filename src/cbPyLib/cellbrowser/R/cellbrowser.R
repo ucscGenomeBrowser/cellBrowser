@@ -195,6 +195,16 @@ ExportToCellbrowser <- function(
             break
         }
     }
+    if (is.null(x = cluster.field)) {
+        message("There is no meta field identical to idents(): using the value of Idents() as a new field 'Cluster'")
+        # create a new meta data field named "Cluster"
+        newDf <- cbind(object@meta.data, Idents(object))
+        # default name is "Idents(object)", not good, let's rename that to "Cluster"
+        names(newDf)[length(newDf)] <- "Cluster"
+        object@meta.data <- newDf
+        cluster.field <- "Cluster"
+    }
+
   } else {
     message("A custom cluster field was specified: ", cluster.field)
     Idents(object) <- object[[cluster.field]]
