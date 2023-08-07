@@ -7942,6 +7942,7 @@ var cellbrowser = function() {
            renderer = new MaxPlot(div, canvTop, canvLeft, canvWidth, canvHeight);
            document.body.appendChild(div);
            activateTooltip(".mpButton"); // tpMaxPlot has no special tooltip support itself
+           renderer.activateSliders();
 
            self.tooltipDiv = makeTooltipCont();
            document.body.appendChild(self.tooltipDiv);

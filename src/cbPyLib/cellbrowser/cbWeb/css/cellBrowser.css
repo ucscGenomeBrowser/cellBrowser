@@ -87,6 +87,23 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
        1px 1px 0 #000;
 }
 
+.sliderContainer {
+        /*position : relative;
+        width : 120px;
+        line-height : 13px;
+        font-weight : bold;
+        font-size : 80%; */
+        display: grid;
+        grid-template-columns: 45px 60px 15px;
+        position: relative;
+}
+
+.sliderLabel {
+    font-size: 11px;
+    z-index: 1000;
+    font-weight: bold;
+}
+
 .tpLegend { font-size:13px; /* border: 2px solid transparent; */ cursor:default; word-wrap: break-word; clear:both}
 .tpHint { font-weight:normal; line-height:1.4; font-size: 80%}
 #tpLegendHeader { background-color:#eee; color: #777 }

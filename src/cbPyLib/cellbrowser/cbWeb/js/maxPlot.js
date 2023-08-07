@@ -90,6 +90,7 @@ function MaxPlot(div, top, left, width, height, args) {
             addModeButtons(10, 10, self);
             addStatusLine(height-gStatusHeight, left, width, gStatusHeight);
             addTitleDiv(height-gTitleSize-gStatusHeight-4, 8);
+            addSliders();
 
             /* add the div used for the mouse selection/zoom rectangle to the DOM */
             var selectDiv = document.createElement('div');
@@ -159,7 +160,6 @@ function MaxPlot(div, top, left, width, height, args) {
         self.coords.px   = null;   // coordinates of cells and labels as screen pixels or (HIDCOORD,HIDCOORD) if not shown
         self.coords.labelBbox = null;   // cluster label bounding boxes, array of [x1,x2,x2,y2]
 
-
         self.col = {};
         self.col.pal = null;        // list of six-digit hex codes
         self.col.arr = null;        // length is coords.px/2, one byte per cell = index into self.col.pal
@@ -187,23 +187,32 @@ function MaxPlot(div, top, left, width, height, args) {
         self.activateMode(getAttr(args, "mode", "move"));
     };
 
-    // call the constructor
-    //self.newObject(div, top, left, width, height, args);
-
     this.clear = function() {
         clearCanvas(self.ctx, self.canvas.width, self.canvas.height);
     };
-
-    //this.setPos = function(left, top) {
-       /* position the canvas on the page */
-       //self.div.style.left = left+"px";
-       //self.div.style.top = top+"px";
-    //};
 
     this.setTitle = function (text) {
         self.title = text;
         self.titleDiv.innerHTML = text;
     };
+
+    this.activateSliders = function () {
+        $(self.alphaSlider).slider({
+            "value": 4,
+            "min"  : 1,
+            "max"  : 7,
+            "step" : 1, 
+            "slide": onChangeAlpha
+        });
+        $(self.radiusSlider).slider({
+            "value": 4,
+            "min"  : 1,
+            "max"  : 7,
+            "step" : 1, 
+            "slide": onChangeRadius
+        });
+        
+    }
 
     this.setWatermark = function (text) {
         if (text==="") {
@@ -255,7 +264,17 @@ function MaxPlot(div, top, left, width, height, args) {
             return 5;
     }
 
-    function createButton(width, height, id, title, text, imgFname, paddingTop, paddingBottom, addSep, addThickSep) {
+    function createSliderSpan(id, width, height) {
+        /* create div with given width and height */
+        var div = document.createElement('span');
+        div.id = id;
+        div.style.position = "relative";
+        div.style.width = width+"px";
+        div.style.height = height+"px";
+        return div;
+    }
+
+    function createButton(width, height, id, title, text, imgFname, paddingTop, paddingBottom, addSep, addThickSep, fontSize) {
         /* make a light-grey div that behaves like a button, with text and/or an image on it
          * Images are hard to vertically center, so padding top can be specified.
          * */
@@ -265,14 +284,19 @@ function MaxPlot(div, top, left, width, height, args) {
         div.style.backgroundColor = gButtonBackground;
         div.style.width = width+"px";
         div.style.height = height+"px";
+        div.style["z-index"]="1000";
         div.style["text-align"]="center";
         div.style["vertical-align"]="middle";
         div.style["line-height"]=height+"px";
-        if (text!==null)
-            if (text.length>3)
-                div.style["font-size"]="11px";
-            else
-                div.style["font-size"]="14px";
+        if (fontSize === undefined || fontSize=== null) {
+            if (text!==null)
+                if (text.length>3)
+                    div.style["font-size"]="11px";
+                else
+                    div.style["font-size"]="14px";
+        } else {
+            div.style["font-size"]=fontSize+"px";
+        }
         div.style["font-weight"]="bold";
         div.style["font-family"]="sans-serif";
 
@@ -358,6 +382,103 @@ function MaxPlot(div, top, left, width, height, args) {
         div.id = 'mpTitle';
         self.div.appendChild(div);
         self.titleDiv = div;
+    }
+
+    function onChangeAlpha(ev, ui) {
+        console.log("alpha: "+ui.value);
+        var sliderVal = ui.value; // 1-7
+        var multMap = {
+            1 : 0.15,
+            2 : 0.4,
+            3 : 0.8,
+            4 : 1.0,
+            5 : 1.2,
+            6 : 1.5,
+            7 : 1.8
+        }
+        self.port.alphaMult = multMap[sliderVal];
+        console.log("alphaMult: "+self.port.alphaMult);
+        self.calcRadius();
+        self.drawDots();
+    }
+
+    function onChangeRadius(ev, ui) {
+        //console.log("radius: "+ui.value);
+        var sliderVal = ui.value; // 1-7
+        var multMap = {
+            1 : 1/3,
+            2 : 1/2,
+            3 : 1/1.5,
+            4 : 1.0,
+            5 : 1.5,
+            6 : 2.0,
+            7 : 3.0
+        }
+        self.port.radiusMult = multMap[sliderVal];
+        self.calcRadius();
+        self.drawDots();
+    }
+
+    function addSliders() {
+        // alpha reset slider: a label, a slider + a reset button
+        var alphaSlider = createSliderSpan("mpAlphaSlider", 60, 10);
+        self.alphaSlider = alphaSlider; // see activateSliders() for the jquery UI part of the code, executed later
+        alphaSlider.style.float = "left";
+        alphaSlider.style.top = "3px";
+
+        // container for label + control elements
+        var alphaCont = document.createElement('div');
+        alphaCont.id = "mpAlphaCont";
+        alphaCont.style.top = "10px";
+        alphaCont.style.left = "50px";
+        alphaCont.className = "sliderContainer";
+
+        var alphaLabel = document.createElement('span'); // contains the slider and the reset button, floats right
+        alphaLabel.id = "alphaSliderLabel";
+        alphaLabel.textContent = "Transp";
+        alphaLabel.className = "sliderLabel";
+
+        // reset button
+        var alphaReset = createButton(15, 15, "mpAlphaReset", "Reset transparency", "Rs", null, null, null, false, false, 10);
+        alphaReset.style.float = "right";
+        alphaReset.style.marginLeft = "2px";
+        alphaReset.addEventListener ('click',  function() { self.resetAlpha(); self.drawDots();}, false);
+
+        alphaCont.appendChild(alphaLabel);
+        alphaCont.appendChild(alphaSlider);
+        alphaCont.appendChild(alphaReset);
+
+        self.div.appendChild(alphaCont);
+
+        // Radius reset slider: label, slider and reset button
+        var radiusSlider = createSliderSpan("mpRadiusSlider", 60, 10);
+        radiusSlider.style.float = "left";
+        self.radiusSlider = radiusSlider; // see activateSliders() for the jquery UI part of the code, executed later
+
+        // container for label + slider and reset button
+        var radiusCont = document.createElement('div');
+        radiusCont.className = "sliderContainer";
+        radiusCont.id = "mpRadiusDiv";
+        radiusCont.style.left = "50px";
+        radiusCont.style.top = "15px";
+        radiusCont.appendChild(radiusSlider)
+
+        var radiusLabel = document.createElement('span'); // contains the slider and the reset button, floats right
+        radiusLabel.id = "radiusSliderLabel";
+        radiusLabel.textContent = "Size";
+        radiusLabel.className = "sliderLabel";
+
+        var radiusReset = createButton(15, 15, "mpRadiusReset", "Reset radius", "Rs", null, null, null, false, false, 10);
+        radiusReset.style.float = "right";
+        radiusReset.style.marginLeft = "2px";
+        radiusReset["z-index"] = "10"; // ? why ?
+        radiusReset.addEventListener ('click',  function() { self.resetRadius(); self.drawDots()}, false);
+
+        radiusCont.appendChild(radiusLabel);
+        radiusCont.appendChild(radiusSlider);
+        radiusCont.appendChild(radiusReset);
+
+        self.div.appendChild(radiusCont);
     }
 
     function addCloseButton(top, left) {
@@ -1469,20 +1590,26 @@ function MaxPlot(div, top, left, width, height, args) {
         var currentSpan = zr.maxX-zr.minX;
         var zoomFact = initSpan/currentSpan;
 
+        // both radius and alpha can be change by a 'multiplier'
+        var alphaMult = self.port.alphaMult || 1.0;
+        var radiusMult = self.port.radiusMult || 1.0;
+
         var baseRadius = self.port.initRadius;
         if (baseRadius===0)
             baseRadius = 0.7;
-        var radius = Math.floor(baseRadius * Math.sqrt(zoomFact));
+        var radius = Math.floor(baseRadius * Math.sqrt(zoomFact) * radiusMult);
 
         // the higher the zoom factor, the higher the alpha value
         var zoomFrac = Math.min(1.0, zoomFact/100.0); // zoom as fraction, max is 1.0
         var alpha = initAlpha + 3.0*zoomFrac*(1.0 - initAlpha);
-        alpha = Math.min(0.8, alpha);
+        alpha = Math.min(0.8, alpha)*alphaMult;
         debug("Zoom factor: ", zoomFact, ", Radius: "+radius+", alpha: "+alpha);
 
         self.port.zoomFact = zoomFact;
         self.port.alpha = alpha;
+        self.port.alphaMult = alphaMult;
         self.port.radius = radius;
+        self.port.radiusMult = radiusMult;
     }
 
     this.drawSvg = function(alpha, radius, coords, colArr, pal) {
@@ -1629,9 +1756,23 @@ function MaxPlot(div, top, left, width, height, args) {
         return res;
     };
 
+    this.resetAlpha = function() {
+       self.port.alphaMult = 1.0;
+       $('#mpAlphaSlider').slider({value:4});
+       self.calcRadius();
+    };
+
+    this.resetRadius = function() {
+       self.port.radiusMult = 1.0;
+       $('#mpRadiusSlider').slider({value:4});
+       self.calcRadius();
+    };
+
     this.zoom100 = function() {
        /* zoom to 100% and redraw */
        copyObj(self.port.initZoom, self.port.zoomRange);
+       self.resetAlpha();
+       self.resetRadius();
        self.scaleData();
        //self.drawDots();
     };
