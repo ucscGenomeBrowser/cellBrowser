@@ -284,7 +284,7 @@ function MaxPlot(div, top, left, width, height, args) {
         div.style.backgroundColor = gButtonBackground;
         div.style.width = width+"px";
         div.style.height = height+"px";
-        div.style["z-index"]="1000";
+        div.style["z-index"]="10";
         div.style["text-align"]="center";
         div.style["vertical-align"]="middle";
         div.style["line-height"]=height+"px";
