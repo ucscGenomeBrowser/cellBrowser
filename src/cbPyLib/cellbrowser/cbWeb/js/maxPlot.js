@@ -1350,10 +1350,10 @@ function MaxPlot(div, top, left, width, height, args) {
         var ctxWidth  = self.canvas.width;
         var ctxHeight = self.canvas.height;
 
-        var coordHeight = dataRange.maxX-dataRange.minX;
-        var coordWidth = dataRange.maxY-dataRange.minY;
+        var coordHeight = dataRange.maxY-dataRange.minY;
+        var coordWidth = dataRange.maxX-dataRange.minX;
 
-        var scaleX = width / coordHeight; // this is px/dataUnit to convert background image pixels to canvas pixels
+        var scaleX = width / coordWidth; // this is px/dataUnit to convert background image pixels to canvas pixels
         var scaleY = height / coordHeight;
 
         var sx1 = zoomRange.minX * scaleX; // sx = x position on source image

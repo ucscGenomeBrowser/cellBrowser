@@ -4794,13 +4794,17 @@ def exportScanpySpatial(adata, outDir, configData, coordDescs):
                     "scale_factor":scale_factor})
 
             meta = dict(spatial_data["metadata"])
+            meta["label"] = label
             meta["py_spot_size"] = spot_size
             meta["py_radius"] = circle_radius
             meta["py_size"] = size
             meta["scalefactors"] = spatial_data["scalefactors"]
             meta["crop_coord"] = crop_coord
-            configData["spatialMeta"] = meta
 
+            if "spatialMeta" not in configData:
+                configData["spatialMeta"] = []
+
+            configData["spatialMeta"].append(meta)
 
             if not coordsDone:
                 # the 10X scale_factor indicates the relationship between pixels in the lowres/hires
@@ -4812,7 +4816,6 @@ def exportScanpySpatial(adata, outDir, configData, coordDescs):
                 yMax = round(width / scale_factor)
                 xMax = round(height / scale_factor)
                 coordsDone = True
-                print(xMax, yMax)
                 #coordInfo = outConf["coords"][0]
 
         #configData["spatial"] = imgConfigs
@@ -6583,7 +6586,6 @@ def copyFileIfDiffSize(inFname, outFname):
         shutil.copyfile(inFname, outFname)
     else:
         logging.info("identical and same size, not copying %s to %s" % (inFname, outFname))
-
 
 def copyTsvMatrix(matrixFname, outMatrixFname):
     " copy one file to another, but only if both look like valid input formats for cbBuild "

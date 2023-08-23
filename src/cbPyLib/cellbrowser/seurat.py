@@ -4,7 +4,7 @@ import logging, optparse, sys, glob, os, datetime, shutil
 from os.path import join, basename, dirname, isfile, isdir, relpath, abspath, getsize, getmtime, expanduser, splitext
 
 from .cellbrowser import copyPkgFile, writeCellbrowserConf, pipeLog, makeDir, maybeLoadConfig, errAbort, popen
-from .cellbrowser import setDebug, build, isDebugMode, generateHtmls, runCommand
+from .cellbrowser import setDebug, build, isDebugMode, generateHtmls, runCommand, copyFileIfDiffSize
 
 def parseArgs():
     " setup logging, parse command line arguments and options. -h shows auto-generated help page "
@@ -419,14 +419,11 @@ def readExportScript(cmds):
     # we want to have only a single source code file, and seurat-wrappers code 
     # cannot use require, so we add the require commands here
     cmds.insert(0, "message(R.version$version.string)")
-    cmds.insert(0, """if(!require(R.utils)){
-            install.packages("R.utils")
-            library(R.utils, warn.conflicts=FALSE)
-        }\n""")
-    cmds.insert(0, """if(!require(Matrix)){
-            install.packages("Matrix")
-            library(Matrix, warn.conflicts=FALSE)
-        }\n""")
+    cmds.insert(0, 'library(jpeg)')
+    cmds.insert(0, 'library(Matrix, warn.conflicts=FALSE)')
+    cmds.insert(0, 'library(R.utils, warn.conflicts=FALSE)')
+    # we need a few packages for the export. Install them unless already installed
+    cmds.insert(0, 'install.packages(setdiff(c("jpeg", "R.utils", "Matrix"), rownames(installed.packages())))')
 
     assert(len(cmds)!=0)
     return cmds
@@ -539,8 +536,7 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
     descDict = None
     if inFormat=="rds":
         rdsOutPath = join(outDir, basename(inFname))
-        logging.info("Copying %s to %s" % (inFname, rdsOutPath))
-        shutil.copyfile(inFname, rdsOutPath)
+        copyFileIfDiffSize(inFname, rdsOutPath)
         objectVersion = findObjectVersion(outDir)
         descDict = {"supplFiles": [{"label":"Seurat %s RDS" % objectVersion, "file":basename(inFname)}]}
 
