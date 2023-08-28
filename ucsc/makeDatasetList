@@ -34,13 +34,14 @@ def main():
         for dname in ct_datasets_raw:
             # Check to see if an dataset has a desc/cellbrowser.conf files on hgwdev
             # This means that the output of this should be able to used as input to getTagVals/addVals 
-            if isfile("/hive/data/inside/cells/datasets/" + dname + "/desc.conf") and isfile("/hive/data/inside/cells/datasets/" + dname + "/cellbrowser.conf"):
-                # By default, we want to output only top-level datasets
-                if not args.everything:
-                    if "/" not in dname:
+            if isfile("/hive/data/inside/cells/datasets/" + dname + "/desc.conf"):
+                if isfile("/hive/data/inside/cells/datasets/" + dname + "/cellbrowser.conf"):
+                    # By default, we want to output only top-level datasets
+                    if not args.everything:
+                        if "/" not in dname:
+                            ct_datasets_filtered.add(dname)
+                    else:
                         ct_datasets_filtered.add(dname)
-                else:
-                    ct_datasets_filtered.add(dname)
         # Sort and output list of datasets
         print("#dataset")
         print(*sorted(list(ct_datasets_filtered)), sep="\n")
@@ -54,13 +55,14 @@ def main():
         cb_datasets_raw.remove('dataset.json')
         cb_datasets_filtered = set()
         for dname in cb_datasets_raw:
-            if isdir("/hive/data/inside/cells/datasets/" + dname):
-                # By default, we want to output only top-level datasets
-                if not args.everything:
-                    if "/" not in dname:
+            if isfile("/hive/data/inside/cells/datasets/" + dname + "/desc.conf"):
+                if isfile("/hive/data/inside/cells/datasets/" + dname + "/cellbrowser.conf"):
+                    # By default, we want to output only top-level datasets
+                    if not args.everything:
+                        if "/" not in dname:
+                            cb_datasets_filtered.add(dname)
+                    else:
                         cb_datasets_filtered.add(dname)
-                else:
-                    cb_datasets_filtered.add(dname)
         # Sort and output list of datasets
         print("#dataset")
         print(*sorted(list(cb_datasets_filtered)), sep="\n")
@@ -89,13 +91,14 @@ def main():
             # I think at least one of the entries is empty, so skip over that
             if dname != '':
                 # Check to see if an RR dataset is has a desc/cellbrowser.conf file on hgwdev
-                if isfile("/hive/data/inside/cells/datasets/" + dname + "/desc.conf") and isfile("/hive/data/inside/cells/datasets/" + dname + "/cellbrowser.conf"):
-                    # By default, we want to output only top-level datasets
-                    if not args.everything:
-                        if "/" not in dname:
+                if isfile("/hive/data/inside/cells/datasets/" + dname + "/desc.conf"):
+                    if isfile("/hive/data/inside/cells/datasets/" + dname + "/cellbrowser.conf"):
+                        # By default, we want to output only top-level datasets
+                        if not args.everything:
+                            if "/" not in dname:
+                                rr_datasets.add(dname)
+                        else:
                             rr_datasets.add(dname)
-                    else:
-                        rr_datasets.add(dname)
         # Sort and output list of datasets
         print("#dataset")
         print(*sorted(list(rr_datasets)), sep="\n")
