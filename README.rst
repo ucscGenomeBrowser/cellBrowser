@@ -5,9 +5,12 @@ UCSC Single Cell Browser
 ========================
 
 The UCSC Cell Browser is a viewer for single cell data. You can click on and
-hover over cells to get meta information, search for genes to color on and
-click clusters to show cluster-specific marker genes. It supports gene expression, ATAC,
-spatial gene/ATAC and multi-modal combinations of these. 
+hover over cells to get meta information, select cells to get annotation histograms, 
+make expression violin plots and heatmaps, search for genes to color on and
+click clusters to show cluster-specific marker genes. It supports the usual gene expression plots, ATAC,
+spatial gene/ATAC, multi-modal combinations of these and trajectory lines. 
+It comes with one-line data exporters for all common analysis formats: Seurat, Scanpy, Cellranger, Monocle and 
+you can always use tsv/csv files to import your data. The exporters are part of Seurat 3/4 and Scanpy. 
 
 To look at a list of selected single cell datasets, see http://cells.ucsc.edu
 
