@@ -253,7 +253,6 @@ ExportToCellbrowser <- function(
   } else {
     message("A custom cluster field was specified: ", cluster.field)
     Idents(object) <- object[[cluster.field]]
-    idents <- Idents(object = object)
   }
 
   # make sure that we have a cluster field
@@ -262,7 +261,7 @@ ExportToCellbrowser <- function(
 
   if (is.null(x = meta.fields)) {
     meta.fields <- colnames(x = meta)
-    if (length(x = levels(x = idents)) > 1) {
+    if (length(x = levels(x = Idents(object))) > 1) {
       meta.fields <- c(meta.fields, ".ident")
     }
   }
@@ -343,7 +342,7 @@ ExportToCellbrowser <- function(
   df <- data.frame(row.names = cellOrder, check.names = FALSE)
   for (field in meta.fields) {
     if (field == ".ident") {
-      df$Cluster <- idents
+      df$Cluster <- Idents(object)
       enum.fields <- c(enum.fields, "Cluster")
     } else {
       name <- meta.fields.names[[field]]
@@ -377,7 +376,7 @@ ExportToCellbrowser <- function(
     file <- NULL
   }
   if (is.null(markers.file) && !skip.markers) {
-    if (length(levels(idents)) > 1) {
+    if (length(levels(Idents(object))) > 1) {
       markers.helper <- function(x) {
         partition <- markers[x,]
 
