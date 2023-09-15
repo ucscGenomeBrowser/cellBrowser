@@ -3495,22 +3495,39 @@ def scaleLines(lines, limits, flipY):
     logging.debug("Scaling lines, flip is %s" % flipY)
     minX, maxX, minY, maxY, scaleX, scaleY, useTwoBytes, _ = limits
     scaledLines = []
-    for x1, y1, x2, y2 in lines:
+    for lineRow in lines:
+        x1, y1, x2, y2 = lineRow[:4]
         x1, y1 = scalePoint(scaleX, scaleY, minX, maxX, minY, maxY, flipY, useTwoBytes, x1, y1)
         x2, y2 = scalePoint(scaleX, scaleY, minX, maxX, minY, maxY, flipY, useTwoBytes, x2, y2)
-        scaledLines.append( (x1, y1, x2, y2) )
+
+        # if the line has a label, append it
+        scaledRow = [x1, y1, x2, y2]
+        if len(lineRow)>4:
+            scaledRow.append(lineRow[4])
+        scaledLines.append( scaledRow )
+
     return scaledLines
 
 def parseLineInfo(inFname, limits):
     " parse a tsv or csv file and use the first four columns as x1,y1,x2,y2 for straight lines "
     lines = []
-    for row in lineFileNextRow(inFname):
-        lines.append( (float(row.x1), float(row.y1), float(row.x2), float(row.y2)) )
-
     endPoints = []
-    for x1, y1, x2, y2 in lines:
+    for row in lineFileNextRow(inFname):
+        if len(row) not in [4,5]:
+            errAbort("The line file %s does not have 4 or 5 columns. Format is (x1, y1, x2, y2) with an optional label as the last field" % inFname)
+
+        lineRow = [ float(row.x1), float(row.y1), float(row.x2), float(row.y2) ]
+        if len(row)>4:
+            lineRow.append(row[4])
+        lines.append(lineRow)
+
+    for lineRow in lines:
+        x1, y1, x2, y2 = lineRow[:4]
+        # we need a list of coordinates so we can determine at the end what the total min/max ranges are
+        # and lines can go outside the min/max of the umap coords.
         endPoints.append( (x1, y1) )
         endPoints.append( (x2, y2) )
+
     logging.info("Read lines from %s, got %d lines" % (inFname, len(lines)))
 
     return lines, endPoints
