@@ -78,7 +78,7 @@ exportImages <- function(obj, outDir, embeddings.conf) {
 #' @param an array of strings to write into the coords object into the cellbrowser config file
 #'
     if (length(obj@images)==0)
-        return("")
+        return(embeddings.conf)
 
     message("Exporting spatial images")
     require(png)
