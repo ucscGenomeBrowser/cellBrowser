@@ -6629,6 +6629,38 @@ var cellbrowser = function() {
         makeLegendExpr(gLegend.geneSym, gLegend.titleHover, binInfo, exprArr, decArr);
     }
 
+    function onLegendExportClick(ev) {
+        /* export the legend to a tsv file */
+        var lines = [ ["Label", "Long_Label", "Color", "Cell_Count", "Frequency"].join("\t") ] ;
+        var rows = gLegend.rows;
+        var sum = 0;
+
+        // this code was copied from buildLegend -> refactor one day
+        // it's also in the SVG drawing code in maxPLot.js
+        for (var i = 0; i < rows.length; i++) {
+            let count = rows[i].count;
+            sum += count;
+        }
+
+        for (i = 0; i < rows.length; i++) {
+            var row = rows[i];
+            var colorHex = row.color; // manual color
+            if (colorHex===null)
+                colorHex = row.defColor; // default color
+            // this was copied from cellbrowser:buildLegend - refactor soon
+            var label = row.label;
+            var longLabel = row.longLabel;
+            let count = row.count;
+            var freq  = 100*count/sum;
+            label = label.replace("&ndash;", "-");
+            var rowLine = [ label, longLabel, "#"+colorHex.toUpperCase(), count, freq].join("\t");
+            lines.push( rowLine );
+        }
+        
+        var blob = new Blob([lines.join("\n")], {type: "text/plain;charset=utf-8"});
+        saveAs(blob, "plotLegend.tsv");
+    }
+
     function onLegendCheckboxClick(ev) {
         /* user clicked the small checkboxes in the legend */
         var valIdx = parseInt(ev.target.getAttribute("data-value-index"));
@@ -6751,6 +6783,8 @@ var cellbrowser = function() {
         }
         htmls.push('</div>'); // tpLegendRows
 
+        htmls.push('<button id="tpExpColorButton" style="line-height:9x">Export</button>'); 
+
         // add the div where the violin plot will later be shown
         htmls.push("<div id='tpViolin'>");
         htmls.push("<canvas style='height:200px; padding-top: 10px; padding-bottom:30px' id='tpViolinCanvas'></canvas>");
@@ -6773,6 +6807,7 @@ var cellbrowser = function() {
         $(".tpLegendCheckbox").click( onLegendCheckboxClick );
         $("#tpLegendClear").click( onLegendClearClick );
         $("#tpExprLimitApply").click( onLegendApplyLimitsClick );
+        $("#tpExpColorButton").click( onLegendExportClick );
 
         $('.tpLegend').click( onLegendLabelClick );
         //$('.tpLegendLabel').attr( "title", "Click to select samples with this value. Shift click to select multiple values.");
@@ -7138,6 +7173,13 @@ var cellbrowser = function() {
 
     function hideTooltip() {
         $("#tpTooltip").hide();
+    }
+
+    function onLineHover(lineLabel, ev) {
+        if (lineLabel===null)
+            hideTooltip();
+        else
+            showTooltip(ev.clientX+15, ev.clientY, lineLabel);
     }
 
     function onClusterNameHover(clusterName, nameIdx, ev) {
@@ -7959,6 +8001,7 @@ var cellbrowser = function() {
         renderer.onCellClick = onCellClickOrHover;
         renderer.onCellHover = onCellClickOrHover;
         renderer.onNoCellHover = clearMetaAndGene;
+        renderer.onLineHover = onLineHover;
         renderer.onZoom100Click = onZoom100Click;
         renderer.onSelChange = onSelChange;
         renderer.canvas.addEventListener("mouseleave", hideTooltip);

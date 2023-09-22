@@ -109,6 +109,7 @@ function MaxPlot(div, top, left, width, height, args) {
             self.onSelChange = null; // called when the selection has been changed, arg: array of cell Ids
             self.onLabelHover = null; // called when mouse hovers over a label
             self.onNoLabelHover = null; // called when mouse does not hover over a label
+            self.onLineHover = null; // called when mouse over a trajectory line
             // self.onZoom100Click: called when user clicks the zoom100 button. Implemented below.
             self.selectBox = selectDiv; // we need this later
             self.setupMouse();
@@ -2112,7 +2113,24 @@ function MaxPlot(div, top, left, width, height, args) {
         }
         //console.timeEnd("labelCheck");
         return null;
-    }
+    };
+
+    this.lineAt = function(x, y) {
+        /* check if there is a line at x,y and return its label if so or null if not */
+            var pxLines = self.coords.pxLines;
+            for (var i=0; i < pxLines.length; i++) {
+                var line = pxLines[i];
+                var x1 = line[0];
+                var y1 = line[1];
+                var x2 = line[2];
+                var y2 = line[3];
+                if (pDistance(x, y, x1, y1, x2, y2) <= 2) {
+                    var lineLabel = self.coords.lineLabels[i];
+                    return lineLabel;
+                }
+            }
+            return null;
+    };
 
     this.cellsAt = function(x, y) {
         /* check which cell's bounding boxes contain (x, y), return a list of the cell IDs, sorted by distance */
@@ -2212,6 +2230,43 @@ function MaxPlot(div, top, left, width, height, args) {
         return true;
     }
 
+    // https://stackoverflow.com/questions/73187456/canvas-determine-if-point-is-on-line
+    //function distancePointFromLine(x0, y0, x1, y1, x2, y2) {
+          //return Math.abs((x2 - x1) * (y1 - y0) - (x1 - x0) * (y2 - y1)) / Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+    //}
+    function pDistance(x, y, x1, y1, x2, y2) {
+      /* distance of point from line segment, copied from https://stackoverflow.com/questions/849211/shortest-distance-between-a-point-and-a-line-segment */
+      var A = x - x1;
+      var B = y - y1;
+      var C = x2 - x1;
+      var D = y2 - y1;
+
+      var dot = A * C + B * D;
+      var len_sq = C * C + D * D;
+      var param = -1;
+      if (len_sq != 0) //in case of 0 length line
+          param = dot / len_sq;
+
+      var xx, yy;
+
+      if (param < 0) {
+        xx = x1;
+        yy = y1;
+      }
+      else if (param > 1) {
+        xx = x2;
+        yy = y2;
+      }
+      else {
+        xx = x1 + param * C;
+        yy = y1 + param * D;
+      }
+
+      var dx = x - xx;
+      var dy = y - yy;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
     this.onMouseMove = function(ev) {
         /* called when the mouse is moved over the Canvas */
 
@@ -2231,6 +2286,17 @@ function MaxPlot(div, top, left, width, height, args) {
         var xCanvas = clientX - canvasLeft;
         var yCanvas = clientY - canvasTop;
 
+        // is there just white space under the mouse, do nothing,
+        // from https://stackoverflow.com/questions/15325283/how-to-detect-if-a-mouse-pointer-hits-a-line-already-drawn-on-an-html-5-canvas
+        var imageData = self.ctx.getImageData(0, 0, self.width, self.height);
+        var inputData = imageData.data;
+        var pData = (~~xCanvas + (~~yCanvas * self.width)) * 4;
+
+        if (!inputData[pData + 3]) {
+            console.log("just white space under mouse");
+            return;
+        }
+
         // when the cursor is over a label, change it to a hand, but only when there is no marquee
         if (self.coords.labelBbox!==null && self.mouseDownX === null) {
             var labelInfo = self.labelAt(xCanvas, yCanvas);
@@ -2243,6 +2309,12 @@ function MaxPlot(div, top, left, width, height, args) {
                     self.onLabelHover(labelInfo[0], labelInfo[1], ev);
                 }
         }
+
+        // when the cursor is over a line, trigger callback
+        if (self.onLineHover && self.coords.lineLabels) {
+            var lineLabel = self.lineAt(xCanvas, yCanvas);
+            self.onLineHover(lineLabel, ev);
+        }       
 
         if (self.mouseDownX!==null) {
             // we're panning
@@ -2487,6 +2559,7 @@ function MaxPlot(div, top, left, width, height, args) {
     };
 
     this._setLines = function(lines, attrs) {
+        /* set the line attributes */
         if (lines===undefined)
             return;
         self.coords.lines = lines;
@@ -2495,6 +2568,15 @@ function MaxPlot(div, top, left, width, height, args) {
             self.coords.lineAttrs = {};
         else
             self.coords.lineAttrs = attrs;
+
+        // save the labels elsewhere. Labels are optional.
+        if (lines[0].length > 4) {
+            var lineLabels = []
+            for (var i=0; i<lines.length; i++) {
+                lineLabels.push(lines[i][4]);
+            }
+            self.coords.lineLabels = lineLabels;
+        }
     }
 
     this.activateMode = function(modeName) {
