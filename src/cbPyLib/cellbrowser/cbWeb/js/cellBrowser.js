@@ -5595,6 +5595,8 @@ var cellbrowser = function() {
     function buildGeneExprViolins(geneSym, metaName) {
         /* build the violin plots for the gene expression viewer */
         // get gene symbol from function call or dropdown
+        geneSym = geneSym.split("|")[0];
+
         if (geneSym===null)
             geneSym = getById("tpGeneExprGeneCombo").value;
         else
