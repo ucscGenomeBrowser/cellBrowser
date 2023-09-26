@@ -11,6 +11,23 @@ var cbUtil = (function () {
     // the byte range warning message will be shown only once, so we need a global flag
     my.byteRangeWarningShown = false;
 
+    my.absPath = function absPaths(base, rel) {
+        /* https://www.geeksforgeeks.org/convert-relative-path-url-to-absolute-path-url-using-javascript/ */
+        var st = base.split("/");
+        var arr = rel.split("/");
+        st.pop(); // ignore the current file name (or no string)
+        // (ignore if "base" is the current folder without having slash in trail)
+        for (var i = 0; i < arr.length; i++) {
+            if (arr[i] == ".")
+                continue;
+            if (arr[i] == "..")
+                st.pop();
+            else
+                st.push(arr[i]);
+        }
+        return st.join("/");
+    };
+
     my.joinPaths = function joinPaths(parts, separator) {
     // join paths together, taking care of duplicated /s
       if (parts[0]==="") // ["", "test.txt] should just be test.txt, not /test.txt
@@ -120,7 +137,10 @@ var cbUtil = (function () {
 
         oReq.onload = cbUtil.onDoneBinaryData;
         oReq.onprogress = onProgress;
-        oReq.onerror = function(e) { alert("Could not load file "+url); };
+        oReq.onerror = function(e) { 
+            // Github rejects accept-encoding: headers coming from Firefox at the moment.
+            alert("Could not load file "+url+". If this is Firefox and running on Github, please contact us."); 
+        };
         oReq._onDone = onDone; // keep this for the callback
         oReq._otherInfo = otherInfo; // keep this for the callback
         oReq._arrType = arrType; // keep this for the callback casting
@@ -323,6 +343,19 @@ var cbUtil = (function () {
         return a;
     };
 
+    my.arrMinMax = function (a) {
+        /* return [min, max] of array */
+        let min = a[0], max = a[0];
+
+        for (let i = 1; i < a.length; i++) {
+            let value = a[i]
+            min = (value < min) ? value : min
+            max = (value > max) ? value : max
+        }
+
+        return [min, max]
+    }
+
     my.baReadOffset = function(ba, o) {
     /* given a byte array, return the long int (little endian) at offset o */
         var offset = ba[o] |  ba[o+1] << 8 | ba[o+2] << 16 | ba[o+3] << 24;
@@ -351,7 +384,7 @@ function CbDbFile(url) {
     self.name = url;
     self.url = url;
 
-    self.exprBinCount = 10;
+    self.exprBinCount = 25;
 
     // for quick gene name searching
     self.geneSyns = null; // array of [geneSynonymLowercase, geneId]
@@ -405,12 +438,38 @@ function CbDbFile(url) {
            dsUrl = dsUrl+"?"+md5;
         cbUtil.loadJson(dsUrl, function(data) { self.conf = data; gotOneFile();});
 
-        // start loading gene offsets in background, because this takes a while
-        var osUrl = cbUtil.joinPaths([this.url, "exprMatrix.json"]);
-        cbUtil.loadJson(osUrl, function(data) { matrixIndex = data; gotOneFile();}, true);
+        if (self.name!='') {
+            // start loading gene offsets in the background now, because this takes a while
+            var osUrl = cbUtil.joinPaths([this.url, "exprMatrix.json"]);
+            cbUtil.loadJson(osUrl, function(data) { matrixIndex = data; gotOneFile();}, true);
+        } else {
+            gotOneFile();
+        }
     };
 
-    this.loadCoords = function(coordIdx, onDone, onProgress) {
+    this.loadBackgroundImage = function(url, onDone, imgIdx, imgCount, onProgress) {
+        /* load the background image from URL, then call onDone() */
+        var image = new Image();
+        image.onload = function() { 
+            console.log("Done loading image "+url);
+            onDone(image)
+            if (imgIdx==imgCount-1) {
+                var pe = new ProgressEvent("loadEnd");
+                pe.text = "";
+                onProgress(pe);
+            }
+        };
+
+        console.log("Start loading image "+url);
+        image.src = url;
+        if (imgIdx==0) {
+            var pe = new ProgressEvent("loadStart");
+            pe.text = "High-res background image loading...";
+            onProgress(pe);
+        }
+    }
+
+    this.loadCoords = function(coordIdx, onDone, onSpatialDone, onProgress) {
     /* load coordinates from URL and call onDone(array of (x,y), coordInfoObj, labelMids) when done */
         var i = 0;
         var binData = null;
@@ -423,6 +482,7 @@ function CbDbFile(url) {
             if (labelMids!==undefined)
                 onDone(binData, meta, labelMids);
         }
+
         function jsonDone(data) {
             labelMids = data;
             if (binData!==null)
@@ -440,9 +500,23 @@ function CbDbFile(url) {
            return;
         }
 
+        if (coordInfo.images || self.conf.spatial) {
+           var spatials = coordInfo.images;
+               if (!spatials)// older placement of the object
+                   spatials = self.conf.spatial; //now spatial settings must be on the coords to support multi-coord datasets
+           for (var i = 0; i < spatials.length; i++) {
+               var spatial = spatials[i];
+               var jpgUrl = cbUtil.joinPaths([self.url, spatial.file]) +"?"+self.conf.md5;
+               if (spatial.md5)
+                   jpgUrl += "?"+spatial.md5;
+               self.loadBackgroundImage(jpgUrl, onSpatialDone, i, spatials.length, onProgress)
+            }
+        }
+
+
         var binUrl = cbUtil.joinPaths([self.url, "coords", coordInfo.name, "coords.bin"]);
         if (coordInfo.md5)
-            binUrl += "?"+coordInfo.md5
+            binUrl += "?"+coordInfo.md5;
         var arrType = cbUtil.makeType(coordInfo.type || "float64");
         cbUtil.loadFile(binUrl, arrType, binDone, onProgress, coordInfo);
 
@@ -648,8 +722,11 @@ function CbDbFile(url) {
         /* ported from Python cbAdd:discretizeArray */
         /* supports NaN special values */
         var breaks = [];
-        var arrSorted = arr.slice(); // sort expression values
+
+        // sort expression values into a new array
+        var arrSorted = arr.slice(); // slice() = "make copy"
         arrSorted.sort();
+
         var pos = 0;
         if (arrSorted[0] == bin0Val) { // skip all bin0Val and remember position
             var zeros = 0;
@@ -717,11 +794,41 @@ function CbDbFile(url) {
         return {"dArr": dArr, "binInfo": binInfo};
     }
 
+    function discretizeArray_binSize(arr, maxBinCount, bin0Val) {
+        /* discretize an array such that each bin has the same size, not the same number of cells */
+        let minMax = cbUtil.arrMinMax(arr);
+        let min = minMax[0];
+        let max = minMax[1];
+        let binSize = (max-min)/(maxBinCount-1);
+
+        var binCounts = [];
+        for (let i=0; i < maxBinCount; i++) {
+            binCounts.push(0);
+        }
+
+        var dArr = [];
+        for (let i=0; i < arr.length; i++) {
+            var binIdx = Math.round( (arr[i]-min) / binSize ) 
+            dArr.push( binIdx );
+            binCounts[binIdx]++;
+        }
+
+        let binInfo = [];
+        for (let i=0; i < maxBinCount; i++)
+            binInfo.push( [i*binSize, (i+1)*binSize, binCounts[i]] );
+
+        let ret = {};
+        ret.dArr = dArr;
+        ret.binInfo = binInfo;
+        return ret;
+    }
+
     this.locusToOffset = function(name) {
         /* for both gene and ATAC mode: */
         /* return an array [start, end, name] given a locus description (=a string: gene symbol or chr|start|end) */
         var off = null;
-        if (name.includes("|")) { // atac mode: name is chrom|start|end
+        //if (name.includes("|")) { // atac mode: name is chrom|start|end
+        if (self.peakOffsets !== null) { // atac mode: name is chrom|start|end
             let pos = name.split("|");
             off = self.findAtacOffsets(pos[0], parseInt(pos[1]), parseInt(pos[2]));
         }
@@ -789,7 +896,7 @@ function CbDbFile(url) {
         return newArr;
     }
 
-    this.loadExprAndDiscretize = function(locusName, onDone, onProgress) {
+    this.loadExprAndDiscretize = function(locusName, onDone, onProgress, strategy) {
     /* given a locus name, retrieve data from expression matrix
      * and call onDone with (array, discretizedArray, locusName, geneDesc (or ""),
      * binInfo).
@@ -800,6 +907,10 @@ function CbDbFile(url) {
      * - sums of either of these, e.g. PITX1+OTX2 or chr1|1000|2000+chr2|1000|2000
      * - a single gene or locus name, prefixed by "+", to add to the current array
      * - a single gene or locus name, prefixed by "-", to substract from the current array
+
+     * "strategy" can be "cells" or "range". If "cells", bins will have an ideally equal number of cells.
+     * if "range", bins will have an equal range between min-max (and somtimes no cells at all). If undefined,
+     * is "cells"
      * */
 
         var ArrType = cbUtil.makeType(self.conf.matrixArrType); // need this later
@@ -849,7 +960,13 @@ function CbDbFile(url) {
             } else
                 newArr = sumAllArrs(ArrType, arrs);
 
-            var da = discretizeArray(newArr, self.exprBinCount, specVal);
+            var discFunc = null;
+            if (strategy==="range")
+                discFunc = discretizeArray_binSize;
+            else
+                discFunc = discretizeArray;
+            
+            var da = discFunc(newArr, self.exprBinCount, specVal);
             self.currExprArr = newArr; // save it away, we'll need it for the next +<locus> operation
 
             onDone(newArr, da.dArr, locusName, geneDesc, da.binInfo);
@@ -931,7 +1048,7 @@ function CbDbFile(url) {
         var start = 0;
         var lineLen = 0;
 
-        if (self.conf.atacSearch) {
+        if (self.isAtacMode()) {
             let r = cbUtil.parseRange(geneSym);
             if (r===null) {
                 alert("Cannot color on "+geneSym+". This is an ATAC dataset, but the input does not look like a chromosome region in a format like chr1:1-1000.")
@@ -1005,12 +1122,15 @@ function CbDbFile(url) {
         return self.conf;
     };
 
+    this.isAtacMode = function() {
+        return (self.conf.atacSearch!==undefined)
+    }
     this.getMatrixIndex = function() {
-    /* return an object with the geneSymbols */
-        if (self.geneOffsets)
-            return self.geneOffsets;
-        else
+    /* return an object with the geneSymbols or peak locations */
+        if (self.isAtacMode())
             return self.peakOffsets;
+        else
+            return self.geneOffsets;
     };
 
     this.getGeneInfo = function(geneId) {
@@ -1283,6 +1403,21 @@ function CbDbFile(url) {
         return geneNameObjs;
     };
 
+    this.findGenesExact = function(geneSyns, geneSym) {
+        /* search the geneSyns (arr of [syn, geneId]) for matches. Return arr of geneIds 
+         * Used to resolve symbol to geneId (symToGene)*/
+        geneSym = geneSyns.toLowerCase();
+        var geneSyns = self.geneSyns;
+        var foundIds = [];
+        for (var i=0; i<geneSyns.length; i++) {
+            var synRow = geneSyns[i];
+            var syn = synRow[0];
+            if (syn===geneSym)
+                foundIds.push(synRow[1]);
+        }
+        return foundIds;
+    }
+
     function pickTssForGene(loc) {
         /* given a chromLoc tuple (start, end, strand, sym), return the TSS of the gene (start or end )*/
         var start = loc[0];
@@ -1450,27 +1585,29 @@ function CbDbFile(url) {
         return matrixMin;
     }
 
-    this.preloadGenes = function(geneSyms, onDone, onProgress) {
+    this.preloadGenes = function(geneSyms, onDone, onProgress, strategy) {
        /* start loading the gene expression vectors in the background. call onDone when done. */
        var validGenes = self.geneOffsets;
 
        var loadCounter = 0;
        if (geneSyms) {
            for (var i=0; i<geneSyms.length; i++) {
-               var sym = geneSyms[i][0];
-               if (! (sym in validGenes)) {
-                  alert("Error: "+sym+" is in quick genes list but is not a valid gene");
-                  continue;
-               }
+               var geneId = geneSyms[i][0];
+               //if (! (sym in validGenes)) {
+                  //alert("Error: "+sym+" is in quick genes list but is not a valid gene");
+                  //continue;
+               //}
+               if (geneId.indexOf("|")!==-1)
+                   geneId = geneId.split("|")[0];
 
                 self.loadExprAndDiscretize(
-                   sym,
+                   geneId,
                    function(exprVec, discExprVec, geneSym, geneDesc, binInfo) {
                        self.quickExpr[geneSym] = [discExprVec, geneDesc, binInfo];
                        loadCounter++;
                        if (loadCounter===geneSyms.length) onDone();
                    },
-                   onProgress);
+                   onProgress, strategy);
            }
        }
     };

@@ -1,6 +1,17 @@
 How To...
 ____
 
+How to determine the correct gene model version
+^^^^
+
+If you don't know the GENCODE version used, cbGenes can determine the most likely version:
+
+::
+
+ cbGenes guess exprMatrix.tsv.gz human
+
+The first column of this file should be gene symbols of GENCODE gene IDs.
+
 How to create a cell browser using a Seurat RDS file
 ^^^^
 
@@ -29,6 +40,10 @@ Lastly, go into the output directory specified in the cbImportSeurat command and
 
   cd myRdsImport
   cbBuild -o ~/public_html/cb
+
+Or, if you don't have a webserver already, use the built-in one:
+
+  cbBuild -o /myHtmlFiles -p 8888
 
 You should now be able to access your cell browser from the web.
 
@@ -61,6 +76,10 @@ Next, go into the output directory specified in the cbImportSeurat command and r
 
   cd seurat-out
   cbBuild -o ~/public_html/cb
+
+Or, if you don't have a webserver already, start the built-in one:
+
+  cbBuild -o /myHtmlFiles -p 8888
 
 
 How to configue a basic cbSeurat pipeline
@@ -103,11 +122,14 @@ Then, go into the output directory specified in the cbImportSeurat command and r
   cd scanpy-import
   cbBuild -o ~/public_html/cb
 
-You should now be able to access your cell browser from the web.
+Or, if you don't have a webserver already, start the built-in one:
+
+  cbBuild -o /myHtmlFiles -p 8888
+
+You should now be able to access your cell browser from the web or your local computer.
 
 
-
-How to convert a Scanpy object wihthin Python
+How to convert a Scanpy object within Python
 ^^^^
 
 It a few simple commands to build a ``cellbrowser.conf`` and all the files you need for a cell
@@ -163,7 +185,6 @@ Next, go into the output directory specified in the ``cbScanpy`` command and bui
   cd scanpy-out
   cbBuild -o ~/public_html/cb
 
-
 How to configue a basic cbScanpy pipeline
 ^^^^
 
@@ -182,56 +203,51 @@ Step 2: Edit your seurat.conf
 Now that you have a scanpy.conf in your current directory, open it up and edit it! If this file is in the same 
 directory where you are running ``cbScanpy``, it will be automatically picked up. 
 
-How to export the data from Monocle for use in the Cell Browser
+How to export the data from Monocle 2 or 3 for use in the Cell Browser
 ^^^^
 `Monocle <https://cole-trapnell-lab.github.io/monocle-release/>`_ is an R package that can be used to reconstruct 
 transcriptional trajectories. You can export the coordinates, expression data, and metadata from a
 Monocle object and then use those files to build a cell browser. These steps assume that you have your Monocle
-object loaded into R already. 
+object loaded into R already and the name of the object is `cds`. 
 
 Step 1: Export expression matrix
 """"
 
 First, export data in MTX format, since it can handle large matrix sizes. MTX consists of three files: 
-(1) a sparse matrix, (2) a file of column names, and (3) a file of row names.
-
-(1) MTX sparse matrix:
+(1) a sparse matrix, (2) a file of column/gene names, and (3) a file of row/cell names.
 
 ::
 
-  writeMM(exprs(monocle_obj), 'matrix.mtx')``
-
-(2) Row names (genes):
-
-::
-
-  write.table(as.data.frame(cbind(rownames(exprs(monocle_obj)), rownames(exprs(monocle_obj)))), file='features.tsv', sep="\t", row.names=F, col.names=F, quote=F)
-
-(3) Column names (samples/cells):
-
-::
-
-  write(colnames(exprs(monocle_obj)), file = 'barcodes.tsv')
+  require(Matrix)
+  writeMM(exprs(cds), 'matrix.mtx')``
+  write.table(as.data.frame(cbind(rownames(exprs(cds)), rownames(exprs(cds)))), file='features.tsv', sep="\t", row.names=F, col.names=F, quote=F)
+  write(colnames(exprs(cds)), file = 'barcodes.tsv')
 
 Step 2: Export cell annotations
 """"
 
 Next, export the cell metadata annotations, which includes Monocle's calculated 'pseudotime':
 
-::
+Monocle2::
 
-  write.table(as(monocle_obj@phenoData,"data.frame"), file='meta.tsv', quote=FALSE, sep='\t', col.names = NA)
+  write.table(as(cds@phenoData,"data.frame"), file='meta.tsv', quote=FALSE, sep='\t', col.names = NA)
 
+Monocle3::
+
+  write.table(as(cds@colData,"data.frame"), file='meta.tsv', quote=FALSE, sep='\t', col.names = NA)
 
 Step 3: Export cell coordinates
 """"
 
-Then, export the cell coordinates:
+Finally, export the cell coordinates:
 
-::
+Monocle2::
 
-  write.table(t(monocle_obj@reducedDimS), file='monocle.coords.tsv', quote=FALSE, sep='\t', col.names = NA)
+  write.table(t(cds@reducedDimS), file='monocle.coords.tsv', quote=FALSE, sep='\t', col.names = NA)
 
+Monocle3::
+
+  write.table(data.frame(SingleCellExperiment::reducedDims(cds)[["UMAP"]]), file='monocle.coords.tsv', quote=FALSE, sep='\t', col.names = NA)
 
 Step 4: Set up your cellbrowser.conf
 """"
@@ -245,7 +261,6 @@ You will specifically need to edit these lines to point to the flies that you ex
 
   exprMatrix="matrix.mtx"
   meta="meta.tsv"
-
   coords=[
     {
       "file":"monocle.coords.tsv",
@@ -253,7 +268,6 @@ You will specifically need to edit these lines to point to the flies that you ex
       "flipY":True,
     },
   ]
-  
   defColorField="Pseudotime"
   
 You will still need to set the other `required settings <https://github.com/maximilianh/cellBrowser/blob/master/src/cbPyLib/cellbrowser/sampleConfig/cellbrowser.conf#L1>`_ in your cellbrowser.conf as well
@@ -345,6 +359,10 @@ You will specifically need to edit these lines to point to the flies that you ex
 
   meta="meta.tsv"
 
+  lineWidth=3
+  lineColor="#220011"
+  lineAlpha=0.2
+
   coords=[
     {
       "file":"urd.coords.tsv",
@@ -361,7 +379,12 @@ You will specifically need to edit these lines to point to the flies that you ex
   
 You will still need to set the other `required settings <https://github.com/maximilianh/cellBrowser/blob/master/src/cbPyLib/cellbrowser/sampleConfig/cellbrowser.conf#L1>`_ in your cellbrowser.conf as well
 
+How to start the webserver without building datasets
+^^^^
 
+If you have stopped the built-in webserver and want to start it again, without rebuilding the entire dataset, use the cbUpgrade tool:
+
+  cbUpgrade -o /myHtmlFiles -p 8888
 
 How to visualize single-cell ATAC-seq data in the Cell Browser
 ^^^^
@@ -372,25 +395,20 @@ Step 1: Gather required files
 """"
 
 You will the following three files:
+
 * Expression matrix with cell names as columns and peak ranges as rows. 
 * Cell annotations/metadata
 * Layout coordinats (e.g. UMAP)
 
-Step 2: Determine GENCODE Gene Model version (optional)
+Step 2: Download the gene model files
 """"
 
-If you don't know the GENCODE version used, cbGenes can determine the most likely version used:
+Pick a current gene model version, either by asking the authors or use current
+one. Use ``cbGenes fetch`` to list the gene model files we have prebuilt for you at UCSC, then
+use ``cbGenes fetch`` followed by the name of the file to download it. Also download the
+gene symbol <-> ID mapping to the user can search for both gene IDs and gene symbols.
 
-::
-
- cbGenes guess exprMatrix.tsv.gz human
-
-The first column of this file should be gene symbols of GENCODE gene IDs.
-
-Step 3: Download the gene model files
-""""
-
-Once you know the version, download the appropriate files to your cellbrowserData directory:
+Examples:
 
 ::
 
@@ -399,7 +417,7 @@ Once you know the version, download the appropriate files to your cellbrowserDat
 
 Both files are required for this to work.
 
-Step 4: Set up your cellbrowser.conf
+Step 3: Set up your cellbrowser.conf
 """"
 
 You will need to add the following lines to your ``cellbrowser.conf``:
