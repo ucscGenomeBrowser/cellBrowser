@@ -4516,8 +4516,9 @@ def geneSeriesToStrings(var, geneKey, indexFirst=False, sep="|", justValues=Fals
         genes = [str(x)+sep+str(y) for (x,y) in geneIdAndSyms]
     return genes
 
-def geneStringsFromVar(var, sep="|"):
+def geneStringsFromVar(ad, sep="|"):
     " return a list of strings in format geneId<sep>geneSymbol "
+    var = ad.var
     if "gene_ids" in var:
         logging.debug("Found 'gene_ids' attribute in var")
         genes = geneSeriesToStrings(var, "gene_ids", indexFirst=False, sep=sep)
@@ -4532,7 +4533,7 @@ def geneStringsFromVar(var, sep="|"):
         logging.debug("Found 'features' attribute in var, using just those")
         genes = var["features"].tolist()
     elif "_index" in var:
-        # mouse-striatal-dev, but only when opened in cbImportScanpy, as the "features" transformed to "_index"
+        # mouse-striatal-dev, but only when opened in cbImportScanpy, has the "features" transformed to "_index"
         logging.debug("Found '_index' attribute in var")
         genes = geneSeriesToStrings(var, "_index", justValues=True, sep=sep)
     else:
@@ -4582,9 +4583,10 @@ def anndataMatrixToMtx(ad, path, useRaw=False):
         dataType = "integer"
 
     if ~scipy.sparse.issparse(mat):
+        logging.debug("Convert matrix to sparse")
         mat = scipy.sparse.csr_matrix(mat)
 
-    geneLines = geneStringsFromVar(var, sep="\t")
+    geneLines = geneStringsFromVar(ad, sep="\t")
     genes_file = join(path, 'features.tsv.gz')
     logging.info("Writing %s" % genes_file)
     with gzip.open(genes_file, 'wt') as f:
@@ -4653,7 +4655,7 @@ def anndataMatrixToTsv(ad, matFname, usePandas=False, useRaw=False):
 
         # when reading 10X files, read_h5 puts the geneIds into a separate field
         # and uses only the symbol. We prefer ENSGxxxx|<symbol> as the gene ID string
-        genes = geneStringsFromVar(var)
+        genes = geneStringsFromVar(ad)
 
         logging.info("Writing %d genes in total" % len(genes))
         for i, geneName in enumerate(genes):
