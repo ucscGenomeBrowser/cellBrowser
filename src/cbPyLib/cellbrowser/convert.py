@@ -34,7 +34,7 @@ Examples:
     - %prog matCatGenes mat1.csv.gz mat2.tsv.gz=atac- exprMatrix.tsv.gz - concatenate expression matrices
            and prefix all genes in the second file with 'atac-'
     - %prog metaCat meta.tsv seurat/meta.tsv scanpy/meta.tsv newMeta.tsv - merge meta matrices
-    - %prog reorder meta.tsv meta.newOrder.tsv --delete samId --order=cluster,cellType,age - reorder meta fields
+    - %prog reorder meta.tsv meta.newOrder.tsv --del samId --order=cluster,cellType,age - reorder meta fields
     """)
 
     parser.add_option("-d", "--debug", dest="debug", action="store_true",
