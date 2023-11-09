@@ -4980,12 +4980,12 @@ var cellbrowser = function() {
 
         htmls.push('<div class="tpLeftSideItem">');
         htmls.push('<label for="tpSizeInput">Dot size</label>');
-        htmls.push('<input id="tpSizeInput" type="text" size="6"></input>');
+        htmls.push('&nbsp;<input id="tpSizeInput" type="text" size="6"></input>');
         htmls.push('</div>'); // tpLeftSideItem
 
         htmls.push('<div class="tpLeftSideItem">');
         htmls.push('<label for="tpAlphaInput">Transparency</label>');
-        htmls.push('<input id="tpAlphaInput" type="text" size="6"></input>');
+        htmls.push('&nbsp;<input id="tpAlphaInput" type="text" size="6"></input>');
         htmls.push('</div>'); // tpLeftSideItem
     }
 

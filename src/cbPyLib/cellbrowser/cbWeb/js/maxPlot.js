@@ -90,7 +90,7 @@ function MaxPlot(div, top, left, width, height, args) {
             addModeButtons(10, 10, self);
             addStatusLine(height-gStatusHeight, left, width, gStatusHeight);
             addTitleDiv(height-gTitleSize-gStatusHeight-4, 8);
-            addSliders();
+            addSliders(height-gStatusHeight-15, width);
 
             /* add the div used for the mouse selection/zoom rectangle to the DOM */
             var selectDiv = document.createElement('div');
@@ -265,13 +265,14 @@ function MaxPlot(div, top, left, width, height, args) {
             return 5;
     }
 
-    function createSliderSpan(id, width, height) {
+    function createSliderSpan(id, width, height, left) {
         /* create div with given width and height */
         var div = document.createElement('span');
         div.id = id;
         div.style.position = "relative";
         div.style.width = width+"px";
         div.style.height = height+"px";
+        div.style.left = left+"px";
         return div;
     }
 
@@ -304,7 +305,7 @@ function MaxPlot(div, top, left, width, height, args) {
         if (title!==null)
             div.title = title;
         if (text!==null)
-            div.textContent = text;
+            div.innerHTML = text;
         if (imgFname!==null && imgFname!==undefined) {
             var img = document.createElement('img');
             img.src = imgFname;
@@ -420,18 +421,22 @@ function MaxPlot(div, top, left, width, height, args) {
         self.drawDots();
     }
 
-    function addSliders() {
+    function addSliders(fromTop, canvWidth) {
+        /* add sliders for transparency and radius */
         // alpha reset slider: a label, a slider + a reset button
-        var alphaSlider = createSliderSpan("mpAlphaSlider", 60, 10);
+        var sliderWidth = 120;
+        var fromLeft = canvWidth - 2*sliderWidth - 2*45 - 30;
+
+        var alphaSlider = createSliderSpan("mpAlphaSlider", sliderWidth, 10, 0);
         self.alphaSlider = alphaSlider; // see activateSliders() for the jquery UI part of the code, executed later
         alphaSlider.style.float = "left";
         alphaSlider.style.top = "3px";
 
         // container for label + control elements
-        var alphaCont = document.createElement('div');
+        var alphaCont = document.createElement('span');
         alphaCont.id = "mpAlphaCont";
-        alphaCont.style.top = "10px";
-        alphaCont.style.left = "50px";
+        alphaCont.style.top = "0px";
+        alphaCont.style.left = "150px"; // cellbrowser.css defines grid widths: 45
         alphaCont.className = "sliderContainer";
 
         var alphaLabel = document.createElement('span'); // contains the slider and the reset button, floats right
@@ -440,46 +445,59 @@ function MaxPlot(div, top, left, width, height, args) {
         alphaLabel.className = "sliderLabel";
 
         // reset button
-        var alphaReset = createButton(15, 15, "mpAlphaReset", "Reset transparency", "Rs", null, null, null, false, false, 10);
-        alphaReset.style.float = "right";
-        alphaReset.style.marginLeft = "2px";
-        alphaReset.addEventListener ('click',  function() { self.resetAlpha(); self.drawDots();}, false);
+        var undoSvg = '<svg xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 512 512"><!--! Font Awesome Free 6.4.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2023 Fonticons, Inc. --><path d="M212.333 224.333H12c-6.627 0-12-5.373-12-12V12C0 5.373 5.373 0 12 0h48c6.627 0 12 5.373 12 12v78.112C117.773 39.279 184.26 7.47 258.175 8.007c136.906.994 246.448 111.623 246.157 248.532C504.041 393.258 393.12 504 256.333 504c-64.089 0-122.496-24.313-166.51-64.215-5.099-4.622-5.334-12.554-.467-17.42l33.967-33.967c4.474-4.474 11.662-4.717 16.401-.525C170.76 415.336 211.58 432 256.333 432c97.268 0 176-78.716 176-176 0-97.267-78.716-176-176-176-58.496 0-110.28 28.476-142.274 72.333h98.274c6.627 0 12 5.373 12 12v48c0 6.627-5.373 12-12 12z"/></svg>';
+
+        //var alphaReset = createButton(15, 15, "mpAlphaReset", "Reset transparency", undoSvg, null, null, null, false, false, 10);
+        //alphaReset.style.float = "right";
+        //alphaReset.style.marginLeft = "2px";
+        //alphaReset.addEventListener ('click',  function() { self.resetAlpha(); self.drawDots();}, false);
+
+        var sliderReset = createButton(15, 15, "mpSliderReset", "Reset transparency and circle size", undoSvg, null, null, null, false, false, 10);
+        sliderReset.style.float = "right";
+        sliderReset.style.lineHeight = "16px";
+        sliderReset.style.marginLeft = "2px";
+        sliderReset.style.top = "8px";
+        sliderReset.style.position = "relative";
+        sliderReset["z-index"] = "10"; // ? why ?
+        sliderReset.addEventListener ('click',  function() { self.resetAlpha(); self.resetRadius(); self.drawDots()}, false);
 
         alphaCont.appendChild(alphaLabel);
         alphaCont.appendChild(alphaSlider);
-        alphaCont.appendChild(alphaReset);
+        //alphaCont.appendChild(alphaReset);
+        alphaCont.appendChild(sliderReset);
 
-        self.div.appendChild(alphaCont);
 
         // Radius reset slider: label, slider and reset button
-        var radiusSlider = createSliderSpan("mpRadiusSlider", 60, 10);
+        var radiusSlider = createSliderSpan("mpRadiusSlider", sliderWidth, 10, 20);
         radiusSlider.style.float = "left";
         self.radiusSlider = radiusSlider; // see activateSliders() for the jquery UI part of the code, executed later
 
         // container for label + slider and reset button
-        var radiusCont = document.createElement('div');
+
+        var radiusCont = document.createElement('span');
         radiusCont.className = "sliderContainer";
         radiusCont.id = "mpRadiusDiv";
-        radiusCont.style.left = "50px";
-        radiusCont.style.top = "15px";
+        radiusCont.style.left = fromLeft+"px";
+        radiusCont.style.top = fromTop+"px";
         radiusCont.appendChild(radiusSlider)
 
         var radiusLabel = document.createElement('span'); // contains the slider and the reset button, floats right
         radiusLabel.id = "radiusSliderLabel";
-        radiusLabel.textContent = "Size";
+        radiusLabel.textContent = "Circle Size";
+        radiusLabel.style.width = "80px";
         radiusLabel.className = "sliderLabel";
-
-        var radiusReset = createButton(15, 15, "mpRadiusReset", "Reset radius", "Rs", null, null, null, false, false, 10);
-        radiusReset.style.float = "right";
-        radiusReset.style.marginLeft = "2px";
-        radiusReset["z-index"] = "10"; // ? why ?
-        radiusReset.addEventListener ('click',  function() { self.resetRadius(); self.drawDots()}, false);
 
         radiusCont.appendChild(radiusLabel);
         radiusCont.appendChild(radiusSlider);
-        radiusCont.appendChild(radiusReset);
+        //radiusCont.appendChild(sliderReset);
 
-        self.div.appendChild(radiusCont);
+        // add both to the DOM
+        var sliderCont = document.createElement('span');
+        sliderCont.style.top = fromTop;
+        sliderCont.style.left = fromLeft;
+        sliderCont.appendChild(radiusCont);
+        sliderCont.appendChild(alphaCont);
+        self.div.appendChild(sliderCont);
     }
 
     function addCloseButton(top, left) {

@@ -94,7 +94,7 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         font-weight : bold;
         font-size : 80%; */
         display: grid;
-        grid-template-columns: 45px 60px 15px;
+        grid-template-columns: 45px 120px 15px;
         position: relative;
 }
 
