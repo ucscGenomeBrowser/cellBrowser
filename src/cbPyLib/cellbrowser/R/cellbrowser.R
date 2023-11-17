@@ -46,6 +46,9 @@ saveMatrix <- function(counts, dir, prefix, use.mtx) {
         genesPath <- file.path(dir, paste(prefix, "features.tsv", sep=""))
         barcodesPath <- file.path(dir, paste(prefix, "barcodes.tsv", sep=""))
         message("Writing expression matrix to ", matrixPath)
+        if (class(counts)[1]=="matrix") {
+            counts <- as(counts, "sparseMatrix")
+        }
         writeMM(counts, matrixPath)
         # easier to load if the genes file has at least two columns. Even though seurat objects
         # don't have yet explicit geneIds/geneSyms data, we just duplicate whatever the matrix has now
