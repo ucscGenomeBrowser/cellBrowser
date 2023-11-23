@@ -1556,6 +1556,10 @@ class MatrixMtxReader:
             if i%1000==0:
                 logging.info("%d genes written..." % i)
             arr = mat.getrow(i).toarray()
+            if arr.ndim==2:
+                # scipy sparse arrays have changed their entire data model and now all operations
+                # return 2D matrices. So need to unpack it to get the array. Grrr.
+                arr = arr[0]
             yield (geneId, geneSym, arr)
 
 class MatrixTsvReader:
