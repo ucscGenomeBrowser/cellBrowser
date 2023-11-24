@@ -3013,16 +3013,18 @@ var cellbrowser = function() {
         }
 
         let exprMax = exprArr[0];
+        let exprMin = exprArr[0];
         for (var i=0; i < exprArr.length; i++) {
             var exprVal = exprArr[i];
             var metaVal = metaArr[i];
             metaValToExprArr[metaVal].push(exprVal);
             exprMax = Math.max(exprMax, exprVal);
-            if (exprMax > 50)
-                exprMax = Math.round(exprMax);
+            //if (exprMax > 50)
+                //exprMax = Math.round(exprMax);
+            exprMin = Math.min(exprMin, exprVal);
 
         }
-        return [metaValToExprArr, exprMax];
+        return [metaValToExprArr, exprMin, exprMax];
     }
 
     function splitExprByMetaSelected(exprVec, splitArr, selCells) {
@@ -4904,7 +4906,7 @@ var cellbrowser = function() {
 
         // users can save bookmarks directly to the expr viewer
         if (getVar("exprGene")) {
-            buildExprView()
+            buildExprViewWindow()
             showTutorial = false;
         }
         // start the tutorial after a while
@@ -5539,7 +5541,7 @@ var cellbrowser = function() {
         var fieldId = parseInt(choice.selected.split("_")[1]);
         var metaName = db.getMetaFields()[fieldId].name;
         debug("changed meta on gene expr view", ev);
-        buildGeneExprViolins(null, metaName);
+        buildGeneExprPlots(null, metaName);
     }
 
     function onGeneExprGeneComboChange(ev) {
@@ -5548,7 +5550,7 @@ var cellbrowser = function() {
         if (geneId==="") // "" = user deleted the gene.
             return;
         //var geneId = db.getGeneInfo(geneId).;
-        buildGeneExprViolins(geneId, null);
+        buildGeneExprPlots(geneId, null);
     }
 
     function promiseGene(locusStr) {
@@ -5592,65 +5594,127 @@ var cellbrowser = function() {
         });
     }
 
-    function buildGeneExprViolins(geneSym, metaName) {
-        /* build the violin plots for the gene expression viewer */
-        // get gene symbol from function call or dropdown
-        geneSym = geneSym.split("|")[0];
+    function calcMedianQuart(arr) {
+        /* given array, return obj with .quart1, .median, .quart3. For a barchart */
+        arr = arr.sort(function(a, b){ return a-b; }); // why is the function necessary? does sort() not sort numerically?
+        let arrLen = arr.length;
+        let quartSize = 1/6; // quartile = partition number space into 6 equal parts
 
-        if (geneSym===null)
-            geneSym = getById("tpGeneExprGeneCombo").value;
-        else
-            selectizeSetValue("tpGeneExprGeneCombo", geneSym);
+        let ret = {};
+        ret.median = arr[Math.round(arrLen*0.5)];
 
-        // get meta field from function call or dropdown
-        if (metaName==null) {
-            let metaIdx = document.getElementById("tpGeneExprMetaCombo").value.split("_")[1]; // e.g. tpMetaVal_1
-            metaName = db.conf.metaFields[metaIdx].name;
-        } else {
-            let metaIdx = db.findMetaInfo(metaName).index
-            chosenSetValue("tpGeneExprMetaCombo", "tpMetaVal_"+metaIdx);
+        ret.quart1 = arr[Math.round(arrLen*1*quartSize)];
+        ret.quart2 = arr[Math.round(arrLen*2*quartSize)];
+        ret.quart3 = arr[Math.round(arrLen*3*quartSize)];
+        ret.quart4 = arr[Math.round(arrLen*4*quartSize)];
+        ret.count = arr.length;
+        console.log(ret);
+        return ret;
+    }
+
+    function plotBarchartAxis(htmls, labelWidth, chartWidth, minY, minExpr, maxExpr) {
+        /* add barchart axis to htmls as svg elements */
+        let x1 = labelWidth;
+        let x2 = chartWidth;
+        let y1 = minY;
+        let y2 = minY;
+        htmls.push("<line x1='"+x1+"' y1='"+y1+"' x2='"+x2+"' y2='"+y2+"' stroke='black' stroke-width='2'/>");
+
+        // left start tick
+        y1 = minY-5;
+        y2 = minY+5;
+        x1 = x2 = labelWidth;
+        htmls.push("<line x1='"+x1+"' y1='"+y1+"' x2='"+x2+"' y2='"+y2+"' stroke='black' stroke-width='1'/>");
+
+        // right end tick
+        x1 = x2 = chartWidth;
+        htmls.push("<line x1='"+x1+"' y1='"+y1+"' x2='"+x2+"' y2='"+y2+"' stroke='black' stroke-width='1'/>");
+
+        // min label
+        let x = labelWidth;
+        let y = minY - 8;
+        let label = minExpr;
+        htmls.push("<text font-family='sans-serif' font-size='12' fill='black' text-anchor='middle' x='"+x+"' y='"+y+"'>"+label+"</text>");
+        // max label
+        x = chartWidth;
+        label = maxExpr;
+        htmls.push("<text font-family='sans-serif' font-size='12' fill='black' text-anchor='middle' x='"+x+"' y='"+y+"'>"+label+"</text>");
+    }
+
+    function plotOneBarchartSvg(htmls, labelWidth, minY, minX, maxX, scaleFact, rowIdx, label, dataSumm) {
+        /* add SVG elements for one barchart to htmls */
+        let barchartHeight = 40;
+        let x = 20;
+        let y = minY+(rowIdx*barchartHeight);
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='left' x='"+x+"' y='"+y+"'>"+label+"</text>");
+
+        // draw a rectangle from second to third quartile
+        y -= 15;
+        let barWidth = Math.round(scaleFact*(dataSumm.quart3-dataSumm.quart2));
+        let barStart = labelWidth+Math.round(scaleFact*(dataSumm.quart2));
+        let barHeight = 15;
+        x = barStart;
+        let fillHex = "DDDDDD";
+        htmls.push("<rect width='"+barWidth+"' height='"+barHeight+"' fill='#"+fillHex+"' x='"+x+"' y='"+y+"'></rect>");
+
+        // a line from first to fourth quartile
+        y = minY+(rowIdx*barchartHeight)-0.5*barHeight;
+        let y1 = y;
+        let y2 = y;
+        let x1 = labelWidth+Math.round(scaleFact*(dataSumm.quart1));
+        let x2 = labelWidth+Math.round(scaleFact*(dataSumm.quart4));
+        htmls.push("<line x1='"+x1+"' y1='"+y1+"' x2='"+x2+"' y2='"+y2+"' stroke='black' stroke-width='2'/>");
+
+        console.log("<rect width='"+barWidth+"' height='"+barHeight+"' fill='#"+fillHex+"' x='"+x+"' y='"+y+"'></rect>");
+    }
+
+    function buildExprBarcharts(parentDomId, metaToExpr, metaLabels, exprMin, exprMax) {
+        /* plot barcharts on the expression viewer */
+        let htmls = [];
+        let parentEl = getById(parentDomId);
+
+        let metaCount = metaToExpr.length;
+        let chartHeight = metaCount*40;
+        let chartWidth = parentEl.getBoundingClientRect().width;
+        htmls.push("<svg xmlns='http://www.w3.org/2000/svg' height='"+chartHeight+"' width='"+chartWidth+"'>");
+
+        let minY = 20;
+        let labelWidth = 150;
+        plotBarchartAxis(htmls, labelWidth, chartWidth, minY, exprMin, exprMax);
+
+        let minX = 0;
+        let maxX = chartWidth;
+        let scaleFact = (maxX-minX)/(exprMax-exprMin);
+
+        minY+=30;
+
+        for (let i=0; i < metaToExpr.length; i++) {
+            console.log(metaLabels[i]);
+            let exprArr = metaToExpr[i];
+            let dataSumm = calcMedianQuart(exprArr);
+            plotOneBarchartSvg(htmls, labelWidth, minY, minX, maxX, scaleFact, i, metaLabels[i], dataSumm);
         }
+        htmls.push("</svg>");
+        parentEl.innerHTML = htmls.join("");
+    }
 
-        // get maximum from URL
-        let exprMax = getVar("exprMax");
-        if (exprMax) {
-            getById("tpGeneExprYLimitCheck").checked = true;
-            getById("tpGeneExprYLimit").value = exprMax;
-        } else {
-            getById("tpGeneExprYLimit").disabled = true;
-            getById("tpGeneExprApply").disabled = true;
-        }
-
-        changeUrl({"exprGene":geneSym, "exprMeta":metaName, "exprMax":exprMax});
-
-        Promise.all([promiseGene(geneSym), promiseMeta(metaName)]).then( function(resArr) {
-            console.log("promises are all loaded", resArr);
-            let geneData = resArr[0];
-            let exprArr = geneData.exprArr;
-
-            let metaData = resArr[1];
-            let metaArr = metaData.arr;
-
-            let res = splitExprByMeta(metaArr, metaData.valCounts, exprArr);
-            let metaToExpr = res[0];
-            let exprMax = res[1];
-            getById("tpGeneExprYLimit").value = exprMax;
-
-            // first make the canvas DOM objects
+    function buildExprViolins(parentDomId, metaToExpr, metaLabels) {
+        /* plot the violin plots on the expression viewer */
+            // first make the canvas DOM objects...
             let htmls = [];
             for (let i=0; i < metaToExpr.length; i++) {
                 htmls.push("<div class='tpExprViolin' id='tpExprViolin_"+i+"'>");
                 htmls.push("<canvas style='width:200px;height:150px' class='tpExprViolinCanvas' id='tpExprViolinCanvas_"+i+"'></canvas>");
                 htmls.push("</div>"); // violin
             }
-            getById("tpExprViewPlot").innerHTML = htmls.join("");
+            getById(parentDomId).innerHTML = htmls.join("");
 
             // then fill them with violin plots
 
             let vioData = {};
 
             for (let i=0; i < metaToExpr.length; i++) {
-                let labelLines = [[metaData.ui.shortLabels[i], metaToExpr[i].length+" cells"]];
+                let labelLines = [[metaLabels[i], metaToExpr[i].length+" cells"]];
                 let dataList = [metaToExpr[i]];
                 let violinData = {
                   labels : labelLines,
@@ -5690,7 +5754,73 @@ var cellbrowser = function() {
                     console.timeEnd("violinDraw_"+i);
                 }, 5);
             }
-    });
+        }
+
+    function buildGeneExprPlots(geneSym, metaName, plotType) {
+        /* build the violin plots for the gene expression viewer */
+        // get gene symbol from function call or dropdown
+        geneSym = geneSym.split("|")[0];
+
+        if (geneSym===null)
+            geneSym = getById("tpGeneExprGeneCombo").value;
+        else
+            selectizeSetValue("tpGeneExprGeneCombo", geneSym);
+
+        // get meta field from function call or dropdown
+        if (metaName==null) {
+            let metaIdx = document.getElementById("tpGeneExprMetaCombo").value.split("_")[1]; // e.g. tpMetaVal_1
+            metaName = db.conf.metaFields[metaIdx].name;
+        } else {
+            let metaIdx = db.findMetaInfo(metaName).index
+            chosenSetValue("tpGeneExprMetaCombo", "tpMetaVal_"+metaIdx);
+        }
+
+        // get maximum from URL
+        let forceExprMax = getVar("exprMax");
+        let forceExprMaxNum = null;
+        let limitCheckbox = getById("tpGeneExprYLimitCheck");
+        let limitInput = getById("tpGeneExprYLimit");
+
+        let urlOpts = {"exprGene":geneSym, "exprMeta":metaName};
+        if (forceExprMax && forceExprMax!="") {
+            limitCheckbox.checked = true;
+            limitInput.value = forceExprMax;
+            forceExprMaxNum = parseFloat(forceExprMax);
+        } else {
+            //if (limitCheckbox.checked)
+                //forceExprMax = parseFloat(limitInput.value);
+            //else {
+                //limitCheckbox.disabled = true;
+                limitInput.disabled = true;
+            //}
+        }
+
+        changeUrl(urlOpts);
+
+        Promise.all([promiseGene(geneSym), promiseMeta(metaName)]).then( function(resArr) {
+            console.log("promises are all loaded", resArr);
+            let geneData = resArr[0];
+            let exprArr = geneData.exprArr;
+
+            let metaData = resArr[1];
+            let metaArr = metaData.arr;
+
+            let res = splitExprByMeta(metaArr, metaData.valCounts, exprArr);
+            let metaToExpr = res[0];
+            let exprMin = res[1];
+            let exprMax = res[2];
+            //getById("tpGeneExprYLimit").value = exprMax;
+            if (forceExprMaxNum)
+                exprMax = forceExprMaxNum;
+
+            if (plotType==="violin") {
+                buildExprViolins("tpExprViewPlot", metaToExpr, metaData.ui.shortLabels, exprMax);
+            }
+            else {
+                buildExprBarcharts("tpExprViewPlot", metaToExpr, metaData.ui.shortLabels, exprMin, exprMax);
+            }
+
+        });
     }
 
     function closeExprView() {
@@ -5705,7 +5835,7 @@ var cellbrowser = function() {
         if(e.keyCode == 27) closeExprView(); 
     }
 
-    function buildExprView() {
+    function buildExprViewWindow() {
         /* build the expression viewer dialog box */
         var htmls = [];
         htmls.push("<div id='tpExprView'>");
@@ -5724,10 +5854,11 @@ var cellbrowser = function() {
         htmls.push('<label id="tpGeneExprMetaLabel" for="'+"tpGeneExprMetaCombo"+'">split by cell annotation</label>');
         buildMetaFieldCombo(htmls, "tpGeneExprMetaComboBox", "tpGeneExprMetaCombo", 0);
 
-        htmls.push('<input style="margin-left:4em" type="checkbox" id="tpGeneExprYLimitCheck"></input>');
+        //htmls.push('<input style="margin-left:4em" type="checkbox" id="tpGeneExprYLimitCheck"></input>');
         htmls.push('<label style="margin-left:0.6em" for="tpGeneExprYLimitCheck">Set maximum to</label>');
         htmls.push('<input style="margin-left:0.6em" type="text" id="tpGeneExprYLimit" size="7"></input>');
-        htmls.push('<button style="margin-left:0.6em" type="button" id="tpGeneExprApply">Apply</button>');
+        htmls.push('<button style="margin-left:0.6em" type="button" id="tpGeneExprLimitApply">Apply</button>');
+        htmls.push('<button style="margin-left:2em" type="button" data-type="violin" id="tpGeneExprFlipType">Show Violins</button>');
 
         htmls.push("</div>"); //tpExprViewHeader
 
@@ -5745,13 +5876,30 @@ var cellbrowser = function() {
         $("#tpGeneExprMetaCombo").change( onGeneExprMetaComboChange );
 
         $('#tpCloseButton').click( function() { $('#tpExprView').remove(); } );
+        $('#tpGeneExprFlipType').click( function() { 
+            let button = $('#tpGeneExprFlipType');
+            let chartType = button.attr("data-type");
+            buildGeneExprPlots(geneSym, metaName, chartType); 
+            if (chartType==="violin") {
+                button.html("Show Violins");
+                button.attr("data-type", "violin");
+            } else {
+                button.html("Show Barcharts");
+                button.attr("data-type", "barchart");
+            }
+        } );
 
-        getById("tpGeneExprYLimitCheck").addEventListener("change", function(ev) {
-            // if the checkbox is on, enable the input field
-            let isDisabled = !ev.target.checked;
-            getById("tpGeneExprYLimit").disabled = isDisabled;
-            getById("tpGeneExprApply").disabled = isDisabled;
+        getById("tpGeneExprLimitApply").addEventListener("click", function(ev) {
+            changeUrl({"exprMax": getById("tpGeneExprYLimit").value});
+            buildGeneExprPlots(geneSym, metaName, $("tpGeneExprFlipType").attr("data-type")); 
         });
+
+        //getById("tpGeneExprYLimitCheck").addEventListener("change", function(ev) {
+            // if the checkbox is on, enable the input field
+            //let isDisabled = !ev.target.checked;
+            //getById("tpGeneExprYLimit").disabled = isDisabled;
+            //getById("tpGeneExprLimitApply").disabled = isDisabled;
+        //});
         
         // pick a reasonable default gene and meta var
         let geneSym;
@@ -5766,7 +5914,7 @@ var cellbrowser = function() {
         geneSym = getVar("exprGene", geneSym);
         metaName = getVar("exprMeta", metaName);
 
-        buildGeneExprViolins(geneSym, metaName); 
+        buildGeneExprPlots(geneSym, metaName); 
     }
 
     function buildToolBar (coordInfo, dataset, fromLeft, fromTop) {
@@ -5865,7 +6013,7 @@ var cellbrowser = function() {
         // update the combobox, select the right dataset
         $('#tpLayoutCombo').change(onLayoutChange);
         $('#tpOpenDatasetButton').click(openCurrentDataset);
-        $('#tpOpenExprButton').click(buildExprView);
+        $('#tpOpenExprButton').click(buildExprViewWindow);
     }
 
     function metaFieldToLabel(fieldName) {
