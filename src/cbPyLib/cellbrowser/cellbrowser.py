@@ -478,10 +478,6 @@ def loadConfig(fname, ignoreName=False, reqTags=[], addTo=None, addName=False):
     if "name" in conf and "/" in conf["name"]:
         errAbort("Config file %s contains a slash in the name. Slashes in names are no allowed" % fname)
 
-    if not fname.endswith(".cellbrowser.conf") and not fname.endswith(".cellbrowser"):
-        if getConfig("onlyLower", False) and "name" in conf and conf["name"].isupper():
-            errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
-                    "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
     return conf
 
 def maybeLoadConfig(confFname):
@@ -5306,6 +5302,14 @@ def rebuildFlatIndex(outDir):
     writeJson(collInfo, outFname)
 
 
+def checkDsCase(inConfFname, relPath, inConfig):
+    """ relPath should not be uppercase for top-level datasets at UCSC, as we use the hostname part """
+    if not inConfFname.endswith(".cellbrowser.conf") and not inConfFname.endswith(".cellbrowser"):
+        if not "/" in relPath and getConfig("onlyLower", False) and \
+                "name" in inConf and inConf["name"].isupper():
+            errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
+                    "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
+
 def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None):
     " build browser from config files confFnames into directory outDir and serve on port "
     outDir = resolveOutDir(outDir)
@@ -5341,6 +5345,8 @@ def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None
 
         dataRoot, relPath, inConf, dsName = fixupName(inConfFname, inConf)
         outConf = addParents(inConfFname, dataRoot, dsName, outConf, todoConfigs)
+
+        checkDsCase(inConfFname, relPath, inConf)
 
         datasets.append(dsName)
 
