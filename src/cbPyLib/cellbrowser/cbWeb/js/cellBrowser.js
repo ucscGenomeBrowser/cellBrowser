@@ -881,6 +881,9 @@ var cellbrowser = function() {
         else
             values = datasetInfo[attrName];
 
+        if (values===undefined)
+            values = [];
+
         htmls.push(label+"=" + values.join(","));
         if (addSep)
             htmls.push("; ");
