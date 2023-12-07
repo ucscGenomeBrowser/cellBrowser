@@ -43,6 +43,8 @@ Examples:
             help="for reorder and metaCat: try to fix R's mangling of various special chars to '.' in the cell IDs")
     parser.add_option("", "--order", dest="order", action="store",
         help="only for reorder and metaCat: new order of fields, comma-sep, e.g. 'disease,age'. Do not include cellId, it's always the first field by definition. Fields that are in the file but not specified here will be appended as the last columns.")
+    parser.add_option("", "--only", dest="only", action="store_true",
+            help="when using --order: only use the specified fields, do not append other fields at the end")
     parser.add_option("", "--del", dest="delFields", action="store",
         help="only for reorder and metaCat: names of fields to remove")
 
@@ -333,16 +335,17 @@ def matCatGenes(inFnames, outFname):
     logging.info("Compressing %s", outFname)
     moveOrGzip(tmpFname, outFname)
 
-def reorderFields(row, firstFields, skipFields):
+def reorderFields(row, firstFields, skipFields, onlyFirst):
     " reorder the row to have firstFields first "
     #logging.debug("Reordering row to have %s fields first" % firstFields)
     newRow = [row[0]]
     for idx in firstFields:
         newRow.append(row[idx])
 
-    for i in range(1, len(row)):
-        if i not in firstFields and i not in skipFields:
-            newRow.append(row[i])
+    if not onlyFirst:
+        for i in range(1, len(row)):
+            if i not in firstFields and i not in skipFields:
+                newRow.append(row[i])
 
     return newRow
 
@@ -430,7 +433,9 @@ def metaCat(inFnames, outFname, options):
         tmpFname = outFname+".tmp"
         ofh = openFile(tmpFname, "w")
 
-    allHeaders = reorderFields(allHeaders, firstFieldIdx, delFieldIdx)
+    onlyFirst = options.only
+
+    allHeaders = reorderFields(allHeaders, firstFieldIdx, delFieldIdx, onlyFirst)
     ofh.write("\t".join(allHeaders))
     ofh.write("\n")
 
@@ -442,7 +447,7 @@ def metaCat(inFnames, outFname, options):
             else:
                 row.extend([""]*fieldCounts[fileIdx])
 
-        row = reorderFields(row, firstFieldIdx, delFieldIdx)
+        row = reorderFields(row, firstFieldIdx, delFieldIdx, onlyFirst)
         ofh.write("\t".join(row))
         ofh.write("\n")
 
