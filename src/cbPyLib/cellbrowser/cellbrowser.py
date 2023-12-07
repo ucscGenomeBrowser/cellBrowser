@@ -5306,7 +5306,7 @@ def checkDsCase(inConfFname, relPath, inConfig):
     """ relPath should not be uppercase for top-level datasets at UCSC, as we use the hostname part """
     if not inConfFname.endswith(".cellbrowser.conf") and not inConfFname.endswith(".cellbrowser"):
         if not "/" in relPath and getConfig("onlyLower", False) and \
-                "name" in inConf and inConf["name"].isupper():
+                "name" in inConfig and inConfig["name"].isupper():
             errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
                     "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
 
