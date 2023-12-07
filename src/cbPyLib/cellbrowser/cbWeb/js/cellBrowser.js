@@ -1564,6 +1564,21 @@ var cellbrowser = function() {
         openDatasetLoadPane(openDsInfo);
     }
 
+    function onHideSelClick(ev) {
+        /* hide all selected cells */
+        renderer.selectHide();
+        renderer.drawDots();
+    }
+
+    function buildSelectActions() {
+        /* add buttons for hide selected / unselected to ribbon bar */
+        let htmls = [];
+        htmls.push('<button title="Hide selected cells" id="tpHideSel" type="button" class="tpRibbonButton" data-placement="bottom">Hide selected</button>');
+        //htmls.push('<button title="Hide the unselected cells" id="tpHideUnsel" type="button" class="ui-button tpIconButton" data-placement="bottom">Hide unselected</button>');
+        htmls.push('&nbsp;&nbsp;');
+        getById('tpToolBar').insertAdjacentHTML('afterbegin', htmls.join(""));
+        getById('tpHideSel').addEventListener('click', onHideSelClick);
+    }
 
     function onSelChange(selection) {
     /* called each time when the selection has been changed */
@@ -1575,6 +1590,7 @@ var cellbrowser = function() {
             clearMetaAndGene();
             clearSelectionState();
             $("#tpSetBackground").parent("li").addClass("disabled");
+            //clearSelectActions();
         } else if (cellIds.length===1) {
             $("#tpHoverHint").hide();
             $("#tpSelectHint").show();
@@ -1588,6 +1604,7 @@ var cellbrowser = function() {
             $("#tpHoverHint").hide();
             $("#tpSelectHint").show();
             updateMetaBarManyCells(cellIds);
+            buildSelectActions();
         }
 
         updateGeneTableColors(cellIds);
@@ -1612,6 +1629,11 @@ var cellbrowser = function() {
         updateLegendGrandCheckbox();
     }
 
+    function onRadiusAlphaChange(radius, alpha) {
+        /* user changed alpha or radius value */
+        getById("tpSizeInput").value = radius;
+        getById("tpAlphaInput").value = alpha;
+    }
     function onSaveAsClick() {
     /* File - Save Image as ... */
         var canvas = $("canvas")[0];
@@ -4184,6 +4206,13 @@ var cellbrowser = function() {
         $('#tpGeneDialogOk').click ( onGeneDialogOkClick );
     }
 
+    function onSetRadiusAlphaClick(ev) {
+        let newRadius = parseFloat(getById('tpSizeInput').value);
+        let newAlpha = parseFloat(getById('tpAlphaInput').value);
+        renderer.setRadiusAlpha(newRadius, newAlpha);
+        renderer.drawDots();
+    }
+
     function onGeneLoadComplete() {
         /* called when all gene expression vectors have been loaded */
         console.log("All genes complete");
@@ -4983,15 +5012,20 @@ var cellbrowser = function() {
         buildComboBox(htmls, id, entries, 0, "Select a layout algorithm...", "100%");
         htmls.push('</div>');
 
+        htmls.push('<form id="radiusAlphaForm">');
         htmls.push('<div class="tpLeftSideItem">');
-        htmls.push('<label for="tpSizeInput">Dot size</label>');
+        htmls.push('<label for="tpSizeInput">Circle size factor (1-7)</label>');
         htmls.push('&nbsp;<input id="tpSizeInput" type="text" size="6"></input>');
         htmls.push('</div>'); // tpLeftSideItem
 
         htmls.push('<div class="tpLeftSideItem">');
-        htmls.push('<label for="tpAlphaInput">Transparency</label>');
+        htmls.push('<label for="tpAlphaInput">Transparency factor (1-7)</label>');
         htmls.push('&nbsp;<input id="tpAlphaInput" type="text" size="6"></input>');
         htmls.push('</div>'); // tpLeftSideItem
+
+        htmls.push('<input type="submit" value="Apply" style="float:right" id="tpSetRadiusAlphaButton"></input><br>');
+        htmls.push('<small>You can also change size and transparency with the sliders at the bottom right of the image</small>');
+        htmls.push('</form>');
     }
 
     function buildCollectionCombo(htmls, id, width, left, top) {
@@ -6194,6 +6228,9 @@ var cellbrowser = function() {
 
         $('.tpGeneBarCell').click( onGeneClick );
         $('#tpChangeGenes').click( onChangeGenesClick );
+
+        $('#tpSetRadiusAlphaButton').click( onSetRadiusAlphaClick );
+        $('#radiusAlphaForm').on("submit",function(event){event.preventDefault()}); // do not reload page when submit clicked
 
         activateCombobox("tpMetaCombo", metaBarWidth-10);
         $("#tpMetaCombo").change( onMetaComboChange );
@@ -8157,6 +8194,7 @@ var cellbrowser = function() {
         renderer.onLineHover = onLineHover;
         renderer.onZoom100Click = onZoom100Click;
         renderer.onSelChange = onSelChange;
+        renderer.onRadiusAlphaChange = onRadiusAlphaChange;
         renderer.canvas.addEventListener("mouseleave", hideTooltip);
 
         loadDataset(datasetName, false, rootMd5);
