@@ -22,6 +22,11 @@ function cloneObj(d) {
     return JSON.parse(JSON.stringify(d));
 }
 
+function cloneArray(a) {
+/* returns a copy of an array */
+    return a.slice();
+}
+
 function copyObj(src, trg) {
 /* object copying: copies all values from src to trg */
     var key;
@@ -1555,6 +1560,8 @@ function MaxPlot(div, top, left, width, height, args) {
            self.port.initAlpha = oldAlpha;
        self.coords = {};
 
+       self.coords.origAll = undefined;
+
        var newZr = {};
        if (minX===undefined || maxX===undefined || minY===undefined || maxY===undefined)
            newZr = findRange(coords);
@@ -2061,6 +2068,10 @@ function MaxPlot(div, top, left, width, height, args) {
         self._selUpdate();
     };
 
+    this.hasSelected = function() {
+        return (selCells.length!==0)
+    }
+
     this.getSelection = function() {
         /* return selected cells as a list of ints */
         var cellIds = [];
@@ -2083,23 +2094,38 @@ function MaxPlot(div, top, left, width, height, args) {
         self._selUpdate();
     };
 
+    this.selectOnlyShow = function() {
+    /* the opposite of selectHide() = remove all coords that are not selected */
+        self.coords.origAll = cloneArray(self.coords.orig);
+        var selCells = self.selCells;
+        var coords = self.coords.orig;
+        for (var i = 0; i < coords.length/2; i++) {
+            if (!selCells.has(i)) {
+                coords[2*i] = HIDCOORD;
+                coords[2*i+1] = HIDCOORD;
+            }
+        }
+        self.scaleData();
+        //self.selectSet([]);
+        self._selUpdate();
+    }
+
+
     this.selectHide = function() {
     /* remove all coords that are selected */
-        self.coords.origAll = self.coords.orig;
+        if (!self.coords.origAll===undefined)
+            self.coords.origAll = cloneArray(self.coords.orig);
+
         var selCells = self.selCells;
         var coords = self.coords.orig;
 
-        var newCoords = [];
         for (var i = 0; i < coords.length/2; i++) {
-            var pxX = pxCoords[2*i];
-            var pxY = pxCoords[2*i+1];
-            if (isHidden(pxX, pxY))
-               continue;
-            if (!(i in selCells))
-                newCoords.push(coord);
+            if (selCells.has(i)) {
+                coords[2*i] = HIDCOORD;
+                coords[2*i+1] = HIDCOORD;
             }
+        }
 
-        self.coords.orig = newCoords;
         self.scaleData();
         self.selectSet([]);
         self._selUpdate();
@@ -2107,13 +2133,24 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.unhideAll = function() {
         /* undo the hide operation */
-        self.coords.orig = self.coords.origAll;
+        if (self.coords.origAll!==undefined)
+            self.coords.orig = self.coords.origAll;
         self.scaleData();
     }
 
     this.getCount = function() {
         /* return maximum number of cells in dataset, may include hidden cells, see isHidden() */
         return self.coords.orig.length / 2;
+    };
+
+    this.getVisibleCount = function() {
+        /* return number of cells that are visible */
+        let count = 0;
+        for (var i = 0; i < coords.length/2; i++) {
+            if (!isHidden(coords[2*i], coords[2*i+1]))
+                count++;
+        }
+        return count;
     };
 
     // END SELECTION METHODS (could be an object?)

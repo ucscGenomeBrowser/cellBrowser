@@ -1570,14 +1570,39 @@ var cellbrowser = function() {
         renderer.drawDots();
     }
 
+    function onOnlySelClick(ev) {
+        /* hide all selected cells */
+        renderer.selectOnlyShow();
+        renderer.drawDots();
+    }
+
+    function onShowAllClick(ev) {
+        /* hide all selected cells */
+        renderer.unhideAll();
+        renderer.drawDots();
+    }
+
+    function removeSelectActions() {
+        /* remove the selection buttons if that's possible */
+        if (!(renderer.visibleCount()==renderer.getCount()) && !renderer.hasSelected()) {
+            $(".tpSelectButton").remove();
+        }
+    }
+
     function buildSelectActions() {
         /* add buttons for hide selected / unselected to ribbon bar */
+        if (getById("tpHideSel")!==null)
+            return;
+
         let htmls = [];
-        htmls.push('<button title="Hide selected cells" id="tpHideSel" type="button" class="tpRibbonButton" data-placement="bottom">Hide selected</button>');
-        //htmls.push('<button title="Hide the unselected cells" id="tpHideUnsel" type="button" class="ui-button tpIconButton" data-placement="bottom">Hide unselected</button>');
-        htmls.push('&nbsp;&nbsp;');
+        htmls.push('<button title="Hide selected cells" id="tpHideSel" type="button" class="tpRibbonButton tpSelectButton" data-placement="bottom">Hide selected</button>');
+        htmls.push('<button title="Hide all unselected cells" id="tpOnlySel" type="button" class="tpRibbonButton tpSelectButton" data-placement="bottom">Only show selected</button>');
+        htmls.push('<button title="Show all cells that were hidden before" id="tpShowAll" type="button" class="tpRibbonButton tpSelectButton" data-placement="bottom">Show all</button>');
+        htmls.push('&nbsp;&nbsp;&nbsp;');
         getById('tpToolBar').insertAdjacentHTML('afterbegin', htmls.join(""));
         getById('tpHideSel').addEventListener('click', onHideSelClick);
+        getById('tpOnlySel').addEventListener('click', onOnlySelClick);
+        getById('tpShowAll').addEventListener('click', onShowAllClick);
     }
 
     function onSelChange(selection) {
@@ -1662,6 +1687,7 @@ var cellbrowser = function() {
     function onSelectNoneClick() {
     /* Edit - Select None */
         clearSelectionState();
+        removeSelectActions();
         renderer.selectClear();
         renderer.drawDots();
     }
