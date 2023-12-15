@@ -2150,6 +2150,8 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     symCounts = defaultdict(int)
     geneCount = 0
+    atacChromCount = 0
+
     allMin = 99999999
     noSymFound = 0
     for geneId, sym, exprArr in matReader.iterRows():
@@ -2160,6 +2162,9 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
             noSymFound +=1
         if geneId!=sym and sym is not None:
             key = geneId+"|"+sym
+
+        if geneId.startswith("chr"):
+            atacChromCount+=1
 
         symCounts[key]+=1
         if symCounts[key] > 1000:
@@ -2197,6 +2202,10 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
     if genesAreRanges:
         logging.info("ATAC-mode is one. Assuming that genes are in format chrom:start-end or chrom_start_end or chrom-start-end")
         exprIndex = indexByChrom(exprIndex)
+    else:
+        if atacChromCount > 100:
+            errAbort("There are more than 100 genes that look like a chrom_start_end range but the atacSearch cellbrowser.conf"
+                    " is not set. Please add this option or contact us if you are confused about this error.")
 
     if highCount==0:
         logging.warn("No single value in the matrix is > 100. It looks like this "
@@ -4885,7 +4894,7 @@ def check_nonnegative_integers(X):
 
 def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=None,
         nb_marker=50, doDebug=False, coordFields=None, skipMatrix=False, useRaw=False,
-        skipMarkers=False, markerField='rank_genes_groups', matrixFormat="tsv"):
+        skipMarkers=False, markerField='rank_genes_groups', matrixFormat="tsv", atac=None):
     """
     Mostly written by Lucas Seninge, lucas.seninge@etu.unistra.fr
 
@@ -5041,6 +5050,10 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     if markersExported:
         generateQuickGenes(outDir)
         configData['quickGenesFile'] = "quickGenes.tsv"
+
+    if atac:
+        assert("." in atac) # --atac must have a dot in it
+        configData["atacSearch"] = atac
 
     if isfile(confName):
         logging.info("%s already exists, not overwriting. Remove and re-run command to recreate." % confName)
@@ -6751,7 +6764,7 @@ def cbScanpyCli():
 
     scanpyToCellbrowser(adata, outDir, datasetName=datasetName, skipMarkers=skipMarkers,
             clusterField=inCluster, skipMatrix=(copyMatrix or skipMatrix), matrixFormat=matrixFormat,
-            useRaw=True)
+            useRaw=True, atac=atac)
 
     if copyMatrix:
         outMatrixFname = join(outDir, "exprMatrix.tsv.gz")

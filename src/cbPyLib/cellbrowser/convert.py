@@ -720,6 +720,9 @@ def cbImportScanpy_parseArgs(showHelp=False):
     parser.add_option("", "--skipMarkers", dest="skipMarkers", action="store_true",
             help="do not try to calculate cluster-specific marker genes. Only useful for the rare datasets where a bug in scanpy crashes the marker gene calculation.")
 
+    parser.add_option("", "--atac", dest="atac", action="store",
+            help="indicate that this is an ATAC dataset and specify genome assembly and gene model, for example 'hg38.gencode-42'. Use 'cbGenes ls' to show the list of all available gene models on your disk or cbGenes fetch to download other ones")
+
     (options, args) = parser.parse_args()
 
     if showHelp:
