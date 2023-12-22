@@ -5529,8 +5529,16 @@ def cbBuildCli():
     try:
         if options.recursive:
             confFnames = glob.glob("**/cellbrowser.conf", recursive=True)
-            confFnames = [cf for cf in confFnames if "old/" not in cf]
-            logging.debug("recursive config filenames without anything that contains the string /old/: %s" % confFnames)
+
+            filtConf = []
+            for cf in confFnames:
+                if "old/" in cf or "tmp/" in cf or "not-used/" in cf or "temp/" in cf:
+                    logging.debug("Skipping %s" % cf)
+                    continue
+                filtConf.append(cf)
+            confFnames = filtConf
+
+            logging.debug("recursive config filenames without anything that contains old/tmp/temp/not-used: %s" % confFnames)
             for cf in confFnames:
                 logging.info("Recursive mode: processing %s" % cf)
                 build(cf, outDir, redo=options.redo)
@@ -5880,7 +5888,7 @@ def summarizeDatasets(datasets):
         else:
             summDs["isCollection"] = True
             if not "datasets" in ds:
-                errAbort("The dataset %s has a dataset.json file that looks invalid. Please rebuild that dataset. "
+                errAbort("The dataset %s has a dataset.json file that looks invalid. Please remove the file and rebuild that dataset. "
                         "Then go back to the current directory and retry the same command. " % ds["name"])
             children = ds["datasets"]
 
