@@ -5528,7 +5528,7 @@ def cbBuildCli():
 
     try:
         if options.recursive:
-            confFnames = glob.glob("**/cellbrowser.conf")
+            confFnames = glob.glob("**/cellbrowser.conf", recursive=True)
             logging.debug("recursive option config filenames: %s" % confFnames)
             for cf in confFnames:
                 logging.info("Recursive mode: processing %s" % cf)
