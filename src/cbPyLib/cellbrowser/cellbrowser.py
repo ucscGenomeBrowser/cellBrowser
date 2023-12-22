@@ -5529,11 +5529,9 @@ def cbBuildCli():
     try:
         if options.recursive:
             confFnames = glob.glob("**/cellbrowser.conf", recursive=True)
-            logging.debug("recursive option config filenames: %s" % confFnames)
+            confFnames = [cf for cf in confFnames if "old/" not in cf]
+            logging.debug("recursive config filenames without anything that contains the string /old/: %s" % confFnames)
             for cf in confFnames:
-                if "/old/" in cf:
-                    logging.info("Skipping %s, as it contains /old/" % cf)
-                    continue
                 logging.info("Recursive mode: processing %s" % cf)
                 build(cf, outDir, redo=options.redo)
         else:
