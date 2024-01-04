@@ -562,6 +562,9 @@ def cbBuild_parseArgs(showHelp=False):
     parser.add_option("-r", "--recursive", dest="recursive", action="store_true",
         help="run in all subdirectories of the current directory. Useful when rebuilding a full hierarchy. Cannot be used with -p.")
 
+    parser.add_option("", "--depth", dest="depth", action="store", type="int",
+            help="when using -r: only go this many directories deep")
+
     parser.add_option("", "--redo", dest="redo", action="store", default="meta",
             help="do not use cached old data. Can be: 'meta' or 'matrix' (matrix includes meta).")
 
@@ -5525,6 +5528,7 @@ def cbBuildCli():
     outDir = options.outDir
     #onlyMeta = options.onlyMeta
     port = options.port
+    maxDepth = options.depth
 
     try:
         if options.recursive:
@@ -5535,6 +5539,11 @@ def cbBuildCli():
                 if "old/" in cf or "tmp/" in cf or "not-used/" in cf or "temp/" in cf:
                     logging.debug("Skipping %s" % cf)
                     continue
+                cfDepth = cf.count("/")
+                if maxDepth and cfDepth > maxDepth:
+                    logging.info("Skipping %s, is at depth %d, but --depth %d was specified" % (cf, cfDepth, maxDepth))
+                    continue
+
                 filtConf.append(cf)
             confFnames = filtConf
 
