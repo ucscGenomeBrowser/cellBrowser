@@ -755,7 +755,7 @@ def cbImportScanpyCli():
     matrixFormat = getMatrixFormat(options)
     atac = options.atac
 
-    if "." not in atac:
+    if atac is not None and "." not in atac:
         errAbort("the --atac option needs to be in the format <assembly>.<genemodel> e.g. hg38.gencode-42")
 
     ad = readMatrixAnndata(inFname, reqCoords=True)
