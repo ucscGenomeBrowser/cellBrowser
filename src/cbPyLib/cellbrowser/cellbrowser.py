@@ -5532,7 +5532,10 @@ def cbBuildCli():
 
     try:
         if options.recursive:
-            confFnames = glob.glob("**/cellbrowser.conf", recursive=True)
+            if isPy3:
+                confFnames = glob.glob("**/cellbrowser.conf", recursive=True)
+            else:
+                confFnames = glob.glob("**/cellbrowser.conf") # not the same, at least doesn't throw an error, good enough, Py2 is old
 
             filtConf = []
             for cf in confFnames:
