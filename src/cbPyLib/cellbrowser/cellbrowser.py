@@ -5539,8 +5539,8 @@ def cbBuildCli():
 
             filtConf = []
             for cf in confFnames:
-                if "old/" in cf or "tmp/" in cf or "not-used/" in cf or "temp/" in cf:
-                    logging.debug("Skipping %s" % cf)
+                if "old/" in cf or "tmp/" in cf or "not-used/" in cf or "temp/" in cf or "orig/" in cf or "ignore/" in cf or "skip/" in cf:
+                    logging.debug("Skipping %s, name suggests that it should be skipped" % cf)
                     continue
                 cfDepth = cf.count("/")
                 if maxDepth and cfDepth > maxDepth:
