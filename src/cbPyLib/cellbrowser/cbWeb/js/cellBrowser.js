@@ -7339,7 +7339,7 @@ var cellbrowser = function() {
         $("#tpExprLimitApply").click( onLegendApplyLimitsClick );
         $("#tpExpColorButton").click( onLegendExportClick );
 
-        $('.tpLegend').click( onLegendLabelClick ); // clicking the legend should have the same effect as clicking the checkbox
+        $('.tpLegendLabel').click( onLegendLabelClick ); // clicking the legend should have the same effect as clicking the checkbox
         //$('.tpLegendLabel').attr( "title", "Click to select samples with this value. Shift click to select multiple values.");
         activateTooltip(".tpLegendLabel");
         activateTooltip(".tpLegendCount");
