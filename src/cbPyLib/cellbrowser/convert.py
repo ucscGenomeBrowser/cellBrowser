@@ -43,6 +43,8 @@ Examples:
             help="for reorder and metaCat: try to fix R's mangling of various special chars to '.' in the cell IDs")
     parser.add_option("", "--order", dest="order", action="store",
         help="only for reorder and metaCat: new order of fields, comma-sep, e.g. 'disease,age'. Do not include cellId, it's always the first field by definition. Fields that are in the file but not specified here will be appended as the last columns.")
+    parser.add_option("", "--only", dest="only", action="store_true",
+            help="when using --order: only use the specified fields, do not append other fields at the end")
     parser.add_option("", "--del", dest="delFields", action="store",
         help="only for reorder and metaCat: names of fields to remove")
 
@@ -333,16 +335,17 @@ def matCatGenes(inFnames, outFname):
     logging.info("Compressing %s", outFname)
     moveOrGzip(tmpFname, outFname)
 
-def reorderFields(row, firstFields, skipFields):
+def reorderFields(row, firstFields, skipFields, onlyFirst):
     " reorder the row to have firstFields first "
     #logging.debug("Reordering row to have %s fields first" % firstFields)
     newRow = [row[0]]
     for idx in firstFields:
         newRow.append(row[idx])
 
-    for i in range(1, len(row)):
-        if i not in firstFields and i not in skipFields:
-            newRow.append(row[i])
+    if not onlyFirst:
+        for i in range(1, len(row)):
+            if i not in firstFields and i not in skipFields:
+                newRow.append(row[i])
 
     return newRow
 
@@ -430,7 +433,9 @@ def metaCat(inFnames, outFname, options):
         tmpFname = outFname+".tmp"
         ofh = openFile(tmpFname, "w")
 
-    allHeaders = reorderFields(allHeaders, firstFieldIdx, delFieldIdx)
+    onlyFirst = options.only
+
+    allHeaders = reorderFields(allHeaders, firstFieldIdx, delFieldIdx, onlyFirst)
     ofh.write("\t".join(allHeaders))
     ofh.write("\n")
 
@@ -442,7 +447,7 @@ def metaCat(inFnames, outFname, options):
             else:
                 row.extend([""]*fieldCounts[fileIdx])
 
-        row = reorderFields(row, firstFieldIdx, delFieldIdx)
+        row = reorderFields(row, firstFieldIdx, delFieldIdx, onlyFirst)
         ofh.write("\t".join(row))
         ofh.write("\n")
 
@@ -715,6 +720,9 @@ def cbImportScanpy_parseArgs(showHelp=False):
     parser.add_option("", "--skipMarkers", dest="skipMarkers", action="store_true",
             help="do not try to calculate cluster-specific marker genes. Only useful for the rare datasets where a bug in scanpy crashes the marker gene calculation.")
 
+    parser.add_option("", "--atac", dest="atac", action="store",
+            help="Indicate that this is an ATAC dataset and specify genome assembly and gene model, for example 'hg38.gencode-42'. Use 'cbGenes ls' to show the list of all available gene models on your disk or cbGenes fetch to download other ones. This will only be passed through to cellbrowser.conf.")
+
     (options, args) = parser.parse_args()
 
     if showHelp:
@@ -745,11 +753,15 @@ def cbImportScanpyCli():
     clusterField = options.clusterField
     skipMarkers = options.skipMarkers
     matrixFormat = getMatrixFormat(options)
+    atac = options.atac
+
+    if atac is not None and "." not in atac:
+        errAbort("the --atac option needs to be in the format <assembly>.<genemodel> e.g. hg38.gencode-42")
 
     ad = readMatrixAnndata(inFname, reqCoords=True)
 
     scanpyToCellbrowser(ad, outDir, datasetName, skipMatrix=options.skipMatrix, useRaw=(not options.useProc),
-            markerField=markerField, clusterField=clusterField, skipMarkers=skipMarkers, matrixFormat=matrixFormat)
+            markerField=markerField, clusterField=clusterField, skipMarkers=skipMarkers, matrixFormat=matrixFormat, atac=atac)
 
     copyFileIfDiffSize(inFname, join(outDir, basename(inFname)))
     generateDataDesc(datasetName, outDir, other={"supplFiles": [{"label":"Scanpy H5AD", "file":basename(inFname)}]})

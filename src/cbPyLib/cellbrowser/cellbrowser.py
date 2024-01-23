@@ -480,10 +480,6 @@ def loadConfig(fname, ignoreName=False, reqTags=[], addTo=None, addName=False):
     if "name" in conf and "/" in conf["name"]:
         errAbort("Config file %s contains a slash in the name. Slashes in names are no allowed" % fname)
 
-    if not fname.endswith(".cellbrowser.conf") and not fname.endswith(".cellbrowser"):
-        if getConfig("onlyLower", False) and "name" in conf and conf["name"].isupper():
-            errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
-                    "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
     return conf
 
 def maybeLoadConfig(confFname):
@@ -567,6 +563,9 @@ def cbBuild_parseArgs(showHelp=False):
 
     parser.add_option("-r", "--recursive", dest="recursive", action="store_true",
         help="run in all subdirectories of the current directory. Useful when rebuilding a full hierarchy. Cannot be used with -p.")
+
+    parser.add_option("", "--depth", dest="depth", action="store", type="int",
+            help="when using -r: only go this many directories deep")
 
     parser.add_option("", "--redo", dest="redo", action="store", default="meta",
             help="do not use cached old data. Can be: 'meta' or 'matrix' (matrix includes meta).")
@@ -1573,6 +1572,10 @@ class MatrixMtxReader:
             if i%1000==0:
                 logging.info("%d genes written..." % i)
             arr = mat.getrow(i).toarray()
+            if arr.ndim==2:
+                # scipy sparse arrays have changed their entire data model and now all operations
+                # return 2D matrices. So need to unpack it to get the array. Grrr.
+                arr = arr[0]
             yield (geneId, geneSym, arr)
 
 class MatrixTsvReader:
@@ -2167,6 +2170,8 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     symCounts = defaultdict(int)
     geneCount = 0
+    atacChromCount = 0
+
     allMin = 99999999
     noSymFound = 0
     for geneId, sym, exprArr in matReader.iterRows():
@@ -2177,6 +2182,9 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
             noSymFound +=1
         if geneId!=sym and sym is not None:
             key = geneId+"|"+sym
+
+        if geneId.startswith("chr"):
+            atacChromCount+=1
 
         symCounts[key]+=1
         if symCounts[key] > 1000:
@@ -2214,6 +2222,10 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
     if genesAreRanges:
         logging.info("ATAC-mode is one. Assuming that genes are in format chrom:start-end or chrom_start_end or chrom-start-end")
         exprIndex = indexByChrom(exprIndex)
+    else:
+        if atacChromCount > 100:
+            errAbort("There are more than 100 genes that look like a chrom_start_end range but the atacSearch cellbrowser.conf"
+                    " is not set. Please add this option or contact us if you are confused about this error.")
 
     if highCount==0:
         logging.warn("No single value in the matrix is > 100. It looks like this "
@@ -4902,7 +4914,7 @@ def check_nonnegative_integers(X):
 
 def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=None,
         nb_marker=50, doDebug=False, coordFields=None, skipMatrix=False, useRaw=False,
-        skipMarkers=False, markerField='rank_genes_groups', matrixFormat="tsv"):
+        skipMarkers=False, markerField='rank_genes_groups', matrixFormat="tsv", atac=None):
     """
     Mostly written by Lucas Seninge, lucas.seninge@etu.unistra.fr
 
@@ -5058,6 +5070,10 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     if markersExported:
         generateQuickGenes(outDir)
         configData['quickGenesFile'] = "quickGenes.tsv"
+
+    if atac:
+        assert("." in atac) # --atac must have a dot in it
+        configData["atacSearch"] = atac
 
     if isfile(confName):
         logging.info("%s already exists, not overwriting. Remove and re-run command to recreate." % confName)
@@ -5319,6 +5335,14 @@ def rebuildFlatIndex(outDir):
     writeJson(collInfo, outFname)
 
 
+def checkDsCase(inConfFname, relPath, inConfig):
+    """ relPath should not be uppercase for top-level datasets at UCSC, as we use the hostname part """
+    if not inConfFname.endswith(".cellbrowser.conf") and not inConfFname.endswith(".cellbrowser"):
+        if not "/" in relPath and getConfig("onlyLower", False) and \
+                "name" in inConfig and inConfig["name"].isupper():
+            errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
+                    "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
+
 def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None):
     " build browser from config files confFnames into directory outDir and serve on port "
     outDir = resolveOutDir(outDir)
@@ -5354,6 +5378,8 @@ def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None
 
         dataRoot, relPath, inConf, dsName = fixupName(inConfFname, inConf)
         outConf = addParents(inConfFname, dataRoot, dsName, outConf, todoConfigs)
+
+        checkDsCase(inConfFname, relPath, inConf)
 
         datasets.append(dsName)
 
@@ -5523,10 +5549,29 @@ def cbBuildCli():
     outDir = options.outDir
     #onlyMeta = options.onlyMeta
     port = options.port
+    maxDepth = options.depth
 
     try:
         if options.recursive:
-            confFnames = glob.glob("*/cellbrowser.conf")
+            if isPy3:
+                confFnames = glob.glob("**/cellbrowser.conf", recursive=True)
+            else:
+                confFnames = glob.glob("**/cellbrowser.conf") # not the same, at least doesn't throw an error, good enough, Py2 is old
+
+            filtConf = []
+            for cf in confFnames:
+                if "old/" in cf or "tmp/" in cf or "not-used/" in cf or "temp/" in cf or "orig/" in cf or "ignore/" in cf or "skip/" in cf:
+                    logging.debug("Skipping %s, name suggests that it should be skipped" % cf)
+                    continue
+                cfDepth = cf.count("/")
+                if maxDepth and cfDepth > maxDepth:
+                    logging.info("Skipping %s, is at depth %d, but --depth %d was specified" % (cf, cfDepth, maxDepth))
+                    continue
+
+                filtConf.append(cf)
+            confFnames = filtConf
+
+            logging.debug("recursive config filenames without anything that contains old/tmp/temp/not-used: %s" % confFnames)
             for cf in confFnames:
                 logging.info("Recursive mode: processing %s" % cf)
                 build(cf, outDir, redo=options.redo)
@@ -5876,7 +5921,7 @@ def summarizeDatasets(datasets):
         else:
             summDs["isCollection"] = True
             if not "datasets" in ds:
-                errAbort("The dataset %s has a dataset.json file that looks invalid. Please rebuild that dataset. "
+                errAbort("The dataset %s has a dataset.json file that looks invalid. Please remove the file and rebuild that dataset. "
                         "Then go back to the current directory and retry the same command. " % ds["name"])
             children = ds["datasets"]
 
@@ -6762,7 +6807,7 @@ def cbScanpyCli():
 
     scanpyToCellbrowser(adata, outDir, datasetName=datasetName, skipMarkers=skipMarkers,
             clusterField=inCluster, skipMatrix=(copyMatrix or skipMatrix), matrixFormat=matrixFormat,
-            useRaw=True)
+            useRaw=True, atac=atac)
 
     if copyMatrix:
         outMatrixFname = join(outDir, "exprMatrix.tsv.gz")

@@ -22,6 +22,11 @@ function cloneObj(d) {
     return JSON.parse(JSON.stringify(d));
 }
 
+function cloneArray(a) {
+/* returns a copy of an array */
+    return a.slice();
+}
+
 function copyObj(src, trg) {
 /* object copying: copies all values from src to trg */
     var key;
@@ -90,7 +95,7 @@ function MaxPlot(div, top, left, width, height, args) {
             addModeButtons(10, 10, self);
             addStatusLine(height-gStatusHeight, left, width, gStatusHeight);
             addTitleDiv(height-gTitleSize-gStatusHeight-4, 8);
-            addSliders();
+            addSliders(height-gStatusHeight-15, width);
 
             /* add the div used for the mouse selection/zoom rectangle to the DOM */
             var selectDiv = document.createElement('div');
@@ -110,6 +115,7 @@ function MaxPlot(div, top, left, width, height, args) {
             self.onLabelHover = null; // called when mouse hovers over a label
             self.onNoLabelHover = null; // called when mouse does not hover over a label
             self.onLineHover = null; // called when mouse over a trajectory line
+            self.onRadiusAlphaChange = null; // called when user changes radius or alpha
             // self.onZoom100Click: called when user clicks the zoom100 button. Implemented below.
             self.selectBox = selectDiv; // we need this later
             self.setupMouse();
@@ -267,13 +273,14 @@ function MaxPlot(div, top, left, width, height, args) {
             return 5;
     }
 
-    function createSliderSpan(id, width, height) {
+    function createSliderSpan(id, width, height, left) {
         /* create div with given width and height */
         var div = document.createElement('span');
         div.id = id;
         div.style.position = "relative";
         div.style.width = width+"px";
         div.style.height = height+"px";
+        div.style.left = left+"px";
         return div;
     }
 
@@ -306,7 +313,7 @@ function MaxPlot(div, top, left, width, height, args) {
         if (title!==null)
             div.title = title;
         if (text!==null)
-            div.textContent = text;
+            div.innerHTML = text;
         if (imgFname!==null && imgFname!==undefined) {
             var img = document.createElement('img');
             img.src = imgFname;
@@ -391,13 +398,13 @@ function MaxPlot(div, top, left, width, height, args) {
         console.log("alpha: "+ui.value);
         var sliderVal = ui.value; // 1-7
         var multMap = {
-            1 : 0.15,
-            2 : 0.4,
-            3 : 0.8,
+            7 : 0.15,
+            6 : 0.4,
+            5 : 0.8,
             4 : 1.0,
-            5 : 1.2,
-            6 : 1.5,
-            7 : 1.8
+            3 : 1.2,
+            2 : 1.5,
+            1 : 1.8
         }
         self.port.alphaMult = multMap[sliderVal];
         console.log("alphaMult: "+self.port.alphaMult);
@@ -422,66 +429,89 @@ function MaxPlot(div, top, left, width, height, args) {
         self.drawDots();
     }
 
-    function addSliders() {
+    function addSliders(fromTop, canvWidth) {
+        /* add sliders for transparency and radius */
         // alpha reset slider: a label, a slider + a reset button
-        var alphaSlider = createSliderSpan("mpAlphaSlider", 60, 10);
+        var sliderWidth = 120;
+        var fromLeft = canvWidth - 2*sliderWidth - 2*45 - 100;
+
+        var alphaSlider = createSliderSpan("mpAlphaSlider", sliderWidth, 10, 0);
         self.alphaSlider = alphaSlider; // see activateSliders() for the jquery UI part of the code, executed later
         alphaSlider.style.float = "left";
-        alphaSlider.style.top = "3px";
+        //alphaSlider.style.top = "3px";
 
         // container for label + control elements
         var alphaCont = document.createElement('div');
         alphaCont.id = "mpAlphaCont";
-        alphaCont.style.top = "10px";
-        alphaCont.style.left = "50px";
+        alphaCont.style.top = "0px";
+        //alphaCont.style.left = "150px"; // cellbrowser.css defines grid widths: 45
         alphaCont.className = "sliderContainer";
+        alphaCont.style.top = "0px"; // (fromTop-14)+"px";
+        alphaCont.style.left = "200px";
 
-        var alphaLabel = document.createElement('span'); // contains the slider and the reset button, floats right
+        var alphaLabel = document.createElement('div'); // contains the slider and the reset button, floats right
         alphaLabel.id = "alphaSliderLabel";
         alphaLabel.textContent = "Transp";
         alphaLabel.className = "sliderLabel";
 
         // reset button
-        var alphaReset = createButton(15, 15, "mpAlphaReset", "Reset transparency", "Rs", null, null, null, false, false, 10);
-        alphaReset.style.float = "right";
-        alphaReset.style.marginLeft = "2px";
-        alphaReset.addEventListener ('click',  function() { self.resetAlpha(); self.drawDots();}, false);
+        var undoSvg = '<svg xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 512 512"><!--! Font Awesome Free 6.4.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2023 Fonticons, Inc. --><path d="M212.333 224.333H12c-6.627 0-12-5.373-12-12V12C0 5.373 5.373 0 12 0h48c6.627 0 12 5.373 12 12v78.112C117.773 39.279 184.26 7.47 258.175 8.007c136.906.994 246.448 111.623 246.157 248.532C504.041 393.258 393.12 504 256.333 504c-64.089 0-122.496-24.313-166.51-64.215-5.099-4.622-5.334-12.554-.467-17.42l33.967-33.967c4.474-4.474 11.662-4.717 16.401-.525C170.76 415.336 211.58 432 256.333 432c97.268 0 176-78.716 176-176 0-97.267-78.716-176-176-176-58.496 0-110.28 28.476-142.274 72.333h98.274c6.627 0 12 5.373 12 12v48c0 6.627-5.373 12-12 12z"/></svg>';
+
+        //var alphaReset = createButton(15, 15, "mpAlphaReset", "Reset transparency", undoSvg, null, null, null, false, false, 10);
+        //alphaReset.style.float = "right";
+        //alphaReset.style.marginLeft = "2px";
+        //alphaReset.addEventListener ('click',  function() { self.resetAlpha(); self.drawDots();}, false);
+
+        var sliderReset = createButton(15, 15, "mpSliderReset", "Reset transparency and circle size", undoSvg, null, null, null, false, false, 10);
+        sliderReset.style.backgroundColor = "transparent";
+        sliderReset.style.float = "right";
+        //sliderReset.style.lineHeight = "16px";
+        sliderReset.style.marginLeft = "10px";
+        sliderReset.style.top = "0px";
+        sliderReset.style.top = "0px";
+        sliderReset.style.position = "relative";
+        sliderReset["z-index"] = "10"; // ? why ?
+        sliderReset.addEventListener ('click',  function() { self.resetAlpha(); self.resetRadius(); self.drawDots()}, false);
 
         alphaCont.appendChild(alphaLabel);
         alphaCont.appendChild(alphaSlider);
-        alphaCont.appendChild(alphaReset);
-
-        self.div.appendChild(alphaCont);
+        //alphaCont.appendChild(alphaReset);
+        alphaCont.appendChild(sliderReset);
 
         // Radius reset slider: label, slider and reset button
-        var radiusSlider = createSliderSpan("mpRadiusSlider", 60, 10);
+        var radiusSlider = createSliderSpan("mpRadiusSlider", sliderWidth, 10, 20);
         radiusSlider.style.float = "left";
         self.radiusSlider = radiusSlider; // see activateSliders() for the jquery UI part of the code, executed later
 
         // container for label + slider and reset button
-        var radiusCont = document.createElement('div');
+
+        var radiusCont = document.createElement('span');
         radiusCont.className = "sliderContainer";
         radiusCont.id = "mpRadiusDiv";
-        radiusCont.style.left = "50px";
-        radiusCont.style.top = "15px";
+        radiusCont.style.left = "0px"; //fromLeft+"px";
+        radiusCont.style.top = "0px"; //fromTop+"px";
         radiusCont.appendChild(radiusSlider)
 
         var radiusLabel = document.createElement('span'); // contains the slider and the reset button, floats right
         radiusLabel.id = "radiusSliderLabel";
-        radiusLabel.textContent = "Size";
+        radiusLabel.textContent = "Circle Size";
+        radiusLabel.style.width = "80px";
         radiusLabel.className = "sliderLabel";
-
-        var radiusReset = createButton(15, 15, "mpRadiusReset", "Reset radius", "Rs", null, null, null, false, false, 10);
-        radiusReset.style.float = "right";
-        radiusReset.style.marginLeft = "2px";
-        radiusReset["z-index"] = "10"; // ? why ?
-        radiusReset.addEventListener ('click',  function() { self.resetRadius(); self.drawDots()}, false);
 
         radiusCont.appendChild(radiusLabel);
         radiusCont.appendChild(radiusSlider);
-        radiusCont.appendChild(radiusReset);
+        //radiusCont.appendChild(sliderReset);
 
-        self.div.appendChild(radiusCont);
+        // add both to the big container div that holds all three slider elements
+        var sliderDiv = document.createElement('span');
+        sliderDiv.style.top = fromTop+"px";
+        sliderDiv.style.left = fromLeft+"px";
+        sliderDiv.style.position = "relative";
+        sliderDiv.id = "mpSliderDiv";
+        sliderDiv.appendChild(radiusCont);
+        sliderDiv.appendChild(alphaCont);
+        self.div.appendChild(sliderDiv);
+        self.sliderDiv = sliderDiv; // for quickResize()
     }
 
     function addCloseButton(top, left) {
@@ -1492,6 +1522,7 @@ function MaxPlot(div, top, left, width, height, args) {
        self.div.style.width = width+"px";
        self.div.style.height = height+"px";
 
+       // if in split screen mode, pass on the message to the second window
        if (self.childPlot) {
            width = width/2;
            //self.childPlot.left = self.left+width;
@@ -1517,11 +1548,13 @@ function MaxPlot(div, top, left, width, height, args) {
        self.zoomDiv.style.top = (height-gZoomFromBottom)+"px";
        self.zoomDiv.style.left = (gZoomFromLeft)+"px";
 
+       // move status line, dataset name and radius/transparency sliders
        var statusDiv = self.statusLine;
        statusDiv.style.top = (height-gStatusHeight)+"px";
        statusDiv.style.width = width+"px";
 
        self.titleDiv.style.top = (height-gStatusHeight-gTitleSize)+"px";
+       self.sliderDiv.style.top = (height-gStatusHeight-gTitleSize)+"px";
 
     }
 
@@ -1580,6 +1613,8 @@ function MaxPlot(div, top, left, width, height, args) {
        if (oldAlpha)
            self.port.initAlpha = oldAlpha;
        self.coords = {};
+
+       self.coords.origAll = undefined;
 
        var newZr = {};
        if (minX===undefined || maxX===undefined || minY===undefined || maxY===undefined)
@@ -1659,6 +1694,9 @@ function MaxPlot(div, top, left, width, height, args) {
         var alpha = initAlpha + 3.0*zoomFrac*(1.0 - initAlpha);
         alpha = Math.min(0.8, alpha)*alphaMult;
         debug("Zoom factor: ", zoomFact, ", Radius: "+radius+", alpha: "+alpha);
+
+        if (self.onRadiusAlphaChange)
+            self.onRadiusAlphaChange(radiusMult, alphaMult);
 
         self.port.zoomFact = zoomFact;
         self.port.alpha = alpha;
@@ -1820,6 +1858,12 @@ function MaxPlot(div, top, left, width, height, args) {
     this.resetRadius = function() {
        self.port.radiusMult = 1.0;
        $('#mpRadiusSlider').slider({value:4});
+       self.calcRadius();
+    };
+
+    this.setRadiusAlpha = function(radius, alpha) {
+       self.port.radiusMult = radius;
+       self.port.alphaMult = alpha;
        self.calcRadius();
     };
 
@@ -2078,6 +2122,10 @@ function MaxPlot(div, top, left, width, height, args) {
         self._selUpdate();
     };
 
+    this.hasSelected = function() {
+        return (selCells.length!==0)
+    }
+
     this.getSelection = function() {
         /* return selected cells as a list of ints */
         var cellIds = [];
@@ -2100,9 +2148,63 @@ function MaxPlot(div, top, left, width, height, args) {
         self._selUpdate();
     };
 
+    this.selectOnlyShow = function() {
+    /* the opposite of selectHide() = remove all coords that are not selected */
+        self.coords.origAll = cloneArray(self.coords.orig);
+        var selCells = self.selCells;
+        var coords = self.coords.orig;
+        for (var i = 0; i < coords.length/2; i++) {
+            if (!selCells.has(i)) {
+                coords[2*i] = HIDCOORD;
+                coords[2*i+1] = HIDCOORD;
+            }
+        }
+        self.scaleData();
+        //self.selectSet([]);
+        self._selUpdate();
+    }
+
+
+    this.selectHide = function() {
+    /* remove all coords that are selected */
+        if (!self.coords.origAll===undefined)
+            self.coords.origAll = cloneArray(self.coords.orig);
+
+        var selCells = self.selCells;
+        var coords = self.coords.orig;
+
+        for (var i = 0; i < coords.length/2; i++) {
+            if (selCells.has(i)) {
+                coords[2*i] = HIDCOORD;
+                coords[2*i+1] = HIDCOORD;
+            }
+        }
+
+        self.scaleData();
+        self.selectSet([]);
+        self._selUpdate();
+    }   
+
+    this.unhideAll = function() {
+        /* undo the hide operation */
+        if (self.coords.origAll!==undefined)
+            self.coords.orig = self.coords.origAll;
+        self.scaleData();
+    }
+
     this.getCount = function() {
         /* return maximum number of cells in dataset, may include hidden cells, see isHidden() */
         return self.coords.orig.length / 2;
+    };
+
+    this.getVisibleCount = function() {
+        /* return number of cells that are visible */
+        let count = 0;
+        for (var i = 0; i < coords.length/2; i++) {
+            if (!isHidden(coords[2*i], coords[2*i+1]))
+                count++;
+        }
+        return count;
     };
 
     // END SELECTION METHODS (could be an object?)
@@ -2342,14 +2444,14 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // is there just white space under the mouse, do nothing,
         // from https://stackoverflow.com/questions/15325283/how-to-detect-if-a-mouse-pointer-hits-a-line-already-drawn-on-an-html-5-canvas
-        var imageData = self.ctx.getImageData(0, 0, self.width, self.height);
-        var inputData = imageData.data;
-        var pData = (~~xCanvas + (~~yCanvas * self.width)) * 4;
+        //var imageData = self.ctx.getImageData(0, 0, self.width, self.height);
+        //var inputData = imageData.data;
+        //var pData = (~~xCanvas + (~~yCanvas * self.width)) * 4;
 
-        if (!inputData[pData + 3]) {
-            console.log("just white space under mouse");
-            return;
-        }
+        //if (!inputData[pData + 3]) {
+            //console.log("just white space under mouse");
+            //return;
+        //}
 
         // when the cursor is over a label, change it to a hand, but only when there is no marquee
         if (self.coords.labelBbox!==null && self.mouseDownX === null) {

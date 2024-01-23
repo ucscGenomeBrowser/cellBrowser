@@ -88,14 +88,9 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 }
 
 .sliderContainer {
-        /*position : relative;
-        width : 120px;
-        line-height : 13px;
-        font-weight : bold;
-        font-size : 80%; */
+        position : absolute;
         display: grid;
-        grid-template-columns: 45px 60px 15px;
-        position: relative;
+        grid-template-columns: 45px 120px 15px;
 }
 
 .sliderLabel {
@@ -137,7 +132,26 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 #tpButtonInfo { height: 24px; top: 1px; margin-right: 8px; width: 120px; border-radius: 4px }
 .tpDialogInput { margin-left: 12px; margin-top: 5px; margin-bottom: 12px; }
 
-.tpIconButton { padding: 1px 2px 1px 2px; border-radius: 0; height:28px; width: 28px; cursor: default}
+.tpIconButton { 
+        padding: 1px 2px 1px 2px; 
+        border-radius: 0; 
+        height:28px; 
+        width: 28px; 
+        cursor: default
+}
+
+.tpRibbonButton {
+        padding:  1px 2px 1px 2px; 
+        border-radius: 4px;
+        height: 24px;
+        border: 1px solid #c5c5c5;
+        vertical-align: middle;
+        text-align: center;
+        margin-right: 8px;
+        top: 3px;
+        position: relative;
+}
+
 .tpClicked { background-color: #AAA }
 .tpClicked:hover { background-color: #AAA }
 .btn-primary.load-dataset {float: right; margin-left: 10px; color: white; font-size: 12px; margin-top: -4px;}

@@ -1368,19 +1368,14 @@ function CbDbFile(url) {
         }
     }
 
-    function searchGeneNames(geneSyns, searchStr, doPrefix) {
+    function searchGeneNames(geneSyns, searchStr) {
         /* search the geneSyns (arr of [syn, geneId]) for matches. Return arr of geneId */
         var foundIds = [];
         for (var i=0; i<geneSyns.length; i++) {
             var synRow = geneSyns[i];
             var syn = synRow[0];
-            if (doPrefix) {
-                if (syn.startsWith(searchStr))
-                    foundIds.push(synRow[1]);
-            } else {
-                if (syn.endsWith(searchStr))
-                    foundIds.push(synRow[1]);
-            }
+            if (syn.startsWith(searchStr) || syn.endsWith(searchStr))
+                foundIds.push(synRow[1]);
         }
         return foundIds;
     }
@@ -1390,9 +1385,7 @@ function CbDbFile(url) {
         searchStr = searchStr.toLowerCase();
         var geneSyns = self.geneSyns;
 
-        var foundIds = searchGeneNames(geneSyns, searchStr, true);
-        if (foundIds.length===0)
-            foundIds = searchGeneNames(geneSyns, searchStr, false);
+        var foundIds = searchGeneNames(geneSyns, searchStr);
         return foundIds;
     }
 
