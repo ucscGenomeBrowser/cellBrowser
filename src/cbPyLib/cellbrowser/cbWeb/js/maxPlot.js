@@ -229,7 +229,7 @@ function MaxPlot(div, top, left, width, height, args) {
         } else {
             var elem = document.createElement('div');
             elem.id = "tpWatermark";
-            elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.3; z-index: 1000; top: 100px; left: 100px; text-align: left; vertical-align: top; color: black; font-size: xx-large;';
+            elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.2; z-index: 1000; top: 50px; left: 50px; text-align: left; vertical-align: top; color: black; font-size: large;';
             elem.textContent = text;
             gebi("tpMaxPlot").appendChild(elem);
             self.watermark = elem;
@@ -611,7 +611,7 @@ function MaxPlot(div, top, left, width, height, args) {
        for (var i=0; i<3; i++) {
            htmls.push('<div id="mpProgressDiv'+i+'" style="display:none; height:17px; width:300px; background-color: rgba(180, 180, 180, 0.3)" style="">');
            htmls.push('<div id="mpProgress'+i+'" style="background-color:#666; height:17px; width:10%"></div>');
-           htmls.push('<div id="mpProgressLabel'+i+'" style="color:white; line-height:17px; position:absolute; top:'+(i*17)+'px;left:100px">Loading...</div>');
+           htmls.push('<div id="mpProgressLabel'+i+'" style="color:black; line-height:17px; position:absolute; top:'+(i*17)+'px;left:100px">Loading...</div>');
            htmls.push('</div>');
        }
 
@@ -2113,7 +2113,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.selectHide = function() {
     /* remove all coords that are selected */
-        if (!self.coords.origAll===undefined)
+        if (self.coords.origAll===undefined)
             self.coords.origAll = cloneArray(self.coords.orig);
 
         var selCells = self.selCells;
@@ -2133,8 +2133,10 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.unhideAll = function() {
         /* undo the hide operation */
-        if (self.coords.origAll!==undefined)
+        if (self.coords.origAll!==undefined) {
             self.coords.orig = self.coords.origAll;
+            self.coords.origAll = undefined;
+        }
         self.scaleData();
     }
 
@@ -2330,6 +2332,11 @@ function MaxPlot(div, top, left, width, height, args) {
         // notify the UI
         self.onActiveChange(self);
         return true;
+    }
+
+    this.isSplit = function() {
+        /* return true if this renderer has either a parent or a child plot = is in split screen mode */
+        return (self.parentPlot!==null || self.childPlot!==null)
     }
 
     // https://stackoverflow.com/questions/73187456/canvas-determine-if-point-is-on-line

@@ -8,19 +8,20 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 
 #tpExprViewTitle { 
         background-color: #eee;
-        padding: 3px;
+        padding: 5px;
+        height: 25px;
         /*border-bottom: 1px solid black; */
 }
 
 #tpExprView { 
         position: absolute;
         z-index: 100;
-        top: 1%;
-        left: 1%;
         display: block;
         background-color: white;
-        height: 98%;
-        width: 98%;
+        top: 1%;
+        left: 1%;
+        height: 99%;
+        width: 99%;
         border: 1px solid grey;
 }
 
@@ -187,6 +188,19 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
     top: 4px;
     font-weight: bold;
 }
+
+/* expression progress bar only */
+.ui-progressbar {
+        position: relative;
+}
+.progress-label {
+        position: absolute;
+        left: 50%;
+        top: 4px;
+        font-weight: bold;
+        /*text-shadow: 1px 1px 0 #fff;*/
+}
+
 
 .context-menu-item { 
         font-size: 13px; 
