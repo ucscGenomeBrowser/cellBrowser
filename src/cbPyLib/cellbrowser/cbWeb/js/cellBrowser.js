@@ -3851,6 +3851,17 @@ var cellbrowser = function() {
         }
     }
 
+    function legendLabelGetIdx(legend, findLabel) {
+         /* given a label, find the index in the legend */
+        let rows = legend.rows;
+        for (let i = 0; i < rows.length; i++) {
+            let row = rows[i];
+            if (row.label === findLabel)
+                return i;
+        }
+        return null;
+     }
+
     function legendRemoveManualColors(gLegend) {
         /* remove all manually defined colors from the legend */
         // reset the legend object
@@ -3868,6 +3879,7 @@ var cellbrowser = function() {
         }
         changeUrl(urlChanges);
     }
+
 
     function legendChangePaletteAndRebuild(palName, resetManual) {
         /* change the legend color palette and put it into the URL */
@@ -6064,7 +6076,7 @@ var cellbrowser = function() {
         ttDiv.style["border-radius"]="2px";
         ttDiv.style["display"]="none";
         ttDiv.style["cursor"]="pointer";
-        ttDiv.style["background-color"]="white";
+        ttDiv.style["background-color"]="rgba(255, 255, 255, 0.85)";
         ttDiv.style["box-shadow"]="0px 2px 4px rgba(0,0,0,0.3)";
         ttDiv.style["user-select"]="none";
         ttDiv.style["z-index"]="10";
@@ -7184,7 +7196,23 @@ var cellbrowser = function() {
             showTooltip(ev.clientX+15, ev.clientY, lineLabel);
     }
 
-    function onClusterNameHover(clusterName, nameIdx, ev) {
+    function fattenCluster(clusterName) {
+    /* highlight one of the clusters */
+        let valIdx = legendLabelGetIdx(gLegend, clusterName);
+        renderer.fatIdx = valIdx;
+        renderer.drawDots();
+        let legQuery = "#tpLegend_"+valIdx;
+        $(legQuery).addClass("tpLegendHl");
+    }
+
+    function resetFattening() {
+    /* remove the highlighted cluster */
+        $(".tpLegendHl").removeClass("tpLegendHl");
+        renderer.fatIdx = null;
+        renderer.drawDots();
+    }
+
+function onClusterNameHover(clusterName, nameIdx, ev) {
         /* user hovers over cluster label */
         var labelLines = [clusterName];
 
@@ -7219,10 +7247,13 @@ var cellbrowser = function() {
 
         labelLines.push("Alt/Option-Click to select cluster; Shift-Click to add cluster to selection");
         showTooltip(ev.clientX+15, ev.clientY, labelLines.join("<br>"));
+
+        fattenCluster(clusterName);
     }
 
     function onNoClusterNameHover(ev) {
         hideTooltip();
+        resetFattening();
     }
 
     function sanitizeName(name) {
@@ -7440,7 +7471,7 @@ var cellbrowser = function() {
         }
     }
 
-    function onClusterNameClick(clusterName, _, event) {
+    function onClusterNameClick(clusterName, clusterLabel, event) {
         /* build and open the dialog with the marker genes table for a given cluster */
         var metaInfo = getClusterFieldInfo();
         var isNumber = false;

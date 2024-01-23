@@ -130,6 +130,8 @@ metaLabels = {
     "n_counts" : "UMI Count"
 }
 
+doForce = False
+
 # ==== functions =====
 
 debugDone = False
@@ -568,6 +570,8 @@ def cbBuild_parseArgs(showHelp=False):
 
     parser.add_option("", "--redo", dest="redo", action="store", default="meta",
             help="do not use cached old data. Can be: 'meta' or 'matrix' (matrix includes meta).")
+    parser.add_option("", "--force", dest="force", action="store_true",
+            help="ignore errors that usually stop the build and go ahead anyways.")
 
     (options, args) = parser.parse_args()
 
@@ -1135,6 +1139,8 @@ def itemsInOrder(valDict, keyOrder):
 
     return ret
 
+errorFields = []
+
 def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
     """ given a list of strings, determine if they're all int, float or
     strings. Return fieldMeta, as dict, and a new valList, with the correct python type
@@ -1145,6 +1151,7 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
     - if colors is not None: 'colors' is a dict of fieldName -> value -> color. The fieldname "__default__" is always tried to look up colors.
     - arrType is the Javascript TypedArray type of the array: float32, uint8, uint16, uint32
     """
+    global errorFields
     unknownCount = 0
     intCount = 0
     floatCount = 0
@@ -1259,8 +1266,9 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
         fieldMeta["arrType"], fieldMeta["_fmt"] = bytesAndFmt(len(valArr))
 
         if fieldMeta["arrType"].endswith("32"):
-            errAbort("Meta field %s has more than 32k different values and makes little sense to keep. "
+            logging.error("Meta field %s has more than 32k different values and makes little sense to keep. "
                 "Please or remove the field from the meta data table or contact us, cells@ucsc.edu."% fieldMeta["label"])
+            errorFields.append(fieldMeta["label"])
 
         valToInt = dict([(y[0],x) for (x,y) in enumerate(valCounts)]) # dict with value -> index in valCounts
         newVals = [valToInt[x] for x in valList] #
@@ -1455,6 +1463,15 @@ def metaToBin(inDir, inConf, outConf, fname, outDir):
             logging.info(("Field %(name)s: type %(type)s, %(diffValCount)d different values" % fieldMeta))
         else:
             logging.info(("Field %(name)s: type %(type)s, %(diffValCount)d different values, max size %(maxSize)d " % fieldMeta))
+
+    if len(errorFields)>0:
+        logging.error("Stopping now, since these fields where found with errors: %s. Run cbBuild with --force"
+            "to ignore these errors and build anyways." % ",".join(errorFields))
+        if doForce:
+            global errorFields
+            errorFields = []
+        else:
+            errAbort("build stopped")
 
     return fieldInfo, validFieldNames
 
@@ -5479,6 +5496,10 @@ def cbBuildCli():
 
     if len(args)!=0:
         errAbort("This program doesn't accept arguments. Did you forget to use the -i option?")
+
+    if options.force:
+        global doForce
+        doForce = True
 
     confFnames = options.inConf
     if confFnames==None:
