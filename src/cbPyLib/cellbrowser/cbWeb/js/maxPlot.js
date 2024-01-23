@@ -173,10 +173,12 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.selCells = new Set();  // IDs of cells that are selected (drawn in black)
 
+        self.fatIdx = null;        // Index of value that is in "fat mode" (=cells bigger, all other cells in light-grey)
+
         self.doDrawLabels = true;  // should cluster labels be drawn?
         self.initPort(args);
 
-        // mouse drag is modal: can be "select", "move" or "zoom"
+        // mouse drag mode: can be "select", "move" or "zoom"
         self.dragMode = "select";
 
         // for zooming and panning
@@ -821,8 +823,8 @@ function MaxPlot(div, top, left, width, height, args) {
        return count;
     }
 
-    function drawCirclesStupid(ctx, pxCoords, coordColors, colors, radius, alpha, selCells) {
-    /* draw little circles onto canvas. pxCoords are the centers.  */
+    function drawCirclesStupid(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
+    /* TOO SLOW - Only used in testing/for demos. Not used anywhere else. Draw circles onto canvas with very slow functions.. */
        debug("Drawing "+coordColors.length+" circles with stupid renderer");
        ctx.globalAlpha = alpha;
        var dblSize = 2*radius;
@@ -832,7 +834,11 @@ function MaxPlot(div, top, left, width, height, args) {
            var pxY = pxCoords[2*i+1];
            if (isHidden(pxX, pxY))
                continue;
-           var col = colors[coordColors[i]];
+           var valIdx = coordColors[i];
+           var col = colors[valIdx];
+           if (fatIdx!==null && valIdx!==fatIdx)
+               col = "F0F0F0";
+               //continue;
            ctx.fillStyle="#"+col;
            //ctx.fillRect(pxX-size, pxY-size, dblSize, dblSize);
            ctx.beginPath();
@@ -1071,25 +1077,23 @@ function MaxPlot(div, top, left, width, height, args) {
         return (0x1000000+(Math.round((t-R)*p)+R)*0x10000+(Math.round((t-G)*p)+G)*0x100+(Math.round((t-B)*p)+B)).toString(16).slice(1);
     }
 
-    function drawCirclesDrawImage(ctx, pxCoords, coordColors, colors, radius, alpha, selCells) {
-    /* predraw and copy circles into canvas. pxCoords are the centers.  */
-       // almost copied from by https://stackoverflow.com/questions/13916066/speed-up-the-drawing-of-many-points-on-a-html5-canvas-element
-       // around 2x faster than drawing full circles
-       // create an off-screen canvas
+    function makeTemplates(radius, tileWidth, tileHeight, colors, fatIdx) {
+    /* create an off-screen-canvas with the circle-templates that will be stamped later onto the bigger canvas 
+     * Add one final circle at the end with the outline, for the selection. */
+        var colCount = colors.length;
+        var off = document.createElement('canvas'); // not added to DOM, will be gc'ed
 
-       ctx.save();
-       debug("Drawing "+coordColors.length+" coords with drawImg renderer, radius="+radius);
-       var off = document.createElement('canvas'); // not added to DOM, will be gc'ed
-       var diam = Math.round(2 * radius);
-       var tileWidth = diam + 2; // must add one pixel on each side, space for antialising
-       var tileHeight = tileWidth; // otherwise circles look cut off
-       off.width = (colors.length+1) * tileWidth;
+        if (fatIdx!==null) {
+            colCount = 2;
+            colors = [colors[fatIdx], "F0F0F0"];
+        }
+
+       off.width = (colCount+1) * tileWidth;
        off.height = tileHeight;
        var ctxOff = off.getContext('2d');
 
        //pre-render circles into the off-screen canvas.
        for (var i = 0; i < colors.length; ++i) {
-           //ctxOff.lineWidth=1;
            ctxOff.fillStyle = "#"+colors[i];
            ctxOff.beginPath();
            // arc(x, y, r, 0, 2*pi)
@@ -1098,8 +1102,8 @@ function MaxPlot(div, top, left, width, height, args) {
            ctxOff.fill();
 
            // only draw outline for big circles
-           ctxOff.lineWidth=1.0;
            if (radius>5) {
+               ctxOff.lineWidth=1.0;
                var strokeCol = "#"+shadeColor(colors[i], 0.9);
                ctxOff.strokeStyle=strokeCol;
 
@@ -1120,10 +1124,33 @@ function MaxPlot(div, top, left, width, height, args) {
        ctxOff.arc((selImgId * tileWidth) + radius +1, radius+1, radius-1, 0, 2 * Math.PI);
        ctxOff.stroke();
 
-       if (alpha!==undefined)
-           ctx.globalAlpha = alpha;
+    return off;
+    }
 
-       // blit the circles onto the main canvas
+    function blitTwo(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, fatIdx, selImgId) {
+    /* blit only the fatIdx circle in color, and all the rest in grey. Also draw selection circles. */
+       var count = 0;
+       for (let i = 0; i < pxCoords.length/2; i++) {
+           var pxX = pxCoords[2*i];
+           var pxY = pxCoords[2*i+1];
+           if (isHidden(pxX, pxY))
+               continue;
+           var col = coordColors[i];
+           if (col===fatIdx)
+                col = 0;
+           else 
+                col = 1;
+           count++;
+           ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
+
+           if (radius>=5)
+               ctx.drawImage(off, selImgId * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
+       }
+       return count;
+    }
+
+    function blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius) {
+   /* blit the circles onto the main canvas, using all colors */
        var count = 0;
        for (let i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
@@ -1135,22 +1162,49 @@ function MaxPlot(div, top, left, width, height, args) {
            // drawImage(img,sx,sy,swidth,sheight,x,y,width,height);
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
        }
+       //debug(count +" circles drawn");
+       return count;
+    }
+
+
+    function drawCirclesDrawImage(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
+    /* predraw and copy circles into canvas. pxCoords are the centers.  */
+       // almost copied from by https://stackoverflow.com/questions/13916066/speed-up-the-drawing-of-many-points-on-a-html5-canvas-element
+       // around 2x faster than drawing full circles by using an off-screen canvas
+
+       debug("Drawing "+coordColors.length+" coords with drawImg renderer, radius="+radius);
+
+       var diam = Math.round(2 * radius);
+       var tileWidth = diam + 2; // must add one pixel on each side, space for antialising
+       var tileHeight = tileWidth; // otherwise circles look cut off
+
+       let off = makeTemplates(radius, tileWidth, tileHeight, colors, fatIdx);
+
+       ctx.save();
+       if (alpha!==undefined)
+           ctx.globalAlpha = alpha;
+
+       let count = 0;
+       if (fatIdx!==null)
+            count = blitTwo(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, fatIdx, selImgId);
+        else
+            count = blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius);
 
        // overdraw the selection as solid black circle outlines
        ctx.globalAlpha = 0.7;
-        selCells.forEach(function(cellId) {
+       var selImgId = colors.length;
+       selCells.forEach(function(cellId) {
            let pxX = pxCoords[2*cellId];
            let pxY = pxCoords[2*cellId+1];
            if (isHidden(pxX, pxY))
                 return;
-           // make sure that old leftover overlapping black circles don't shine through
+           // make sure that old leftover overlapping black circles don't shine through and redraw the circle
+           // slow, but not sure what else I can do...
            let col = coordColors[cellId];
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
-
            ctx.drawImage(off, selImgId * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
         })
 
-       debug(count +" circles drawn");
        ctx.restore();
        return count;
     }
@@ -1715,10 +1769,10 @@ function MaxPlot(div, top, left, width, height, args) {
         else {
             switch (self.mode) {
                 case 0:
-                    count = drawCirclesStupid(self.ctx, coords, colArr, pal, radius, alpha, self.selCells);
+                    count = drawCirclesStupid   (self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
                     break;
                 case 1:
-                    count = drawCirclesDrawImage(self.ctx, coords, colArr, pal, radius, alpha, self.selCells);
+                    count = drawCirclesDrawImage(self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
                     break;
                 case 2:
                     break;
@@ -2415,7 +2469,7 @@ function MaxPlot(div, top, left, width, height, args) {
             } else {
                 self.canvas.style.cursor = 'pointer'; // not 'hand' anymore ! and not 'grab' yet!
                 if (self.onLabelHover!==null)
-                    self.onLabelHover(labelInfo[0], labelInfo[1], ev);
+                    self.onLabelHover(labelInfo[0], ev);
                 }
         }
 
