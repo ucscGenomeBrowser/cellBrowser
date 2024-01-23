@@ -228,6 +228,33 @@ var cellbrowser = function() {
         }
     }
 
+    const getRandomIndexes = (length, size) =>
+    /* get 'size' random indexes from an array of length 'length' */
+    {
+        const indexes = [];
+        const created = {};
+      
+        while (indexes.length < size) {
+          const random = Math.floor(Math.random() * length);
+          if (!created[random]) {
+            indexes.push(random);
+            created[random] = true;
+          }
+        }
+        return indexes;
+    };
+
+    function arrSample(arr, size) {
+        var arrLen = arr.length; 
+        let rndIndexes = getRandomIndexes(arrLen, size);
+        let sampleArr = [];
+        for (let i = 0; i < rndIndexes.length; i++) {
+            let rndIdx = rndIndexes[i];
+            sampleArr.push(arr[rndIdx]);
+        }
+        return sampleArr;
+    }
+
     function warn(msg) {
         alert(msg);
     }
@@ -427,7 +454,7 @@ var cellbrowser = function() {
     }
 
     function activateTooltip(selector) {
-        // noconflict in html, I had to rename BS's tooltip to avoid overwrite by jquery
+        // see noconflict line in html source code, I had to rename BS's tooltip to avoid overwrite by jquery, argh: both are called .tooltip() !
         var ttOpt = {
             "html": true,
             "animation": false,
@@ -1636,21 +1663,21 @@ var cellbrowser = function() {
         if ("geneSym" in gLegend)
             buildViolinPlot();
 
-        var cols = renderer.col.arr;
-        var selectedLegends = {};
-        for (var i = 0; i < gLegend.rows.length; i++) {
-            selectedLegends[i] = 0;
-        }
-        selection.forEach(function(cellId) {
-            selectedLegends[cols[cellId]]++;
-        });
-        for (var i = 0; i < gLegend.rows.length; i++) {
-            if (selectedLegends[i] == gLegend.rows[i].count) {
-                $("#tpLegendCheckbox_" + i).prop("checked", true);
-            } else {
-                $("#tpLegendCheckbox_" + i).prop("checked", false);
-            }
-        }
+        //var cols = renderer.col.arr;
+        //var selectedLegends = {};
+        //for (var i = 0; i < gLegend.rows.length; i++) {
+            //selectedLegends[i] = 0;
+        //}
+        //selection.forEach(function(cellId) {
+            //selectedLegends[cols[cellId]]++;
+        //});
+        //for (var i = 0; i < gLegend.rows.length; i++) {
+            //if (selectedLegends[i] == gLegend.rows[i].count) {
+                //$("#tpLegendCheckbox_" + i).prop("checked", true);
+            //} else {
+                ////$("#tpLegendCheckbox_" + i).prop("checked", false);
+            //}
+        //}
         updateLegendGrandCheckbox();
     }
 
@@ -3324,15 +3351,20 @@ var cellbrowser = function() {
             var fullLocusStr = locusStr;
             if (locusStr.indexOf("|") > -1) {
                 fullLocusStr = peakListSerialize(); // the locus str can be +chr1:1-1000 to add a single gene, but we want all
+                if (locusStr.length > 600)
+                    // this is rare, so just completely skip this URL change now
+                    locusStr = "";
                 changeUrl({"locus":locusStr, "meta":null});
             } else {
                 changeUrl({"gene":locusStr, "meta":null});
             }
 
-
             makeLegendExpr(fullLocusStr, geneDesc, binInfo, exprArr, decArr);
             renderer.setColors(legendGetColors(gLegend.rows));
             renderer.setColorArr(decArr);
+            if (renderer.isSplit()) {
+                renderer.setWatermark(fullLocusStr);
+            }
             buildLegendBar();
             onDone();
 
@@ -3530,7 +3562,7 @@ var cellbrowser = function() {
            console.log("got spatial, but cannot draw yet");
    }
 
-    function renderData() {
+    function loadAndRenderData() {
     /* init the basic UI parts, the main renderer in the center, start loading and draw data when ready
      */
        var forcePalName = getVar("pal", null);
@@ -4950,27 +4982,29 @@ var cellbrowser = function() {
         }
 
         cartLoad(db);
-        renderData();
-        resizeDivs(true);
-
-        let showTutorial = true;
-
-        // special URL argument allows to force the info dialog to open
-        if (getVar("openDialog")) {
-            openDatasetDialog(db.conf, db.name); // open Info dialog
-            showTutorial = false;
-        }
-        cartSave(db); // = set the current URL from local storage settings
-
-        // users can save bookmarks directly to the expr viewer
         if (getVar("exprGene")) {
+            // show the gene expression viewer
             buildExprViewWindow()
-            showTutorial = false;
         }
-        // start the tutorial after a while
-        var introShownBefore = localStorage.getItem("introShown");
-        if (introShownBefore===undefined)
-           setTimeout(function(){ showIntro(true); }, 3000); // shown after 5 secs
+        else {
+            // show the UMAP view
+            let showTutorial = true;
+
+            loadAndRenderData();
+            resizeDivs(true);
+            // special URL argument allows to force the info dialog to open
+            if (getVar("openDialog")) {
+                openDatasetDialog(db.conf, db.name); // open Info dialog
+                showTutorial = false;
+            }
+            cartSave(db); // = set the current URL from local storage settings
+
+            // start the tutorial after a while
+            var introShownBefore = localStorage.getItem("introShown");
+            if (introShownBefore===undefined)
+               setTimeout(function(){ showIntro(true); }, 3000); // shown after 5 secs
+        }
+
     }
 
     function loadDataset(datasetName, resetVars, md5) {
@@ -5616,7 +5650,7 @@ var cellbrowser = function() {
         buildGeneExprPlots(geneId, null);
     }
 
-    function promiseGene(locusStr) {
+    function promiseGene(locusStr, onProgress) {
         /* a promise for loading the gene data. resolves with a geneData object with gene-related attributes.  */
         return new Promise(function(resolve, reject) {
 
@@ -5632,11 +5666,11 @@ var cellbrowser = function() {
                 geneData.binInfo = binInfo;
                 resolve(geneData);
             }
-            db.loadExprAndDiscretize(locusStr, gotGeneData, onProgress);
+            db.loadExprAndDiscretize(locusStr, gotGeneData, onProgress, "none");
         });
     }
 
-    function promiseMeta(metaName) {
+    function promiseMeta(metaName, onProgress) {
         /* a promise for loading the meta data. Resolves with a metaInfo object that has an .arr attribute. */
         return new Promise(function(resolve, reject) {
             var metaInfo = db.findMetaInfo(metaName);
@@ -5761,7 +5795,7 @@ var cellbrowser = function() {
         parentEl.innerHTML = htmls.join("");
     }
 
-    function buildExprViolins(parentDomId, metaToExpr, metaLabels) {
+    function buildExprViolins(parentDomId, metaToExpr, metaLabels, exprMax) {
         /* plot the violin plots on the expression viewer */
             // first make the canvas DOM objects...
             let htmls = [];
@@ -5777,8 +5811,17 @@ var cellbrowser = function() {
             let vioData = {};
 
             for (let i=0; i < metaToExpr.length; i++) {
-                let labelLines = [[metaLabels[i], metaToExpr[i].length+" cells"]];
-                let dataList = [metaToExpr[i]];
+                var exprArr = metaToExpr[i];
+
+                // if the arrays are very big, just sample to 10k points - violin plots are too slow
+                let sampleSize = 10000;
+                let exprLen = exprArr.length;
+                if (exprLen > sampleSize) {
+                    exprArr = arrSample(exprArr, sampleSize);
+                }
+
+                let labelLines = [[metaLabels[i], exprLen+" cells"]];
+                let dataList = [exprArr];
                 let violinData = {
                   labels : labelLines,
                   datasets: [{
@@ -5805,29 +5848,250 @@ var cellbrowser = function() {
             // finally build the charts
             window.violinCharts = [];
 
-            for (let i=0; i < metaToExpr.length; i++) {
-                const ctx = getById("tpExprViolinCanvas_"+i).getContext("2d");
-                window.setTimeout(function() {
-                    console.time("violinDraw_"+i);
-                    window.violinCharts.push( new Chart(ctx, {
-                        type: 'violin',
-                        data: vioData[i],
-                        options: optDict
-                    }));
-                    console.timeEnd("violinDraw_"+i);
-                }, 5);
+            window.setTimeout(function() {
+                for (let i=0; i < metaToExpr.length; i++) {
+                    const ctx = getById("tpExprViolinCanvas_"+i).getContext("2d");
+                        console.time("violinDraw_"+i);
+                        window.violinCharts.push( new Chart(ctx, {
+                            type: 'violin',
+                            data: vioData[i],
+                            options: optDict,
+                            scales : {
+                                y : {
+                                    max : exprMax
+                                }
+                            }
+                        }));
+                        console.timeEnd("violinDraw_"+i);
+                }
+            }, 5);
+    }
+
+    function plotDotRowLabels(htmls, labelWidth, minX, minY, rowDist, labels) {
+        /* plot the names of the meta values downwards on the left */
+        let x = minX;
+        let fontSize = 14;
+        for (let i=0; i < labels.length; i++) {
+            let label = labels[i];
+            let y = minY+(i*rowDist)+(fontSize);
+            htmls.push("<text font-family='sans-serif' font-size='"+fontSize+"' fill='black' alignment-baseline='bottom' text-anchor='start' x='"+x+"' y='"+y+"'>"+label+"</text>");
+        }
+    }
+
+    function plotDotColumnLabels(htmls, minX, minY, xDist, geneSyms) {
+        /* plot the names of the genes rightwards at the top */
+        let y = minY;
+        let fontSize = 14;
+        for (let i=0; i < geneSyms.length; i++) {
+            let label = geneSyms[i];
+            let x = minX+(i+xDist)+(fontSize);
+            htmls.push("<text font-family='sans-serif' font-weight='bold' font-size='"+fontSize+"' fill='black' transform='translate("+x+", "+y+
+                    ") rotate(90)' alignment-baseline='bottom' text-anchor='start'>"+label+"</text>");
+        }
+    }
+
+    function plotDotCircles(htmls, dotData, leftPad, topPad, colDist, rowDist, maxDotSize, colors) {
+        /* plot the circles of the dot plot */
+        let rows = dotData.rows;
+        let avgMin = dotData.avgMin;
+        let avgMax = dotData.avgMax;
+
+        let radius = maxDotSize/0.5;
+
+        let binCount = colors.length;
+        let binSize = (avgMax-avgMin)/binCount;
+
+        let x = leftPad+colDist+(0.5*colDist);
+        for (let rowI=0; rowI < rows.length; rowI++) {
+            let row = rows[rowI];
+            let cellCount = row[0];
+            let nonZeroPercent = row[1];
+            let avgExpr = row[2];
+
+            let y = topPad+(rowI*rowDist);
+
+            let radius = Math.max(1, Math.round(nonZeroPercent*(maxDotSize*0.5)));
+
+            let alpha = 0.7;
+
+            let colBin = Math.min(binCount, Math.round((avgExpr-avgMin) / binSize)); // at the edge, floating point problems can make it sometimes 21
+            let color = colors[colBin];
+
+            let tooltip = cellCount.toLocaleString('en-US')+" cells: expressing="+Math.round(100*nonZeroPercent)+"%, avgExpr="+avgExpr.toFixed(2);
+            htmls.push("<circle class='tpDotCircle' title='"+tooltip+"' cx='"+x+"' cy='"+y+"' r='"+radius+"' fill-opacity='"+alpha+"' fill='#"+color+"' />");
+        }
+    }
+
+    function plotLegend(htmls, dotData, legendX, legendY, colorPal, legendWidth, legendHeight, maxDotSize) {
+        /* plot the legend at x, y*/
+        htmls.push('<rect style="fill:transparent;stroke-width:0.3;stroke:black" x="'+legendX+'" y="'+legendY+'" width="'+(legendWidth)+'" height="'+legendHeight+'"/>');
+
+        let titleX = legendX + 20;
+        let titleY = legendY + 20;
+        htmls.push("<text font-family='sans-serif' font-size='16' fill='black' text-anchor='start' x='"+titleX+"' y='"+titleY+"'>Average Expression</text>");
+
+        titleY += 100;
+        htmls.push("<text font-family='sans-serif' font-size='16' fill='black' text-anchor='start' x='"+titleX+"' y='"+titleY+"'>Expressed in Cells</text>");
+
+        // draw five circles and 0% and 100% percent values underneath
+        let circlesY = legendY+150;
+        let lastCircleX = 0;
+        for (let i=0; i < 5; i++) {
+            let x = legendX+20+(i*30);
+            let radius = Math.round(Math.max(1, (maxDotSize*0.5)*(i*0.2)));
+            htmls.push("<circle fill-opacity='0.8' cx='"+x+"' cy='"+circlesY+"' r='"+radius+"' fill='black' />");
+            lastCircleX = x;
+        }
+
+        let zeroX = legendX+10;
+        let circleLabelY = legendY+150+30;
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+zeroX+"' y='"+circleLabelY+"'>0%</text>");
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+(lastCircleX-15)+"' y='"+circleLabelY+"'>100%</text>");
+
+        let rectY = legendY+25;
+        let rectX = legendX+10;
+        let colCount = colorPal.length;
+        let rectIncX = (legendWidth-20)/colCount;
+        let lastRectX = 0;
+        for (let i=0; i < colorPal.length; i++) {
+            let colHex = colorPal[i];
+            htmls.push('<rect style="fill:#'+colHex+';stroke-width:0;stroke:transparent" x="'+rectX+'" y="'+rectY+'" width="'+rectIncX+'" height="'+30+'"/>');
+            rectX += rectIncX;
+            lastRectX = rectX;
+        }
+
+        let avgMin = dotData.avgMin;
+        let avgMax = dotData.avgMax;
+        let minLabel = avgMin.toFixed(2);
+        let maxLabel = avgMax.toFixed(2);
+
+        let exprMinX = legendX+10;
+        let avgLabelY = rectY+50;
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+exprMinX+"' y='"+avgLabelY+"'>"+minLabel+"</text>");
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+(lastRectX-25)+"' y='"+avgLabelY+"'>"+maxLabel+"</text>");
+
+
+
+    }
+
+    function buildExprDotplot(parentDomId, geneSym, dotData, metaLabels, exprMin, exprMax) {
+        /* create an svg under parentDomId that shows dot plots for each meta category */
+        let htmls = [];
+        let parentEl = getById(parentDomId);
+
+        let rowLabels = metaLabels; 
+        rowLabels.sort();
+        let rowCount = rowLabels.length;
+
+        let genes = [geneSym]; 
+        let colCount = genes.length;
+        
+        //                              topPad 
+        //
+        //                              col label
+        //                              height
+        //
+        //  leftPad  <row label width> +<-colWidth--->+                     |  legendWidth     |
+        //                             +              |                     |  & legendHeight  |
+        //                             +  rowHeight ->|
+        //                             +              |
+        //
+        let topPad = 6;
+        let leftPad = 6;
+        let rowLabelWidth = 200;
+        let colLabelHeight = 80;
+
+        let maxDotSize = 30;
+        let rowHeight = maxDotSize+4;
+        let colWidth = maxDotSize+4;
+        let legendWidth = 200;
+        let legendHeight = 200;
+
+        let cellCountColWidth = 50;
+
+        let chartWidth = leftPad+rowLabelWidth+(colWidth*colCount)+legendWidth+cellCountColWidth;
+        let chartHeight = topPad+colLabelHeight+Math.max(legendHeight, rowCount*rowHeight);
+        htmls.push("<svg xmlns='http://www.w3.org/2000/svg' height='"+chartHeight+"' width='"+chartWidth+"'>");
+
+        let colorPal = makeColorPalette("magma", 20);
+        colorPal = colorPal.reverse();
+
+        plotDotRowLabels(htmls, rowLabelWidth, leftPad, colLabelHeight, rowHeight, rowLabels);
+        plotDotColumnLabels(htmls, leftPad+rowLabelWidth, topPad, colWidth, genes);
+        plotDotCircles(htmls, dotData, leftPad+rowLabelWidth, topPad+colLabelHeight, colWidth, rowHeight, maxDotSize, colorPal);
+        plotLegend(htmls, dotData, leftPad+rowLabelWidth+(colCount*colWidth)+cellCountColWidth, topPad+colLabelHeight, colorPal, legendWidth, legendHeight, maxDotSize)
+
+        htmls.push("</svg>");
+
+        parentEl.innerHTML = htmls.join("");
+        $(".tpDotCircle").tooltip({show:false}); // switch off animations. For some reason, the Bootstrap tooltip doesn't seem to work on the SVG tag
+    }
+
+    function calcDotData(metaToExpr, doLog) {
+        /* summarize gene expression to an array of rows [cellCount, nonZeroPercent, avgExpr], one per row */
+        /* returns object with o.rows of this array and o.avgMax and o.avgMin */
+        let rows = [];
+        let avgMax = -1000000;
+        let avgMin = 1000000;
+        for (let metaIdx=0; metaIdx < metaToExpr.length; metaIdx++) {
+            let exprArr = metaToExpr[metaIdx];
+            let nonZeroCount = 0;
+            let sum = 0;
+            for (let i=0; i < exprArr.length; i++) {
+                let val = exprArr[i];
+                if (val!==0)
+                    nonZeroCount++;
+                if (doLog)
+                    sum += Math.log(val+1);
+                else
+                    sum += val;
+            }
+            let cellCount = exprArr.length;
+            let avg = sum / cellCount;
+            let nonZeroPercent = nonZeroCount / exprArr.length;
+            rows.push( [cellCount, nonZeroPercent, avg] );
+            avgMax = Math.max(avgMax, avg);
+            avgMin = Math.min(avgMin, avg);
+        }
+
+        return {"avgMax":avgMax, "avgMin":avgMin, "rows" : rows};
+    }
+
+    function geneExprOnProgress(ev) {
+        console.log("expression"+ev);
+        let domId = null;
+        let prefix = "";
+        if (ev.target && ev.target._url) {
+            let url = ev.target._url;
+            if (url.search("/metaFields/")!=-1) {
+                prefix = "Annotation data: ";
+                domId = "#progressBarMeta";
+            }
+            else {
+                prefix = "Expression data: ";
+                domId = "#progressBarExpr";
             }
         }
 
+        var progressDiv = $( domId );
+        let perc = Math.round(100*ev.loaded/ev.total);
+        let sizeInMb = (ev.total/1000000).toFixed(2);
+        let label = prefix+perc+" % (of "+sizeInMb+" MB)";
+        progressDiv.progressbar( "value", perc);
+        var progressLabel = progressDiv.children().first();
+        progressLabel.text( label );
+    }
+
     function buildGeneExprPlots(geneSym, metaName, plotType) {
-        /* build the violin plots for the gene expression viewer */
+        /* build the plots for the gene expression viewer */
         // get gene symbol from function call or dropdown
-        geneSym = geneSym.split("|")[0];
 
         if (geneSym===null)
             geneSym = getById("tpGeneExprGeneCombo").value;
-        else
+        else {
+            geneSym = geneSym.split("|")[0]; // internal genes sometimes can be in format ENSG-ID|geneSymbol
             selectizeSetValue("tpGeneExprGeneCombo", geneSym);
+        }
 
         // get meta field from function call or dropdown
         if (metaName==null) {
@@ -5839,33 +6103,52 @@ var cellbrowser = function() {
         }
 
         // get maximum from URL
-        let forceExprMax = getVar("exprMax");
-        let forceExprMaxNum = null;
-        let limitCheckbox = getById("tpGeneExprYLimitCheck");
-        let limitInput = getById("tpGeneExprYLimit");
+        //let forceExprMax = getVar("exprMax");
+        //let forceExprMaxNum = null;
+        //let limitCheckbox = getById("tpGeneExprYLimitCheck");
+        //let limitInput = getById("tpGeneExprYLimit");
 
         let urlOpts = {"exprGene":geneSym, "exprMeta":metaName};
-        if (forceExprMax && forceExprMax!="") {
-            limitCheckbox.checked = true;
-            limitInput.value = forceExprMax;
-            forceExprMaxNum = parseFloat(forceExprMax);
-        } else {
-            //if (limitCheckbox.checked)
-                //forceExprMax = parseFloat(limitInput.value);
-            //else {
-                //limitCheckbox.disabled = true;
-                limitInput.disabled = true;
+        //if (forceExprMax && forceExprMax!="") {
+            //limitCheckbox.checked = true;
+            //limitInput.value = forceExprMax;
+            //forceExprMaxNum = parseFloat(forceExprMax);
+        //} else {
+                //limitInput.disabled = true;
             //}
-        }
+        //}
 
         changeUrl(urlOpts);
 
-        Promise.all([promiseGene(geneSym), promiseMeta(metaName)]).then( function(resArr) {
-            console.log("promises are all loaded", resArr);
+        function buildProgressBar(domId) {
+            var progressDiv = $( "#"+domId );
+            var progressLabel = progressDiv.children().first();
+            progressDiv.progressbar({
+              value: false,
+              complete: function() {
+                progressLabel.text( "Creating plot..." );
+              }
+            });
+        }
+
+        let exprContent = getById("tpExprViewPlot");
+        exprContent.innerHTML = 
+            '<div id="progressBarExpr" style="width:500px"><div class="progress-label">Loading expression values...</div></div><br>'+
+            '<div id="progressBarMeta" style="width:500px"><div class="progress-label">Loading annotation labels...</div></div>';
+
+        buildProgressBar('progressBarExpr');
+        buildProgressBar('progressBarMeta');
+
+        Promise.all([promiseGene(geneSym, geneExprOnProgress), promiseMeta(metaName, geneExprOnProgress)]).then( function(resArr) {
+            //console.log("promises are all loaded", resArr);
+            $( '#progressBarMeta').progressbar( "value", 100); // make sure that the progress bars show "complete"
+            $( '#progressBarExpr').progressbar( "value", 100);
+
             let geneData = resArr[0];
             let exprArr = geneData.exprArr;
 
             let metaData = resArr[1];
+            let shortLabels = metaData.ui.shortLabels;
             let metaArr = metaData.arr;
 
             let res = splitExprByMeta(metaArr, metaData.valCounts, exprArr);
@@ -5873,14 +6156,16 @@ var cellbrowser = function() {
             let exprMin = res[1];
             let exprMax = res[2];
             //getById("tpGeneExprYLimit").value = exprMax;
-            if (forceExprMaxNum)
-                exprMax = forceExprMaxNum;
+            //if (forceExprMaxNum)
+                //exprMax = forceExprMaxNum;
 
             if (plotType==="violin") {
                 buildExprViolins("tpExprViewPlot", metaToExpr, metaData.ui.shortLabels, exprMax);
-            }
-            else {
+            } else if (plotType==="barchart") {
                 buildExprBarcharts("tpExprViewPlot", metaToExpr, metaData.ui.shortLabels, exprMin, exprMax);
+            } else {
+                let dotData = calcDotData(metaToExpr, false);
+                buildExprDotplot("tpExprViewPlot", geneSym, dotData, shortLabels, exprMin, exprMax);
             }
 
         });
@@ -5904,11 +6189,13 @@ var cellbrowser = function() {
         htmls.push("<div id='tpExprView'>");
 
         htmls.push("<div id='tpExprViewTitle'>");
-        htmls.push("<b>Gene Expression: Violin Plots</b>");
+        htmls.push("<b>Gene Expression Plots</b>");
         htmls.push("<span id='tpCloseButton' class='ui-button-icon ui-icon ui-icon-closethick' style='float:right'></span>");
         htmls.push("</div>"); //tpExprViewTitle
 
         htmls.push('<div id="tpExprViewContent">');
+
+        htmls.push('<div class="link" style="padding-bottom: 6px; padding-left: 6px" id="tpBackToCb">&#8592; Back to Cell Browser</div>');
 
         htmls.push("<div id='tpExprViewHeader'>");
         htmls.push('<label id="tpGeneExprLabel" for="tpGeneExprGeneCombo">Show expression of </label>');
@@ -5918,10 +6205,10 @@ var cellbrowser = function() {
         buildMetaFieldCombo(htmls, "tpGeneExprMetaComboBox", "tpGeneExprMetaCombo", 0);
 
         //htmls.push('<input style="margin-left:4em" type="checkbox" id="tpGeneExprYLimitCheck"></input>');
-        htmls.push('<label style="margin-left:0.6em" for="tpGeneExprYLimitCheck">Set maximum to</label>');
-        htmls.push('<input style="margin-left:0.6em" type="text" id="tpGeneExprYLimit" size="7"></input>');
-        htmls.push('<button style="margin-left:0.6em" type="button" id="tpGeneExprLimitApply">Apply</button>');
-        htmls.push('<button style="margin-left:2em" type="button" data-type="violin" id="tpGeneExprFlipType">Show Violins</button>');
+        //htmls.push('<label style="margin-left:0.6em" for="tpGeneExprYLimitCheck">Set maximum to</label>');
+        //htmls.push('<input style="margin-left:0.6em" type="text" id="tpGeneExprYLimit" size="7"></input>');
+        //htmls.push('<button style="margin-left:0.6em" type="button" id="tpGeneExprLimitApply">Apply</button>');
+        //htmls.push('<button style="margin-left:2em" type="button" data-type="violin" id="tpGeneExprFlipType">Show Violins</button>');
 
         htmls.push("</div>"); //tpExprViewHeader
 
@@ -5938,24 +6225,37 @@ var cellbrowser = function() {
         activateCombobox("tpGeneExprMetaCombo", metaBarWidth-10);
         $("#tpGeneExprMetaCombo").change( onGeneExprMetaComboChange );
 
-        $('#tpCloseButton').click( function() { $('#tpExprView').remove(); } );
+        function closeExprView() {
+            $('#tpExprView').remove();
+            if (!renderer.readyToDraw())
+                loadAndRenderData(); // note that if 'exprGene' set on initial load, loadAndRenderData() was not run, so do this now.
+        }
+
+        $("#tpBackToCb").click( closeExprView );
+        $('#tpCloseButton').click( closeExprView );
+
+        /*
         $('#tpGeneExprFlipType').click( function() { 
             let button = $('#tpGeneExprFlipType');
             let chartType = button.attr("data-type");
-            buildGeneExprPlots(geneSym, metaName, chartType); 
+            window.setTimeout(function() {
+                buildGeneExprPlots(geneSym, metaName, chartType); 
+            }, 5);
+
             if (chartType==="violin") {
                 button.html("Show Violins");
                 button.attr("data-type", "violin");
             } else {
-                button.html("Show Barcharts");
-                button.attr("data-type", "barchart");
+                button.html("Show Dotplot");
+                button.attr("data-type", "dotplot");
             }
         } );
+        */
 
-        getById("tpGeneExprLimitApply").addEventListener("click", function(ev) {
-            changeUrl({"exprMax": getById("tpGeneExprYLimit").value});
-            buildGeneExprPlots(geneSym, metaName, $("tpGeneExprFlipType").attr("data-type")); 
-        });
+        //getById("tpGeneExprLimitApply").addEventListener("click", function(ev) {
+            //changeUrl({"exprMax": getById("tpGeneExprYLimit").value});
+            //buildGeneExprPlots(geneSym, metaName, $("tpGeneExprFlipType").attr("data-type")); 
+        //});
 
         //getById("tpGeneExprYLimitCheck").addEventListener("change", function(ev) {
             // if the checkbox is on, enable the input field
@@ -6791,7 +7091,7 @@ var cellbrowser = function() {
     function setLegendHeaders(type) {
     /* set the headers of the right-hand legend */
         if (type==="category") {
-            $('#tpLegendCol1').html('<span title="select all checkboxes below" id="tpLegendClear">&#9745;</span><span class="tpLegendHover" title="click to sort by name"> Name<span class="caret"></span></span>');
+            $('#tpLegendCol1').html('<span title="select all checkboxes below" id="tpLegendClear" style="font-size: 20px; vertical-align:top">&#9745;</span><span class="tpLegendHover" title="click to sort by name"> Name<span class="caret"></span></span>');
             $('#tpLegendCol2').html('<span class="tpLegendHover" title="click to sort by frequency"> Frequency<span class="caret"></span></span>');
         }
         else {
@@ -6803,6 +7103,7 @@ var cellbrowser = function() {
     }
 
     function updateLegendGrandCheckbox() {
+        /* update the "uncheck all" checkboxes in the legend */
         var checkbox = $("#tpLegendClear");
         var total = renderer.getCount();
         var selected = renderer.selCells.size;
@@ -6879,14 +7180,22 @@ var cellbrowser = function() {
 
     function onLegendCheckboxClick(ev) {
         /* user clicked the small checkboxes in the legend */
+        console.log(ev);
+        console.log(ev.target);
+        console.log(ev.target.checked);
         var valIdx = parseInt(ev.target.getAttribute("data-value-index"));
-        if ($(this).is(':checked'))
+        if (ev.target.checked) {
+            //ev.target.checked = true;
             renderer.selectByColor(valIdx);
-        else
+            ev.target.checked = true;
+        } else {
+            //ev.target.checked = false; // why is this necessary?
             renderer.unselectByColor(valIdx);
+            ev.target.checked = false;
+        }
         renderer.drawDots();
-        ev.stopPropagation();
-        $(this).blur();
+        //ev.stopPropagation();
+        //$(this).blur();
     }
 
     function buildMinMaxPart(htmls) {
@@ -7020,12 +7329,17 @@ var cellbrowser = function() {
 
         $("#tpLegendCol1").click( onSortByClick );
         $("#tpLegendCol2").click( onSortByClick );
-        $(".tpLegendCheckbox").click( onLegendCheckboxClick );
+
+        let checkEls = document.getElementsByClassName("tpLegendCheckbox");
+        for (let i = 0; i < checkEls.length; i++) {
+            checkEls[i].addEventListener("change", onLegendCheckboxClick);
+        }
+
         $("#tpLegendClear").click( onLegendClearClick );
         $("#tpExprLimitApply").click( onLegendApplyLimitsClick );
         $("#tpExpColorButton").click( onLegendExportClick );
 
-        $('.tpLegend').click( onLegendLabelClick );
+        //$('.tpLegend').click( onLegendLabelClick );
         //$('.tpLegendLabel').attr( "title", "Click to select samples with this value. Shift click to select multiple values.");
         activateTooltip(".tpLegendLabel");
         activateTooltip(".tpLegendCount");
