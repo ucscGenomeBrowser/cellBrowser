@@ -132,6 +132,9 @@ metaLabels = {
 
 doForce = False
 
+# any meta fields with errors get collected here, so we are not stopping just for one field
+errorFields = []
+
 # ==== functions =====
 
 debugDone = False
@@ -1137,8 +1140,6 @@ def itemsInOrder(valDict, keyOrder):
         errAbort("Keys %s are in the meta file but not in the enum order file." % missKeys)
 
     return ret
-
-errorFields = []
 
 def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
     """ given a list of strings, determine if they're all int, float or
