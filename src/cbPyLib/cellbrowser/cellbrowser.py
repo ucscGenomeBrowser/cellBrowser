@@ -1464,11 +1464,11 @@ def metaToBin(inDir, inConf, outConf, fname, outDir):
         else:
             logging.info(("Field %(name)s: type %(type)s, %(diffValCount)d different values, max size %(maxSize)d " % fieldMeta))
 
+    global errorFields
     if len(errorFields)>0:
         logging.error("Stopping now, since these fields where found with errors: %s. Run cbBuild with --force"
             "to ignore these errors and build anyways." % ",".join(errorFields))
         if doForce:
-            global errorFields
             errorFields = []
         else:
             errAbort("build stopped")
