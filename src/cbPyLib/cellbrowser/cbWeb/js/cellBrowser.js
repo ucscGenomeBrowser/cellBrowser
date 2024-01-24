@@ -1598,7 +1598,7 @@ var cellbrowser = function() {
     }
 
     function onOnlySelClick(ev) {
-        /* hide all selected cells */
+        /* show only selected, hide all unselected cells */
         renderer.selectOnlyShow();
         renderer.drawDots();
     }
@@ -3515,6 +3515,10 @@ var cellbrowser = function() {
            colorType = "locus";
            colorBy = getVar("locus");
            activateTab("gene");
+           if (getVar("locusGene")!==undefined) {
+               let geneId = getVar("locusGene");
+               updatePeakListWithGene(geneId);
+           }
        }
 
        gLegend = {};
@@ -3666,10 +3670,16 @@ var cellbrowser = function() {
            selList = JSURL.parse(getVar("select"));
        }
 
-       colorByDefaultField(doneOnePart);
 
-       if (db.conf.atacSearch)
-           db.loadGeneLocs(db.conf.atacSearch, db.conf.fileVersions.geneLocs);
+       if (db.conf.atacSearch) {
+           // peak loading needs the gene -> peak assignment, as otherwise can't show any peaks on the left
+           // so defer the coloring until all the peaks are loaded
+           let onLocsDone = function() { colorByDefaultField(doneOnePart); };
+           db.loadGeneLocs(db.conf.atacSearch, db.conf.fileVersions.geneLocs, onLocsDone);
+       } else
+           // in gene mode, we can start coloring right away
+           colorByDefaultField(doneOnePart);
+
        // pre-load the dataset description file, as the users will often go directly to the info dialog
        // and the following pre-loads risk blocking this load.
        var jsonUrl = cbUtil.joinPaths([db.conf.name, "desc.json"]) +"?"+db.conf.md5;
@@ -5237,7 +5247,7 @@ var cellbrowser = function() {
         for (let el of inEls) {
             let parts = el.id.split(":");
             let peakId = parts[1]+"|"+parts[2]+"|"+parts[3];
-            el.checked = (activeRanges.includes(peakId));
+            el.checked = (activePeaks.includes(peakId));
         }
     }
 
@@ -5420,6 +5430,7 @@ var cellbrowser = function() {
         var gene = db.getGeneInfoAtac(geneId);
         peakListShowTitle(gene.sym, gene.chrom, gene.chromStart);
         peakListShowRanges(gene.chrom, peaksInView.ranges, gene.chromStart);
+        changeUrl({"locusGene":geneId});
     }
 
     function comboLoadAtac(query, callback) {
@@ -5992,7 +6003,7 @@ var cellbrowser = function() {
         let parentEl = getById(parentDomId);
 
         let rowLabels = metaLabels; 
-        rowLabels.sort();
+        //rowLabels.sort();
         let rowCount = rowLabels.length;
 
         let genes = [geneSym]; 
@@ -6197,6 +6208,14 @@ var cellbrowser = function() {
 
     function buildExprViewWindow() {
         /* build the expression viewer dialog box */
+        if (db.conf.atacSearch) {
+            alert("This is an ATAC-Seq dataset. Creating dot/violin/barchart gene plots from ATAC-Seq peak data "+
+                    "is not obvious, as the Cell Browser does not know how to associate peaks to genes. "+
+                    "Therefore this feature has been disabled. If you have suggestions or feedback about this choice, please "+
+                    " do not hesitate to contact us at cells@ucsc.edu");
+            return;
+        }
+
         var htmls = [];
         htmls.push("<div id='tpExprView'>");
 
@@ -6304,6 +6323,7 @@ var cellbrowser = function() {
         if (!getVar("suppressOpenButton", false))
             htmls.push('<button id="tpOpenDatasetButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Open another dataset" data-placement="bottom">Open...</button>');
 
+        //if (!db.conf.atacSearch)
         htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Violin Plot Viewer" data-placement="bottom">Gene Expression</button>');
 
         //var nextLeft = 220;

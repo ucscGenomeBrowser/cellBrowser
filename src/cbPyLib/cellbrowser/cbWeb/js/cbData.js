@@ -421,6 +421,7 @@ function CbDbFile(url) {
             if (doneCount===2) {
                 if (self.conf.atacSearch) {
                     self.peakOffsets = matrixIndex;
+                    self.indexGenesAtac();
                 } else {
                     self.geneOffsets = matrixIndex;
                     self.indexGenes();
@@ -907,9 +908,9 @@ function CbDbFile(url) {
      * - a single gene or locus name, prefixed by "+", to add to the current array
      * - a single gene or locus name, prefixed by "-", to substract from the current array
 
-     * "strategy" can be "cells" or "range". If "cells", bins will have an ideally equal number of cells.
+     * "strategy" can be "cells" or "range" or "none". If "cells", bins will have an ideally equal number of cells.
      * if "range", bins will have an equal range between min-max (and somtimes no cells at all). If undefined,
-     * is "cells"
+     * is "cells". "none" switches off discretization.
      * */
 
         var ArrType = cbUtil.makeType(self.conf.matrixArrType); // need this later
@@ -962,10 +963,20 @@ function CbDbFile(url) {
             var discFunc = null;
             if (strategy==="range")
                 discFunc = discretizeArray_binSize;
-            else
+            else if (strategy="cells")
                 discFunc = discretizeArray;
+            else
+                discFunc = null;
+
             
-            var da = discFunc(newArr, self.exprBinCount, specVal);
+            var da = {};
+            if (discFunc == null) {
+                da.dArr = null;
+                da.binInfo = null;
+            } else {
+                da = discFunc(newArr, self.exprBinCount, specVal);
+            }
+
             self.currExprArr = newArr; // save it away, we'll need it for the next +<locus> operation
 
             onDone(newArr, da.dArr, locusName, geneDesc, da.binInfo);
@@ -1635,11 +1646,13 @@ function CbDbFile(url) {
         self.conf.metaFields = newMetaInfo;
     }
 
-    this.loadGeneLocs = function(dbAndGene, fileInfo) {
+    this.loadGeneLocs = function(dbAndGene, fileInfo, onLoadDone) {
         /* load genes/dbAndGene.json into db.geneLocs */
 
         function genesDone(data) {
             self.geneLocs = data;
+            self.indexGenesAtac();
+            onLoadDone();
         }
 
         var addUrl = "";

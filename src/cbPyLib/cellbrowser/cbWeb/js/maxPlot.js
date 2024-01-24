@@ -2160,7 +2160,7 @@ function MaxPlot(div, top, left, width, height, args) {
             }
         }
         self.scaleData();
-        //self.selectSet([]);
+        self.selCells.clear();
         self._selUpdate();
     }
 
@@ -2469,7 +2469,7 @@ function MaxPlot(div, top, left, width, height, args) {
             } else {
                 self.canvas.style.cursor = 'pointer'; // not 'hand' anymore ! and not 'grab' yet!
                 if (self.onLabelHover!==null)
-                    self.onLabelHover(labelInfo[0], ev);
+                    self.onLabelHover(labelInfo[0], labelInfo[1], ev);
                 }
         }
 
