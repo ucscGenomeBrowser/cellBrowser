@@ -6025,6 +6025,7 @@ var cellbrowser = function() {
 
         let rowLabels = metaLabels; 
         //rowLabels.sort();
+        rowLabels.sort(function(a, b) { return naturalSort(a, b); });
         let rowCount = rowLabels.length;
 
         let genes = [geneSym]; 

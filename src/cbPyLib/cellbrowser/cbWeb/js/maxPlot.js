@@ -2154,8 +2154,12 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.selectOnlyShow = function() {
     /* the opposite of selectHide() = remove all coords that are not selected */
-        self.coords.origAll = cloneArray(self.coords.orig);
         var selCells = self.selCells;
+        if (selCells.size===0)
+            return;
+
+        if (self.coords.origAll===undefined)
+            self.coords.origAll = cloneArray(self.coords.orig);
         var coords = self.coords.orig;
         for (var i = 0; i < coords.length/2; i++) {
             if (!selCells.has(i)) {
