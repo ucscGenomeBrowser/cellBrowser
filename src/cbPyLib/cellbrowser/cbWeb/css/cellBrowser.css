@@ -146,11 +146,13 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         border-radius: 4px;
         height: 24px;
         border: 1px solid #c5c5c5;
-        vertical-align: middle;
+        vertical-align: top;
         text-align: center;
         margin-right: 8px;
         top: 3px;
         position: relative;
+        padding-left: 4px;
+        padding-right: 4px;
 }
 
 .tpClicked { background-color: #AAA }

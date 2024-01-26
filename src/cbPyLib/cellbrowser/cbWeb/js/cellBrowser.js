@@ -1595,12 +1595,14 @@ var cellbrowser = function() {
         /* hide all selected cells */
         renderer.selectHide();
         renderer.drawDots();
+        updateSelectionButtons();
     }
 
     function onOnlySelClick(ev) {
         /* show only selected, hide all unselected cells */
         renderer.selectOnlyShow();
         renderer.drawDots();
+        updateSelectionButtons();
     }
 
     function onShowAllClick(ev) {
@@ -1609,10 +1611,21 @@ var cellbrowser = function() {
         renderer.drawDots();
     }
 
-    function removeSelectActions() {
+    function updateSelectionButtons() {
         /* remove the selection buttons if that's possible */
-        if (!(renderer.visibleCount()==renderer.getCount()) && !renderer.hasSelected()) {
-            $(".tpSelectButton").remove();
+        let visCount = renderer.getVisibleCount();
+        let totalCount = renderer.getCount();
+        let hiddenCount = totalCount - visCount;
+
+        if (hiddenCount===0)
+            $("#tpShowAll").hide();
+        else
+            $("#tpShowAll").show();
+
+        if (renderer.hasSelected()) {
+            $(".tpSelectButton").show();
+        } else {
+            $(".tpSelectButton").hide();
         }
     }
 
@@ -1622,10 +1635,10 @@ var cellbrowser = function() {
             return;
 
         let htmls = [];
-        htmls.push('<button title="Hide selected cells" id="tpHideSel" type="button" class="tpRibbonButton tpSelectButton" data-placement="bottom">Hide selected</button>');
-        htmls.push('<button title="Hide all unselected cells" id="tpOnlySel" type="button" class="tpRibbonButton tpSelectButton" data-placement="bottom">Only show selected</button>');
-        htmls.push('<button title="Show all cells that were hidden before" id="tpShowAll" type="button" class="tpRibbonButton tpSelectButton" data-placement="bottom">Show all</button>');
-        htmls.push('&nbsp;&nbsp;&nbsp;');
+        htmls.push('<button style="display:none" title="Hide selected cells" id="tpHideSel" type="button" class="tpRibbonButton tpSelectButton" data-placement="bottom">Hide selected</button>');
+        htmls.push('<button style="display:none" title="Hide all unselected cells" id="tpOnlySel" type="button" class="tpRibbonButton tpSelectButton" data-placement="bottom">Only show selected</button>');
+        htmls.push('<button style="display:none" title="Show all cells that were hidden before" id="tpShowAll" type="button" class="tpRibbonButton" data-placement="bottom">Show all</button>&nbsp;&nbsp;&nbsp;');
+        //htmls.push('');
         getById('tpToolBar').insertAdjacentHTML('afterbegin', htmls.join(""));
         getById('tpHideSel').addEventListener('click', onHideSelClick);
         getById('tpOnlySel').addEventListener('click', onOnlySelClick);
@@ -1638,6 +1651,7 @@ var cellbrowser = function() {
         selection.forEach(function(x) {cellIds.push(x)});
         $("#tpSetBackground").parent("li").removeClass("disabled");
 
+        updateSelectionButtons();
         if (cellIds.length===0 || cellIds===null) {
             clearMetaAndGene();
             clearSelectionState();
@@ -1656,7 +1670,6 @@ var cellbrowser = function() {
             $("#tpHoverHint").hide();
             $("#tpSelectHint").show();
             updateMetaBarManyCells(cellIds);
-            buildSelectActions();
         }
 
         updateGeneTableColors(cellIds);
@@ -1678,7 +1691,7 @@ var cellbrowser = function() {
                 ////$("#tpLegendCheckbox_" + i).prop("checked", false);
             //}
         //}
-        updateLegendGrandCheckbox();
+        //updateLegendGrandCheckbox();
     }
 
     function onRadiusAlphaChange(radius, alpha) {
@@ -1711,12 +1724,16 @@ var cellbrowser = function() {
         renderer.drawDots();
     }
 
-    function onSelectNoneClick() {
-    /* Edit - Select None */
+    function clearSelectionAndDraw() {
+        /* do everything needed to clear the selection */
         clearSelectionState();
-        removeSelectActions();
         renderer.selectClear();
         renderer.drawDots();
+    }
+
+    function onSelectNoneClick() {
+    /* Edit - Select None */
+        clearSelectionAndDraw();
     }
 
     function onSelectInvertClick() {
@@ -3663,6 +3680,7 @@ var cellbrowser = function() {
 
        buildLeftSidebar();
        buildToolBar(db.conf.coords, db.conf, metaBarWidth+metaBarMargin, menuBarHeight);
+       buildSelectActions();
 
        db.loadCoords(coordIdx, gotFirstCoords, gotSpatial, onProgress);
 
@@ -7135,11 +7153,10 @@ var cellbrowser = function() {
     }
 
     function updateLegendGrandCheckbox() {
-        /* update the "uncheck all" checkboxes in the legend */
+        /* update the "uncheck all" checkboxes in the legend:
+         * If all cells are selected */
         var checkbox = $("#tpLegendClear");
-        var total = renderer.getCount();
-        var selected = renderer.selCells.size;
-        if (gLegend.selectionDirection == "all" && total == selected) {
+        if (gLegend.selectionDirection == "none") {
             gLegend.selectionDirection = "none";
             checkbox.html("&#9746;");
             // from https://stackoverflow.com/questions/9501921/change-twitter-bootstrap-tooltip-content-on-click
@@ -7149,7 +7166,7 @@ var cellbrowser = function() {
                 tip.find('.tooltip-inner')
                 .text("unselect all checkboxes below");
             }
-        } else if (gLegend.selectionDirection == "none" && selected === 0) {
+        } else if (gLegend.selectionDirection == "all") {
             gLegend.selectionDirection = "all";
             checkbox.html("&#9745;");
             checkbox.attr('title', "select all checkboxes below");
@@ -7158,18 +7175,23 @@ var cellbrowser = function() {
                 tip.find('.tooltip-inner')
                 .text("select all checkboxes below");
             }
+        } else {
+            alert("internal error, gLegend.selectionDirection has an invalid value, please email cells@ucsc.edu");
         }
     }
 
     function onLegendClearClick(ev) {
         /* unselect all checkboxes in the legend and clear the selection */
         if (gLegend.selectionDirection == "all") {
-            clearSelectionState();
-            renderer.selectAll();
-            renderer.drawDots();
+            $(".tpLegendCheckbox").prop('checked', true);
+            onSelectAllClick();
+            gLegend.selectionDirection = "none";
         } else {
+            $(".tpLegendCheckbox").prop('checked', false);
             onSelectNoneClick();
+            gLegend.selectionDirection = "all";
         }
+        updateLegendGrandCheckbox();
         ev.stopPropagation();
     }
 
@@ -7269,7 +7291,9 @@ var cellbrowser = function() {
         htmls.push('<span id="tpLegendTitle" title="' +gLegend.titleHover+'">'+legTitle+"</span>");
         if (subTitle)
             htmls.push('<div id="tpLegendSubTitle" >'+subTitle+"</div>");
-        htmls.push('<div class="tpHint">Check boxes below to select '+gSampleDesc+'s</small></div>');
+
+        htmls.push('<div class="tpHint">Click buttons/checkboxes below to select '+gSampleDesc+'s</small></div>');
+        //htmls.push("<small><button>All</button><button>None</button><button>Invert</button></small>");
         htmls.push("</div>"); // title
         htmls.push('<div id="tpLegendHeader"><span id="tpLegendCol1"></span><span id="tpLegendCol2"></span></div>');
         htmls.push('<div id="tpLegendRows">');

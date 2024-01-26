@@ -2123,7 +2123,11 @@ function MaxPlot(div, top, left, width, height, args) {
     };
 
     this.hasSelected = function() {
-        return (selCells.length!==0)
+        return (self.selCells.length!==0)
+    }
+
+    this.hasAllSelected = function() {
+        return (self.selCells.length===self.getCount());
     }
 
     this.getSelection = function() {
@@ -2202,6 +2206,7 @@ function MaxPlot(div, top, left, width, height, args) {
     this.getVisibleCount = function() {
         /* return number of cells that are visible */
         let count = 0;
+        let coords = self.coords.orig;
         for (var i = 0; i < coords.length/2; i++) {
             if (!isHidden(coords[2*i], coords[2*i+1]))
                 count++;
