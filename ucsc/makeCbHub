@@ -1,5 +1,7 @@
 #! /usr/bin/env python3
 
+import logging
+
 import sys,os,subprocess,webcolors,argparse,pathlib
 from collections import OrderedDict
 
@@ -179,8 +181,9 @@ for ds in dsList:
                 #parser.print_help(sys.stderr)
                 exit(1)
         else:
-            print("makeCbHub supports bigWig, bigBed and other big* tracks at the moment.\nEnsure that your files end with one of the following extentsions:\n\nbw, bigWig, bigwig, bb, bigBed, bigbed\n")
-            exit(1)
+            logging.warn("makeCbHub supports bigWig, bigBed and other big* tracks at the moment.\nEnsure that your files end with one of the following extentsions:\n\nbw, bigWig, bigwig, bb, bigBed, bigbed: %s\n" % f)
+            continue
+            #exit(1)
         # If someone specifies colors, use those
         if len(colors) != 0:
             if shortLabel in colors.keys():

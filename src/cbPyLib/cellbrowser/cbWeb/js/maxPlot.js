@@ -22,6 +22,11 @@ function cloneObj(d) {
     return JSON.parse(JSON.stringify(d));
 }
 
+function cloneArray(a) {
+/* returns a copy of an array */
+    return a.slice();
+}
+
 function copyObj(src, trg) {
 /* object copying: copies all values from src to trg */
     var key;
@@ -90,6 +95,7 @@ function MaxPlot(div, top, left, width, height, args) {
             addModeButtons(10, 10, self);
             addStatusLine(height-gStatusHeight, left, width, gStatusHeight);
             addTitleDiv(height-gTitleSize-gStatusHeight-4, 8);
+            addSliders(height-gStatusHeight-15, width);
 
             /* add the div used for the mouse selection/zoom rectangle to the DOM */
             var selectDiv = document.createElement('div');
@@ -108,6 +114,8 @@ function MaxPlot(div, top, left, width, height, args) {
             self.onSelChange = null; // called when the selection has been changed, arg: array of cell Ids
             self.onLabelHover = null; // called when mouse hovers over a label
             self.onNoLabelHover = null; // called when mouse does not hover over a label
+            self.onLineHover = null; // called when mouse over a trajectory line
+            self.onRadiusAlphaChange = null; // called when user changes radius or alpha
             // self.onZoom100Click: called when user clicks the zoom100 button. Implemented below.
             self.selectBox = selectDiv; // we need this later
             self.setupMouse();
@@ -159,17 +167,18 @@ function MaxPlot(div, top, left, width, height, args) {
         self.coords.px   = null;   // coordinates of cells and labels as screen pixels or (HIDCOORD,HIDCOORD) if not shown
         self.coords.labelBbox = null;   // cluster label bounding boxes, array of [x1,x2,x2,y2]
 
-
         self.col = {};
         self.col.pal = null;        // list of six-digit hex codes
         self.col.arr = null;        // length is coords.px/2, one byte per cell = index into self.col.pal
 
         self.selCells = new Set();  // IDs of cells that are selected (drawn in black)
 
+        self.fatIdx = null;        // Index of value that is in "fat mode" (=cells bigger, all other cells in light-grey)
+
         self.doDrawLabels = true;  // should cluster labels be drawn?
         self.initPort(args);
 
-        // mouse drag is modal: can be "select", "move" or "zoom"
+        // mouse drag mode: can be "select", "move" or "zoom"
         self.dragMode = "select";
 
         // for zooming and panning
@@ -187,23 +196,32 @@ function MaxPlot(div, top, left, width, height, args) {
         self.activateMode(getAttr(args, "mode", "move"));
     };
 
-    // call the constructor
-    //self.newObject(div, top, left, width, height, args);
-
     this.clear = function() {
         clearCanvas(self.ctx, self.canvas.width, self.canvas.height);
     };
-
-    //this.setPos = function(left, top) {
-       /* position the canvas on the page */
-       //self.div.style.left = left+"px";
-       //self.div.style.top = top+"px";
-    //};
 
     this.setTitle = function (text) {
         self.title = text;
         self.titleDiv.innerHTML = text;
     };
+
+    this.activateSliders = function () {
+        $(self.alphaSlider).slider({
+            "value": 4,
+            "min"  : 1,
+            "max"  : 7,
+            "step" : 1, 
+            "slide": onChangeAlpha
+        });
+        $(self.radiusSlider).slider({
+            "value": 4,
+            "min"  : 1,
+            "max"  : 7,
+            "step" : 1, 
+            "slide": onChangeRadius
+        });
+        
+    }
 
     this.setWatermark = function (text) {
         if (text==="") {
@@ -213,7 +231,7 @@ function MaxPlot(div, top, left, width, height, args) {
         } else {
             var elem = document.createElement('div');
             elem.id = "tpWatermark";
-            elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.3; z-index: 1000; top: 100px; left: 100px; text-align: left; vertical-align: top; color: black; font-size: xx-large;';
+            elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.2; z-index: 1000; top: 50px; left: 50px; text-align: left; vertical-align: top; color: black; font-size: large;';
             elem.textContent = text;
             gebi("tpMaxPlot").appendChild(elem);
             self.watermark = elem;
@@ -255,7 +273,18 @@ function MaxPlot(div, top, left, width, height, args) {
             return 5;
     }
 
-    function createButton(width, height, id, title, text, imgFname, paddingTop, paddingBottom, addSep, addThickSep) {
+    function createSliderSpan(id, width, height, left) {
+        /* create div with given width and height */
+        var div = document.createElement('span');
+        div.id = id;
+        div.style.position = "relative";
+        div.style.width = width+"px";
+        div.style.height = height+"px";
+        div.style.left = left+"px";
+        return div;
+    }
+
+    function createButton(width, height, id, title, text, imgFname, paddingTop, paddingBottom, addSep, addThickSep, fontSize) {
         /* make a light-grey div that behaves like a button, with text and/or an image on it
          * Images are hard to vertically center, so padding top can be specified.
          * */
@@ -265,21 +294,26 @@ function MaxPlot(div, top, left, width, height, args) {
         div.style.backgroundColor = gButtonBackground;
         div.style.width = width+"px";
         div.style.height = height+"px";
+        div.style["z-index"]="10";
         div.style["text-align"]="center";
         div.style["vertical-align"]="middle";
         div.style["line-height"]=height+"px";
-        if (text!==null)
-            if (text.length>3)
-                div.style["font-size"]="11px";
-            else
-                div.style["font-size"]="14px";
+        if (fontSize === undefined || fontSize=== null) {
+            if (text!==null)
+                if (text.length>3)
+                    div.style["font-size"]="11px";
+                else
+                    div.style["font-size"]="14px";
+        } else {
+            div.style["font-size"]=fontSize+"px";
+        }
         div.style["font-weight"]="bold";
         div.style["font-family"]="sans-serif";
 
         if (title!==null)
             div.title = title;
         if (text!==null)
-            div.textContent = text;
+            div.innerHTML = text;
         if (imgFname!==null && imgFname!==undefined) {
             var img = document.createElement('img');
             img.src = imgFname;
@@ -358,6 +392,126 @@ function MaxPlot(div, top, left, width, height, args) {
         div.id = 'mpTitle';
         self.div.appendChild(div);
         self.titleDiv = div;
+    }
+
+    function onChangeAlpha(ev, ui) {
+        console.log("alpha: "+ui.value);
+        var sliderVal = ui.value; // 1-7
+        var multMap = {
+            7 : 0.15,
+            6 : 0.4,
+            5 : 0.8,
+            4 : 1.0,
+            3 : 1.2,
+            2 : 1.5,
+            1 : 1.8
+        }
+        self.port.alphaMult = multMap[sliderVal];
+        console.log("alphaMult: "+self.port.alphaMult);
+        self.calcRadius();
+        self.drawDots();
+    }
+
+    function onChangeRadius(ev, ui) {
+        //console.log("radius: "+ui.value);
+        var sliderVal = ui.value; // 1-7
+        var multMap = {
+            1 : 1/3,
+            2 : 1/2,
+            3 : 1/1.5,
+            4 : 1.0,
+            5 : 1.5,
+            6 : 2.0,
+            7 : 3.0
+        }
+        self.port.radiusMult = multMap[sliderVal];
+        self.calcRadius();
+        self.drawDots();
+    }
+
+    function addSliders(fromTop, canvWidth) {
+        /* add sliders for transparency and radius */
+        // alpha reset slider: a label, a slider + a reset button
+        var sliderWidth = 120;
+        var fromLeft = canvWidth - 2*sliderWidth - 2*45 - 100;
+
+        var alphaSlider = createSliderSpan("mpAlphaSlider", sliderWidth, 10, 0);
+        self.alphaSlider = alphaSlider; // see activateSliders() for the jquery UI part of the code, executed later
+        alphaSlider.style.float = "left";
+        //alphaSlider.style.top = "3px";
+
+        // container for label + control elements
+        var alphaCont = document.createElement('div');
+        alphaCont.id = "mpAlphaCont";
+        alphaCont.style.top = "0px";
+        //alphaCont.style.left = "150px"; // cellbrowser.css defines grid widths: 45
+        alphaCont.className = "sliderContainer";
+        alphaCont.style.top = "0px"; // (fromTop-14)+"px";
+        alphaCont.style.left = "200px";
+
+        var alphaLabel = document.createElement('div'); // contains the slider and the reset button, floats right
+        alphaLabel.id = "alphaSliderLabel";
+        alphaLabel.textContent = "Transp";
+        alphaLabel.className = "sliderLabel";
+
+        // reset button
+        var undoSvg = '<svg xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 512 512"><!--! Font Awesome Free 6.4.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2023 Fonticons, Inc. --><path d="M212.333 224.333H12c-6.627 0-12-5.373-12-12V12C0 5.373 5.373 0 12 0h48c6.627 0 12 5.373 12 12v78.112C117.773 39.279 184.26 7.47 258.175 8.007c136.906.994 246.448 111.623 246.157 248.532C504.041 393.258 393.12 504 256.333 504c-64.089 0-122.496-24.313-166.51-64.215-5.099-4.622-5.334-12.554-.467-17.42l33.967-33.967c4.474-4.474 11.662-4.717 16.401-.525C170.76 415.336 211.58 432 256.333 432c97.268 0 176-78.716 176-176 0-97.267-78.716-176-176-176-58.496 0-110.28 28.476-142.274 72.333h98.274c6.627 0 12 5.373 12 12v48c0 6.627-5.373 12-12 12z"/></svg>';
+
+        //var alphaReset = createButton(15, 15, "mpAlphaReset", "Reset transparency", undoSvg, null, null, null, false, false, 10);
+        //alphaReset.style.float = "right";
+        //alphaReset.style.marginLeft = "2px";
+        //alphaReset.addEventListener ('click',  function() { self.resetAlpha(); self.drawDots();}, false);
+
+        var sliderReset = createButton(15, 15, "mpSliderReset", "Reset transparency and circle size", undoSvg, null, null, null, false, false, 10);
+        sliderReset.style.backgroundColor = "transparent";
+        sliderReset.style.float = "right";
+        //sliderReset.style.lineHeight = "16px";
+        sliderReset.style.marginLeft = "10px";
+        sliderReset.style.top = "0px";
+        sliderReset.style.top = "0px";
+        sliderReset.style.position = "relative";
+        sliderReset["z-index"] = "10"; // ? why ?
+        sliderReset.addEventListener ('click',  function() { self.resetAlpha(); self.resetRadius(); self.drawDots()}, false);
+
+        alphaCont.appendChild(alphaLabel);
+        alphaCont.appendChild(alphaSlider);
+        //alphaCont.appendChild(alphaReset);
+        alphaCont.appendChild(sliderReset);
+
+        // Radius reset slider: label, slider and reset button
+        var radiusSlider = createSliderSpan("mpRadiusSlider", sliderWidth, 10, 20);
+        radiusSlider.style.float = "left";
+        self.radiusSlider = radiusSlider; // see activateSliders() for the jquery UI part of the code, executed later
+
+        // container for label + slider and reset button
+
+        var radiusCont = document.createElement('span');
+        radiusCont.className = "sliderContainer";
+        radiusCont.id = "mpRadiusDiv";
+        radiusCont.style.left = "0px"; //fromLeft+"px";
+        radiusCont.style.top = "0px"; //fromTop+"px";
+        radiusCont.appendChild(radiusSlider)
+
+        var radiusLabel = document.createElement('span'); // contains the slider and the reset button, floats right
+        radiusLabel.id = "radiusSliderLabel";
+        radiusLabel.textContent = "Circle Size";
+        radiusLabel.style.width = "80px";
+        radiusLabel.className = "sliderLabel";
+
+        radiusCont.appendChild(radiusLabel);
+        radiusCont.appendChild(radiusSlider);
+        //radiusCont.appendChild(sliderReset);
+
+        // add both to the big container div that holds all three slider elements
+        var sliderDiv = document.createElement('span');
+        sliderDiv.style.top = fromTop+"px";
+        sliderDiv.style.left = fromLeft+"px";
+        sliderDiv.style.position = "relative";
+        sliderDiv.id = "mpSliderDiv";
+        sliderDiv.appendChild(radiusCont);
+        sliderDiv.appendChild(alphaCont);
+        self.div.appendChild(sliderDiv);
+        self.sliderDiv = sliderDiv; // for quickResize()
     }
 
     function addCloseButton(top, left) {
@@ -459,7 +613,7 @@ function MaxPlot(div, top, left, width, height, args) {
        for (var i=0; i<3; i++) {
            htmls.push('<div id="mpProgressDiv'+i+'" style="display:none; height:17px; width:300px; background-color: rgba(180, 180, 180, 0.3)" style="">');
            htmls.push('<div id="mpProgress'+i+'" style="background-color:#666; height:17px; width:10%"></div>');
-           htmls.push('<div id="mpProgressLabel'+i+'" style="color:white; line-height:17px; position:absolute; top:'+(i*17)+'px;left:100px">Loading...</div>');
+           htmls.push('<div id="mpProgressLabel'+i+'" style="color:black; line-height:17px; position:absolute; top:'+(i*17)+'px;left:100px">Loading...</div>');
            htmls.push('</div>');
        }
 
@@ -669,8 +823,8 @@ function MaxPlot(div, top, left, width, height, args) {
        return count;
     }
 
-    function drawCirclesStupid(ctx, pxCoords, coordColors, colors, radius, alpha, selCells) {
-    /* draw little circles onto canvas. pxCoords are the centers.  */
+    function drawCirclesStupid(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
+    /* TOO SLOW - Only used in testing/for demos. Not used anywhere else. Draw circles onto canvas with very slow functions.. */
        debug("Drawing "+coordColors.length+" circles with stupid renderer");
        ctx.globalAlpha = alpha;
        var dblSize = 2*radius;
@@ -680,7 +834,11 @@ function MaxPlot(div, top, left, width, height, args) {
            var pxY = pxCoords[2*i+1];
            if (isHidden(pxX, pxY))
                continue;
-           var col = colors[coordColors[i]];
+           var valIdx = coordColors[i];
+           var col = colors[valIdx];
+           if (fatIdx!==null && valIdx!==fatIdx)
+               col = "F0F0F0";
+               //continue;
            ctx.fillStyle="#"+col;
            //ctx.fillRect(pxX-size, pxY-size, dblSize, dblSize);
            ctx.beginPath();
@@ -732,17 +890,6 @@ function MaxPlot(div, top, left, width, height, args) {
         /* given an array of [x, y, text], draw the text. returns bounding
          * boxes as array of [x1, y1, x2, y2]  */
 
-        //ctx.strokeStyle = '#EEEEEE';
-        //ctx.lineWidth = 5;
-        //ctx.miterLimit =2;
-        //ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
-        //ctx.textBaseline = "top";
-//
-        //ctx.shadowBlur=6;
-        //ctx.shadowColor="white";
-        //ctx.fillStyle = "rgba(0,0,0,0.8)";
-        //ctx.textAlign = "left";
-//
         for (var i=0; i < labelCoords.length; i++) {
             var coord = labelCoords[i];
             if (coord===null) { // outside of view range, push a null to avoid messing up the order of bboxArr
@@ -758,12 +905,14 @@ function MaxPlot(div, top, left, width, height, args) {
                 continue;
             }
 
-            svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' text-anchor='middle' x='"+x+"' y='"+y+"'>"+text+"</text>");
+            svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize+2)+"' fill='black' text-anchor='middle' x='"+x+"' y='"+y+"'>"+text+"</text>");
         }
+
     }
 
-    self.drawLegendSvg = function (legend, legWidth) {
+    self.drawLegendSvg = function (legend) {
         /* draw a legend onto the SVG given a legend object. */
+        var legWidth = self.svgLabelWidth;
         var svgLines = self.svgLines;
 
         var rows = legend.rows;
@@ -773,7 +922,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         var left = self.canvas.width; // x position where legend starts
 
-        var lineHeight = 18;
+        var lineHeight = gTextSize;
 
         var x = left + 11;
         var y = lineHeight;
@@ -781,7 +930,6 @@ function MaxPlot(div, top, left, width, height, args) {
         y += lineHeight;
 
         if (subTitle) {
-            htmls.push('<div id="tpLegendSubTitle" >'+subTitle+"</div>");
             svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' text-anchor='middle' x='"+x+"' y='"+y+"'>"+subTitle+"</text>");
             y += lineHeight;
         }
@@ -789,6 +937,7 @@ function MaxPlot(div, top, left, width, height, args) {
         y += lineHeight;
 
         // get the sum of all rows, to calculate frequency
+        // this code was copied from buildLegend -> refactor one day
         var sum = 0;
         for (var i = 0; i < rows.length; i++) {
             let count = rows[i].count;
@@ -817,20 +966,27 @@ function MaxPlot(div, top, left, width, height, args) {
             if (label==="") {
                 label = "(empty)";
             }
+            label = label.replace("&ndash;", "-");
+
+            // draw colored rectangle first
+
+            var textSize = gTextSize-3;
 
             svgLines.push("<rect width='15' height='15' fill='#"+colorHex+"' x='"+x+"' y='"+y+"'></rect>");
-            y+= lineHeight;
 
             var prec = 1;
             if (freq<1)
                 prec = 2;
 
-            svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' text-anchor='start' x='"+(x+18)+"' y='"+(y-4)+"'>"+label+"</text>");
-            svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' text-anchor='end' x='"+(left+legWidth-3)+"' y='"+y+"'>"+freq.toFixed(prec)+"%</text>");
-            y+= lineHeight;
+            //var lineCount = 0;
+            //svgLines.push("<text font-family='sans-serif' font-size='"+textSize+"' fill='black' text-anchor='start' x='"+(x+18)+"' y='"+((y-4)+lineCount*textSize)+"'>"+label+"</text>");
+            svgLines.push("<text font-family='sans-serif' font-size='"+textSize+"' fill='black' text-anchor='start' x='"+(x+18)+"' y='"+(y+8)+"'>"+label+"</text>");
+            //}
+            svgLines.push("<text font-family='sans-serif' font-size='"+textSize+"' fill='black' text-anchor='end' x='"+(left+legWidth-3)+"' y='"+(y+15)+"'>"+freq.toFixed(prec)+"%</text>");
+            y+= textSize;
 
         }
-        // cannot draw violin plots in SVG right now
+        // cannot draw violin plots in SVG - no library for it
     };
 
     function drawLabels(ctx, labelCoords, winWidth, winHeight, zoomFact) {
@@ -921,25 +1077,23 @@ function MaxPlot(div, top, left, width, height, args) {
         return (0x1000000+(Math.round((t-R)*p)+R)*0x10000+(Math.round((t-G)*p)+G)*0x100+(Math.round((t-B)*p)+B)).toString(16).slice(1);
     }
 
-    function drawCirclesDrawImage(ctx, pxCoords, coordColors, colors, radius, alpha, selCells) {
-    /* predraw and copy circles into canvas. pxCoords are the centers.  */
-       // almost copied from by https://stackoverflow.com/questions/13916066/speed-up-the-drawing-of-many-points-on-a-html5-canvas-element
-       // around 2x faster than drawing full circles
-       // create an off-screen canvas
+    function makeTemplates(radius, tileWidth, tileHeight, colors, fatIdx) {
+    /* create an off-screen-canvas with the circle-templates that will be stamped later onto the bigger canvas 
+     * Add one final circle at the end with the outline, for the selection. */
+        var colCount = colors.length;
+        var off = document.createElement('canvas'); // not added to DOM, will be gc'ed
 
-       ctx.save();
-       debug("Drawing "+coordColors.length+" coords with drawImg renderer, radius="+radius);
-       var off = document.createElement('canvas'); // not added to DOM, will be gc'ed
-       var diam = Math.round(2 * radius);
-       var tileWidth = diam + 2; // must add one pixel on each side, space for antialising
-       var tileHeight = tileWidth; // otherwise circles look cut off
-       off.width = (colors.length+1) * tileWidth;
+        if (fatIdx!==null) {
+            colCount = 2;
+            colors = [colors[fatIdx], "F0F0F0"];
+        }
+
+       off.width = (colCount+1) * tileWidth;
        off.height = tileHeight;
        var ctxOff = off.getContext('2d');
 
        //pre-render circles into the off-screen canvas.
        for (var i = 0; i < colors.length; ++i) {
-           //ctxOff.lineWidth=1;
            ctxOff.fillStyle = "#"+colors[i];
            ctxOff.beginPath();
            // arc(x, y, r, 0, 2*pi)
@@ -948,8 +1102,8 @@ function MaxPlot(div, top, left, width, height, args) {
            ctxOff.fill();
 
            // only draw outline for big circles
-           ctxOff.lineWidth=1.0;
            if (radius>5) {
+               ctxOff.lineWidth=1.0;
                var strokeCol = "#"+shadeColor(colors[i], 0.9);
                ctxOff.strokeStyle=strokeCol;
 
@@ -970,10 +1124,33 @@ function MaxPlot(div, top, left, width, height, args) {
        ctxOff.arc((selImgId * tileWidth) + radius +1, radius+1, radius-1, 0, 2 * Math.PI);
        ctxOff.stroke();
 
-       if (alpha!==undefined)
-           ctx.globalAlpha = alpha;
+    return off;
+    }
 
-       // blit the circles onto the main canvas
+    function blitTwo(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, fatIdx, selImgId) {
+    /* blit only the fatIdx circle in color, and all the rest in grey. Also draw selection circles. */
+       var count = 0;
+       for (let i = 0; i < pxCoords.length/2; i++) {
+           var pxX = pxCoords[2*i];
+           var pxY = pxCoords[2*i+1];
+           if (isHidden(pxX, pxY))
+               continue;
+           var col = coordColors[i];
+           if (col===fatIdx)
+                col = 0;
+           else 
+                col = 1;
+           count++;
+           ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
+
+           if (radius>=5)
+               ctx.drawImage(off, selImgId * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
+       }
+       return count;
+    }
+
+    function blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius) {
+   /* blit the circles onto the main canvas, using all colors */
        var count = 0;
        for (let i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
@@ -985,22 +1162,49 @@ function MaxPlot(div, top, left, width, height, args) {
            // drawImage(img,sx,sy,swidth,sheight,x,y,width,height);
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
        }
+       //debug(count +" circles drawn");
+       return count;
+    }
+
+
+    function drawCirclesDrawImage(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
+    /* predraw and copy circles into canvas. pxCoords are the centers.  */
+       // almost copied from by https://stackoverflow.com/questions/13916066/speed-up-the-drawing-of-many-points-on-a-html5-canvas-element
+       // around 2x faster than drawing full circles by using an off-screen canvas
+
+       debug("Drawing "+coordColors.length+" coords with drawImg renderer, radius="+radius);
+
+       var diam = Math.round(2 * radius);
+       var tileWidth = diam + 2; // must add one pixel on each side, space for antialising
+       var tileHeight = tileWidth; // otherwise circles look cut off
+
+       let off = makeTemplates(radius, tileWidth, tileHeight, colors, fatIdx);
+
+       ctx.save();
+       if (alpha!==undefined)
+           ctx.globalAlpha = alpha;
+
+       let count = 0;
+       if (fatIdx!==null)
+            count = blitTwo(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, fatIdx, selImgId);
+        else
+            count = blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius);
 
        // overdraw the selection as solid black circle outlines
        ctx.globalAlpha = 0.7;
-        selCells.forEach(function(cellId) {
+       var selImgId = colors.length;
+       selCells.forEach(function(cellId) {
            let pxX = pxCoords[2*cellId];
            let pxY = pxCoords[2*cellId+1];
            if (isHidden(pxX, pxY))
                 return;
-           // make sure that old leftover overlapping black circles don't shine through
+           // make sure that old leftover overlapping black circles don't shine through and redraw the circle
+           // slow, but not sure what else I can do...
            let col = coordColors[cellId];
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
-
            ctx.drawImage(off, selImgId * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
         })
 
-       debug(count +" circles drawn");
        ctx.restore();
        return count;
     }
@@ -1231,10 +1435,10 @@ function MaxPlot(div, top, left, width, height, args) {
         var ctxWidth  = self.canvas.width;
         var ctxHeight = self.canvas.height;
 
-        var coordHeight = dataRange.maxX-dataRange.minX;
-        var coordWidth = dataRange.maxY-dataRange.minY;
+        var coordHeight = dataRange.maxY-dataRange.minY;
+        var coordWidth = dataRange.maxX-dataRange.minX;
 
-        var scaleX = width / coordHeight; // this is px/dataUnit to convert background image pixels to canvas pixels
+        var scaleX = width / coordWidth; // this is px/dataUnit to convert background image pixels to canvas pixels
         var scaleY = height / coordHeight;
 
         var sx1 = zoomRange.minX * scaleX; // sx = x position on source image
@@ -1318,6 +1522,7 @@ function MaxPlot(div, top, left, width, height, args) {
        self.div.style.width = width+"px";
        self.div.style.height = height+"px";
 
+       // if in split screen mode, pass on the message to the second window
        if (self.childPlot) {
            width = width/2;
            //self.childPlot.left = self.left+width;
@@ -1343,11 +1548,13 @@ function MaxPlot(div, top, left, width, height, args) {
        self.zoomDiv.style.top = (height-gZoomFromBottom)+"px";
        self.zoomDiv.style.left = (gZoomFromLeft)+"px";
 
+       // move status line, dataset name and radius/transparency sliders
        var statusDiv = self.statusLine;
        statusDiv.style.top = (height-gStatusHeight)+"px";
        statusDiv.style.width = width+"px";
 
        self.titleDiv.style.top = (height-gStatusHeight-gTitleSize)+"px";
+       self.sliderDiv.style.top = (height-gStatusHeight-gTitleSize)+"px";
 
     }
 
@@ -1397,7 +1604,7 @@ function MaxPlot(div, top, left, width, height, args) {
        copyObj(opts, coordOpts);
 
        var oldRadius = self.port.initRadius;
-       var oldAlpha = self.port.initAlpha;
+       var oldAlpha  = self.port.initAlpha;
        var oldLabels = self.coords.pxLabels;
        self.port = {};
        self.initPort(coordOpts);
@@ -1406,6 +1613,8 @@ function MaxPlot(div, top, left, width, height, args) {
        if (oldAlpha)
            self.port.initAlpha = oldAlpha;
        self.coords = {};
+
+       self.coords.origAll = undefined;
 
        var newZr = {};
        if (minX===undefined || maxX===undefined || minY===undefined || maxY===undefined)
@@ -1471,20 +1680,54 @@ function MaxPlot(div, top, left, width, height, args) {
         var currentSpan = zr.maxX-zr.minX;
         var zoomFact = initSpan/currentSpan;
 
+        // both radius and alpha can be change by a 'multiplier'
+        var alphaMult = self.port.alphaMult || 1.0;
+        var radiusMult = self.port.radiusMult || 1.0;
+
         var baseRadius = self.port.initRadius;
         if (baseRadius===0)
             baseRadius = 0.7;
-        var radius = Math.floor(baseRadius * Math.sqrt(zoomFact));
+        var radius = Math.floor(baseRadius * Math.sqrt(zoomFact) * radiusMult);
 
         // the higher the zoom factor, the higher the alpha value
         var zoomFrac = Math.min(1.0, zoomFact/100.0); // zoom as fraction, max is 1.0
         var alpha = initAlpha + 3.0*zoomFrac*(1.0 - initAlpha);
-        alpha = Math.min(0.8, alpha);
+        alpha = Math.min(0.8, alpha)*alphaMult;
         debug("Zoom factor: ", zoomFact, ", Radius: "+radius+", alpha: "+alpha);
+
+        if (self.onRadiusAlphaChange)
+            self.onRadiusAlphaChange(radiusMult, alphaMult);
 
         self.port.zoomFact = zoomFact;
         self.port.alpha = alpha;
+        self.port.alphaMult = alphaMult;
         self.port.radius = radius;
+        self.port.radiusMult = radiusMult;
+    }
+
+    this.drawSvg = function(alpha, radius, coords, colArr, pal) {
+        self.svgLines = [];
+        var plotHeight = self.canvas.height;
+        var plotWidth = self.canvas.width;
+        var width = plotWidth+self.svgLabelWidth;
+        var height = 1500; // enough space for 100 lines in the legend
+        self.svgLines.push("<svg  xmlns='http://www.w3.org/2000/svg' height='"+height+"' width='"+width+"'>\n");
+        drawCirclesSvg(self.svgLines, coords, colArr, pal, radius, alpha, self.selCells);
+        if (self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined)
+            drawLabelsSvg(self.svgLines, self.coords.pxLabels, plotWidth, plotHeight, self.port.zoomFact);
+        // axis lines
+        self.svgLines.push('<line x1="2" y1="2" x2="2" y2="'+plotHeight+'" stroke="black" stroke-width="2"/>');
+        self.svgLines.push('<line x1="2" y1="2" x2="'+plotWidth+'" y2="2" stroke="black" stroke-width="2"/>');
+
+        // draw axis labels
+        var initZoom = self.port.initZoom;
+        // x axis
+        self.svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize)+"' fill='black' text-anchor='left' x='"+10+"' y='"+(gTextSize+20)+"'>"+initZoom.minY+"</text>");
+        self.svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize)+"' fill='black' text-anchor='left' x='"+10+"' y='"+(plotHeight-gTextSize-2)+"'>"+initZoom.maxY+"</text>");
+        // y axis
+        self.svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize)+"' fill='black' text-anchor='left' x='"+10+"' y='"+(gTextSize+3)+"'>"+initZoom.minX+"</text>");
+        self.svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize)+"' fill='black' text-anchor='left' x='"+(plotWidth-40)+"' y='"+(gTextSize+3)+"'>"+initZoom.maxX+"</text>");
+        return;
     }
 
     this.drawDots = function(doSvg) {
@@ -1509,11 +1752,7 @@ function MaxPlot(div, top, left, width, height, args) {
             alert("internal error: cbDraw.drawDots - colorArr is not 1/2 of coords array. Got "+pal.length+" color values but coordinates for "+(coords.length/2)+" cells.");
 
         if (doSvg!==undefined) {
-            self.svgLines = [];
-            var legWidth = 200;
-            self.svgLines.push("<svg  xmlns='http://www.w3.org/2000/svg' height='"+self.canvas.height+"' width='"+(self.canvas.width+legWidth)+"'>\n");
-            drawCirclesSvg(self.svgLines, coords, colArr, pal, radius, alpha, self.selCells);
-            drawLabelsSvg(self.svgLines, self.coords.pxLabels, self.canvas.width, self.canvas.height, self.port.zoomFact);
+            self.drawSvg(alpha, radius, coords, colArr, pal);
             return;
         }
 
@@ -1530,10 +1769,10 @@ function MaxPlot(div, top, left, width, height, args) {
         else {
             switch (self.mode) {
                 case 0:
-                    count = drawCirclesStupid(self.ctx, coords, colArr, pal, radius, alpha, self.selCells);
+                    count = drawCirclesStupid   (self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
                     break;
                 case 1:
-                    count = drawCirclesDrawImage(self.ctx, coords, colArr, pal, radius, alpha, self.selCells);
+                    count = drawCirclesDrawImage(self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
                     break;
                 case 2:
                     break;
@@ -1610,9 +1849,29 @@ function MaxPlot(div, top, left, width, height, args) {
         return res;
     };
 
+    this.resetAlpha = function() {
+       self.port.alphaMult = 1.0;
+       $('#mpAlphaSlider').slider({value:4});
+       self.calcRadius();
+    };
+
+    this.resetRadius = function() {
+       self.port.radiusMult = 1.0;
+       $('#mpRadiusSlider').slider({value:4});
+       self.calcRadius();
+    };
+
+    this.setRadiusAlpha = function(radius, alpha) {
+       self.port.radiusMult = radius;
+       self.port.alphaMult = alpha;
+       self.calcRadius();
+    };
+
     this.zoom100 = function() {
        /* zoom to 100% and redraw */
        copyObj(self.port.initZoom, self.port.zoomRange);
+       self.resetAlpha();
+       self.resetRadius();
        self.scaleData();
        //self.drawDots();
     };
@@ -1863,6 +2122,14 @@ function MaxPlot(div, top, left, width, height, args) {
         self._selUpdate();
     };
 
+    this.hasSelected = function() {
+        return (self.selCells.length!==0)
+    }
+
+    this.hasAllSelected = function() {
+        return (self.selCells.length===self.getCount());
+    }
+
     this.getSelection = function() {
         /* return selected cells as a list of ints */
         var cellIds = [];
@@ -1885,9 +2152,70 @@ function MaxPlot(div, top, left, width, height, args) {
         self._selUpdate();
     };
 
+    this.selectOnlyShow = function() {
+    /* the opposite of selectHide() = remove all coords that are not selected */
+        var selCells = self.selCells;
+        if (selCells.size===0)
+            return;
+
+        if (self.coords.origAll===undefined)
+            self.coords.origAll = cloneArray(self.coords.orig);
+        var coords = self.coords.orig;
+        for (var i = 0; i < coords.length/2; i++) {
+            if (!selCells.has(i)) {
+                coords[2*i] = HIDCOORD;
+                coords[2*i+1] = HIDCOORD;
+            }
+        }
+        self.scaleData();
+        self.selCells.clear();
+        self._selUpdate();
+    }
+
+
+    this.selectHide = function() {
+    /* remove all coords that are selected */
+        if (self.coords.origAll===undefined)
+            self.coords.origAll = cloneArray(self.coords.orig);
+
+        var selCells = self.selCells;
+        var coords = self.coords.orig;
+
+        for (var i = 0; i < coords.length/2; i++) {
+            if (selCells.has(i)) {
+                coords[2*i] = HIDCOORD;
+                coords[2*i+1] = HIDCOORD;
+            }
+        }
+
+        self.scaleData();
+        self.selectSet([]);
+        self._selUpdate();
+    }   
+
+    this.unhideAll = function() {
+        /* undo the hide operation */
+        if (self.coords.origAll!==undefined) {
+            self.coords.orig = self.coords.origAll;
+            self.coords.origAll = undefined;
+        }
+        self.scaleData();
+    }
+
     this.getCount = function() {
         /* return maximum number of cells in dataset, may include hidden cells, see isHidden() */
         return self.coords.orig.length / 2;
+    };
+
+    this.getVisibleCount = function() {
+        /* return number of cells that are visible */
+        let count = 0;
+        let coords = self.coords.orig;
+        for (var i = 0; i < coords.length/2; i++) {
+            if (!isHidden(coords[2*i], coords[2*i+1]))
+                count++;
+        }
+        return count;
     };
 
     // END SELECTION METHODS (could be an object?)
@@ -1952,7 +2280,24 @@ function MaxPlot(div, top, left, width, height, args) {
         }
         //console.timeEnd("labelCheck");
         return null;
-    }
+    };
+
+    this.lineAt = function(x, y) {
+        /* check if there is a line at x,y and return its label if so or null if not */
+            var pxLines = self.coords.pxLines;
+            for (var i=0; i < pxLines.length; i++) {
+                var line = pxLines[i];
+                var x1 = line[0];
+                var y1 = line[1];
+                var x2 = line[2];
+                var y2 = line[3];
+                if (pDistance(x, y, x1, y1, x2, y2) <= 2) {
+                    var lineLabel = self.coords.lineLabels[i];
+                    return lineLabel;
+                }
+            }
+            return null;
+    };
 
     this.cellsAt = function(x, y) {
         /* check which cell's bounding boxes contain (x, y), return a list of the cell IDs, sorted by distance */
@@ -2052,6 +2397,48 @@ function MaxPlot(div, top, left, width, height, args) {
         return true;
     }
 
+    this.isSplit = function() {
+        /* return true if this renderer has either a parent or a child plot = is in split screen mode */
+        return (self.parentPlot!==null || self.childPlot!==null)
+    }
+
+    // https://stackoverflow.com/questions/73187456/canvas-determine-if-point-is-on-line
+    //function distancePointFromLine(x0, y0, x1, y1, x2, y2) {
+          //return Math.abs((x2 - x1) * (y1 - y0) - (x1 - x0) * (y2 - y1)) / Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+    //}
+    function pDistance(x, y, x1, y1, x2, y2) {
+      /* distance of point from line segment, copied from https://stackoverflow.com/questions/849211/shortest-distance-between-a-point-and-a-line-segment */
+      var A = x - x1;
+      var B = y - y1;
+      var C = x2 - x1;
+      var D = y2 - y1;
+
+      var dot = A * C + B * D;
+      var len_sq = C * C + D * D;
+      var param = -1;
+      if (len_sq != 0) //in case of 0 length line
+          param = dot / len_sq;
+
+      var xx, yy;
+
+      if (param < 0) {
+        xx = x1;
+        yy = y1;
+      }
+      else if (param > 1) {
+        xx = x2;
+        yy = y2;
+      }
+      else {
+        xx = x1 + param * C;
+        yy = y1 + param * D;
+      }
+
+      var dx = x - xx;
+      var dy = y - yy;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
     this.onMouseMove = function(ev) {
         /* called when the mouse is moved over the Canvas */
 
@@ -2071,6 +2458,17 @@ function MaxPlot(div, top, left, width, height, args) {
         var xCanvas = clientX - canvasLeft;
         var yCanvas = clientY - canvasTop;
 
+        // is there just white space under the mouse, do nothing,
+        // from https://stackoverflow.com/questions/15325283/how-to-detect-if-a-mouse-pointer-hits-a-line-already-drawn-on-an-html-5-canvas
+        //var imageData = self.ctx.getImageData(0, 0, self.width, self.height);
+        //var inputData = imageData.data;
+        //var pData = (~~xCanvas + (~~yCanvas * self.width)) * 4;
+
+        //if (!inputData[pData + 3]) {
+            //console.log("just white space under mouse");
+            //return;
+        //}
+
         // when the cursor is over a label, change it to a hand, but only when there is no marquee
         if (self.coords.labelBbox!==null && self.mouseDownX === null) {
             var labelInfo = self.labelAt(xCanvas, yCanvas);
@@ -2083,6 +2481,12 @@ function MaxPlot(div, top, left, width, height, args) {
                     self.onLabelHover(labelInfo[0], labelInfo[1], ev);
                 }
         }
+
+        // when the cursor is over a line, trigger callback
+        if (self.onLineHover && self.coords.lineLabels) {
+            var lineLabel = self.lineAt(xCanvas, yCanvas);
+            self.onLineHover(lineLabel, ev);
+        }       
 
         if (self.mouseDownX!==null) {
             // we're panning
@@ -2272,7 +2676,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var pxX = ev.clientX - self.left;
         var pxY = ev.clientY - self.top;
         var spinFact = 0.1;
-        if (ev.ctrlKey) // = OSX pinch and zoom gesture (and no other OS/mouse combination?)
+       if (ev.ctrlKey) // = OSX pinch and zoom gesture (and no other OS/mouse combination?)
             spinFact = 0.08;  // is too fast, so slow it down a little
         var zoomFact = 1-(spinFact*normWheel.spinY);
         debug("Wheel Zoom by "+zoomFact);
@@ -2327,6 +2731,7 @@ function MaxPlot(div, top, left, width, height, args) {
     };
 
     this._setLines = function(lines, attrs) {
+        /* set the line attributes */
         if (lines===undefined)
             return;
         self.coords.lines = lines;
@@ -2335,6 +2740,15 @@ function MaxPlot(div, top, left, width, height, args) {
             self.coords.lineAttrs = {};
         else
             self.coords.lineAttrs = attrs;
+
+        // save the labels elsewhere. Labels are optional.
+        if (lines[0].length > 4) {
+            var lineLabels = []
+            for (var i=0; i<lines.length; i++) {
+                lineLabels.push(lines[i][4]);
+            }
+            self.coords.lineLabels = lineLabels;
+        }
     }
 
     this.activateMode = function(modeName) {

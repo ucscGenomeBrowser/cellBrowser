@@ -2,20 +2,15 @@
 
 import sys,argparse,re
 from collections import OrderedDict
-from os.path import join, basename, dirname
+from os.path import join, basename, dirname, isfile
 from pathlib import Path
 
 # These two functions copied and modified from cellbrowser.py
 def readLines(lines, fname):
-    " recursively read lines from fname, understands lines like #include 'filename.conf' "
+    "recursively read lines from fname"
     for line in open(fname):
         line = line.rstrip("\r\n")
-        if line.startswith("#include"):
-            newFname = splitOnce(line, " ")[1]
-            newFname = newFname.strip('"').strip("'")
-            lines.extend(readLines(lines, newFname))
-        else:
-            lines.append(line)
+        lines.append(line)
     return lines
 
 def loadConfig(fname):
@@ -83,27 +78,35 @@ def main():
     # Now process rest of datasetFile
     for line in dfh:
         if not line.startswith('#'):
+            # split our line to pull out the dataset name
             splitLine = line.rstrip().split(dsep)
             dname = splitLine[0]
+
+            # set up confName based on input options, default is to modify the cellbrowser.conf
             if args.descConf:
                 confName = join("/hive/data/inside/cells/datasets",dname,"desc.conf")
             else:
                 confName = join("/hive/data/inside/cells/datasets",dname,"cellbrowser.conf")
-            conf = loadConfig(confName)
-            for tag in tagIndex:
-                n = tagIndex[tag]
-                if tag in conf.keys():
-                    tagVal = str(conf[tag])
-                    # remove all the extra characters from the line
-                    tagVal = re.sub('[\[\]\'"]','',tagVal)
-                    # Case where we're replacing what's there
-                    if n <= len(splitLine) - 1:
-                        splitLine[n] = tagVal
-                    # Case where we're tacking the tag onto the end of our file
-                    else:
-                        splitLine.append(tagVal)
 
-        print(*splitLine, sep='\t')
+            # check if confName is an actual file, otherwise skip that dataset
+            if isfile(confName):
+                conf = loadConfig(confName)
+                for tag in tagIndex:
+                    n = tagIndex[tag]
+                    if tag in conf.keys():
+                        tagVal = str(conf[tag])
+                        # remove all the extra characters from the line
+                        tagVal = re.sub('[\[\]\'"]','',tagVal)
+                        # Case where we're replacing what's there
+                        if n <= len(splitLine) - 1:
+                            splitLine[n] = tagVal
+                        # Case where we're tacking the tag onto the end of our file
+                        else:
+                            splitLine.append(tagVal)
+                print(*splitLine, sep='\t')
+            else:
+                sys.stderr.write('Warning: "' + dname + '" does not have a cellbrowser.conf and/or desc.conf. You might want to double check your input file.\n')
+
 
 if __name__ == "__main__":
     main()

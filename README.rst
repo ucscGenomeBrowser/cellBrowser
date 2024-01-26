@@ -5,8 +5,12 @@ UCSC Single Cell Browser
 ========================
 
 The UCSC Cell Browser is a viewer for single cell data. You can click on and
-hover over cells to get meta information, search for genes to color on and
-click clusters to show cluster-specific marker genes. 
+hover over cells to get meta information, select cells to get annotation histograms, 
+make expression violin plots and heatmaps, search for genes to color on and
+click clusters to show cluster-specific marker genes. It supports the usual gene expression plots, ATAC,
+spatial gene/ATAC, multi-modal combinations of these and trajectory lines. 
+It comes with one-line data exporters for all common analysis formats: Seurat, Scanpy, Cellranger, Monocle and 
+you can always use tsv/csv files to import your data. The exporters are part of Seurat 3/4 and Scanpy. 
 
 To look at a list of selected single cell datasets, see http://cells.ucsc.edu
 
@@ -57,8 +61,8 @@ ticket system with more features and that a lot of communication with wetlab use
 do not require a Github account for feedback. But we do reply to issues here, as you can see from the Github 
 account and also use Github for source control.
 
-Additional availability
------------------------
+Install and use
+---------------
 
 * The preferred installation is via pip https://pypi.org/project/cellbrowser/, for documentation see https://cellbrowser.readthedocs.io
 * Bioconda: this tool is available to install via `bioconda <https://bioconda.github.io/recipes/ucsc-cell-browser/README.html>`_. Note that the conda release is usually a bit outdated relative to the pip release, so use pip if possible. If you cannot use pip, please contact us. 
@@ -67,7 +71,7 @@ Additional availability
 * Galaxy: there is a Galaxy tool for UCSC CellBrowser, which can be installed on any Galaxy instance via its `Galaxy Toolshed entry <https://toolshed.g2.bx.psu.edu/view/ebi-gxa/ucsc_cell_browser>`_ or it can be directly used by users at the `Human Cell Atlas Galaxy instance <https://humancellatlas.usegalaxy.eu/root?tool_id=toolshed.g2.bx.psu.edu/repos/ebi-gxa/ucsc_cell_browser/ucsc_cell_browser>`_ or as part of the example workflows, such as the `Human Cell Atlas / Scanpy CellBrowser workflow <https://humancellatlas.usegalaxy.eu/u/pmoreno/w/humancellatlas-scanpy-cellbrowser>`_ or the `EBI Single Cell Expression Atlas / Scanpy / CellBrowser workflow <https://humancellatlas.usegalaxy.eu/u/pmoreno/w/atlas-scanpy-cellbrowser-imported-from-uploaded-file>`_
 
 This project was funded by the California Institute of Regenerative Medicine and the
-Chan-Zuckerberg Initiative https://www.chanzuckerberg.com/. In 2020, it is funded through a supplement to the NHGRI Genome Browser grant.
+Chan-Zuckerberg Initiative https://www.chanzuckerberg.com/. In 2020, it was funded through a supplement to the NHGRI Genome Browser grant. Since 2023, it is funded by a grant from NIMH BRAIN.
 
 This is early research software. You are likely to find bugs. Please open a Github
 ticket or email us at cells@ucsc.edu, we can usually fix them quickly.

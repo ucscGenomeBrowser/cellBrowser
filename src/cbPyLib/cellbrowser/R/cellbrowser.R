@@ -46,15 +46,18 @@ saveMatrix <- function(counts, dir, prefix, use.mtx) {
         genesPath <- file.path(dir, paste(prefix, "features.tsv", sep=""))
         barcodesPath <- file.path(dir, paste(prefix, "barcodes.tsv", sep=""))
         message("Writing expression matrix to ", matrixPath)
+        if (class(counts)[1]=="matrix") {
+            counts <- as(counts, "sparseMatrix")
+        }
         writeMM(counts, matrixPath)
         # easier to load if the genes file has at least two columns. Even though seurat objects
         # don't have yet explicit geneIds/geneSyms data, we just duplicate whatever the matrix has now
         write.table(as.data.frame(cbind(rownames(counts), rownames(counts))), file=genesPath, sep="\t", row.names=F, col.names=F, quote=F)
         write(colnames(counts), file = barcodesPath)
         message("Gzipping expression matrix")
-        gzip(matrixPath)
-        gzip(genesPath)
-        gzip(barcodesPath)
+        gzip(matrixPath, overwrite=TRUE)
+        gzip(genesPath, overwrite=TRUE)
+        gzip(barcodesPath, overwrite=TRUE)
   } else {
       # we can write the matrix as a tsv file
       gzPath <- file.path(dir, paste(prefix, "exprMatrix.tsv.gz", sep=""))
@@ -67,6 +70,50 @@ saveMatrix <- function(counts, dir, prefix, use.mtx) {
       write.table(x = df, sep="\t", file=z, quote = FALSE, row.names = FALSE)
       close(con = z)
   }
+}
+
+exportImages <- function(obj, outDir, embeddings.conf) {
+#' used by ExportToCellbrowser:
+#' Write spatial images to outDir
+#'
+#' @param obj The Seurat4 object
+#' @param outDir output directory
+#' @param an array of strings to write into the coords object into the cellbrowser config file
+#'
+    if (length(obj@images)==0)
+        return(embeddings.conf)
+
+    message("Exporting spatial images")
+    require(png)
+    for (name in names(obj@images)) { 
+        message(name); 
+        img = GetImage(obj, mode="raw", image=name); 
+        imgPath <- file.path(outDir, paste0(name, ".jpg"))
+        message("Writing image ", imgPath)
+        #writePNG(img, imgPath);  # JPEG seems like a better choice here, 4x smaller at default quality settings.
+        writeJPEG(img, target=imgPath, quality=0.95); 
+        yMax = dim(img)[1];
+        xMax = dim(img)[2]; # there is a difference of 3 pixels on height when comparing "identify file.jpeg" with this. NO IDEA WHY!
+        coordsPath <- file.path(outDir, paste0(name, ".coords.tsv")) 
+        message("Writing coords for image to ", coordsPath)
+        #coords <- GetTissueCoordinates(object = obj[[img]])
+
+        coords <- GetTissueCoordinates(object = obj[[name]])
+        coordsRev <- coords[, c("imagecol", "imagerow")]  # Grrrr... Seurat stores coordinates as (y,x) in this particular case. reverse the order now.
+        colnames(coordsRev) <- c("x", "y")
+
+        write.table(coordsRev, coordsPath, sep="\t", row.names=T, quote=F, col.names=NA)
+        conf <- sprintf(
+         '  {\n    "file": "%s",\n    "shortLabel": "Spatial %s",\n    "flipY":True,\n    "images" : [{"file":"%s"}],\n     "minX":0, "minY":0, "maxX":%d, "maxY":%d\n  }',
+         coordsPath,
+         name,
+         imgPath,
+         xMax,
+         yMax
+        )
+        embeddings.conf <- c(conf, embeddings.conf)
+    }
+    return(embeddings.conf)
 }
 
 #' Export \code{Seurat} objects for UCSC cell browser and stop open cell browser
@@ -119,6 +166,7 @@ saveMatrix <- function(counts, dir, prefix, use.mtx) {
 #' @importFrom reticulate py_module_available import
 #' @importFrom Seurat Project Idents GetAssayData Embeddings FetchData
 #' @importFrom Matrix  writeMM
+#' @importFrom jpeg writeJPEG
 #'
 #' @export
 #'
@@ -195,6 +243,16 @@ ExportToCellbrowser <- function(
             break
         }
     }
+    if (is.null(x = cluster.field)) {
+        message("There is no meta field identical to idents(): using the value of Idents() as a new field 'Cluster'")
+        # create a new meta data field named "Cluster"
+        newDf <- cbind(object@meta.data, Idents(object))
+        # default name is "Idents(object)", not good, let's rename that to "Cluster"
+        names(newDf)[length(newDf)] <- "Cluster"
+        object@meta.data <- newDf
+        cluster.field <- "Cluster"
+    }
+
   } else {
     message("A custom cluster field was specified: ", cluster.field)
     Idents(object) <- object[[cluster.field]]
@@ -206,7 +264,7 @@ ExportToCellbrowser <- function(
 
   if (is.null(x = meta.fields)) {
     meta.fields <- colnames(x = meta)
-    if (length(x = levels(x = idents)) > 1) {
+    if (length(x = levels(x = Idents(object))) > 1) {
       meta.fields <- c(meta.fields, ".ident")
     }
   }
@@ -278,7 +336,7 @@ ExportToCellbrowser <- function(
   embeddings.conf <- c()
   for (embedName in foundEmbedNames) {
       conf <- sprintf(
-        '{"file": "%s.coords.tsv", "shortLabel": "Seurat %1$s"}',
+        '  {"file": "%s.coords.tsv", "shortLabel": "Seurat %1$s"}',
         embedName
       )
       embeddings.conf <- c(embeddings.conf, conf)
@@ -287,7 +345,7 @@ ExportToCellbrowser <- function(
   df <- data.frame(row.names = cellOrder, check.names = FALSE)
   for (field in meta.fields) {
     if (field == ".ident") {
-      df$Cluster <- idents
+      df$Cluster <- Idents(object)
       enum.fields <- c(enum.fields, "Cluster")
     } else {
       name <- meta.fields.names[[field]]
@@ -321,7 +379,7 @@ ExportToCellbrowser <- function(
     file <- NULL
   }
   if (is.null(markers.file) && !skip.markers) {
-    if (length(levels(idents)) > 1) {
+    if (length(levels(Idents(object))) > 1) {
       markers.helper <- function(x) {
         partition <- markers[x,]
 
@@ -390,6 +448,8 @@ ExportToCellbrowser <- function(
   if (use.mtx) {
     matrixOutPath <- sprintf("%s%smatrix.mtx.gz", firstPrefix, matSep)
   }
+
+  embeddings.conf <- exportImages(object, dir, embeddings.conf)
 
   config <- '# This is a bare-bones cellbrowser config file auto-generated by the command-line tool cbImportSeurat 
 # or directly from R with SeuratWrappers::ExportToCellbrowser().

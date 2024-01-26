@@ -65,8 +65,9 @@ To create an anndata object in Scanpy if the expression matrix is a .tsv.gz file
     import scanpy as sc
     import pandas as pd
     ad = sc.read_text("exprMatrix.tsv.gz")
-    meta = pd.read_csv("meta.tsv", sep="\t")
-    ad.var = meta
+    ad = ad.T
+    meta = pd.read_csv("meta.tsv", sep="\t", index_col=0)
+    ad.obs = meta
 
 If the expression matrix is an MTX file::
 
