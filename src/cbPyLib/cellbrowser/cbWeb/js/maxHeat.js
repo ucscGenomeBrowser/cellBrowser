@@ -153,7 +153,8 @@ function MaxHeat(div, args) {
         else
             rowName = self.rowLabels[self.rowOrder[rowIdx]];
         //console.log("mouse over coords:", x, y, rowIdx, colIdx);
-        return [rowName, colName];
+        //return [rowName, colName];
+        return [rowIdx, colIdx];
     }
 
     function onClick(ev) {
@@ -168,12 +169,12 @@ function MaxHeat(div, args) {
     function onMouseMove(ev) {
         /* mouse hover functionality */
         let rowAndCol = evToRowCol(ev);
-        let rowName = rowAndCol[0];
-        let colName = rowAndCol[1];
+        let rowIdx = rowAndCol[0];
+        let colIdx = rowAndCol[1];
         
         var value = null;
 
-        if (colIdx===null | rowIdx===null)
+        if (rowIdx===null || colIdx===null)
             self.selEl.style.display="none"
         else {
             var rowStart = self.rowStartsSizes[rowIdx*2];

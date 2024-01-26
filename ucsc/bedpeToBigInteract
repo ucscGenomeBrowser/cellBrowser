@@ -1,0 +1,52 @@
+#! /usr/bin/env python3
+
+import argparse
+
+# Set up script arguments
+parser = argparse.ArgumentParser(
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    description="convert bedpe file to bigInteract format")
+parser.add_argument('bedpeFile', type=str, help='input bedpe file')
+args = parser.parse_args()
+
+
+#with open(args.bedpeFile, 'r') as bedpe:
+for line in open(args.bedpeFile, 'r'):
+    #for line in bedpe:
+    splitLine = line.strip().split("\t")
+    
+    chrom1 = splitLine[0]
+    start1 = int(splitLine[1]) - 1
+    end1 = splitLine[2]
+    chrom2 = splitLine[3]
+    start2 = int(splitLine[4]) - 1
+    end2 = splitLine[5]
+
+    if chrom1 == chrom2:
+        chrom = chrom1
+        if int(start1) > int(start2) and int(start1) < int(end2):
+            chromStart = start2
+            chromEnd = end2
+        elif int(start1) > int(end2):
+            chromStart = start2
+            chromEnd = start1
+        elif int(start1) < int(start2):
+            chromStart = start1
+            chromEnd = end2
+    else:
+        chrom = chrom1
+        chromStart = start1
+        chromEnd = end1
+
+    name = splitLine[6]
+    score = splitLine[7]
+    strand1 = splitLine[8]
+    strand2 = splitLine[9]
+
+    outputInteract = [chrom, chromStart, chromEnd, name, "1000", score, ".", "#000000", \
+                      chrom1, start1, end1, ".", strand1, \
+                      chrom2, start2, end2, ".", strand2]
+
+    print(*outputInteract, sep='\t')
+
+
