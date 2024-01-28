@@ -5229,9 +5229,10 @@ var cellbrowser = function() {
         htmls.push("<div id='tpPeakList' style='height: 30%'>");
             htmls.push("<span id='noPeaks'>No genes or ranges found</span>");
         htmls.push("</div>");
+
         htmls.push("<div id='tpPeakListSelector'>");
         //htmls.push("<input id='tpPeakListAuto' style='margin-right: 3px' type='checkbox' checked>");
-        htmls.push("<div id='tpPeakListButtons' style='margin-left: 4px'>");
+        htmls.push("<div id='tpPeakListButtonControls' style='margin-left: 4px'>");
         htmls.push('<button title="Select all peaks in the list above" id="tpPeakListAll">All</button>');
         htmls.push('<button title="Select no peaks in the list above" id="tpPeakListNone">None</button>');
         htmls.push('<button title="Select only peaks within a certain distance upstream from the TSS. Click on the field to edit the distance. Click the button to select the peaks." id="tpPeakListUpstream">');
@@ -5244,7 +5245,9 @@ var cellbrowser = function() {
             //htmls.push("kbp upstream</input>");
             //htmls.push("<button id='tpPeakListUpstream' style='float:right; margin-top: 2px'>Select</button>");
         //htmls.push("</label>");
-        htmls.push("</div>");
+        htmls.push("</div>"); // tpPeakListButtons
+        htmls.push("</div>"); // tpPeakListBottons
+        htmls.push("</div>"); // tpPeakListSelector
     }
 
     function peakListShowTitle(sym, chrom, start, end) {
@@ -6022,6 +6025,7 @@ var cellbrowser = function() {
 
         let rowLabels = metaLabels; 
         //rowLabels.sort();
+        rowLabels.sort(function(a, b) { return naturalSort(a, b); });
         let rowCount = rowLabels.length;
 
         let genes = [geneSym]; 
