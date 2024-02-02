@@ -1606,9 +1606,10 @@ var cellbrowser = function() {
     }
 
     function onShowAllClick(ev) {
-        /* hide all selected cells */
+        /* show all cells, hidden or not. Do not touch the selection. */
         renderer.unhideAll();
         renderer.drawDots();
+        $("#tpShowAll").hide()
     }
 
     function updateSelectionButtons() {

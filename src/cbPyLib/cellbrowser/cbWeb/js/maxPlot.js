@@ -2123,7 +2123,7 @@ function MaxPlot(div, top, left, width, height, args) {
     };
 
     this.hasSelected = function() {
-        return (self.selCells.length!==0)
+        return (self.selCells.size!==0)
     }
 
     this.hasAllSelected = function() {
