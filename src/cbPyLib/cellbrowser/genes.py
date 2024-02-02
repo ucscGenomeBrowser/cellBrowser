@@ -209,6 +209,8 @@ def iterGencodePairs(release, doTransGene=False):
     db = "hg38"
     if release[0]=="M":
         db = "mm10"
+        if int(release.strip("M"))>=26:
+            db='mm39'
     if release in ["7", "14", "17", "19"] or "lift" in release:
         db = "hg19"
     url = "https://hgdownload.cse.ucsc.edu/goldenPath/%s/database/wgEncodeGencodeAttrsV%s.txt.gz" %  (db, release)
@@ -346,6 +348,7 @@ def listModelRemoteBuild():
     sep = "\n"
     urls = [("hg38", "https://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/"),
             ("mm10", "https://hgdownload.cse.ucsc.edu/goldenPath/mm10/database/"),
+            ("mm39", "https://hgdownload.cse.ucsc.edu/goldenPath/mm39/database/"),
             ("hg19", "https://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/")
             ]
 
