@@ -2470,7 +2470,7 @@ def readMatrixSampleNames(fname):
         lines = openFile(barcodePath).read().splitlines()
         ret = []
         for l in lines:
-            ret.append(l.split()[0])
+            ret.append(l.split("\t")[0])
         return ret
 
     else:
