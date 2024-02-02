@@ -30,25 +30,65 @@ def fetch_data(loc, dname, out_dict, hidden):
     if 'hide' in djson.values():
         hidden.add(dname)
 
-def compare_machines(mach1_dict, mach1_name, mach2_dict, mach2_name):
+def print_diffs(key, mach1_name, mach1_val, mach2_name, mach2_val):
+    """Print out values that differ between two machines, e.g. cells-beta and cells-test"""
+    print(key, "\n", mach1_name + ": ", mach1_val, "\n", mach2_name + ": ", mach2_val)
+
+def process_dict(mach1_name, mach1_dict, mach2_name, mach2_dict):
+    """Processes a dictionary, printing out differenting values if needed.
+       Or continuing to process if it finds another dictionary."""
+    for key in mach1_dict.keys():
+        mach1_val = mach1_dict[key]
+        mach2_val = mach2_dict[key]
+        if isinstance(mach1_val, dict):
+            process_dict(mach1_name, mach1_val, mach2_name, mach2_val)
+        else:
+            if mach1_val != mach2_val:
+                print_diffs(key, mach1_name, mach1_val, mach2_name, mach2_val)
+
+def compare_machines(mach1_dict, mach1_name, mach2_dict, mach2_name, verbose=False):
     """
-    takes a dictionary containing dataset.json for each dataset on two machines
-    prints those that are different between the two machines and highlights if a dataset exists on one machine but not the other
+    - Takes a dictionary containing dataset.json for each dataset on two machines
+    - Prints those that are different between the two machines and highlights if
+      a dataset exists on one machine but not the other
+    - 'Verbose' mode prints the exact diffs, otherwise just prints the dataset name
     """
-    diffs = list()
+    print(f'\nDatasets with diffs between {mach1_name} + {mach2_name}:')
     for dataset in mach2_dict:
         # Check if the overall dicts are the same for a dataset on test/beta
-        # If different add dataset name to a list to print later
+        # If not, we'll go through and print out only those values that are different
         try:
             if not eq(mach1_dict[dataset], mach2_dict[dataset]):
-                diffs.append(dataset)
+                # Print dataset name
+                print("\n" + dataset)
+
+                # Script has option to print only names of datasets that have diffs
+                # This whole chunk gets skipped if that's the case
+                if verbose:
+                    for key in mach2_dict[dataset].keys():
+                        # Check if current value is a dict and if so, process that a certain way
+                        if isinstance(mach2_dict[dataset][key], dict):
+                            process_dict(mach2_name, mach2_dict[dataset][key], mach1_name, mach1_dict[dataset][key])
+                        # Otherwise check to see if values for test/beta are different
+                        # and print only the diffs
+                        else:
+                            try:
+                                val1 = mach1_dict[dataset][key]
+                                val2 = mach2_dict[dataset][key]
+                                if val1 != val2:
+                                    # The value for this keys if often large and bloats the results
+                                    # making it difficult to actually see the diffs. Only print a
+                                    # message saying this value differs for test/beta.
+                                    if key == "metaFields":
+                                        print(key, mach1_name + " and " + mach2_name + " differ")
+                                    # Otherwise print out the field that differs and what the values
+                                    # are for test/beta
+                                    else:
+                                        print_diffs(key, mach2_name, val2, mach1_name, val1)
+                            except KeyError:
+                                print(key, f'present on {mach1_name}, but not on {mach2_name} or vice versa')
         except KeyError:
-            outstr = dataset + f' present on {mach1_name}, but not on {mach2_name} or vice versa'
-            diffs.append(outstr)
-    if len(diffs) != 0:
-        print(f'\nDatasets with diffs between {mach1_name} + {mach2_name}:')
-        print(*sorted(diffs), sep="\n")
-        print()
+            print(dataset, f'present on {mach1_name}, but not on {mach2_name} or vice versa')
 
 # Set up script arguments
 parser = argparse.ArgumentParser(
@@ -59,6 +99,8 @@ parser.add_argument("-r","--run", action='store_true',
 parser.add_argument("-s","--stats", action='store_true',
     help='Print stats about the number of datasets/collections on each machine')
 parser.add_argument("-d","--hidden", action='store_true',
+    help='Print datasets that are hidden on each machine')
+parser.add_argument("-v","--verbose", action='store_true',
     help='Print datasets that are hidden on each machine')
 args = parser.parse_args()
 
@@ -119,7 +161,7 @@ def main():
             pass
         rsync_cmd = ['rsync', '--files-from=' + tmp.name, \
         'qateam@hgw0.soe.ucsc.edu:/usr/local/apache/htdocs-cells/', rr_base]
-        rsync_p = Popen(rsync_cmd, shell=False, stdout=PIPE, stderr=PIPE)
+        rsync_p = Popen(rsync_cmd, shell=True, stdout=PIPE, stderr=PIPE)
         rsync_cmdout, rsync_cmderr = p.communicate()
         # go through rr_files
         for fname in rr_files:
@@ -163,9 +205,10 @@ def main():
             print(beta_only,"\n")
 
         # Compare cells-test to cells-beta datasets
-        compare_machines(ct_djson, "cells-test", cb_djson, "cells-beta")
+        print(args.verbose)
+        compare_machines(ct_djson, "cells-test", cb_djson, "cells-beta", args.verbose)
         # And then cells-beta to cells
-        compare_machines(cb_djson, "cells-beta", rr_djson, "cells")
+        compare_machines(cb_djson, "cells-beta", rr_djson, "cells", args.verbose)
 
         # make sets of only top-level datasets
         # from: https://stackoverflow.com/questions/33944647/what-is-the-most-pythonic-way-to-filter-a-set
