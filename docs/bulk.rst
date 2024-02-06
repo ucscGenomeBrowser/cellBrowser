@@ -13,5 +13,11 @@ There is no search API yet but a systematic way to download::
 Rsync download
 ^^^^^^^^^^^^^^
 
-If you want to download all or selected datasets, use our ``rsync`` server. It is still being tested,
-please email us for more info.
+If you want to download all or selected datasets, use our ``rsync`` server. To download single dataset, for example,
+use this command, for ``ad-aging-brain``::
+
+    rsync -avzp hgdownload.gi.ucsc.edu::cells/ad-aging-brain/ ./
+
+And the list all datasets available::
+
+    rsync hgdownload.gi.ucsc.edu::cells
