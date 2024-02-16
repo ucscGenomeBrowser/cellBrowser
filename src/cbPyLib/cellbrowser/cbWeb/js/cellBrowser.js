@@ -508,6 +508,9 @@ var cellbrowser = function() {
     function prettySeqDist(count, addSign) {
         /* create human-readable string from chrom distance */
         var f = count;
+        if (f==="0")
+            return "+0bp";
+
         var sign = "";
         if (addSign && count > 0)
             sign = "+";
@@ -5193,6 +5196,7 @@ var cellbrowser = function() {
             boxLabel = "enter gene or chrom:start-end";
         htmls.push('<select style="width:'+width+'px" id="'+id+'" placeholder="'+boxLabel+'" class="tpCombo">');
         htmls.push('</select>');
+        htmls.push('<div><button style="margin-top:4px" id="tpResetColors">Reset to default cell type colors</button></div>');
         htmls.push('</div>');
     }
 
@@ -7277,6 +7281,33 @@ var cellbrowser = function() {
     }
 
 
+    function countLeadingZerosAfterDecimal(number) {
+        // Convert number to string
+        let numStr = number.toString();
+
+        // Find the index of the decimal point
+        let decimalIndex = numStr.indexOf('.');
+
+        // If there is no decimal point, return 0
+        if (decimalIndex === -1) {
+            return 0;
+        }
+
+        // Iterate over characters after the decimal point
+        let count = 0;
+        for (let i = decimalIndex + 1; i < numStr.length; i++) {
+            // If the character is '0', increment count
+            if (numStr[i] === '0') {
+                count++;
+            } else {
+                // If a non-zero digit is encountered, break the loop
+                break;
+            }
+        }
+
+        return count;
+    }
+
     function buildLegendBar() {
     /* draws current legend as specified by gLegend.rows
      * */
@@ -7309,6 +7340,14 @@ var cellbrowser = function() {
             let count = rows[i].count;
             sum += count;
         }
+
+        // get the minimum frequency, so we know the precision needed. Otherwise we would show 0.00% for the small cell types
+        //var minFreq = 100;
+        //for (i = 0; i < rows.length; i++) {
+            //let count = rows[i].count;
+            //var freq  = 100*count/sum;
+            //minFreq = Math.min(freq, minFreq);
+        //}
 
         for (i = 0; i < rows.length; i++) {
             var row = rows[i];
@@ -7361,7 +7400,9 @@ var cellbrowser = function() {
             htmls.push("</span>");
             var prec = 1;
             if (freq<1)
-                prec = 2;
+                //prec = minPrec;
+                prec = 1+countLeadingZerosAfterDecimal(freq) // one more digit than the smallest frequency
+
             htmls.push("<span class='tpLegendCount' title='"+count+" of "+sum+"'>"+freq.toFixed(prec)+"%</span>");
             htmls.push("</span>");
 
