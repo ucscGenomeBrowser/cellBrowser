@@ -508,6 +508,9 @@ var cellbrowser = function() {
     function prettySeqDist(count, addSign) {
         /* create human-readable string from chrom distance */
         var f = count;
+        if (f==="0")
+            return "+0bp";
+
         var sign = "";
         if (addSign && count > 0)
             sign = "+";
@@ -1606,9 +1609,10 @@ var cellbrowser = function() {
     }
 
     function onShowAllClick(ev) {
-        /* hide all selected cells */
+        /* show all cells, hidden or not. Do not touch the selection. */
         renderer.unhideAll();
         renderer.drawDots();
+        $("#tpShowAll").hide()
     }
 
     function updateSelectionButtons() {
@@ -3443,7 +3447,7 @@ var cellbrowser = function() {
                 origLabels.push(clusterMids[i][2]);
             }
             renderer.origLabels = origLabels;
-            clusterMids = [];
+            //clusterMids = []; // Niklay added this, but it broke &gene=HES1 on the URL. Not sure why it was there.
          }
 
         if (clusterInfo && clusterInfo.lines) {
@@ -3512,31 +3516,33 @@ var cellbrowser = function() {
        chosenSetValue("tpLabelCombo", "tpMetaVal_"+fieldIdx);
    }
 
-   function colorByDefaultField(onDone) {
+   function colorByDefaultField(onDone, ignoreUrl) {
        /* get the default color field from the config or the URL and start coloring by it.
         * Call onDone() when done. */
        var colorType = "meta";
        var colorBy = db.getDefaultColorField();
 
-       // allow to override coloring by URL args
-       if (getVar("gene")!==undefined) {
-           colorType = "gene";
-           colorBy = getVar("gene");
-           activateTab("gene");
-       }
-       else if (getVar("meta")!==undefined) {
-           colorType = "meta";
-           colorBy = getVar("meta");
-           activateTab("meta");
-       } else if (getVar("locus")!==undefined) {
-           colorType = "locus";
-           colorBy = getVar("locus");
-           activateTab("gene");
-           if (getVar("locusGene")!==undefined) {
-               let geneId = getVar("locusGene");
-               updatePeakListWithGene(geneId);
+       if (ignoreUrl!==true) {
+           // allow to override coloring by URL args
+           if (getVar("gene")!==undefined) {
+               colorType = "gene";
+               colorBy = getVar("gene");
+               activateTab("gene");
            }
-       }
+           else if (getVar("meta")!==undefined) {
+               colorType = "meta";
+               colorBy = getVar("meta");
+               activateTab("meta");
+           } else if (getVar("locus")!==undefined) {
+               colorType = "locus";
+               colorBy = getVar("locus");
+               activateTab("gene");
+               if (getVar("locusGene")!==undefined) {
+                   let geneId = getVar("locusGene");
+                   updatePeakListWithGene(geneId);
+               }
+           }
+        }
 
        gLegend = {};
        if (colorType==="meta") {
@@ -5192,6 +5198,7 @@ var cellbrowser = function() {
             boxLabel = "enter gene or chrom:start-end";
         htmls.push('<select style="width:'+width+'px" id="'+id+'" placeholder="'+boxLabel+'" class="tpCombo">');
         htmls.push('</select>');
+        htmls.push('<div><button style="margin-top:4px" id="tpResetColors">Reset to default cell type colors</button></div>');
         htmls.push('</div>');
     }
 
@@ -6603,6 +6610,7 @@ var cellbrowser = function() {
         resizeGeneTableDivs("tpRecentGenes");
         resizeGeneTableDivs("tpGenes");
 
+        $("#tpResetColors").click ( function() { colorByDefaultField(undefined, true) } );
         $("#tpLeftTabs").tabs();
         $('#tpLeftTabs').tabs("option", "active", 0); // open the first tab
 
@@ -7276,6 +7284,33 @@ var cellbrowser = function() {
     }
 
 
+    function countLeadingZerosAfterDecimal(number) {
+        // Convert number to string
+        let numStr = number.toString();
+
+        // Find the index of the decimal point
+        let decimalIndex = numStr.indexOf('.');
+
+        // If there is no decimal point, return 0
+        if (decimalIndex === -1) {
+            return 0;
+        }
+
+        // Iterate over characters after the decimal point
+        let count = 0;
+        for (let i = decimalIndex + 1; i < numStr.length; i++) {
+            // If the character is '0', increment count
+            if (numStr[i] === '0') {
+                count++;
+            } else {
+                // If a non-zero digit is encountered, break the loop
+                break;
+            }
+        }
+
+        return count;
+    }
+
     function buildLegendBar() {
     /* draws current legend as specified by gLegend.rows
      * */
@@ -7308,6 +7343,14 @@ var cellbrowser = function() {
             let count = rows[i].count;
             sum += count;
         }
+
+        // get the minimum frequency, so we know the precision needed. Otherwise we would show 0.00% for the small cell types
+        //var minFreq = 100;
+        //for (i = 0; i < rows.length; i++) {
+            //let count = rows[i].count;
+            //var freq  = 100*count/sum;
+            //minFreq = Math.min(freq, minFreq);
+        //}
 
         for (i = 0; i < rows.length; i++) {
             var row = rows[i];
@@ -7360,7 +7403,9 @@ var cellbrowser = function() {
             htmls.push("</span>");
             var prec = 1;
             if (freq<1)
-                prec = 2;
+                //prec = minPrec;
+                prec = 1+countLeadingZerosAfterDecimal(freq) // one more digit than the smallest frequency
+
             htmls.push("<span class='tpLegendCount' title='"+count+" of "+sum+"'>"+freq.toFixed(prec)+"%</span>");
             htmls.push("</span>");
 

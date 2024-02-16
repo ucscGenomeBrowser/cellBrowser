@@ -255,7 +255,7 @@ ExportToCellbrowser <- function(
 
   } else {
     message("A custom cluster field was specified: ", cluster.field)
-    Idents(object) <- object[[cluster.field]]
+    Idents(object) <- as.factor(object[[cluster.field]])
   }
 
   # make sure that we have a cluster field
