@@ -3447,7 +3447,7 @@ var cellbrowser = function() {
                 origLabels.push(clusterMids[i][2]);
             }
             renderer.origLabels = origLabels;
-            clusterMids = [];
+            //clusterMids = []; // Niklay added this, but it broke &gene=HES1 on the URL. Not sure why it was there.
          }
 
         if (clusterInfo && clusterInfo.lines) {
@@ -3516,31 +3516,33 @@ var cellbrowser = function() {
        chosenSetValue("tpLabelCombo", "tpMetaVal_"+fieldIdx);
    }
 
-   function colorByDefaultField(onDone) {
+   function colorByDefaultField(onDone, ignoreUrl) {
        /* get the default color field from the config or the URL and start coloring by it.
         * Call onDone() when done. */
        var colorType = "meta";
        var colorBy = db.getDefaultColorField();
 
-       // allow to override coloring by URL args
-       if (getVar("gene")!==undefined) {
-           colorType = "gene";
-           colorBy = getVar("gene");
-           activateTab("gene");
-       }
-       else if (getVar("meta")!==undefined) {
-           colorType = "meta";
-           colorBy = getVar("meta");
-           activateTab("meta");
-       } else if (getVar("locus")!==undefined) {
-           colorType = "locus";
-           colorBy = getVar("locus");
-           activateTab("gene");
-           if (getVar("locusGene")!==undefined) {
-               let geneId = getVar("locusGene");
-               updatePeakListWithGene(geneId);
+       if (ignoreUrl!==true) {
+           // allow to override coloring by URL args
+           if (getVar("gene")!==undefined) {
+               colorType = "gene";
+               colorBy = getVar("gene");
+               activateTab("gene");
            }
-       }
+           else if (getVar("meta")!==undefined) {
+               colorType = "meta";
+               colorBy = getVar("meta");
+               activateTab("meta");
+           } else if (getVar("locus")!==undefined) {
+               colorType = "locus";
+               colorBy = getVar("locus");
+               activateTab("gene");
+               if (getVar("locusGene")!==undefined) {
+                   let geneId = getVar("locusGene");
+                   updatePeakListWithGene(geneId);
+               }
+           }
+        }
 
        gLegend = {};
        if (colorType==="meta") {
@@ -6608,6 +6610,7 @@ var cellbrowser = function() {
         resizeGeneTableDivs("tpRecentGenes");
         resizeGeneTableDivs("tpGenes");
 
+        $("#tpResetColors").click ( function() { colorByDefaultField(undefined, true) } );
         $("#tpLeftTabs").tabs();
         $('#tpLeftTabs').tabs("option", "active", 0); // open the first tab
 
