@@ -24,7 +24,8 @@ def cbGenes_parseArgs():
     Commands for building new gene model files:
     build <assembly>.<geneType> - Download a gene model file from UCSC, pick one transcript per gene and save to ~/cellbrowserData/genes/<db>.<geneType>.bed.gz and <geneType>.symbols.tsv.gz
     allSyms [human|mouse] - Build one big table with geneId <-> symbol, valid for all Gencode versions, always use most recent symbol
-    add fname - Add a two-column .tsv file to your local directory. First column is gene ID, second column is symbol.
+    add fname geneType - Add a two-column .tsv file to your local directory. First column is gene ID, second column is symbol.
+                         e.g. 'cbGenes add myGenes.tsv sea-anemone'
     index - Build the -unique index files and also run 'allSyms' for both human and mouse
     push - Only at UCSC: copy all gene files to the export directory on hgwdev
 
