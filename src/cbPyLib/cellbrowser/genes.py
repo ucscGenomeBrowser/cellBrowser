@@ -324,10 +324,11 @@ def addFileLocal(fname, name):
 
 def pushLocal():
     " copy all local files to export directory "
-    srcDir = join(findCbData(), "genes")
+    srcDir = join(findCbData(), "genes/")
     targetDir = "/usr/local/apache/htdocs-cells/downloads/cellbrowserData/genes/"
     cmd = ["rsync", "-rvzp", srcDir, targetDir]
     subprocess.run(cmd, check=True)
+    logging.info("Updated files in %s" % targetDir)
 
 def iterBedRows(db, geneIdType):
     " yield BED rows of gene models of given type "
