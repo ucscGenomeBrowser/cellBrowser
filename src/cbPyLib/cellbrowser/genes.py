@@ -24,6 +24,7 @@ def cbGenes_parseArgs():
     Commands for building new gene model files:
     build <assembly>.<geneType> - Download a gene model file from UCSC, pick one transcript per gene and save to ~/cellbrowserData/genes/<db>.<geneType>.bed.gz and <geneType>.symbols.tsv.gz
     allSyms [human|mouse] - Build one big table with geneId <-> symbol, valid for all Gencode versions, always use most recent symbol
+    add fname - Add a two-column .tsv file to your local directory. First column is gene ID, second column is symbol.
     index - Build the -unique index files and also run 'allSyms' for both human and mouse
 
     Run "fetch" or "build" without arguments to list the available files at UCSC.
@@ -303,6 +304,22 @@ def listModelsLocal():
     print("Installed gene/chrom-location mappings:")
     print("\n".join(names))
 
+def addFileLocal(fname, name):
+    " add a file to the local sym table dir"
+    dataDir = join(findCbData(), "genes")
+    newFname = name+".symbols.tsv.gz"
+    newPath = join(dataDir, newFname)
+
+    lines = open(fname).readlines()
+    ofh = gzip.open(newPath, "wt")
+    for l in lines:
+        assert("\t" in l) # every line must contain at least one tab character
+        l = l.strip() # we're getting DOS and Mac line endings sometimes...
+        ofh.write(l)
+        ofh.write("\n")
+    ofh.close()
+    logging.info("Wrote %s" % newPath)
+
 def iterBedRows(db, geneIdType):
     " yield BED rows of gene models of given type "
     fname = getStaticPath(getGeneBedPath(db, geneIdType))
@@ -580,6 +597,9 @@ def cbGenesCli():
     elif command=="allSyms":
         org = args[1]
         bigSymTable(org)
+
+    elif command=="add":
+        addFileLocal(args[1], args[2])
 
     elif command=="json": # undocumented
         db, geneType, outFname = args[1:]
