@@ -1,6 +1,6 @@
 # functions to guess the gene model release given a list of gene IDs
 # tested on python3 and python2
-import logging, sys, optparse, string, glob, gzip, json
+import logging, sys, optparse, string, glob, gzip, json, subprocess
 from io import StringIO
 
 from collections import defaultdict
@@ -26,6 +26,7 @@ def cbGenes_parseArgs():
     allSyms [human|mouse] - Build one big table with geneId <-> symbol, valid for all Gencode versions, always use most recent symbol
     add fname - Add a two-column .tsv file to your local directory. First column is gene ID, second column is symbol.
     index - Build the -unique index files and also run 'allSyms' for both human and mouse
+    push - Only at UCSC: copy all gene files to the export directory on hgwdev
 
     Run "fetch" or "build" without arguments to list the available files at UCSC.
 
@@ -320,6 +321,13 @@ def addFileLocal(fname, name):
     ofh.close()
     logging.info("Wrote %s" % newPath)
 
+def pushLocal():
+    " copy all local files to export directory "
+    srcDir = join(findCbData(), "genes")
+    targetDir = "/usr/local/apache/htdocs-cells/downloads/cellbrowserData/genes/"
+    cmd = ["rsync", "-rvzp", srcDir, targetDir]
+    subprocess.run(cmd, check=True)
+
 def iterBedRows(db, geneIdType):
     " yield BED rows of gene models of given type "
     fname = getStaticPath(getGeneBedPath(db, geneIdType))
@@ -600,6 +608,9 @@ def cbGenesCli():
 
     elif command=="add":
         addFileLocal(args[1], args[2])
+
+    elif command=="push":
+        pushLocal()
 
     elif command=="json": # undocumented
         db, geneType, outFname = args[1:]
