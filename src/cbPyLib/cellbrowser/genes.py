@@ -321,6 +321,7 @@ def addFileLocal(fname, name):
         ofh.write("\n")
     ofh.close()
     logging.info("Wrote %s" % newPath)
+    logging.info("You can now use the value '%s' in your cellbrowser.conf file as a value for geneIdType" % name)
 
 def pushLocal():
     " copy all local files to export directory "
