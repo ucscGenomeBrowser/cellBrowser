@@ -720,6 +720,9 @@ def cbImportScanpy_parseArgs(showHelp=False):
     parser.add_option("", "--skipMarkers", dest="skipMarkers", action="store_true",
             help="do not try to calculate cluster-specific marker genes. Only useful for the rare datasets where a bug in scanpy crashes the marker gene calculation.")
 
+    parser.add_option("-l", "--layer", dest="layer", action="store",
+            help="specify the layer to export")
+
     parser.add_option("", "--atac", dest="atac", action="store",
             help="Indicate that this is an ATAC dataset and specify genome assembly and gene model, for example 'hg38.gencode-42'. Use 'cbGenes ls' to show the list of all available gene models on your disk or cbGenes fetch to download other ones. This will only be passed through to cellbrowser.conf.")
 
@@ -754,6 +757,7 @@ def cbImportScanpyCli():
     skipMarkers = options.skipMarkers
     matrixFormat = getMatrixFormat(options)
     atac = options.atac
+    layer = options.layer
 
     if atac is not None and "." not in atac:
         errAbort("the --atac option needs to be in the format <assembly>.<genemodel> e.g. hg38.gencode-42")
@@ -761,7 +765,7 @@ def cbImportScanpyCli():
     ad = readMatrixAnndata(inFname, reqCoords=True)
 
     scanpyToCellbrowser(ad, outDir, datasetName, skipMatrix=options.skipMatrix, useRaw=(not options.useProc),
-            markerField=markerField, clusterField=clusterField, skipMarkers=skipMarkers, matrixFormat=matrixFormat, atac=atac)
+            markerField=markerField, clusterField=clusterField, skipMarkers=skipMarkers, matrixFormat=matrixFormat, atac=atac, layer=layer)
 
     copyFileIfDiffSize(inFname, join(outDir, basename(inFname)))
     generateDataDesc(datasetName, outDir, other={"supplFiles": [{"label":"Scanpy H5AD", "file":basename(inFname)}]})

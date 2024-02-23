@@ -4915,7 +4915,7 @@ def check_nonnegative_integers(X):
 
 def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=None,
         nb_marker=50, doDebug=False, coordFields=None, skipMatrix=False, useRaw=False,
-        skipMarkers=False, markerField='rank_genes_groups', matrixFormat="tsv", atac=None):
+        skipMarkers=False, markerField='rank_genes_groups', matrixFormat="tsv", atac=None, layer=None):
     """
     Mostly written by Lucas Seninge, lucas.seninge@etu.unistra.fr
 
@@ -4935,6 +4935,8 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     from the AnnData object (other than 'louvain' to also save (eg: batches, ...)).
     This can also be a dict of name -> label, if you want to have more human-readable names.
     :param nb_marker: number of cluster markers to store. Default: 50
+    :param atac: assume that the file is an ATAC seq file, chnages the cellbrowser.conf output file
+    :param layer: specify the layer to use in the anndata object
 
     """
     outDir = path
@@ -4954,6 +4956,11 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     import anndata
 
     configData = {} # dict that can override the default arguments in the generated cellbrowser.conf file
+
+    if layer:
+        if layer not in adata.layers:
+            raise ValueError("The layer '%s' does not exist. Available layers are: %s" % (layer, adata.layers.keys()))
+        adata.X = adata.layers[layer]
 
     if matrixFormat=="tsv" or matrixFormat is None:
         matFname = join(outDir, 'exprMatrix.tsv.gz')
