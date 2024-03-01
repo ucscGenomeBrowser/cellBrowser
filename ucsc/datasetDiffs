@@ -1,9 +1,10 @@
 #! /usr/bin/env python3
 
-import argparse, requests, threading, sys
-from json import load,loads
+import argparse, threading, sys, tempfile
+from json import load
 from subprocess import Popen,PIPE
 from operator import eq
+from os import unlink, mkdir
 
 def threader(to_fetch, mach_djson, hidden):
     """
@@ -23,40 +24,71 @@ def fetch_data(loc, dname, out_dict, hidden):
 
     also indicates if dataset is hidden on one of the various machines
     """
-    # Combination of top answers on these two threads:
-    # https://stackoverflow.com/questions/16181121/a-very-simple-multithreading-parallel-url-fetching-without-queue
-    # https://stackoverflow.com/questions/2018026/what-are-the-differences-between-the-urllib-urllib2-urllib3-and-requests-modul
-    # handle urls differently than regular files
-    if loc.startswith('https'):
-        resp = requests.get(loc)
-        djson = resp.json()
-        out_dict[dname] = djson
-    else:
-        djson = load(open(loc,"r"))
-        out_dict[dname] = djson
+    djson = load(open(loc,"r"))
+    out_dict[dname] = djson
 
     if 'hide' in djson.values():
         hidden.add(dname)
 
-def compare_machines(mach1_dict, mach1_name, mach2_dict, mach2_name):
+def print_diffs(key, mach1_name, mach1_val, mach2_name, mach2_val):
+    """Print out values that differ between two machines, e.g. cells-beta and cells-test"""
+    print(key, "\n", mach1_name + ": ", mach1_val, "\n", mach2_name + ": ", mach2_val)
+
+def process_dict(mach1_name, mach1_dict, mach2_name, mach2_dict):
+    """Processes a dictionary, printing out differenting values if needed.
+       Or continuing to process if it finds another dictionary."""
+    for key in mach1_dict.keys():
+        mach1_val = mach1_dict[key]
+        mach2_val = mach2_dict[key]
+        if isinstance(mach1_val, dict):
+            process_dict(mach1_name, mach1_val, mach2_name, mach2_val)
+        else:
+            if mach1_val != mach2_val:
+                print_diffs(key, mach1_name, mach1_val, mach2_name, mach2_val)
+
+def compare_machines(mach1_dict, mach1_name, mach2_dict, mach2_name, verbose=False):
     """
-    takes a dictionary containing dataset.json for each dataset on two machines
-    prints those that are different between the two machines and highlights if a dataset exists on one machine but not the other
+    - Takes a dictionary containing dataset.json for each dataset on two machines
+    - Prints those that are different between the two machines and highlights if
+      a dataset exists on one machine but not the other
+    - 'Verbose' mode prints the exact diffs, otherwise just prints the dataset name
     """
-    diffs = list()
+    print(f'\nDatasets with diffs between {mach1_name} + {mach2_name}:')
     for dataset in mach2_dict:
         # Check if the overall dicts are the same for a dataset on test/beta
-        # If different add dataset name to a list to print later
+        # If not, we'll go through and print out only those values that are different
         try:
             if not eq(mach1_dict[dataset], mach2_dict[dataset]):
-                diffs.append(dataset)
+                # Print dataset name
+                print("\n" + dataset)
+
+                # Script has option to print only names of datasets that have diffs
+                # This whole chunk gets skipped if that's the case
+                if verbose:
+                    for key in mach2_dict[dataset].keys():
+                        # Check if current value is a dict and if so, process that a certain way
+                        if isinstance(mach2_dict[dataset][key], dict):
+                            process_dict(mach2_name, mach2_dict[dataset][key], mach1_name, mach1_dict[dataset][key])
+                        # Otherwise check to see if values for test/beta are different
+                        # and print only the diffs
+                        else:
+                            try:
+                                val1 = mach1_dict[dataset][key]
+                                val2 = mach2_dict[dataset][key]
+                                if val1 != val2:
+                                    # The value for this keys if often large and bloats the results
+                                    # making it difficult to actually see the diffs. Only print a
+                                    # message saying this value differs for test/beta.
+                                    if key == "metaFields":
+                                        print(key, mach1_name + " and " + mach2_name + " differ")
+                                    # Otherwise print out the field that differs and what the values
+                                    # are for test/beta
+                                    else:
+                                        print_diffs(key, mach2_name, val2, mach1_name, val1)
+                            except KeyError:
+                                print(key, f'present on {mach1_name}, but not on {mach2_name} or vice versa')
         except KeyError:
-            outstr = dataset + f' present on {mach1_name}, but not on {mach2_name} or vice versa'
-            diffs.append(outstr)
-    if len(diffs) != 0:
-        print(f'\nDatasets with diffs between {mach1_name} + {mach2_name}:')
-        print(*sorted(diffs), sep="\n")
-        print()
+            print(dataset, f'present on {mach1_name}, but not on {mach2_name} or vice versa')
 
 # Set up script arguments
 parser = argparse.ArgumentParser(
@@ -67,6 +99,8 @@ parser.add_argument("-r","--run", action='store_true',
 parser.add_argument("-s","--stats", action='store_true',
     help='Print stats about the number of datasets/collections on each machine')
 parser.add_argument("-d","--hidden", action='store_true',
+    help='Print datasets that are hidden on each machine')
+parser.add_argument("-v","--verbose", action='store_true',
     help='Print datasets that are hidden on each machine')
 args = parser.parse_args()
 
@@ -90,13 +124,12 @@ def main():
         for dname in ct_datasets:
             ct_loc[dname] = ct_base + dname + "/dataset.json"
         threader(ct_loc, ct_djson, ct_hide)
-
         # dicts/sets to hold everything
         cb_hide = set() # hidden cells-beta datasets
         cb_djson = dict() # holds contents of json for each cells-beta dataset
         cb_loc = dict()
         # get list of all datasets on cells-beta
-        cb_base = "/usr/local/apache/htdocs-cells-beta/"
+        cb_base = '/usr/local/apache/htdocs-cells-beta/'
         bash_cmd = 'find ' + cb_base + ' -name dataset.json | cut -f6- -d "/" | sed "s/\/dataset.json//g" | sort'
         p = Popen([bash_cmd], shell=True, stdout=PIPE, stderr=PIPE)
         cmdout, cmderr = p.communicate()
@@ -110,32 +143,43 @@ def main():
         rr_hide = set() # holds hidden rr datasets
         rr_djson = dict() # holds contents of json files for each rr dataset
         rr_datasets = set() # holds names of all datasets on rr
-        rr_urls = dict() # urls to process via multithreading
+        rr_paths = dict() # file paths to process via multithreading
         # Get list of dataset.json files for rr
-        cmd = ['ssh', 'qateam@hgw0.soe.ucsc.edu', 'find', ct_base, '-name', 'dataset.json']
+        cmd = ['ssh', 'qateam@hgw0.soe.ucsc.edu', 'find', ct_base, '-name',\
+        'dataset.json', '|', 'cut', '-f', '6-', '-d', '"/"']
         p = Popen(cmd, shell=False, stdout=PIPE, stderr=PIPE)
         cmdout, cmderr = p.communicate()
         rr_files = set(cmdout.decode().rstrip().split('\n'))
-        rr_base = "https://cells.ucsc.edu/"
+        with tempfile.NamedTemporaryFile(prefix='cb_', delete=False) as tmp:
+            tmp.write(cmdout)
+        # Wanted to use TemporaryDirectory here but couldn't get it to work
+        rr_base = '/data/tmp/cb_tmp'
+        # Make the new directory, continue on if dir already exists
+        try:
+            mkdir(rr_base)
+        except OSError:
+            pass
+        rsync_cmd = ['rsync', '--files-from=' + tmp.name, \
+        'qateam@hgw0.soe.ucsc.edu:/usr/local/apache/htdocs-cells/', rr_base]
+        rsync_p = Popen(rsync_cmd, shell=True, stdout=PIPE, stderr=PIPE)
+        rsync_cmdout, rsync_cmderr = p.communicate()
         # go through rr_files
         for fname in rr_files:
             # turn full path name into a simple dataset name
             fsplit = fname.strip().split('/')
-            final_index = int(len(fsplit)-2)
-            # Had to do this next part in two lines as I couldn't get slicing to work on one line
-            # This gets rid of the /usr/local/apache/htdocs-cells bit
-            indicies = fsplit[5:]
-            # This gets ride of the /dataset.json at the end
-            indicies = indicies[:-1]
             # from https://stackoverflow.com/questions/12453580/how-do-i-concatenate-items-in-a-list-to-a-single-string
-            dname = '/'.join(indicies)
+            dname = '/'.join(fsplit[:-1])
             if dname != '':
                 # now turn dataset name into url
-                dpath = rr_base + dname  + "/dataset.json"
+                dpath = rr_base + '/' + dname  + '/dataset.json'
                 # add that url to a dict
-                rr_urls[dname] = dpath
+                rr_paths[dname] = dpath
                 rr_datasets.add(dname)
-        threader(rr_urls, rr_djson, rr_hide)
+        threader(rr_paths, rr_djson, rr_hide)
+
+        # Close out our tmp file
+        tmp.close()
+        unlink(tmp.name)
 
         if args.hidden:
             if len(ct_hide) != 0:
@@ -161,9 +205,10 @@ def main():
             print(beta_only,"\n")
 
         # Compare cells-test to cells-beta datasets
-        compare_machines(ct_djson, "cells-test", cb_djson, "cells-beta")
+        print(args.verbose)
+        compare_machines(ct_djson, "cells-test", cb_djson, "cells-beta", args.verbose)
         # And then cells-beta to cells
-        compare_machines(cb_djson, "cells-beta", rr_djson, "cells")
+        compare_machines(cb_djson, "cells-beta", rr_djson, "cells", args.verbose)
 
         # make sets of only top-level datasets
         # from: https://stackoverflow.com/questions/33944647/what-is-the-most-pythonic-way-to-filter-a-set
