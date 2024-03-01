@@ -1562,13 +1562,19 @@ class MatrixMtxReader:
         " yield (geneId, symbol, array) tuples from gene expression file. "
         mat = self.mat
         genes = self.genes
+        skipIds = 0
+        geneToSym = self.geneToSym
         for i in range(0, len(self.genes)):
+
             geneId = genes[i]
-            geneSym = geneId
-            if "|" in geneId:
-                geneId, geneSym = geneId.split("|")[:2]
-            if self.geneToSym and geneSym is not None:
-                geneSym = self.geneToSym.get(geneId)
+            #geneSym = geneId
+            #if "|" in geneId:
+                #geneId, geneSym = geneId.split("|")[:2]
+            #else:
+                #if self.geneToSym and geneSym is not None:
+                    #geneSym = self.geneToSym.get(geneId)
+
+            geneId, geneSym, skipIds  = resolveGene(geneId, geneToSym, skipIds)
 
             if i%1000==0:
                 logging.info("%d genes written..." % i)
@@ -1578,6 +1584,27 @@ class MatrixMtxReader:
                 # return 2D matrices. So need to unpack it to get the array. Grrr.
                 arr = arr[0]
             yield (geneId, geneSym, arr)
+
+def resolveGene(gene, geneToSym, skipIds):
+    if "|" in gene:
+        gene, symbol = gene.split("|")
+    else:
+        if geneToSym is None:
+            symbol = gene
+        else:
+            symbol = geneToSym.get(gene.split(".")[0])
+            logging.debug("%s -> %s" % (gene, symbol))
+
+            if symbol is None:
+                skipIds += 1
+                logging.warn("could not find symbol for ID %s, looks like it is not a valid gene ID, check geneIdType setting in cellbrowser.conf or gene symbol mapping tables" % (gene))
+                symbol = gene
+
+            if symbol.isdigit():
+                logging.warn("in gene matrix: gene identifier %s is a number. If this is indeed a gene identifier, you can " \
+                "ignore this warning. Otherwise, your matrix may have no gene ID in the first column and you will have to fix the matrix. " \
+                "Another possibility is that your geneIds are entrez gene IDs, but this is very rare." % (symbol))
+    return gene, symbol, skipIds
 
 class MatrixTsvReader:
     " open a .tsv or .csv file and yield rows via iterRows. gz and csv OK."
@@ -1725,26 +1752,7 @@ class MatrixTsvReader:
                 errAbort("The first header line of the matrix file has %d columns. "\
                     "However, line %d has %d columns. All lines must have the same number of columns." % (len(self.headers), lineNo+1, geneCount+1))
 
-            if "|" in gene:
-                gene, symbol = gene.split("|")
-            else:
-                if geneToSym is None:
-                    symbol = gene
-                else:
-                    symbol = geneToSym.get(gene.split(".")[0])
-                    logging.debug("%s -> %s" % (gene, symbol))
-                    #if symbol is None:
-                        #symbol = geneToSym.get(gene)
-
-                    if symbol is None:
-                        skipIds += 1
-                        logging.warn("line %d: could not find symbol for ID %s, looks like it is not a valid gene ID, check geneIdType setting in cellbrowser.conf or gene symbol mapping tables" % (lineNo, gene))
-                        symbol = gene
-
-                    if symbol.isdigit():
-                        logging.warn("line %d in gene matrix: gene identifier %s is a number. If this is indeed a gene identifier, you can " \
-                        "ignore this warning. Otherwise, your matrix may have no gene ID in the first column and you will have to fix the matrix. " \
-                        "Another possibility is that your geneIds are entrez gene IDs, but this is very rare." % (lineNo, symbol))
+            gene, symbol, skipIds  = resolveGene(gene, geneToSym, skipIds)
 
             if symbol in doneGenes:
                 logging.warn("line %d: Gene %s/%s is duplicated in matrix, using only first occurrence for symbol, kept second occurrence with original geneId" % (lineNo, gene, symbol))
@@ -2181,13 +2189,15 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
         key = sym
         if sym is None:
             noSymFound +=1
+        else:
+            symCounts[key]+=1
+
         if geneId!=sym and sym is not None:
             key = geneId+"|"+sym
 
         if geneId.startswith("chr"):
             atacChromCount+=1
 
-        symCounts[key]+=1
         if symCounts[key] > 1000:
             errAbort("The gene ID/symbol %s appears more than 1000 times in the expression matrix. "
                     "Are you sure that the matrix is in the right format? Each gene should be on a row. "
