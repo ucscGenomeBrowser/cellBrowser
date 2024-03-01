@@ -676,7 +676,8 @@ def cbCellrangerCli_parseArgs(showHelp=False):
 def cbImportScanpy_parseArgs(showHelp=False):
     " setup logging, parse command line arguments and options. -h shows auto-generated help page "
     parser = optparse.OptionParser("""usage: %prog [options] -i inFilename -o outDir - convert Scanpy AnnData object to cellbrowser. inFilename can be an .h5ad or .loom file. 
-    Exports raw.X by default, or .X alternatively, see --proc. Exports all meta data. Writes .tsv by default, or alternatively .mtx.gz
+    Exports raw.X by default, or .X alternatively, see --proc and --layer.
+    Exports all meta data. Writes .tsv by default, or alternatively .mtx.gz
 
     Example:
     - %prog -i pbmc3k.h5ad -o pbmc3kScanpy - convert pbmc3k to directory with tab-separated files
@@ -687,9 +688,6 @@ def cbImportScanpy_parseArgs(showHelp=False):
 
     parser.add_option("-i", "--inFile", dest="inFile", action="store",
         help="input .h5ad file. Required parameter")
-
-    parser.add_option("", "--proc", dest="useProc", action="store_true",
-        help="when exporting, do not use the raw input data, instead use the normalized and corrected matrix scanpy. This has no effect if the anndata.raw attribute is not used in the anndata object")
 
     parser.add_option("-o", "--outDir", dest="outDir", action="store",
         help="Output directory. Required parameter")
@@ -720,8 +718,11 @@ def cbImportScanpy_parseArgs(showHelp=False):
     parser.add_option("", "--skipMarkers", dest="skipMarkers", action="store_true",
             help="do not try to calculate cluster-specific marker genes. Only useful for the rare datasets where a bug in scanpy crashes the marker gene calculation.")
 
+    parser.add_option("", "--proc", dest="useProc", action="store_true",
+        help="when exporting, do not use the raw input data, instead use the normalized and corrected matrix scanpy. This has no effect if the anndata.raw attribute is not present in the anndata object")
+
     parser.add_option("-l", "--layer", dest="layer", action="store",
-            help="specify the layer to export")
+            help="Specify the layer to export. This takes precedence over --useProc.")
 
     parser.add_option("", "--atac", dest="atac", action="store",
             help="Indicate that this is an ATAC dataset and specify genome assembly and gene model, for example 'hg38.gencode-42'. Use 'cbGenes ls' to show the list of all available gene models on your disk or cbGenes fetch to download other ones. This will only be passed through to cellbrowser.conf.")

@@ -4585,7 +4585,7 @@ def geneStringsFromVar(ad, sep="|"):
         genes = var.index.tolist()
     return genes
 
-def anndataMatrixToMtx(ad, path, useRaw=False):
+def anndataMatrixToMtx(ad, path):
     """
     write the ad expression matrix into a sparse mtx.gz file (matrix-market format)
 
@@ -4596,17 +4596,8 @@ def anndataMatrixToMtx(ad, path, useRaw=False):
 
     import scipy.io
 
-    if useRaw and ad.raw is None:
-        logging.warning("The option to export raw expression data is set, but the scanpy object has no 'raw' attribute. Exporting the processed scanpy matrix. Some genes may be missing.")
-
-    if useRaw and ad.raw is not None:
-        mat = ad.raw.X
-        var = ad.raw.var
-        logging.info("Processed matrix has size (%d cells, %d genes)" % (mat.shape[0], mat.shape[1]))
-        logging.info("Using raw expression matrix")
-    else:
-        mat = ad.X
-        var = ad.var
+    mat = ad.X
+    var = ad.var
 
     rowCount, colCount = mat.shape
     logging.info("Writing scanpy matrix (%d cells, %d genes) to %s in mtx.gz format" % (rowCount, colCount, path))
@@ -4652,22 +4643,13 @@ def anndataMatrixToMtx(ad, path, useRaw=False):
             shutil.copyfileobj(mtx_in, mtx_gz)
     os.remove(mtxfile)
 
-def anndataMatrixToTsv(ad, matFname, usePandas=False, useRaw=False):
+def anndataMatrixToTsv(ad, matFname, usePandas=False):
     " write ad expression matrix to .tsv file and gzip it "
     import pandas as pd
     import scipy.sparse
 
-    if useRaw and ad.raw is None:
-        logging.warn("The option to export raw expression data is set, but the scanpy object has no 'raw' attribute. Exporting the processed scanpy matrix. Some genes may be missing.")
-
-    if useRaw and ad.raw is not None:
-        mat = ad.raw.X
-        var = ad.raw.var
-        logging.info("Processed matrix has size (%d cells, %d genes)" % (mat.shape[0], mat.shape[1]))
-        logging.info("Using raw expression matrix")
-    else:
-        mat = ad.X
-        var = ad.var
+    mat = ad.X
+    var = ad.var
 
     rowCount, colCount = mat.shape
     logging.info("Writing scanpy matrix (%d cells, %d genes) to %s" % (rowCount, colCount, matFname))
@@ -4971,19 +4953,33 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
 
     configData = {} # dict that can override the default arguments in the generated cellbrowser.conf file
 
+    # layers are the new thing to store multiple matrixces. In the old days, there only was the adata.raw matrix
+    # in addition to ad.X. So if a layer was specified, we use that. Only when a layer was not specified do we respect 
+    # the useRaw option
     if layer:
         if layer not in adata.layers:
             raise ValueError("The layer '%s' does not exist. Available layers are: %s" % (layer, adata.layers.keys()))
-        logging.info("Using layer '%s' of anndata object" % layer)
+        logging.info("Using layer '%s' of anndata object (not using .raw)" % layer)
         adata.X = adata.layers[layer]
+    else:
+        if useRaw:
+            if ad.raw is None:
+                logging.warn("The option to export raw expression data is set, but the scanpy object has no 'raw' attribute. Exporting the processed scanpy matrix. Some genes may be missing.")
+            else:
+                logging.info("Using raw expression matrix")
+                adata.X = adata.raw.X
+                adata.var = adata.raw.var
+
+    mat = adata.X
+    logging.info("Matrix has size (%d cells, %d genes)" % (mat.shape[0], mat.shape[1]))
 
     if matrixFormat=="tsv" or matrixFormat is None:
         matFname = join(outDir, 'exprMatrix.tsv.gz')
         if not skipMatrix:
-            anndataMatrixToTsv(adata, matFname, useRaw=useRaw)
+            anndataMatrixToTsv(adata, matFname)
     elif matrixFormat=="mtx":
         if not skipMatrix:
-            anndataMatrixToMtx(adata, outDir, useRaw=useRaw)
+            anndataMatrixToMtx(adata, outDir)
         configData["exprMatrix"] = "matrix.mtx.gz"
     else:
         assert(False) # invalid value for 'matrixFormat'
