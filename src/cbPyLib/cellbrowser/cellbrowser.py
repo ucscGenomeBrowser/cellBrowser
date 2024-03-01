@@ -2273,6 +2273,15 @@ def indexMeta(fname, outFname):
     """ index a tsv by its first field. Writes binary data to outFname.
         binary data is (offset/4 bytes, line length/2 bytes)
     """
+    # traditionally, I always used four bytes. The biggest datasets have meta data 
+    # that is bigger than 4GB, however
+    indexFormat = "<L" # unsigned long, four bytes
+    isEightBytes = False
+    metaSize = getsize(fname)
+    if metaSize > 4294967295:
+        indexFormat = "<Q" # unsigned long long, eight bytes
+        isEightBytes = True
+
     ofh = open(outFname, "wb")
     logging.info("Indexing meta file %s to %s" % (fname, outFname))
     ifh = open(fname)
@@ -2289,9 +2298,10 @@ def indexMeta(fname, outFname):
         lineLen = end - start
         assert(lineLen!=0)
         assert(lineLen<65535) # meta data line cannot be longer than 2 bytes
-        ofh.write(struct.pack("<L", start))
+        ofh.write(struct.pack(indexFormat, start))
         ofh.write(struct.pack("<H", lineLen))
     ofh.close()
+    return isEightBytes
 
 # ----------- main --------------
 
@@ -2689,12 +2699,14 @@ def checkMtx(mtxFname, geneFname, barcodeFname):
     if len(geneIds) != rowCount:
         errAbort("The number of rows in the file %s (%d) is different from the number of lines in the file %s (%d). "
                 "The number should be identical and usually is the number of genes/features. "
-                "This suggests a problem in the way the data was exported. You may want to remove header lines. "
-                % (mtxFname, len(geneIds), geneFname, rowCount))
+                "This suggests a problem in the way the data was exported. If the difference is one, the problem is often that "
+                                "there is a header line but features.tsv files have no header line. "
+                % (mtxFname, rowCount, geneFname, len(geneIds)))
     if len(barcodes) != colCount:
         errAbort("The number of columns in the file %s is different from the number of lines in the file %s. "
                 "The number should be identical and usually is the number of genes/features. "
-                "This suggests a problem in the way the data was exported. You may want to remove header lines. "
+                "This suggests a problem in the way the data was exported. If the difference is one, the problem is often that "
+                "there is a header line but features.tsv files have no header line. "
                 % (mtxFname, barcodeFname))
 
     return False
@@ -3950,7 +3962,9 @@ def convertMeta(inDir, inConf, outConf, outDir, finalMetaFname):
     checkFieldNames(outConf, ["violinField", "clusterField", "defColorField", "labelField"], validFieldNames, \
             fieldConf, labelField)
 
-    indexMeta(finalMetaFname, metaIdxFname)
+    useLongLongMeta = indexMeta(finalMetaFname, metaIdxFname)
+    if useLongLongMeta:
+        outConf["metaNeedsEightBytes"] = True
 
     logging.info("Kept %d cells present in both meta data file and expression matrix" % len(sampleNames))
 
@@ -4960,6 +4974,7 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     if layer:
         if layer not in adata.layers:
             raise ValueError("The layer '%s' does not exist. Available layers are: %s" % (layer, adata.layers.keys()))
+        logging.info("Using layer '%s' of anndata object" % layer)
         adata.X = adata.layers[layer]
 
     if matrixFormat=="tsv" or matrixFormat is None:
