@@ -2899,7 +2899,14 @@ def parseMarkerTable(filename, geneToSym):
 
         geneId = row[geneIdx]
 
-        scoreVal = float(row[scoreIdx])
+        try:
+            scoreVal = float(row[scoreIdx])
+        except ValueError:
+            logging.error("File %s, column %d: value is not a number but we expect a number in this colum."
+                    "Columns should be: cluster, gene, score. '%s' is not a score`" %
+                    (filename, scoreIdx+1, row[scoreIdx]))
+            raise
+
         otherFields = row[otherStart:otherEnd]
 
         for colIdx, val in enumerate(otherFields):
