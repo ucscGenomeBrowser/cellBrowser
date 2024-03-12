@@ -196,9 +196,13 @@ var cbUtil = (function () {
             if (!dataLen)
                 dataLen = new Blob([binData]).size;;
 
-            if (dataLen < expLength -1) // Yes, the -1 does not make sense. This happens only with https://cells-beta.gi.ucsc.edu/?ds=engraftable-hsc+adt
+            if (dataLen < expLength-1) // Yes, the -1 does not make sense. 
+                // This happens only with https://cells-beta.gi.ucsc.edu/?ds=engraftable-hsc+adt
                 // and I have no idea why.
-                alert("internal error cbData.js: chunk is too small. Does the HTTP server really support byte range requests?");
+                alert("internal error cbData.js: data received from web server is too short. Expected data size was "+exprLength+
+                        " but received "+dataLen+" bytes. URL: "+url+
+                        "Does the HTTP server really support byte range requests? You probably will have to contact us to "
+                        " narrow down this problem.");
 
             if (dataLen > expLength) {
                 console.log("Webserver does not support byte range requests, working around it, but this may be slow");
