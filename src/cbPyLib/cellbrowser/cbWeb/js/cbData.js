@@ -1625,7 +1625,7 @@ function CbDbFile(url) {
                   //alert("Error: "+sym+" is in quick genes list but is not a valid gene");
                   //continue;
                //}
-               if (geneId.indexOf("|")!==-1)
+               if (geneId.indexOf("|")!==-1 && !self.conf.atacSearch)
                    geneId = geneId.split("|")[0];
 
                 self.loadExprAndDiscretize(

@@ -4483,9 +4483,16 @@ var cellbrowser = function() {
             var geneId
             var sym;
             if (geneIdOrSym.indexOf("|")!==-1) {
-                var parts = geneIdOrSym.split("|");
-                geneId = parts[0];
-                sym = parts[1];
+                if (db.isAtacMode()) {
+                    // it's in range format chr|123123|125443
+                    var parts = geneIdOrSym.split("|");
+                    geneId = geneIdOrSym;
+                    sym = parts[0]+":"+prettyNumber(parts[1]);
+                } else {
+                    var parts = geneIdOrSym.split("|");
+                    geneId = parts[0];
+                    sym = parts[1];
+                }
             } else {
                 geneId = geneIdOrSym;
                 sym = geneId;
