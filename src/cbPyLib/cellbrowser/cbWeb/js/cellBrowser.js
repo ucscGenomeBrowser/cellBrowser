@@ -8387,16 +8387,18 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
 
         $("#"+divId).html(htmls.join(""));
         var sortOpt = {};
-        //if (doDescSort)
-            //sortOpt.descending=true;
-        new Tablesort(document.getElementById('tpMarkerTable'));
         var tableOpt = { sortList: [[pValCol,0]], theme: "bootstrap", widgets : [ "uitheme", "filter", "columns", "zebra" ],
         };
         if (doDescSort)
             tableOpt.sortList[0][1] = 1; // = sort first column descending
         //new Tablesort(document.getElementById('tpMarkerTable'), tableOpt);
         $("#tpMarkerTable").tablesorter(tableOpt);
-        $('#tpMarkerTable').trigger('sorton', tableOpt.sortList); // tableOpt has no effect?!?! So doing this twice
+        //$('#tpMarkerTable').trigger('sorton', tableOpt.sortList); // does not work, though documented
+        // this is a pretty bad hack, but I have no idea why the sortList option doesn't work above...
+        $("[data-column='1']").trigger("sort"); // this seems to work!
+        if (doDescSort)
+            $("[data-column='1']").trigger("sort"); // second click...
+
         $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
         activateTooltip(".link");
 
