@@ -201,7 +201,7 @@ var cbUtil = (function () {
                 // and I have no idea why.
                 alert("internal error cbData.js: data received from web server is too short. Expected data size was "+exprLength+
                         " but received "+dataLen+" bytes. URL: "+url+
-                        "Does the HTTP server really support byte range requests? You probably will have to contact us to "
+                        "Does the HTTP server really support byte range requests? You probably will have to contact us to "+
                         " narrow down this problem.");
 
             if (dataLen > expLength) {
