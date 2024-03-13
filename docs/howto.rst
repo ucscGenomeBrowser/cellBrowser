@@ -203,56 +203,51 @@ Step 2: Edit your seurat.conf
 Now that you have a scanpy.conf in your current directory, open it up and edit it! If this file is in the same 
 directory where you are running ``cbScanpy``, it will be automatically picked up. 
 
-How to export the data from Monocle for use in the Cell Browser
+How to export the data from Monocle 2 or 3 for use in the Cell Browser
 ^^^^
 `Monocle <https://cole-trapnell-lab.github.io/monocle-release/>`_ is an R package that can be used to reconstruct 
 transcriptional trajectories. You can export the coordinates, expression data, and metadata from a
 Monocle object and then use those files to build a cell browser. These steps assume that you have your Monocle
-object loaded into R already. 
+object loaded into R already and the name of the object is `cds`. 
 
 Step 1: Export expression matrix
 """"
 
 First, export data in MTX format, since it can handle large matrix sizes. MTX consists of three files: 
-(1) a sparse matrix, (2) a file of column names, and (3) a file of row names.
-
-(1) MTX sparse matrix:
+(1) a sparse matrix, (2) a file of column/gene names, and (3) a file of row/cell names.
 
 ::
 
-  writeMM(exprs(monocle_obj), 'matrix.mtx')``
-
-(2) Row names (genes):
-
-::
-
-  write.table(as.data.frame(cbind(rownames(exprs(monocle_obj)), rownames(exprs(monocle_obj)))), file='features.tsv', sep="\t", row.names=F, col.names=F, quote=F)
-
-(3) Column names (samples/cells):
-
-::
-
-  write(colnames(exprs(monocle_obj)), file = 'barcodes.tsv')
+  require(Matrix)
+  writeMM(exprs(cds), 'matrix.mtx')``
+  write.table(as.data.frame(cbind(rownames(exprs(cds)), rownames(exprs(cds)))), file='features.tsv', sep="\t", row.names=F, col.names=F, quote=F)
+  write(colnames(exprs(cds)), file = 'barcodes.tsv')
 
 Step 2: Export cell annotations
 """"
 
 Next, export the cell metadata annotations, which includes Monocle's calculated 'pseudotime':
 
-::
+Monocle2::
 
-  write.table(as(monocle_obj@phenoData,"data.frame"), file='meta.tsv', quote=FALSE, sep='\t', col.names = NA)
+  write.table(as(cds@phenoData,"data.frame"), file='meta.tsv', quote=FALSE, sep='\t', col.names = NA)
 
+Monocle3::
+
+  write.table(as(cds@colData,"data.frame"), file='meta.tsv', quote=FALSE, sep='\t', col.names = NA)
 
 Step 3: Export cell coordinates
 """"
 
-Then, export the cell coordinates:
+Finally, export the cell coordinates:
 
-::
+Monocle2::
 
-  write.table(t(monocle_obj@reducedDimS), file='monocle.coords.tsv', quote=FALSE, sep='\t', col.names = NA)
+  write.table(t(cds@reducedDimS), file='monocle.coords.tsv', quote=FALSE, sep='\t', col.names = NA)
 
+Monocle3::
+
+  write.table(data.frame(SingleCellExperiment::reducedDims(cds)[["UMAP"]]), file='monocle.coords.tsv', quote=FALSE, sep='\t', col.names = NA)
 
 Step 4: Set up your cellbrowser.conf
 """"
@@ -266,7 +261,6 @@ You will specifically need to edit these lines to point to the flies that you ex
 
   exprMatrix="matrix.mtx"
   meta="meta.tsv"
-
   coords=[
     {
       "file":"monocle.coords.tsv",
@@ -274,7 +268,6 @@ You will specifically need to edit these lines to point to the flies that you ex
       "flipY":True,
     },
   ]
-  
   defColorField="Pseudotime"
   
 You will still need to set the other `required settings <https://github.com/maximilianh/cellBrowser/blob/master/src/cbPyLib/cellbrowser/sampleConfig/cellbrowser.conf#L1>`_ in your cellbrowser.conf as well
@@ -402,6 +395,7 @@ Step 1: Gather required files
 """"
 
 You will the following three files:
+
 * Expression matrix with cell names as columns and peak ranges as rows. 
 * Cell annotations/metadata
 * Layout coordinats (e.g. UMAP)

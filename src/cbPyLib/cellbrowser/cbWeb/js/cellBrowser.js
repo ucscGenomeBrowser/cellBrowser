@@ -4483,9 +4483,16 @@ var cellbrowser = function() {
             var geneId
             var sym;
             if (geneIdOrSym.indexOf("|")!==-1) {
-                var parts = geneIdOrSym.split("|");
-                geneId = parts[0];
-                sym = parts[1];
+                if (db.isAtacMode()) {
+                    // it's in range format chr|123123|125443
+                    var parts = geneIdOrSym.split("|");
+                    geneId = geneIdOrSym;
+                    sym = parts[0]+":"+prettyNumber(parts[1]);
+                } else {
+                    var parts = geneIdOrSym.split("|");
+                    geneId = parts[0];
+                    sym = parts[1];
+                }
             } else {
                 geneId = geneIdOrSym;
                 sym = geneId;
@@ -6030,8 +6037,7 @@ var cellbrowser = function() {
         let htmls = [];
         let parentEl = getById(parentDomId);
 
-        let rowLabels = metaLabels; 
-        //rowLabels.sort();
+        let rowLabels = cloneArray(metaLabels);  // we'll sort this in place, so make a copy first
         rowLabels.sort(function(a, b) { return naturalSort(a, b); });
         let rowCount = rowLabels.length;
 
@@ -6225,6 +6231,8 @@ var cellbrowser = function() {
 
     function closeExprView() {
     /* close the expression viewer dialog window, remove the key handler, destroy the chart objects */
+        if (!renderer.readyToDraw())
+            loadAndRenderData(); // note that if 'exprGene' set on initial load, loadAndRenderData() was not run, so do this now.
         changeUrl({"exprGene":null, "exprMeta":null});
         getById("tpExprView").remove();
         window.violinCharts = [];
@@ -6284,12 +6292,6 @@ var cellbrowser = function() {
 
         activateCombobox("tpGeneExprMetaCombo", metaBarWidth-10);
         $("#tpGeneExprMetaCombo").change( onGeneExprMetaComboChange );
-
-        function closeExprView() {
-            $('#tpExprView').remove();
-            if (!renderer.readyToDraw())
-                loadAndRenderData(); // note that if 'exprGene' set on initial load, loadAndRenderData() was not run, so do this now.
-        }
 
         $("#tpBackToCb").click( closeExprView );
         $('#tpCloseButton').click( closeExprView );
@@ -7931,7 +7933,7 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
             renderer.childPlot.coordIdx = currCoordIdx; // keep for onActRendChange
 
             $("#tpSplitMenuEntry").text("Unsplit Screen");
-            $("#mpCloseButton").click(renderer.unsplit);
+            $("#mpCloseButton").click( function() {removeSplit(renderer);} );
             //$("#mpCloseButton").click(onSplitClick);
 
         } else {
@@ -8281,16 +8283,16 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
                 colLabel = "Gene Lists";
                 geneListCol = i;
             }
-            else if (colLabel==="P_value" || colLabel==="pVal" || colLabel.startsWith("p_val")) {
+            else if (colLabel==="pVal" || /[pP].[Vv]al.*/.test(colLabel)) {
                 colLabel = "P-value";
-                pValCol = i;
+                pValCol = i-1; // the table displayed does not have the "id" column
+                isNumber = true;
                 if (i===2)
                     doDescSort = true;
             }
-
             else if (colLabel==="_expr") {
                 colLabel = "Expression";
-                exprCol = i;
+                exprCol = i-1; // table displayed does not have the "id" column
             }
             else if (colLabel==="_hprdClass") {
                 hprdCol = i;
@@ -8300,7 +8302,9 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
 
             var addStr = "";
             if (isNumber)
-                addStr = " data-sort-method='number'";
+                //addStr = " data-sort-method='number'";
+                addStr = " sorter='number'";
+                //addStr = ' class="{sorter: \'number\'}"';
 
             if (width===null)
                 htmls.push("<th"+addStr+">");
@@ -8389,12 +8393,19 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
         // ----
 
         $("#"+divId).html(htmls.join(""));
-        var tableOpt = { sortList: [[1,0]], theme: "bootstrap", widgets : [ "uitheme", "filter", "columns", "zebra" ],
+        var sortOpt = {};
+        var tableOpt = { sortList: [[pValCol,0]], theme: "bootstrap", widgets : [ "uitheme", "filter", "columns", "zebra" ],
         };
         if (doDescSort)
-            tableOpt.sortList = [[1,1]]; // = sort first column descending
+            tableOpt.sortList[0][1] = 1; // = sort first column descending
         //new Tablesort(document.getElementById('tpMarkerTable'), tableOpt);
         $("#tpMarkerTable").tablesorter(tableOpt);
+        //$('#tpMarkerTable').trigger('sorton', tableOpt.sortList); // does not work, though documented
+        // this is a pretty bad hack, but I have no idea why the sortList option doesn't work above...
+        $("[data-column='1']").trigger("sort"); // this seems to work!
+        if (doDescSort)
+            $("[data-column='1']").trigger("sort"); // second click...
+
         $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
         activateTooltip(".link");
 

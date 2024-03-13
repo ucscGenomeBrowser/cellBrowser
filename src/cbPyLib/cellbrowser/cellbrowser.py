@@ -2921,7 +2921,14 @@ def parseMarkerTable(filename, geneToSym):
 
         geneId = row[geneIdx]
 
-        scoreVal = float(row[scoreIdx])
+        try:
+            scoreVal = float(row[scoreIdx])
+        except ValueError:
+            logging.error("File %s, column %d: value is not a number but we expect a number in this colum."
+                    "Columns should be: cluster, gene, score. '%s' is not a score`" %
+                    (filename, scoreIdx+1, row[scoreIdx]))
+            raise
+
         otherFields = row[otherStart:otherEnd]
 
         for colIdx, val in enumerate(otherFields):
@@ -3471,8 +3478,12 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
                 errAbort("Gene %s in quickgenes file is neither a symbol nor a geneId" % repr(geneOrSym))
             geneStr = geneId+"|"+sym
 
+        # case 5: it is an ATAC dataset and the quickgenes file has ranges
+        elif ":" in geneOrSym and "-" in geneOrSym:
+            geneStr = geneOrSym.replace(":", "|").replace("-", "|")
+
         else:
-            errAbort("Gene '%s' in quickgenes file is not in expr matrix and there is no geneId<->symbol mapping to resolve it to a geneId in the expression matrix" % repr(geneOrSym))
+            errAbort("Gene '%s' in quickgenes file is not in expr matrix and there is no geneId<->symbol mapping to resolve it to a geneId in the expression matrix and it is not an ATAC range" % repr(geneOrSym))
 
         # if we had no geneToSym, we'll check the symbol later if it's valid
 

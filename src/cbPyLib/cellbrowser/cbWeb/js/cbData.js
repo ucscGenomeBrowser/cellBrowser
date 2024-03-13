@@ -196,9 +196,13 @@ var cbUtil = (function () {
             if (!dataLen)
                 dataLen = new Blob([binData]).size;;
 
-            if (dataLen < expLength -1) // Yes, the -1 does not make sense. This happens only with https://cells-beta.gi.ucsc.edu/?ds=engraftable-hsc+adt
+            if (dataLen < expLength-1) // Yes, the -1 does not make sense. 
+                // This happens only with https://cells-beta.gi.ucsc.edu/?ds=engraftable-hsc+adt
                 // and I have no idea why.
-                alert("internal error cbData.js: chunk is too small. Does the HTTP server really support byte range requests?");
+                alert("internal error cbData.js: data received from web server is too short. Expected data size was "+exprLength+
+                        " but received "+dataLen+" bytes. URL: "+url+
+                        "Does the HTTP server really support byte range requests? You probably will have to contact us to "+
+                        " narrow down this problem.");
 
             if (dataLen > expLength) {
                 console.log("Webserver does not support byte range requests, working around it, but this may be slow");
@@ -356,8 +360,14 @@ var cbUtil = (function () {
         return [min, max]
     }
 
+    my.baReadBigOffset = function(ba, o) {
+    /* given a byte array, return the unsigned long long int (little endian), so eight bytes, at offset o */
+        var offset = ba[o] |  ba[o+1] << 8 | ba[o+2] << 16 | ba[o+3] << 24 | ba[o+4] << 32 | ba[o+5] << 40 | ba[o+6] << 48 | ba[o+7] << 56;
+        return offset;
+    };
+
     my.baReadOffset = function(ba, o) {
-    /* given a byte array, return the long int (little endian) at offset o */
+    /* given a byte array, return the unsigned long int (little endian), so four bytes, at offset o */
         var offset = ba[o] |  ba[o+1] << 8 | ba[o+2] << 16 | ba[o+3] << 24;
         return offset;
     };
@@ -1277,6 +1287,8 @@ function CbDbFile(url) {
         // first we need to lookup the offset of the line and its length from the index
         var url = cbUtil.joinPaths([self.url, "meta.index"]);
         var start = (cellIdx*6); // four bytes for the offset + 2 bytes for the line length
+        if (self.conf.metaNeedsEightBytes)
+            start = (cellIdx*10); // meta files > 4GB need 8 bytes for the offset + 2 for the line length
         var end   = start+6;
 
         function lineDone(text) {
@@ -1288,7 +1300,12 @@ function CbDbFile(url) {
 
         function offsetDone(arr) {
             /* called when the offset in meta.index has been read */
-            var offset = cbUtil.baReadOffset(arr, 0);
+            var offset;
+            if (self.conf.metaNeedsEightBytes)
+                offset = cbUtil.baReadBigOffset(arr, 0);
+            else
+                offset = cbUtil.baReadOffset(arr, 0);
+
             var lineLen = cbUtil.baReadUint16(arr, 4);
             // now get the line from the .tsv file
             var url = cbUtil.joinPaths([self.url, "meta.tsv"]);
@@ -1608,7 +1625,7 @@ function CbDbFile(url) {
                   //alert("Error: "+sym+" is in quick genes list but is not a valid gene");
                   //continue;
                //}
-               if (geneId.indexOf("|")!==-1)
+               if (geneId.indexOf("|")!==-1 && !self.conf.atacSearch)
                    geneId = geneId.split("|")[0];
 
                 self.loadExprAndDiscretize(
