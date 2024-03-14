@@ -1730,9 +1730,11 @@ var cellbrowser = function() {
 
     function clearSelectionAndDraw() {
         /* do everything needed to clear the selection */
+        // clear checkboxes and colored highlight
         clearSelectionState();
         renderer.selectClear();
         renderer.drawDots();
+
     }
 
     function onSelectNoneClick() {
@@ -7754,10 +7756,13 @@ var cellbrowser = function() {
 
         $("#tpHoverHint").show();
         $("#tpSelectHint").hide();
+
+        // clear all checkboxes in the legend
+        $(".tpLegendLabel").removeClass("tpLegendSelect");
+        $(".tpLegendCheckbox").prop('checked', false);
     }
 
-    function onCellClickOrHover (cellIds, ev) {
-        /* user clicks onto a circle with the mouse or hovers over one.
+    function onCellClickOrHover (cellIds, ev) { /* user clicks onto a circle with the mouse or hovers over one.
          * ev is undefined if not a click. cellIds is none if click was on empty background. */
 
         // do nothing if only hover but something is already selected
@@ -7772,11 +7777,14 @@ var cellbrowser = function() {
         $("#tpSelectHint").hide();
 
         // if click into background, remove any legend selection
-        if (cellIds===null)
-            $(".tpLegendLabel").removeClass("tpLegendSelect");
+        //if (cellIds===null) {
+            //$(".tpLegendLabel").removeClass("tpLegendSelect");
+            //$(".tpLegendCheckbox").prop('checked', false);
+        //}
 
         if (cellIds===null || cellIds.length===0) {
             clearMetaAndGene();
+            clearSelectionState();
         } else {
             var cellId = cellIds[0];
             var cellCountBelow = cellIds.length-1;
