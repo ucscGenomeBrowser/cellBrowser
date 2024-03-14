@@ -3065,6 +3065,11 @@ def getImageSize(inFname):
 
 def copyImage(inDir, summInfo, datasetDir):
     """ copy image to datasetDir and write size to summInfo["imageWidth"] and "imageHeight" """
+    if summInfo["image"]=="":
+        logging.warn("empty string for the 'image' tag in desc.conf, removing it entirely")
+        del summInfo["image"]
+        return summInfo
+
     inFname = join(inDir, summInfo["image"])
     logging.debug("Copying %s to %s" % (inFname, datasetDir))
     shutil.copyfile(inFname, join(datasetDir, basename(inFname)))
