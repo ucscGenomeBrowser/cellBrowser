@@ -246,7 +246,7 @@ def main():
                     label = betaInfo[entry][0]
                     count = betaInfo[entry][1]
                     day = betaInfo[entry][2]
-                    line = str(day) + "\t" + entry + "\t" + label + "\t" + count + "\n"
+                    line = str(day) + "\t" + entry + "\t" + label[0] + "\t" + count + "\n"
                     if entry not in oldNames:
                         allDatasets.write(line)
                     # Check if '/' in shortname, if so means it's a dataset in a collection
