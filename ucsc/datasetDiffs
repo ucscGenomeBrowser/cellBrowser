@@ -151,10 +151,14 @@ def main():
         p = Popen(cmd, shell=False, stdout=PIPE, stderr=PIPE)
         cmdout, cmderr = p.communicate()
         rr_files = set(cmdout.decode().rstrip().split('\n'))
-        with tempfile.NamedTemporaryFile(prefix='cb_', delete=False) as tmp:
-            tmp.write(cmdout)
+        #with tempfile.NamedTemporaryFile(prefix='cb_', delete=False) as tmp:
+            #tmp.write(cmdout)
+        tmp = open("/data/tmp/filesForRsync.txt", "wb")
+        tmp.write(cmdout)
+        tmp.close()
+
         # Wanted to use TemporaryDirectory here but couldn't get it to work
-        rr_base = '/data/tmp/cb_tmp'
+        rr_base = '/data/tmp/cb_tmp_new'
         # Make the new directory, continue on if dir already exists
         try:
             mkdir(rr_base)
@@ -184,7 +188,7 @@ def main():
 
         # Close out our tmp file
         tmp.close()
-        unlink(tmp.name)
+        #unlink(tmp.name)
 
         if args.hidden:
             if len(ct_hide) != 0:
