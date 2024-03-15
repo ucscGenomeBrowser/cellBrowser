@@ -1592,7 +1592,10 @@ def resolveGene(gene, geneToSym, skipIds):
         if geneToSym is None:
             symbol = gene
         else:
-            symbol = geneToSym.get(gene.split(".")[0])
+            if gene.startswith("EN"):
+                gene = gene.split(".")[0]
+
+            symbol = geneToSym.get(gene)
             logging.debug("%s -> %s" % (gene, symbol))
 
             if symbol is None:
