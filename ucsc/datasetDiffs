@@ -54,14 +54,19 @@ def compare_machines(mach1_dict, mach1_name, mach2_dict, mach2_name, verbose=Fal
       a dataset exists on one machine but not the other
     - 'Verbose' mode prints the exact diffs, otherwise just prints the dataset name
     """
+
     print(f'\nDatasets with diffs between {mach1_name} + {mach2_name}:')
-    for dataset in mach2_dict:
+
+	# Sort the datasets alphabetically
+    sorted_datasets = sorted(mach2_dict.keys())
+
+    for dataset in sorted_datasets:
         # Check if the overall dicts are the same for a dataset on test/beta
         # If not, we'll go through and print out only those values that are different
         try:
             if not eq(mach1_dict[dataset], mach2_dict[dataset]):
                 # Print dataset name
-                print("\n" + dataset)
+                print(dataset)
 
                 # Script has option to print only names of datasets that have diffs
                 # This whole chunk gets skipped if that's the case
@@ -193,27 +198,38 @@ def main():
         if args.hidden:
             if len(ct_hide) != 0:
                 print("cells-test hidden datasets:")
-                print(sorted(list(ct_hide)),"\n")
+                for dataset in sorted(list(ct_hide)):
+                    print(dataset)
+                print("\n")            
             if len(cb_hide) != 0:
                 print("cells-beta hidden datasets:")
-                print(sorted(list(cb_hide)),"\n")
-            if len(rr_hide) != 0:
+                for dataset in sorted(list(cb_hide)):
+                    print(dataset)
+                print("\n")
+            if  len(rr_hide) != 0:
                 print("cells hidden datasets:")
-                print(sorted(list(rr_hide)),"\n")
+                for dataset in sorted(list(rr_hide)):
+                    print(dataset)
+                print("\n")
 
         # Print out only datasets on cells-test only
         dev_only = sorted(list(x for x in ct_datasets.difference(cb_datasets) if "/" not in x))
         # Only print something if there are actually datasets on cells-test only
         if len(dev_only) != 0:
             print("Datasets on cells-test only:")
-            print(dev_only,"\n")
+            for dataset in dev_only:
+                print(dataset)
+            print("\n")
         # Now datasets on cells-beta only
         beta_only = sorted(list(x for x in cb_datasets.difference(rr_datasets) if "/" not in x))
         if len(beta_only) != 0:
             print("Datasets on cells-beta, but not on RR:")
-            print(beta_only,"\n")
+            for dataset in beta_only:
+                print(dataset)
+            print("\n") 
 
         # Compare cells-test to cells-beta datasets
+        print('Verbose Mode "on": ')        
         print(args.verbose)
         compare_machines(ct_djson, "cells-test", cb_djson, "cells-beta", args.verbose)
         # And then cells-beta to cells
