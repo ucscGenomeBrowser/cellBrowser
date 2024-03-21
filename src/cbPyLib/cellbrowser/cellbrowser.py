@@ -13,7 +13,6 @@
 import logging, sys, optparse, struct, json, os, string, shutil, gzip, re, unicodedata
 import zlib, math, operator, doctest, copy, bisect, array, glob, io, time, subprocess
 import hashlib, timeit, datetime, keyword, itertools, os.path, urllib, platform
-from distutils import spawn
 from collections import namedtuple, OrderedDict
 from os.path import join, basename, dirname, isfile, isdir, relpath, abspath, getsize, getmtime, expanduser
 from time import gmtime, strftime
@@ -4137,9 +4136,9 @@ def md5WithPython(fname):
 def md5ForFile(fname, isSmall=False):
     " return the md5sum of a file. Use a command line tool, if possible. "
     logging.debug("Getting md5 of %s" % fname)
-    if spawn.find_executable("md5sum")!=None and not isSmall:
+    if which("md5sum")!=None and not isSmall:
         md5 = getMd5Using("md5sum", fname).split()[0]
-    elif spawn.find_executable("md5")!=None and not isSmall:
+    elif which("md5")!=None and not isSmall:
         md5 = getMd5Using("md5", fname).split()[-1]
     else:
         md5 = md5WithPython(fname)
