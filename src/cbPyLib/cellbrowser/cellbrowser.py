@@ -4393,12 +4393,41 @@ def copyFacets(inConf, outConf):
         outConf["facets"] = inConf["facets"]
     return outConf
 
+def convertTraces(inConf, sampleNames, datasetDir, outConf):
+    " read ephys traces in format 'cellId<tab>comma-sep list of values', one per line and write to outDir "
+    if not "traceFile" in inConf:
+        return
+
+    fname = inConf["traceFile"]
+    traces = {}
+    for rowTuple in lineFileNextRow(fname):
+        cellId = rowTuple[0]
+        arrStr = rowTuple[1]
+        strArr = arrStr.split(",")
+        floatArr = []
+        for x in strArr:
+            x = float(x)
+            if x > 1.0:
+                x = round(x, 3)
+            floatArr.append(x)
+        if all(i != i for i in floatArr):
+            continue # do not store if all elements are Nan
+        traces[cellId] = floatArr
+
+    traceOutFn = join(datasetDir, "traces.json")
+    with open(traceOutFn, "w") as ofh:
+        json.dump(traces, ofh)
+    logging.info(f'Wrote {traceOutFn}')
+
+    outConf["fileVersions"]["traces"] = getFileVersion(traceOutFn)
+    
 def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     """ convert everything needed for a dataset to datasetDir, write config to outConf.
     If the expression matrix has not changed since the last run, and the sampleNames are the same,
     the matrix won't be converted again, which saves a lot of time.
     """
     checkConfig(inConf, isTopLevel)
+
     inMatrixFname = getAbsPath(inConf, "exprMatrix")
     # outMetaFname/outMatrixFname are reordered & trimmed tsv versions of the matrix/meta data
     if isMtx(inMatrixFname):
@@ -4422,6 +4451,8 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
 
     if not doMeta:
         sampleNames = readSampleNames(outMetaFname)
+
+    convertTraces(inConf, sampleNames, datasetDir, outConf)
 
     needFilterMatrix = True
 

@@ -536,6 +536,16 @@ function CbDbFile(url) {
         cbUtil.loadJson(jsonUrl, jsonDone, true);
     };
 
+    this.loadTraces = function(onTracesDone) {
+        /* load the trace file, add to self.traces and call onDone */
+        function onFileDone(res) {
+            self.traces = res;
+            onTracesDone(self.traces);
+        }
+        var fileUrl = cbUtil.joinPaths([self.url, "traces.json"]);
+        cbUtil.loadJson(fileUrl, onFileDone, true);
+    };
+
     this.getDefaultColorField = function() {
         /* return a pair: [0] is "meta" or "gene" and [1] is the field name or the gene */
         if (self.conf.clusterField)
