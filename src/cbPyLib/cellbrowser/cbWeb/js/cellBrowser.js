@@ -73,6 +73,9 @@ var cellbrowser = function() {
     // width of a single gene cell in the meta gene bar tables
     //var gGeneCellWidth = 66;
 
+    // height of the trace viewer at the bottom of the screen
+    var traceHeight = 100;
+
     // height of bottom gene bar
     var geneBarHeight = 100;
     var geneBarMargin = 5;
@@ -3592,7 +3595,101 @@ var cellbrowser = function() {
            console.log("got spatial, but cannot draw yet");
    }
 
-    function loadAndRenderData() {
+   function plotTrace(cellId) {
+       /* plot a trace of a cell */
+       let lineEl = document.createElement('line'); 
+       //<line x1="0" y1="80" x2="100" y2="20" stroke="black" />
+       lineEl.setAttribute("x1", 5);
+       lineEl.setAttribute("y1", 5);
+       lineEl.setAttribute("x2", 10);
+       lineEl.setAttribute("y2", 5);
+       lineEl.setAttribute("stroke", "black");
+       lineEl.setAttribute("stroke-width", "2");
+
+       let svgEl = getById("tpTraceSvg");
+       svgEl.textContent = "";      // remove all children
+       svgEl.appendChild(lineEl);
+
+       let trace = db.traces[cellId];
+
+       if (trace===undefined) {
+           svgEl.innerHTML = '<text x="50" y="30" class="heavy">No trace available. Most likely removed due to quality filters.</text>';
+           return;
+       }
+
+       let traceMin = 999999;
+       let traceMax = -99999;
+       for (let i=0; i < trace.length; i++) {
+           let val = trace[i];
+           traceMin = Math.min(traceMin, val);
+           traceMax = Math.max(traceMax, val);
+       }
+
+       let traceWidth = parseInt(getById("tpTraceSvg").getAttribute("width"));
+       let scaleFact = (traceMax-traceMin)/100.0;
+       let stepX = traceWidth / trace.length ; // number of pixels per point
+
+       let pixYs = [];
+       for (let i=0; i < trace.length; i++) {
+           let val = trace[i];
+           let pixY = (val-traceMin)*scaleFact;
+           pixYs.push(pixY);
+       }
+
+       let htmls = [];
+       for (let i=0; i < trace.length-1; i++) { 
+           let x1 = Math.round(i*stepX);
+           let x2 = Math.round((i+1)*stepX);
+           let y1 = Math.round(pixYs[i])+10;
+           let y2 = Math.round(pixYs[i+1])+10;
+           console.log(x1, y1, x2, y2);
+           htmls.push("<line x1='"+x1+"' x2='"+x2+"' y1='"+y1+"' y2='"+y2+"' stroke='black' stroke-width='2'/>");
+        }
+
+       svgEl.innerHTML = htmls.join("");
+   }
+
+   function buildTraceWindow() {
+       /* called when the traces have been loaded */
+       renderer.setSize(renderer.getWidth(), renderer.height-traceHeight, true);
+       let divEl = document.createElement('div'); 
+       divEl.style.position = "absolute";
+       divEl.style.left = metaBarWidth+"px";
+       // from plotHeatmap
+       var canvLeft = metaBarWidth+metaBarMargin;
+       var traceWidth = window.innerWidth - canvLeft - legendBarWidth;
+       divEl.style.width = traceWidth+"px";
+       divEl.style.height = traceHeight+"px";
+       divEl.style.left = metaBarWidth+"px";
+       divEl.style.top = (menuBarHeight+toolBarHeight+renderer.height)+"px";
+       divEl.id = "tpTraceBar";
+       document.body.appendChild(divEl);
+       divEl.innerHTML = "<div id='tpTraceTitle'>Calcium Trace</div>"+
+           '<svg id="tpTraceSvg" width="'+traceWidth+'" height="'+traceHeight+'" xmlns="http://www.w3.org/2000/svg">';
+
+       //let svgEl = document.createElement("svg");
+       //svgEl.id = "tpTraceSvg";
+       //svgEl.style.width = "100%";
+       //svgEl.style.height = "100%";
+       //svgEl.setAttributeNS(null, "viewBox", "0 0 "+traceWidth+" "+traceHeight);
+       //svgEl.setAttribute("width", traceWidth);
+       //svgEl.setAttribute("height", traceHeight);
+       //svgEl.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+
+       //let contEl = getById("tpTraceCont");
+       //divEl.appendChild(svgEl);
+
+       let cellId = getVar("cell");
+       if (cellId)
+           plotTrace(cellId);
+   }
+
+   function gotTraces(traces) {
+       /* called when the traces have been loaded */
+       buildTraceWindow();
+   }
+
+   function loadAndRenderData() {
     /* init the basic UI parts, the main renderer in the center, start loading and draw data when ready
      */
        var forcePalName = getVar("pal", null);
@@ -3693,10 +3790,12 @@ var cellbrowser = function() {
 
        db.loadCoords(coordIdx, gotFirstCoords, gotSpatial, onProgress);
 
+       if ("traces" in db.conf.fileVersions)
+           db.loadTraces(gotTraces);
+
        if (getVar("select")!==undefined) {
            selList = JSURL.parse(getVar("select"));
        }
-
 
        if (db.conf.atacSearch) {
            // peak loading needs the gene -> peak assignment, as otherwise can't show any peaks on the left
@@ -7734,6 +7833,9 @@ var cellbrowser = function() {
             let metaIdx = i + customCount;
             let metaInfo = fieldInfos[metaIdx];
 
+            if (i===0 && db.traces)
+                plotTrace(fieldValue);
+
             let rowDiv = $('#tpMeta_'+i);
             if (fieldValue.startsWith("http") && fieldValue.endsWith(".png")) {
                 rowDiv.css('height', "40px");
@@ -7776,12 +7878,6 @@ var cellbrowser = function() {
 
         $("#tpHoverHint").show();
         $("#tpSelectHint").hide();
-
-        // if click into background, remove any legend selection
-        //if (cellIds===null) {
-            //$(".tpLegendLabel").removeClass("tpLegendSelect");
-            //$(".tpLegendCheckbox").prop('checked', false);
-        //}
 
         if (cellIds===null || cellIds.length===0) {
             clearMetaAndGene();
