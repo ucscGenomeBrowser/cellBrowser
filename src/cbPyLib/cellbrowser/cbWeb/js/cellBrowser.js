@@ -2041,7 +2041,7 @@ var cellbrowser = function() {
                     gotMetaArr(metaInfo.origVals, metaInfo, searchDesc)
                 else
                     // other fields may not be loaded yet
-                    db.loadMetaVec(metaInfo, gotMetaArr, null, searchDesc);
+                    db.loadMetaVec(metaInfo, gotMetaArr, null, searchDesc, db.conf.binStrategy);
             }
         }
     }
@@ -3079,7 +3079,7 @@ var cellbrowser = function() {
         if (metaInfo.arr) // eg custom fields
             onMetaArrLoaded(metaInfo.arr, metaInfo);
         else
-            db.loadMetaVec(metaInfo, onMetaArrLoaded, onProgress);
+            db.loadMetaVec(metaInfo, onMetaArrLoaded, onProgress, {}, db.conf.binStrategy);
 
 
        changeUrl({"pal":null});
@@ -3108,8 +3108,9 @@ var cellbrowser = function() {
     function splitExprByMeta(metaArr, metaCounts, exprArr) {
         /* split expression values by meta annotation, return array metaIdx -> array of expression values  */
         var metaValToExprArr = [];
+        var metaCountSize = keys(metaCounts).length;
         // initialize result array
-        for (var i=0; i < keys(metaCounts).length; i++) {
+        for (var i=0; i < metaCountSize; i++) {
             metaValToExprArr.push([]);
         }
 
@@ -3271,7 +3272,7 @@ var cellbrowser = function() {
                     var dataList = splitExprByMetaSelected(exprVec, metaArr, selCells);
                     buildViolinFromValues(labelList, dataList);
                 },
-                null);
+                null, {}, db.conf.binStrategy);
     }
 
     //function removeViolinPlot() {
@@ -4121,7 +4122,7 @@ var cellbrowser = function() {
             if (typeof(binMax)=== 'number')
                 binMax = binMax.toFixed(minDig);
 
-            legLabel = binMin+'&ndash;'+binMax;
+            legLabel = binMin+' &ndash; '+binMax;
         }
         else
             legLabel = binMin.toFixed(minDig);
@@ -5747,7 +5748,7 @@ var cellbrowser = function() {
                 resolve(metaInfo);
             }
 
-            db.loadMetaVec(metaInfo, gotMetaArray, onProgress);
+            db.loadMetaVec(metaInfo, gotMetaArray, onProgress, {}, db.conf.binStrategy);
         });
     }
 
@@ -6040,7 +6041,7 @@ var cellbrowser = function() {
         let parentEl = getById(parentDomId);
 
         let rowLabels = cloneArray(metaLabels);  // we'll sort this in place, so make a copy first
-        rowLabels.sort(function(a, b) { return naturalSort(a, b); });
+        //rowLabels.sort(function(a, b) { return naturalSort(a, b); });
         let rowCount = rowLabels.length;
 
         let genes = [geneSym]; 
@@ -8097,7 +8098,7 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
             }
             db.loadGeneSetExpr(onGenesDone);
             metaInfo = getClusterFieldInfo();
-            db.loadMetaVec(metaInfo, onClusterMetaDone, onProgress);
+            db.loadMetaVec(metaInfo, onClusterMetaDone, onProgress, {}, db.conf.binStrategy);
             changeUrl({"heat":"1"});
         }
     }

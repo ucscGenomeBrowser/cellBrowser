@@ -4992,7 +4992,7 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
         adata.X = adata.layers[layer]
     else:
         if useRaw:
-            if ad.raw is None:
+            if adata.raw is None:
                 logging.warn("The option to export raw expression data is set, but the scanpy object has no 'raw' attribute. Exporting the processed scanpy matrix. Some genes may be missing.")
             else:
                 logging.info("Using raw expression matrix")
@@ -6855,7 +6855,7 @@ def cbScanpyCli():
 
     scanpyToCellbrowser(adata, outDir, datasetName=datasetName, skipMarkers=skipMarkers,
             clusterField=inCluster, skipMatrix=(copyMatrix or skipMatrix), matrixFormat=matrixFormat,
-            useRaw=True, atac=atac)
+            useRaw=True, atac=False)
 
     if copyMatrix:
         outMatrixFname = join(outDir, "exprMatrix.tsv.gz")

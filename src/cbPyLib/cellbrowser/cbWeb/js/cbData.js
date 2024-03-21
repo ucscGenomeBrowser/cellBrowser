@@ -576,7 +576,7 @@ function CbDbFile(url) {
                 onProgress, metaInfo);
     }
 
-    this.loadMetaVec = function(metaInfo, onDone, onProgress, otherInfo) {
+    this.loadMetaVec = function(metaInfo, onDone, onProgress, otherInfo, strategy) {
     /* get an array of numbers, one per cell, that reflect the meta field contents
      * and an object with some info about the field. call onDone(arr, metaInfo) when done.
      * Keep all compressed arrays in metaCache;
@@ -607,7 +607,13 @@ function CbDbFile(url) {
             if (metaInfo.arrType==="float32") {
                 // numeric arrays have to be binned on the client. They are always floats.
                 console.time("discretize "+metaInfo.name);
-                var discRes = discretizeArray(arr, self.exprBinCount, FLOATNAN);
+                var discRes;
+
+                if (strategy==="range")
+                    discRes = discretizeArray_binSize(arr, self.exprBinCount, FLOATNAN);
+                else
+                    discRes = discretizeArray(arr, self.exprBinCount, FLOATNAN);
+
                 console.timeEnd("discretize "+metaInfo.name);
                 metaInfo.origVals = arr; // keep original values, so we can later query for them
                 arr = discRes.dArr;
