@@ -2631,7 +2631,10 @@ def writeCoords(coordName, coords, sampleNames, coordBinFname, coordInfo, textOu
         logging.info("%s: %d cells have meta and coords. %d cells have meta but no coord. E.g. %s" % \
             (coordName, len(xVals), len(missNames), missNames[:3]))
         if len(xVals)-len(missNames)==0:
-            errAbort("No coordinates that are also in meta. Check coord and meta cell identifiers.")
+            sampleCoords = list(coords)[:10]
+            exampleSampleNames = sampleNames[:10]
+            errAbort("No coordinates that are also in meta. Check coord and meta cell identifiers. "
+                    "Example meta coords: %s, Example matrix coords: %s" % (sampleCoords, exampleSampleNames))
 
     binFh.close()
     if debugFh:
@@ -4450,10 +4453,8 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
 
     geneToSym = -1 # -1 = "we have not read any", "None" would mean "there are no gene symbols to map to"
 
-    if not doMeta or sampleNames is None:
+    if not doMeta:
         sampleNames = readSampleNames(outMetaFname)
-
-    convertTraces(inConf, sampleNames, datasetDir, outConf)
 
     needFilterMatrix = True
 
@@ -4477,6 +4478,8 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         writeConfig(inConf, outConf, datasetDir)
     else:
         logging.info("Matrix and meta sample names have not changed, not indexing matrix again")
+
+    convertTraces(inConf, sampleNames, datasetDir, outConf)
 
     coordFiles, clusterLabels = convertCoords(inDir, inConf, outConf, sampleNames, outMetaFname, datasetDir)
 
