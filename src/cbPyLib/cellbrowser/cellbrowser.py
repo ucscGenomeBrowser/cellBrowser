@@ -2326,6 +2326,8 @@ def parseOneColorFile(fname):
 
     for row in textFileRows(fname):
         lineNo +=1
+        if row[0].startswith("#"):
+            continue
         if len(row)!=2:
             errAbort("color file %s - line %d does not contain exactly two fields: %s" % (fname, lineNo, row))
         metaVal, color = row
@@ -4599,6 +4601,9 @@ coords=%(coordStr)s
     if "spatialMeta" in args:
         conf += "spatialMeta=%s\n" % json.dumps(args["spatialMeta"], indent=4)
 
+    if "colors" in args:
+        conf += "colors=%s\n" % json.dumps(args["colors"], indent=4)
+
     if isfile(fname):
         logging.info("Not overwriting %s, file already exists." % fname)
         return
@@ -4976,6 +4981,28 @@ def check_nonnegative_integers(X):
         return True
 # copy end
 
+def exportScanpyOneFieldColor(fieldName, fieldValues, colors, outDir, configData):
+    " write a single color file, for one field "
+    outFname = join(outDir, fieldName+"_colors.tsv")
+    logging.info("Writing colors of field %s to %s" % (fieldName, outFname))
+    ofh = open(outFname, "w")
+    assert(len(fieldValues)==len(colors))
+    ofh.write("#val	color\n")
+    for val, color in zip(fieldValues, colors):
+        ofh.write("%s\t%s\n" % (val, color))
+    ofh.close()
+    if not "colors" in configData:
+        configData["colors"] = {}
+    configData["colors"][fieldName] = outFname
+
+def exportScanpyColors(adata, outDir, configData):
+    " create one tsv with the colors per color definition in adata "
+    for fieldName in adata.obs.keys():
+        colorKey = fieldName+"_colors"
+        if colorKey in adata.uns:
+            outFname = exportScanpyOneFieldColor(fieldName, adata.obs[fieldName].values.categories, adata.uns[colorKey], outDir, configData)
+    return configData
+
 def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=None,
         nb_marker=50, doDebug=False, coordFields=None, skipMatrix=False, useRaw=False,
         skipMarkers=False, markerField='rank_genes_groups', matrixFormat="tsv", atac=None, layer=None):
@@ -5145,6 +5172,8 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
 
     if "spatial" in adata.uns:
         configData, coordDescs = exportScanpySpatial(adata, outDir, configData, coordDescs)
+
+    configData = exportScanpyColors(adata, outDir, configData)
 
     if clusterField is None:
         clusterField = 'louvain'
