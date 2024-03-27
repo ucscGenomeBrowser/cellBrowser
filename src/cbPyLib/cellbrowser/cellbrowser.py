@@ -4908,9 +4908,8 @@ def exportScanpySpatial(adata, outDir, configData, coordDescs):
             meta["py_radius"] = circle_radius
             meta["py_size"] = size
             meta["scalefactors"] = spatial_data["scalefactors"]
-            if numpyLoaded and numpy.isnan(crop_coord):
-                crop_coord = None
-            meta["crop_coord"] = crop_coord
+            if crop_coord is not None:
+                meta["crop_coord"] = crop_coord
 
             if "spatialMeta" not in configData:
                 configData["spatialMeta"] = []
@@ -4938,6 +4937,8 @@ def exportScanpySpatial(adata, outDir, configData, coordDescs):
 
         suffix = "-"+library_id.lower()
         filtCoords = coordDf[coordDf.index.str.endswith(suffix,na=False)]
+        if filtCoords.shape[0]==0:
+            errAbort("There are no coordinates for the slide %s" % fileBase)
         filtCoords.to_csv(fname,sep='\t')
         # the origin of the image is top-left, for the spots it's bottom-left. Fixing this for now by flipping the spots on the y.
         coordConf = {}
