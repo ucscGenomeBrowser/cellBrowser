@@ -4417,7 +4417,7 @@ def convertTraces(inConf, sampleNames, datasetDir, outConf):
     traceOutFn = join(datasetDir, "traces.json")
     with open(traceOutFn, "w") as ofh:
         json.dump(traces, ofh)
-    logging.info(f'Wrote {traceOutFn}')
+    logging.info("Wrote %s" % traceOutFn)
 
     outConf["fileVersions"]["traces"] = getFileVersion(traceOutFn)
     
@@ -4894,7 +4894,8 @@ def exportScanpySpatial(adata, outDir, configData, coordDescs):
             imgFname = library_id+"_"+img_key+".jpg"
             matplotlib.image.imsave(join(outDir, imgFname), img)
 
-            imgConfigs.append({"file":imgFname, "label":library_id+"_"+img_key, "radius":circle_radius, \
+            label = library_id+"_"+img_key
+            imgConfigs.append({"file":imgFname, "label":label, "radius":circle_radius, \
                     "scale_factor":scale_factor})
 
             meta = dict(spatial_data["metadata"])
