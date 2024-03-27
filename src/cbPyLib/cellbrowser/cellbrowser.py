@@ -4176,12 +4176,12 @@ def matrixOrSamplesHaveChanged(datasetDir, inMatrixFname, outMatrixFname, outCon
     logging.info("Determining if %s needs to be created" % outMatrixFname)
     if not isfile(outMatrixFname):
         logging.info("%s does not exist. Must build matrix now." % outMatrixFname)
-        return True
+        return True, None
 
     confName = join(datasetDir, "dataset.json")
     if not isfile(confName):
         logging.debug("%s does not exist. This looks like the first run with this output directory" % confName)
-        return True
+        return True, None
 
     try:
         lastConf = readJson(confName)
@@ -4191,7 +4191,7 @@ def matrixOrSamplesHaveChanged(datasetDir, inMatrixFname, outMatrixFname, outCon
     if not "fileVersions" in lastConf or not "inMatrix" in lastConf["fileVersions"] \
         or not "outMatrix" in lastConf["fileVersions"]:
             logging.warn("Internal error? Missing 'fileVersions' tag in %s" % confName)
-            return True
+            return True, None
 
     oldMatrixInfo = lastConf["fileVersions"]["inMatrix"]
     origSize = oldMatrixInfo ["size"]
@@ -4220,7 +4220,7 @@ def matrixOrSamplesHaveChanged(datasetDir, inMatrixFname, outMatrixFname, outCon
         logging.info("input matrix has input file size that is different from previously "
             "processed matrix. Expression matrix must be reindexed. Old file(s): %s, current file: %d" %
             (oldMatrixInfo, nowSize))
-        return True
+        return True, None
 
     outConf["fileVersions"]["inMatrix"] = oldMatrixInfo
     outConf["fileVersions"]["outMatrix"] = lastConf["fileVersions"]["outMatrix"]
@@ -4228,17 +4228,18 @@ def matrixOrSamplesHaveChanged(datasetDir, inMatrixFname, outMatrixFname, outCon
 
     metaSampleNames = readOldSampleNames(datasetDir, lastConf)
     if metaSampleNames is None:
-        return False # this can only happen if the old dataset directory is broken somehow
+        return False, None # this can only happen if the old dataset directory is broken somehow
 
     matrixSampleNames = readMatrixSampleNames(outMatrixFname)
     assert(len(matrixSampleNames)!=0)
 
     if set(metaSampleNames)!=set(matrixSampleNames):
         logging.info("meta sample samples from previous run are different from sample names in current matrix, have to reindex the matrix. Counts: %d vs. %d" % (len(metaSampleNames), len(matrixSampleNames)))
-        return True
+        return True, None
 
     logging.info("current input matrix looks identical to previously processed matrix, same file size, same sample names")
-    return False
+    return False, metaSampleNames
+
 
 def readJson(fname, keepOrder=False):
     " read .json and return as a dict "
@@ -4444,12 +4445,12 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     outMetaFname = join(datasetDir, "meta.tsv")
 
     # try not to recreate files that have been created before, as it is all quite slow (=Python)
-    doMatrix = matrixOrSamplesHaveChanged(datasetDir, inMatrixFname, outMatrixFname, outConf)
+    doMatrix, sampleNames = matrixOrSamplesHaveChanged(datasetDir, inMatrixFname, outMatrixFname, outConf)
     doMeta = metaHasChanged(datasetDir, outMetaFname)
 
     geneToSym = -1 # -1 = "we have not read any", "None" would mean "there are no gene symbols to map to"
 
-    if not doMeta:
+    if not doMeta or sampleNames is None:
         sampleNames = readSampleNames(outMetaFname)
 
     convertTraces(inConf, sampleNames, datasetDir, outConf)
