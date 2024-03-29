@@ -4943,7 +4943,8 @@ def exportScanpySpatial(adata, outDir, configData, coordDescs):
         suffix = "-"+library_id.lower()
         filtCoords = coordDf[coordDf.index.str.endswith(suffix,na=False)]
         if filtCoords.shape[0]==0:
-            errAbort("There are no coordinates for the slide %s" % fileBase)
+            logging.info("There are no barcodes with the right suffix for the slide %s, using all barcodes" % fileBase)
+            filtCoords = coordDf
         filtCoords.to_csv(fname,sep='\t')
         # the origin of the image is top-left, for the spots it's bottom-left. Fixing this for now by flipping the spots on the y.
         coordConf = {}
