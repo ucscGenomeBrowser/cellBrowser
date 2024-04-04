@@ -4521,12 +4521,33 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
 
     makeFilesTxt(outConf, datasetDir)
 
+def filterFields(anndata):
+    " remove all fields with more than 5 columns from anndata.obsm "
+    filtCoordFields = []
+    droppedKeys = []
+    for fieldName in coordFields:
+        colCount = anndata.obsm[fieldName].shape[1]
+        if colCount < 5:
+            filtCoordFields.append(fieldName)
+        else:
+            droppedKeys.append(fieldName)
+    logging.info("These obsm entries were dropped, too many columns: %s" % droppedKeys)
+    coordFields = filtCoordFields
+    return coordFields
+
 def writeAnndataCoords(anndata, coordFields, outDir, desc):
     " write all embedding coordinates from anndata object to outDir, the new filename is <coordName>_coords.tsv "
     import pandas as pd
 
     if coordFields=="all" or coordFields is None:
         coordFields = getObsmKeys(anndata)
+
+    if "spatial" in coordFields:
+        # spatial datasets have a ton of obsm attributes that are usually not coordinates
+        coordFields = filterFields(anndata)
+
+    # move over a field to obs:
+    # ad.obs = pd.concat([ad.obs, ad.obsm["ctype_props"]], axis=1)
 
     coordFields.sort(reverse=True) # umap first, then t-sne, then PCA... sorting works to make a good order!
 
