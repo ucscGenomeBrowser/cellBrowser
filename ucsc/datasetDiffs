@@ -176,9 +176,9 @@ def main():
         #rsync_cmdout, rsync_cmderr = p.communicate()
         subprocess.run(rsync_cmd, check=True)
         
-        if p.returncode != 0:
-            logging.error("error when running: "+repr(" ".join(rsync_cmd)))
-            assert(False)
+        #if p.returncode != 0:
+            #logging.error("error when running: "+repr(" ".join(rsync_cmd)))
+            #assert(False)
         # go through rr_files
         for fname in rr_files:
             # turn full path name into a simple dataset name
