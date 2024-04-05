@@ -172,8 +172,10 @@ def main():
         rsync_cmd = ['rsync', '--files-from=' + tmp.name, \
         'qateam@hgw0.soe.ucsc.edu:/usr/local/apache/htdocs-cells/', rr_base]
         print("running ", rsync_cmd)
-        rsync_p = Popen(rsync_cmd, shell=True, stdout=PIPE, stderr=PIPE)
-        rsync_cmdout, rsync_cmderr = p.communicate()
+        #rsync_p = Popen(rsync_cmd, shell=True, stdout=PIPE, stderr=PIPE)
+        #rsync_cmdout, rsync_cmderr = p.communicate()
+        subprocess.run(rsync_cmd, check=True)
+        
         if p.returncode != 0:
             logging.error("error when running: "+repr(" ".join(rsync_cmd)))
             assert(False)
