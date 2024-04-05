@@ -34,7 +34,7 @@ def cbGenes_parseArgs():
     ls - list all available (built or downloaded)  gene models on this machine
 
     Examples (common):
-    %prog fetch                   # show the files that are available
+    %prog fetch                   # show the files that are available for the 'build' command
     %prog fetch gencode-34        # geneId -> symbol mapping for human gencode relase 34
     %prog fetch hg38.gencode-34   # gene -> chrom mapping for human gencode relase 34
     %prog ls
