@@ -2102,7 +2102,7 @@ def exprEncode(geneDesc, exprArr, matType):
     logging.debug("raw - compression factor of %s: %f, before %d, after %d"% (geneDesc, fact, len(geneStr), len(geneCompr)))
     return geneCompr, minVal
 
-def indexByChrom(exprIndex):
+def indexAtacOffsetsByChrom(exprIndex):
     """ given a dict with name -> (offset, len) and name being a string of chrom:start-end,
     reformat the dict to one with chrom -> [ [start, end, offset, len], ... ] and return it.
     The positions are sorted.
@@ -2116,7 +2116,7 @@ def indexByChrom(exprIndex):
         elif "_" in chromRange:
             chrom, start, end = chromRange.split("_")
         else:
-            chrom, start, end = chromRange.split("-") # chrom names must be in format chrom:start-end or chrom_start_end or chrom-start-end. Not sure? Email cells@ucsc.edu
+            chrom, start, end = chromRange.split("-") # chrom names must be in format chrom:start-end or chrom_start_end or chrom-start-end. Broken? Email us at cells@ucsc.edu
 
         start = int(start)
         end = int(end)
@@ -2234,7 +2234,7 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     if genesAreRanges:
         logging.info("ATAC-mode is one. Assuming that genes are in format chrom:start-end or chrom_start_end or chrom-start-end")
-        exprIndex = indexByChrom(exprIndex)
+        exprIndex = indexAtacOffsetsByChrom(exprIndex)
     else:
         if atacChromCount > 100:
             errAbort("There are more than 100 genes that look like a chrom_start_end range but the atacSearch cellbrowser.conf"
@@ -3424,9 +3424,47 @@ def removeBom(line):
     " strip BOM from line "
     return line.replace('\ufeff', '')
 
+#def indexRangesByChrom(stringList):
+#    " given a list of strings in format chr:start-end, return dict chrom -> sorted list of (start, end) "
+#    byChrom = defaultdict(list)
+#    for rangeStr in stringList:
+#        chrom, pos = rangeStr.split(":")
+#        start, end = pos.split("-")
+#        start = int(start)
+#        end = int(end)
+#        byChrom[chrom].append( (start,end) )
+#
+#    # sort in-place
+#    for chrom, chromList in byChrom.items():
+#        chromList.sort()
+#
+#    return byChrom
+
+def findOverlappingRanges(atacByChrom, posStr):
+    """ atacByChrom is an ATAC dict with chr -> list of (start, end, offset, len), as returned by indexAtacOffsetsByChrom()
+    and posStr is a string chrom:start-end
+    Returns a string like chr1|start1|end1+chr1|start2|end2 
+    start1|end1, start2|end2, etc all are within start-end. Returns an empty string if nothing found. """
+
+    chrom, pos = posStr.split(":")
+    start, end = pos.split("-")
+    start = int(start)
+    end = int(end)
+
+    # this would be a lot faster with binary search but also a lot more complicated...
+    if chrom not in atacByChrom:
+        errAbort("The quickGenes file contains %s, but this chromosome has no features in the matrix." % repr(posStr))
+
+    chromRanges = atacByChrom[chrom]
+    foundRanges = []
+    for rangeStart, rangeEnd, offset, dataLen in chromRanges:
+        if start <= rangeStart  and rangeEnd <= end:
+            foundRanges.append( "|".join( [chrom, str(rangeStart), str(rangeEnd)] ) )
+    return "+".join(foundRanges)
+
 def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
     """ parse quick genes file with three columns: symbol or geneId, desc (optional), pmid (optional).
-    Return as a dict geneId|symbol -> [description, pmid] """
+    Return as a dict geneId|symbol -> description """
     if fname is None:
         return {}
     logging.debug("Parsing %s" % fname)
@@ -3436,6 +3474,8 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
         for gene, sym in iterItems(geneToSym):
             symToGene[sym] = gene
 
+
+    atacByChrom = None # only filled lazily if we find any ATAC quick ranges
     sep = sepForFile(fname)
     geneInfo = []
     for line in openFile(fname):
@@ -3458,10 +3498,10 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
                 errAbort("geneId %s in quickgenes file is not in expression matrix" % repr(geneId))
             geneStr = geneOrSym
 
-        # case 2: matrix has only symbols and user provides symbol. legacy format.
+        # case 2: matrix has only symbols and user provides symbol. This is our legacy format for old datasets.
         # store only the symbol. We could look up the geneId but that's data inference, 
         # which we try not to do. The lookup could be wrong.
-        elif geneOrSym in matrixSyms and len(matrixGeneIds)==0:
+        elif matrixSyms is not None and geneOrSym in matrixSyms and len(matrixGeneIds)==0:
             geneStr = geneOrSym
 
         # case 3: matrix has geneIds and user provides a geneId. add the symbol from our mapping
@@ -3492,10 +3532,15 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
 
         # case 5: it is an ATAC dataset and the quickgenes file has ranges
         elif ":" in geneOrSym and "-" in geneOrSym:
-            geneStr = geneOrSym.replace(":", "|").replace("-", "|")
+            #geneStr = geneOrSym.replace(":", "|").replace("-", "|")
+            geneStr = findOverlappingRanges(matrixGeneIds, geneOrSym)
+            if geneStr=="":
+                logging.error("quickGene ATAC range %s does not contain any peak in the matrix, skipping it" % geneOrSym)
+                continue
 
         else:
-            errAbort("Gene '%s' in quickgenes file is not in expr matrix and there is no geneId<->symbol mapping to resolve it to a geneId in the expression matrix and it is not an ATAC range" % repr(geneOrSym))
+            errAbort("Gene '%s' in quickgenes file is not in expr matrix and there is no geneId<->symbol mapping "
+                "to resolve it to a geneId in the expression matrix and it is not an ATAC range" % repr(geneOrSym))
 
         # if we had no geneToSym, we'll check the symbol later if it's valid
 
@@ -3894,11 +3939,17 @@ def areProbablyGeneIds(ids):
         logging.debug("GeneIds in matrix are symbols, not identifiers")
         return False
 
-def readValidGenes(outDir):
+def readValidGenes(outDir, inConf):
     """ the output directory contains an exprMatrix.json file that contains all valid gene symbols.
-    We're reading those here """
+    We're reading them here, so we do not have to read the entire .tsv.gz file. """
+
     matrixJsonFname = join(outDir, "exprMatrix.json")
-    validGenes = list(readJson(matrixJsonFname))
+    validGenes = readJson(matrixJsonFname)
+
+    if "atacSearch" in inConf:
+        return None, validGenes, None # in ATAC mode, no need to do anything else
+
+    validGenes = list(validGenes)
 
     syms = []
     geneIds = []
@@ -3929,19 +3980,20 @@ def readValidGenes(outDir):
 def readQuickGenes(inConf, geneToSym, outDir, outConf):
     " read quick genes file and make sure that the genes in it are in the matrix "
     quickGeneFname = inConf.get("quickGenesFile")
-    if quickGeneFname:
+    if not quickGeneFname:
+        return
 
-        matrixSyms, matrixGeneIds, geneToSymFromMatrix = readValidGenes(outDir)
+    matrixSyms, matrixGeneIds, geneToSymFromMatrix = readValidGenes(outDir, inConf)
 
-        # prefer the symbols from the matrix over our own symbol tables
-        if geneToSymFromMatrix is not None:
-            geneToSym = geneToSymFromMatrix
+    # prefer the symbols from the matrix over our own symbol tables
+    if geneToSymFromMatrix is not None:
+        geneToSym = geneToSymFromMatrix
 
-        fname = getAbsPath(inConf, "quickGenesFile")
-        quickGenes = parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds)
+    fname = getAbsPath(inConf, "quickGenesFile")
+    quickGenes = parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds)
 
-        outConf["quickGenes"] = quickGenes
-        logging.info("Read %d quick genes from %s" % (len(quickGenes), fname))
+    outConf["quickGenes"] = quickGenes
+    logging.info("Read %d quick genes from %s" % (len(quickGenes), fname))
 
 def getFileVersion(fname):
     data = {}

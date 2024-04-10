@@ -963,10 +963,15 @@ function CbDbFile(url) {
             let arrs = [];
             for (let r of loadedRanges) {
                 arrs.push(r.arr);
-                if (r.desc!=="")
-                    geneDescs.push(r.desc);
+                //if (r.desc!=="")
+                    //geneDescs.push(r.name);
             }
-            let geneDesc = geneDescs.join("; ");
+            //let geneDesc = geneDescs.join("; ");
+
+            let chrom = loadedRanges[0].name.split("|")[0];
+            let minStart = loadedRanges[0].name.split("|")[1];
+            let maxEnd = loadedRanges[loadedRanges.length-1].name.split("|")[2];
+            let geneDesc = chrom+":"+minStart+"-"+maxEnd;
 
             // specVal is the value for a special bin, usually 0
             var specVal = 0;

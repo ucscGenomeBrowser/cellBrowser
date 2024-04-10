@@ -225,15 +225,17 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.setWatermark = function (text) {
         if (text==="") {
-            //var elem = gebi("tpWatermark");
             self.watermark.parentNode.removeChild(self.watermark);
             self.watermark = undefined;
         } else {
+            if (self.watermark)
+                self.watermark.parentNode.removeChild(self.watermark);
+
             var elem = document.createElement('div');
             elem.id = "tpWatermark";
-            elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.2; z-index: 1000; top: 50px; left: 50px; text-align: left; vertical-align: top; color: black; font-size: large;';
+            elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.5; z-index: 1000; top: 10px; left: 45px; text-align: left; vertical-align: top; color: black; font-size: 20px; font-weight:bold; font-style:oblique';
             elem.textContent = text;
-            gebi("tpMaxPlot").appendChild(elem);
+            self.div.appendChild(elem);
             self.watermark = elem;
         }
     }
@@ -2879,7 +2881,6 @@ function MaxPlot(div, top, left, width, height, args) {
             self.parentPlot = undefined;
         }
         self.setSize(self.width*2, self.height, false);
-
 
         otherRend.div.remove();
         self.canvas.style["border"] = "none";
