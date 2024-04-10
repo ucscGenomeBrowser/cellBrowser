@@ -837,7 +837,7 @@ function MaxPlot(div, top, left, width, height, args) {
            var valIdx = coordColors[i];
            var col = colors[valIdx];
            if (fatIdx!==null && valIdx!==fatIdx)
-               col = "F0F0F0";
+               col = "FaFaFa";
                //continue;
            ctx.fillStyle="#"+col;
            //ctx.fillRect(pxX-size, pxY-size, dblSize, dblSize);
@@ -1783,14 +1783,14 @@ function MaxPlot(div, top, left, width, height, args) {
 
         console.timeEnd("draw");
 
-        if (self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined) {
-            self.redrawLabels();
-        }
-
         if (self.coords.pxLines) {
             console.time("draw lines");
             drawLines(self.ctx, self.coords.pxLines, self.canvas.width, self.canvas.height, self.coords.lineAttrs);
             console.timeEnd("draw lines");
+        }
+
+        if (self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined) {
+            self.redrawLabels();
         }
 
         if (self.childPlot)

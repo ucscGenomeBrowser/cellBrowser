@@ -1798,7 +1798,7 @@ var cellbrowser = function() {
         var valCounts = metaInfo.valCounts;
         var shortLabels = metaInfo.ui.shortLabels;
         //$('#tpSelectMetaCombo_'+rowIdx).val("tpMetaVal_"+fieldIdx).trigger('chosen:updated'); // update the meta dropdown
-        chosenSetValue('#tpSelectMetaCombo_'+rowIdx, "tpMetaVal_"+fieldIdx);
+        chosenSetValue('tpSelectMetaCombo_'+rowIdx, "tpMetaVal_"+fieldIdx);
 
         if (valCounts===undefined) {
             // this is a numeric field
@@ -3617,31 +3617,46 @@ var cellbrowser = function() {
            return;
        }
 
+       let traceWidth = parseInt(getById("tpTraceSvg").getAttribute("width"));
+       let traceHeight = 100.0;
+
        let traceMin = 999999;
        let traceMax = -99999;
+       console.log(trace);
+
+       // TODO: inverting the trace is that the right thing here?
+       var newTrace = [];
+       for (let i=0; i < trace.length; i++) {
+           newTrace.push(-trace[i]);
+       }
+       trace = newTrace;
+
        for (let i=0; i < trace.length; i++) {
            let val = trace[i];
            traceMin = Math.min(traceMin, val);
            traceMax = Math.max(traceMax, val);
        }
+       console.log("Min", traceMin, "Max", traceMax);
 
-       let traceWidth = parseInt(getById("tpTraceSvg").getAttribute("width"));
-       let scaleFact = (traceMax-traceMin)/100.0;
+       let dataSpan = (traceMax-traceMin);
+       let scaleFact = traceHeight / (dataSpan);
        let stepX = traceWidth / trace.length ; // number of pixels per point
+       console.log("dataSpan", dataSpan, "scaleFact", scaleFact, "stepX", stepX);
 
        let pixYs = [];
        for (let i=0; i < trace.length; i++) {
            let val = trace[i];
            let pixY = (val-traceMin)*scaleFact;
            pixYs.push(pixY);
+           console.log(val, pixY);
        }
 
        let htmls = [];
        for (let i=0; i < trace.length-1; i++) { 
            let x1 = Math.round(i*stepX);
            let x2 = Math.round((i+1)*stepX);
-           let y1 = Math.round(pixYs[i])+10;
-           let y2 = Math.round(pixYs[i+1])+10;
+           let y1 = Math.round(pixYs[i]);
+           let y2 = Math.round(pixYs[i+1]);
            console.log(x1, y1, x2, y2);
            htmls.push("<line x1='"+x1+"' x2='"+x2+"' y1='"+y1+"' y2='"+y2+"' stroke='black' stroke-width='2'/>");
         }
@@ -3666,18 +3681,6 @@ var cellbrowser = function() {
        document.body.appendChild(divEl);
        divEl.innerHTML = "<div id='tpTraceTitle'>Calcium Trace</div>"+
            '<svg id="tpTraceSvg" width="'+traceWidth+'" height="'+traceHeight+'" xmlns="http://www.w3.org/2000/svg">';
-
-       //let svgEl = document.createElement("svg");
-       //svgEl.id = "tpTraceSvg";
-       //svgEl.style.width = "100%";
-       //svgEl.style.height = "100%";
-       //svgEl.setAttributeNS(null, "viewBox", "0 0 "+traceWidth+" "+traceHeight);
-       //svgEl.setAttribute("width", traceWidth);
-       //svgEl.setAttribute("height", traceHeight);
-       //svgEl.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-
-       //let contEl = getById("tpTraceCont");
-       //divEl.appendChild(svgEl);
 
        let cellId = getVar("cell");
        if (cellId)
@@ -5493,10 +5496,7 @@ var cellbrowser = function() {
             peakNames.push(p.locusName);
             p.el.checked = false;
         }
-        if (peakNames.length===0)
-            return;
-        let locusStr = "-"+peakNames.join("-");
-        colorByLocus(locusStr);
+        colorByLocus("");
     }
 
     function onPeakUpstream(ev) {
@@ -6242,14 +6242,18 @@ var cellbrowser = function() {
         progressLabel.text( label );
     }
 
-    function buildGeneExprPlots(geneSym, metaName, plotType) {
+    function buildGeneExprPlots(geneId, metaName, plotType) {
         /* build the plots for the gene expression viewer */
         // get gene symbol from function call or dropdown
 
-        if (geneSym===null)
-            geneSym = getById("tpGeneExprGeneCombo").value;
-        else {
-            geneSym = geneSym.split("|")[0]; // internal genes sometimes can be in format ENSG-ID|geneSymbol
+        var geneSym;
+
+        if (geneId===null) {
+            geneId = getById("tpGeneExprGeneCombo").value;
+            geneSym = db.getGeneInfo(geneId).sym;
+        } else {
+            geneId = geneId.split("|")[0]; // internal genes sometimes can be in format ENSG-ID|geneSymbol
+            geneSym = db.getGeneInfo(geneId).sym;
             selectizeSetValue("tpGeneExprGeneCombo", geneSym);
         }
 
@@ -6268,7 +6272,7 @@ var cellbrowser = function() {
         //let limitCheckbox = getById("tpGeneExprYLimitCheck");
         //let limitInput = getById("tpGeneExprYLimit");
 
-        let urlOpts = {"exprGene":geneSym, "exprMeta":metaName};
+        let urlOpts = {"exprGene":geneId, "exprMeta":metaName};
         //if (forceExprMax && forceExprMax!="") {
             //limitCheckbox.checked = true;
             //limitInput.value = forceExprMax;
@@ -6299,7 +6303,7 @@ var cellbrowser = function() {
         buildProgressBar('progressBarExpr');
         buildProgressBar('progressBarMeta');
 
-        Promise.all([promiseGene(geneSym, geneExprOnProgress), promiseMeta(metaName, geneExprOnProgress)]).then( function(resArr) {
+        Promise.all([promiseGene(geneId, geneExprOnProgress), promiseMeta(metaName, geneExprOnProgress)]).then( function(resArr) {
             //console.log("promises are all loaded", resArr);
             $( '#progressBarMeta').progressbar( "value", 100); // make sure that the progress bars show "complete"
             $( '#progressBarExpr').progressbar( "value", 100);
@@ -6327,7 +6331,6 @@ var cellbrowser = function() {
                 let dotData = calcDotData(metaToExpr, false);
                 buildExprDotplot("tpExprViewPlot", geneSym, dotData, shortLabels, exprMin, exprMax);
             }
-
         });
     }
 
@@ -7833,8 +7836,11 @@ var cellbrowser = function() {
             let metaIdx = i + customCount;
             let metaInfo = fieldInfos[metaIdx];
 
-            if (i===0 && db.traces)
-                plotTrace(fieldValue);
+            if (i===0) {
+                changeUrl({"cell":fieldValue});
+                if (db.traces)
+                    plotTrace(fieldValue);
+            }
 
             let rowDiv = $('#tpMeta_'+i);
             if (fieldValue.startsWith("http") && fieldValue.endsWith(".png")) {

@@ -172,7 +172,7 @@ def checkGenesAgainstRelease(inGenes, geneType, bestRelease, stripVersion):
         allIds = set([x.split(".")[0] for x in allIds])
 
     if geneType=="syms":
-        allIds = allIds.values()
+        allIds = allIds
     notFoundIds = inGenes - set(allIds)
     print("%d of the genes in the input are not part of %s" % (len(notFoundIds), bestRelease))
     print("Examples: %s" % " ".join(list(notFoundIds)[:50]))
