@@ -3031,15 +3031,7 @@ var cellbrowser = function() {
        if (fieldName===null || fieldName===undefined) {
            // obscure hacky option: you can set the default color field to "None"
            // so there is no coloring at all on startup
-           renderer.setColors(["black"]);
-           var cellCount = db.conf.sampleCount;
-           renderer.setColorArr(new Uint8Array(cellCount));
-           gLegend.rows = [];
-           gLegend.title = "Nothing selected";
-           gLegend.rows.push( {
-                   color:"000000", defColor:null, label:"No Value",
-                   count:cellCount, intKey:0, strKey:null
-           } );
+           colorByNothing();
            doneLoad();
            return;
        }
@@ -3361,6 +3353,21 @@ var cellbrowser = function() {
         sel.setValue(name, 1); // 1 = do not fire change
     }
 
+    function colorByNothing() {
+        /* color by nothing, rarely needed */
+        renderer.setColors([cNullColor]);
+        var cellCount = db.conf.sampleCount;
+        renderer.setColorArr(new Uint8Array(cellCount));
+        gLegend.rows = [];
+        gLegend.title = "Nothing selected";
+        gLegend.subTitle = "";
+        gLegend.rows.push( {
+                color:cNullColor, defColor:null, label:"No Value",
+                count:cellCount, intKey:0, strKey:null
+        } );
+        buildLegendBar();
+    }
+
     function colorByLocus(locusStr, onDone, locusLabel) {
         /* color by a gene or peak, load the array into the renderer and call onDone or just redraw 
          * peak can be in format: +chr1:1-1000
@@ -3375,22 +3382,20 @@ var cellbrowser = function() {
                 return;
             console.log("Received expression vector, for "+locusStr+", desc: "+geneDesc);
             // update the URL and possibly the gene combo box
-            var fullLocusStr = locusStr;
+            //var fullLocusStr = locusStr;
             if (locusStr.indexOf("|") > -1) {
-                fullLocusStr = peakListSerialize(); // the locus str can be +chr1:1-1000 to add a single gene, but we want all
-                if (locusStr.length > 600)
+                //fullLocusStr = peakListSerialize(); // the locus str can be +chr1:1-1000 to add a single gene, but we want all
+                if (locusStr.length < 600)
                     // this is rare, so just completely skip this URL change now
-                    locusStr = "";
-                changeUrl({"locus":locusStr, "meta":null});
-            } else {
+                    changeUrl({"locus":locusStr, "meta":null});
+            } else
                 changeUrl({"gene":locusStr, "meta":null});
-            }
 
-            makeLegendExpr(fullLocusStr, geneDesc, binInfo, exprArr, decArr);
+            makeLegendExpr(locusStr, geneDesc, binInfo, exprArr, decArr);
             renderer.setColors(legendGetColors(gLegend.rows));
             renderer.setColorArr(decArr);
             if (renderer.isSplit()) {
-                renderer.setWatermark(fullLocusStr);
+                renderer.setWatermark(locusStr);
             }
             buildLegendBar();
             onDone();
@@ -3406,9 +3411,13 @@ var cellbrowser = function() {
 
             // make sure that recent genes table has symbol and Id
             var locusWithSym = locusStr;
-            var geneInfo = db.getGeneInfo(locusStr);
-            if (!db.isAtacMode() && (geneInfo.sym!==geneInfo.geneId))
-                locusWithSym = geneInfo.id+"|"+geneInfo.sym;
+            if (db.isAtacMode()) {
+                locusWithSym = shortenRange(locusStr);
+            } else {
+                let geneInfo = db.getGeneInfo(locusStr);
+                if ((geneInfo.sym!==geneInfo.geneId))
+                    locusWithSym = geneInfo.id+"|"+geneInfo.sym;
+            }
 
             gRecentGenes.unshift([locusWithSym, geneDesc]); // insert at position 0
             gRecentGenes = gRecentGenes.slice(0, 9); // keep only nine last
@@ -4298,8 +4307,13 @@ var cellbrowser = function() {
         gLegend.type = "expr";
         gLegend.rows = legendRows;
         var subTitle = null;
-        if (db.conf.atacSearch)
-            gLegend.title = ("sum of "+geneSym.split("+").length) + " peaks";
+        if (db.conf.atacSearch) {
+            let peakCount = geneSym.split("+").length;
+            if (peakCount===1)
+                gLegend.title = "One peak selected";
+            else
+                gLegend.title = ("sum of "+geneSym.split("+").length) + " peaks";
+        }
         else {
             //  make a best effort to find the gene sym and gene ID
             var geneInfo = db.getGeneInfo(geneSym);
@@ -4530,6 +4544,12 @@ var cellbrowser = function() {
 
     }
 
+    function shortenRange(s) {
+        /* reformat atac range chr1|start|end to chr1:10Mbp */
+        var parts = s.split("|");
+        return parts[0]+":"+prettyNumber(parts[1]);
+    }
+
     function buildGeneTable(htmls, divId, title, subtitle, geneInfos, noteStr, helpText) {
     /* create gene expression info table. if htmls is null, update DIV with divId in-place. 
      * geneInfos is array of [gene, mouseover]. gene can be geneId+"|"+symbol. 
@@ -4578,18 +4598,20 @@ var cellbrowser = function() {
             var geneInfo = geneInfos[i];
             var geneIdOrSym   = geneInfo[0];
             var geneDesc = geneInfo[1];
-            if (geneDesc===undefined)
-                geneDesc = geneId;
 
             // geneIdOrSym can be just the symbol (if we all we have is symbols) or geneId|symbol
             var geneId
             var sym;
             if (geneIdOrSym.indexOf("|")!==-1) {
                 if (db.isAtacMode()) {
-                    // it's in range format chr|123123|125443
-                    var parts = geneIdOrSym.split("|");
-                    geneId = geneIdOrSym;
-                    sym = parts[0]+":"+prettyNumber(parts[1]);
+                    if (geneDesc!==undefined) {
+                        sym = geneDesc.split()[0];
+                        geneId = geneIdOrSym;
+                    } else {
+                        // quickGene is a range in format chr|123123|125443
+                        sym = shortenRange(geneIdOrSym);
+                        geneId = geneIdOrSym;
+                    }
                 } else {
                     var parts = geneIdOrSym.split("|");
                     geneId = parts[0];
@@ -4599,6 +4621,9 @@ var cellbrowser = function() {
                 geneId = geneIdOrSym;
                 sym = geneId;
             }
+
+            if (geneDesc===undefined)
+                geneDesc = geneId;
 
             htmls.push('<span title="'+geneDesc+'" style="width: fit-content;" data-geneId="'+geneId+'" id="tpGeneBarCell_'+onlyAlphaNum(geneId)+'" class="tpGeneBarCell">'+sym+'</span>');
             i++;
@@ -5307,6 +5332,7 @@ var cellbrowser = function() {
             boxLabel = "enter gene or chrom:start-end";
         htmls.push('<select style="width:'+width+'px" id="'+id+'" placeholder="'+boxLabel+'" class="tpCombo">');
         htmls.push('</select>');
+        htmls.push('<div><button style="margin-top:4px" id="tpSplitOnGene">Split on this gene</button></div>');
         htmls.push('<div><button style="margin-top:4px" id="tpResetColors">Reset to default cell type colors</button></div>');
         htmls.push('</div>');
     }
@@ -5424,17 +5450,21 @@ var cellbrowser = function() {
 
     function onPeakChange(ev) {
         /* user checks or unchecks a peak */
-        let el = ev.currentTarget.firstChild; // user may have clicked the label
-        var isChecked = el.checked;
-        var peakInfos = el.id.split(":");
-        let chrom = peakInfos[1];
-        let start = peakInfos[2];
-        let end = peakInfos[3];
-        let prefix = "+";
-        if (!isChecked)
-            prefix = "-";
-        let rangeStr = prefix+chrom+"|"+start+"|"+end;
-        colorByLocus(rangeStr);
+        //let el = ev.currentTarget.firstChild; // user may have clicked the label
+        //var isChecked = el.checked;
+        //var peakInfos = el.id.split(":");
+        //let chrom = peakInfos[1];
+        //let start = peakInfos[2];
+        //let end = peakInfos[3];
+        //let prefix = "+";
+        //if (!isChecked)
+            //prefix = "-";
+        //let rangeStr = prefix+chrom+"|"+start+"|"+end;
+        let rangeStr = peakListSerialize();
+        if (rangeStr==="")
+            colorByNothing();
+        else
+            colorByLocus(rangeStr);
     }
 
     function peakListShowRanges(chrom, foundRanges, searchStart) {
@@ -5493,10 +5523,9 @@ var cellbrowser = function() {
             peakNames.push(p.locusName);
             p.el.checked = false;
         }
-        if (peakNames.length===0)
-            return;
-        let locusStr = "-"+peakNames.join("-");
-        colorByLocus(locusStr);
+        colorByNothing();
+        changeUrl({"locus":null, "meta":null});
+        renderer.drawDots();
     }
 
     function onPeakUpstream(ev) {
@@ -5527,7 +5556,7 @@ var cellbrowser = function() {
         }
 
         if (addPeaks.length===0) {
-            alert("Either there is no active gene search or TSS or no peaks are at "+maxDist+" bp relative to the TSS");
+            alert("Either there is no active gene TSS or there are no peaks at "+maxDist+" bp relative to the TSS");
             return;
         }
 
@@ -6714,9 +6743,19 @@ var cellbrowser = function() {
         resizeGeneTableDivs("tpRecentGenes");
         resizeGeneTableDivs("tpGenes");
 
-        $("#tpResetColors").click ( function() { colorByDefaultField(undefined, true) } );
+        $("#tpResetColors").click ( function() { 
+            colorByDefaultField(undefined, true) 
+            activateTab();
+        });
+
+        $("#tpSplitOnGene").click ( function() { 
+            activateSplit();
+            colorByDefaultField(undefined, true) 
+            renderer.childPlot.activatePlot();
+        });
+
         $("#tpLeftTabs").tabs();
-        $('#tpLeftTabs').tabs("option", "active", 0); // open the first tab
+        activateTab();
 
         $('.tpGeneBarCell').click( onGeneClick );
         $('#tpChangeGenes').click( onChangeGenesClick );
@@ -8015,32 +8054,39 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
             return;
         if (!renderer.isMain) {
             // make sure the left renderer is the active one
-            renderer.childPlot.activatePlot();
+            renderer = renderer.childPlot;
+            renderer.activatePlot();
         }
         renderer.unsplit();
         $("#tpSplitMenuEntry").text("Split Screen");
+        renderer.drawDots();
+    }
+
+    function activateSplit() {
+        // nothing is split yet -> start the split
+        renderer.onActiveChange = onActRendChange;
+
+        var currCoordIdx = $("#tpLayoutCombo").val();
+        renderer.legend = gLegend;
+        renderer.coordIdx = currCoordIdx; // keep for onActRendChange
+        renderer.isMain = true;
+
+        renderer.split();
+
+        if (gLegend.type==="expr")
+            renderer.childPlot.setWatermark(gLegend.geneSym);
+
+        renderer.childPlot.legend = gLegend;
+        renderer.childPlot.coordIdx = currCoordIdx; // keep for onActRendChange
+
+        $("#tpSplitMenuEntry").text("Unsplit Screen");
+        $("#mpCloseButton").click( function() {removeSplit(renderer);} );
     }
 
     function onSplitClick() {
         /* user clicked on View > Split Screen */
         if (!renderer.childPlot && !renderer.parentPlot) {
-            // nothing is split yet -> start the split
-            renderer.onActiveChange = onActRendChange;
-
-            var currCoordIdx = $("#tpLayoutCombo").val();
-            renderer.legend = gLegend;
-            renderer.coordIdx = currCoordIdx; // keep for onActRendChange
-            renderer.isMain = true;
-
-            renderer.split();
-
-            renderer.childPlot.legend = gLegend;
-            renderer.childPlot.coordIdx = currCoordIdx; // keep for onActRendChange
-
-            $("#tpSplitMenuEntry").text("Unsplit Screen");
-            $("#mpCloseButton").click( function() {removeSplit(renderer);} );
-            //$("#mpCloseButton").click(onSplitClick);
-
+            activateSplit();
         } else {
             removeSplit(renderer);
         }
