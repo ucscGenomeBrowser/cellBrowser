@@ -908,7 +908,7 @@ def readGeneToSym(fname):
     # Jim's files and CellRanger files have no headers, they are just key-value
     line1 = openFile(fname).readline().rstrip("\r\n")
     fieldCount = len(line1.split('\t'))
-    if "geneId" not in line1:
+    if "geneId" not in line1 and "symbol" not in line1:
         logging.debug("geneID,symbol file does not start with 'geneId', parsing as key,value")
         d = parseDict(fname)
     # my new files are smaller and have headers
@@ -1273,7 +1273,6 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
         newVals = [valToInt[x] for x in valList] #
 
     fieldMeta["diffValCount"] = len(valCounts)
-    #logging.debug("Full meta info: %s" % repr(fieldMeta))
 
     return fieldMeta, newVals
 
@@ -1401,7 +1400,6 @@ def metaToBin(inDir, inConf, outConf, fname, outDir):
 
         if colIdx==0:
             forceType = "unique"
-
 
         fieldMeta = OrderedDict()
         fieldMeta["name"] = cleanFieldName
@@ -1566,14 +1564,10 @@ class MatrixMtxReader:
         for i in range(0, len(self.genes)):
 
             geneId = genes[i]
-            #geneSym = geneId
-            #if "|" in geneId:
-                #geneId, geneSym = geneId.split("|")[:2]
-            #else:
-                #if self.geneToSym and geneSym is not None:
-                    #geneSym = self.geneToSym.get(geneId)
-
             geneId, geneSym, skipIds  = resolveGene(geneId, geneToSym, skipIds)
+            logging.debug("geneId %s, geneSym %s", geneId, geneSym)
+            logging.debug(geneToSym)
+            asd
 
             if i%1000==0:
                 logging.info("%d genes written..." % i)
@@ -2500,9 +2494,9 @@ def readMatrixSampleNames(fname):
     else:
         return readHeaders(fname)[1:]
 
-def metaReorder(matrixFname, metaFname, fixedMetaFname):
+def metaReorderFilter(matrixFname, metaFname, fixedMetaFname, keepFields):
     """ check and reorder the meta data, has to be in the same order as the
-    expression matrix, write to fixedMetaFname. Remove single-value fields from the meta data. """
+    expression matrix, write to fixedMetaFname. Remove single value fields from the meta data, except if they are in keepFields. """
 
     logging.info("Checking and reordering meta data to %s" % fixedMetaFname)
     metaSampleNames = readSampleNames(metaFname)
@@ -2559,9 +2553,14 @@ def metaReorder(matrixFname, metaFname, fixedMetaFname):
     for fieldIdx, values in iterItems(fieldValues):
         #logging.debug("fieldIdx %d, values %s" % (fieldIdx, values))
         if len(values)==1:
+            fieldName = headers[fieldIdx]
             logging.info("Field %d, '%s', has only a single value. Removing this field from meta data." %
-                    (fieldIdx, headers[fieldIdx] ))
-            skipFields.add(fieldIdx)
+                    (fieldIdx, fieldName))
+            if fieldName in keepFields:
+                logging.warn("Actually, keeping field '%s' since its the default label or color field, "
+                    "but check with submitter if this makes sense." % fieldName)
+            else:
+                skipFields.add(fieldIdx)
 
     # write the header line, removing unused fields
     ofh.write("\t".join(sliceRow(headers, skipFields)))
@@ -4035,7 +4034,12 @@ def convertMeta(inDir, inConf, outConf, outDir, finalMetaFname):
     metaIdxFname = join(outDir, "meta.index")
 
     matrixFname = getAbsPath(inConf, "exprMatrix")
-    sampleNames, needFilterMatrix = metaReorder(matrixFname, metaFname, finalMetaFname)
+
+    keepFields = []
+    for fieldName in ["labelField", "clusterField" ]:
+        keepFields.append( inConf[fieldName] )
+
+    sampleNames, needFilterMatrix = metaReorderFilter(matrixFname, metaFname, finalMetaFname, keepFields)
 
     outConf["sampleCount"] = len(sampleNames)
     outConf["matrixWasFiltered"] = needFilterMatrix
@@ -4573,7 +4577,7 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
 
     makeFilesTxt(outConf, datasetDir)
 
-def filterFields(anndata):
+def filterFields(anndata, coordFields):
     " remove all fields with more than 5 columns from anndata.obsm "
     filtCoordFields = []
     droppedKeys = []
@@ -4596,7 +4600,7 @@ def writeAnndataCoords(anndata, coordFields, outDir, desc):
 
     if "spatial" in coordFields:
         # spatial datasets have a ton of obsm attributes that are usually not coordinates
-        coordFields = filterFields(anndata)
+        coordFields = filterFields(anndata, coordFields)
 
     # move over a field to obs:
     # ad.obs = pd.concat([ad.obs, ad.obsm["ctype_props"]], axis=1)
