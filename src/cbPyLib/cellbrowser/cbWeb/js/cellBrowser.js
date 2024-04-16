@@ -3080,6 +3080,7 @@ var cellbrowser = function() {
        changeUrl({"pal":null});
        // clear the gene search box
        var select = $('#tpGeneCombo')[0].selectize.clear();
+       //buildWatermark();
     }
 
     function activateTab(name) {
@@ -3368,6 +3369,33 @@ var cellbrowser = function() {
         buildLegendBar();
     }
 
+    function buildWatermark(myRend) {
+        /* update the watermark behind ghe image */
+        if (myRend===undefined)
+            myRend = renderer;
+
+        if (!myRend.isSplit()) {
+            myRend.setWatermark("");
+            return;
+        }
+
+        let labelStr;
+        if (gLegend.type==="expr")
+            labelStr = gLegend.geneSym;
+        else
+            labelStr = gLegend.metaInfo.label;
+
+        let waterLabel;
+        if (db.isAtacMode())
+            //waterLabel = shortenRange(locusStr);
+            waterLabel= labelStr.split("|").length + " peak(s)";
+        else
+            waterLabel = labelStr;
+        //else
+            //waterLabel = geneDesc
+        myRend.setWatermark(waterLabel);
+    }
+
     function colorByLocus(locusStr, onDone, locusLabel) {
         /* color by a gene or peak, load the array into the renderer and call onDone or just redraw 
          * peak can be in format: +chr1:1-1000
@@ -3394,9 +3422,8 @@ var cellbrowser = function() {
             makeLegendExpr(locusStr, geneDesc, binInfo, exprArr, decArr);
             renderer.setColors(legendGetColors(gLegend.rows));
             renderer.setColorArr(decArr);
-            if (renderer.isSplit()) {
-                renderer.setWatermark(locusStr);
-            }
+
+            buildWatermark();
             buildLegendBar();
             onDone();
 
@@ -4310,7 +4337,7 @@ var cellbrowser = function() {
         gLegend.type = "expr";
         gLegend.rows = legendRows;
         var subTitle = null;
-        if (db.conf.atacSearch) {
+        if (db.isAtacMode()) {
             let peakCount = geneSym.split("+").length;
             if (peakCount===1)
                 gLegend.title = "One peak selected";
@@ -4600,35 +4627,37 @@ var cellbrowser = function() {
         while (i < geneInfos.length) {
             var geneInfo = geneInfos[i];
             var geneIdOrSym   = geneInfo[0];
-            var geneDesc = geneInfo[1];
+            var mouseOver = geneInfo[1];
 
             // geneIdOrSym can be just the symbol (if we all we have is symbols) or geneId|symbol
-            var geneId
-            var sym;
+            var internalId;
+            var label;
             if (geneIdOrSym.indexOf("|")!==-1) {
                 if (db.isAtacMode()) {
-                    if (geneDesc!==undefined) {
-                        sym = geneDesc.split()[0];
-                        geneId = geneIdOrSym;
-                    } else {
+                    label = shortenRange(geneIdOrSym);
+                    internalId = geneIdOrSym;
+                    //if (mouseOver!==undefined) {
+                        //label = mouseOver.split()[0];
+                        //internalId = geneIdOrSym;
+                    //} else {
                         // quickGene is a range in format chr|123123|125443
-                        sym = shortenRange(geneIdOrSym);
-                        geneId = geneIdOrSym;
-                    }
+                        //label = shortenRange(geneIdOrSym);
+                        //internalId = geneIdOrSym;
+                    //}
                 } else {
                     var parts = geneIdOrSym.split("|");
-                    geneId = parts[0];
-                    sym = parts[1];
+                    internalId = parts[0];
+                    label = parts[1];
                 }
             } else {
-                geneId = geneIdOrSym;
-                sym = geneId;
+                internalId = geneIdOrSym;
+                label = internalId;
             }
 
-            if (geneDesc===undefined)
-                geneDesc = geneId;
+            if (mouseOver===undefined)
+                mouseOver = internalId;
 
-            htmls.push('<span title="'+geneDesc+'" style="width: fit-content;" data-geneId="'+geneId+'" id="tpGeneBarCell_'+onlyAlphaNum(geneId)+'" class="tpGeneBarCell">'+sym+'</span>');
+            htmls.push('<span title="'+mouseOver+'" style="width: fit-content;" data-geneId="'+internalId+'" id="tpGeneBarCell_'+onlyAlphaNum(internalId)+'" class="hasTooltip tpGeneBarCell">'+label+'</span>');
             i++;
         }
         htmls.push("</div>"); // divId
@@ -5196,7 +5225,9 @@ var cellbrowser = function() {
          * be reset, as their values (gene or meta data) may not exist
          * there. If it's opened via a URL, the variables must stay. */
 
+        gRecentGenes = [];
         // collections are not real datasets, so ask user which one they want
+
         if (db!==null && db.heatmap)
             removeHeatmap();
         removeSplit();
@@ -5322,6 +5353,16 @@ var cellbrowser = function() {
         return geneLabel;
     }
 
+    function splitButtonLabel(state) {
+        let dataType = "gene";
+        if (db.isAtacMode())
+            dataType = "peak";
+        if (state)
+            return "Split on this "+dataType;
+        else
+            return "Remove split screen";
+    }
+
     function buildGeneCombo(htmls, id, left, width) {
         /* Combobox that allows searching for genes */
         htmls.push('<div class="tpLeftSideItem" style="padding-left: 3px">');
@@ -5335,7 +5376,8 @@ var cellbrowser = function() {
             boxLabel = "enter gene or chrom:start-end";
         htmls.push('<select style="width:'+width+'px" id="'+id+'" placeholder="'+boxLabel+'" class="tpCombo">');
         htmls.push('</select>');
-        htmls.push('<div><button style="margin-top:4px" id="tpSplitOnGene">Split on this gene</button></div>');
+
+        htmls.push('<div><button style="margin-top:4px" id="tpSplitOnGene">'+splitButtonLabel(true)+'</button></div>');
         htmls.push('<div><button style="margin-top:4px" id="tpResetColors">Reset to default cell type colors</button></div>');
         htmls.push('</div>');
     }
@@ -6745,10 +6787,10 @@ var cellbrowser = function() {
 
         $(document.body).append(htmls.join(""));
 
-        activateTooltip('.hasTooltip');
-
         resizeGeneTableDivs("tpRecentGenes");
         resizeGeneTableDivs("tpGenes");
+
+        activateTooltip('.hasTooltip');
 
         $("#tpResetColors").click ( function() { 
             colorByDefaultField(undefined, true) 
@@ -6756,9 +6798,16 @@ var cellbrowser = function() {
         });
 
         $("#tpSplitOnGene").click ( function() { 
-            activateSplit();
-            colorByDefaultField(undefined, true) 
-            renderer.childPlot.activatePlot();
+            if (renderer.isSplit())
+            {
+                removeSplit(renderer);
+                $("#tpSplitOnGene").text(splitButtonLabel(true));
+            } else {
+                $("#tpSplitOnGene").text(splitButtonLabel(false));
+                activateSplit();
+                colorByDefaultField(undefined, true) 
+                renderer.childPlot.activatePlot();
+            }
         });
 
         $("#tpLeftTabs").tabs();
@@ -8074,6 +8123,7 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
 
     function activateSplit() {
         // nothing is split yet -> start the split
+        buildWatermark(renderer);
         renderer.onActiveChange = onActRendChange;
 
         var currCoordIdx = $("#tpLayoutCombo").val();
@@ -8081,16 +8131,18 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
         renderer.coordIdx = currCoordIdx; // keep for onActRendChange
         renderer.isMain = true;
 
-        renderer.split();
+        let rend2 = renderer.split();
+        buildWatermark(rend2);
 
-        if (gLegend.type==="expr")
-            renderer.childPlot.setWatermark(gLegend.geneSym);
+        //if (gLegend.type==="expr")
+            //renderer.childPlot.setWatermark(gLegend.geneSym);
 
         renderer.childPlot.legend = gLegend;
         renderer.childPlot.coordIdx = currCoordIdx; // keep for onActRendChange
 
         $("#tpSplitMenuEntry").text("Unsplit Screen");
         $("#mpCloseButton").click( function() {removeSplit(renderer);} );
+
     }
 
     function onSplitClick() {

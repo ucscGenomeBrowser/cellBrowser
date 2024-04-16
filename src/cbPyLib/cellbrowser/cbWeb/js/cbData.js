@@ -963,15 +963,21 @@ function CbDbFile(url) {
             let arrs = [];
             for (let r of loadedRanges) {
                 arrs.push(r.arr);
-                //if (r.desc!=="")
-                    //geneDescs.push(r.name);
+                if (r.desc!=="")
+                    geneDescs.push(r.name);
             }
-            //let geneDesc = geneDescs.join("; ");
 
-            let chrom = loadedRanges[0].name.split("|")[0];
-            let minStart = loadedRanges[0].name.split("|")[1];
-            let maxEnd = loadedRanges[loadedRanges.length-1].name.split("|")[2];
-            let geneDesc = chrom+":"+minStart+"-"+maxEnd;
+            // set gene description to an ;-separated list for multi-gene mode and
+            // to chrom:minStart-maxStart for ATAC mode
+            let geneDesc;
+            if (self.isAtacMode()) {
+                let chrom = loadedRanges[0].name.split("|")[0];
+                let minStart = loadedRanges[0].name.split("|")[1];
+                let maxEnd = loadedRanges[loadedRanges.length-1].name.split("|")[2];
+                geneDesc = chrom+":"+minStart+"-"+maxEnd;
+            }
+            else
+                geneDesc = geneDescs.join("; ");
 
             // specVal is the value for a special bin, usually 0
             var specVal = 0;
