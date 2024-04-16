@@ -1566,8 +1566,6 @@ class MatrixMtxReader:
             geneId = genes[i]
             geneId, geneSym, skipIds  = resolveGene(geneId, geneToSym, skipIds)
             logging.debug("geneId %s, geneSym %s", geneId, geneSym)
-            logging.debug(geneToSym)
-            asd
 
             if i%1000==0:
                 logging.info("%d genes written..." % i)
@@ -4036,8 +4034,9 @@ def convertMeta(inDir, inConf, outConf, outDir, finalMetaFname):
     matrixFname = getAbsPath(inConf, "exprMatrix")
 
     keepFields = []
-    for fieldName in ["labelField", "clusterField" ]:
-        keepFields.append( inConf[fieldName] )
+    for fieldName in ["labelField", "defColorField"]:
+        if fieldName in inConf:
+            keepFields.append( inConf[fieldName] )
 
     sampleNames, needFilterMatrix = metaReorderFilter(matrixFname, metaFname, finalMetaFname, keepFields)
 
