@@ -22,6 +22,11 @@ function cloneObj(d) {
     return JSON.parse(JSON.stringify(d));
 }
 
+function isValid(x) {
+    /* x is not null nor undefined */
+    return (x!==null && x!==undefined)
+}
+
 function cloneArray(a) {
 /* returns a copy of an array */
     return a.slice();
@@ -66,6 +71,8 @@ function MaxPlot(div, top, left, width, height, args) {
     const gButtonBackgroundClicked = "rgb(180, 180, 180, 0.6)"; // grey of buttons when clicked
     const gCloseButtonFromRight = 60; // distance of "close" button from right edge
 
+    const nonFatColor = "F9F9F9"; // color used in fattening mode for all non-fat cells
+
     // the rest of the initialization is done at the end of this file,
     // because the init involves many functions that are not defined yet here
 
@@ -95,7 +102,9 @@ function MaxPlot(div, top, left, width, height, args) {
             addModeButtons(10, 10, self);
             addStatusLine(height-gStatusHeight, left, width, gStatusHeight);
             addTitleDiv(height-gTitleSize-gStatusHeight-4, 8);
-            addSliders(height-gStatusHeight-15, width);
+
+            if (self.parentPlot===null)
+                addSliders(height-gStatusHeight-15, width);
 
             /* add the div used for the mouse selection/zoom rectangle to the DOM */
             var selectDiv = document.createElement('div');
@@ -794,7 +803,7 @@ function MaxPlot(div, top, left, width, height, args) {
         return pixelCoords;
     }
 
-    function drawRect(ctx, pxCoords, coordColors, colors, radius, alpha, selCells) {
+    function drawRect(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
         /* draw not circles but tiny rectangles. Maybe good enough for 2pixels sizes */
        debug("Drawing "+coordColors.length+" rectangles, with fillRect");
        ctx.save();
@@ -806,21 +815,31 @@ function MaxPlot(div, top, left, width, height, args) {
            var pxY = pxCoords[2*i+1];
            if (isHidden(pxX, pxY))
                continue;
-           var col = colors[coordColors[i]];
+
+           var valIdx = coordColors[i];
+           var col = colors[valIdx];
+           if (fatIdx!==null)
+               if (valIdx===fatIdx)
+                   col = "000000";
+               else
+                   col = "DDDDDD";
+
            ctx.fillStyle="#"+col;
            ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
            count++;
        }
 
        // draw the selection as black rectangles
-       ctx.globalAlpha = 0.7;
-       ctx.fillStyle="black";
-        selCells.forEach(function(cellId) {
-           let pxX = pxCoords[2*cellId];
-           let pxY = pxCoords[2*cellId+1];
-           ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
-           count += 1;
-        })
+       if (fatIdx===null) {
+           ctx.globalAlpha = 0.7;
+           ctx.fillStyle="black";
+            selCells.forEach(function(cellId) {
+               let pxX = pxCoords[2*cellId];
+               let pxY = pxCoords[2*cellId+1];
+               ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
+               count += 1;
+            })
+       }
        debug(count+" rectangles drawn (including selection)");
        ctx.restore();
        return count;
@@ -840,10 +859,9 @@ function MaxPlot(div, top, left, width, height, args) {
            var valIdx = coordColors[i];
            var col = colors[valIdx];
            if (fatIdx!==null && valIdx!==fatIdx)
-               col = "FaFaFa";
-               //continue;
+               col = nonFatColor;
+
            ctx.fillStyle="#"+col;
-           //ctx.fillRect(pxX-size, pxY-size, dblSize, dblSize);
            ctx.beginPath();
            ctx.arc(pxX, pxY, radius, 0, 2 * Math.PI);
            ctx.closePath();
@@ -1288,7 +1306,7 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
 
-    function drawPixels(ctx, width, height, pxCoords, colorArr, colors, alpha, selCells) {
+    function drawPixels(ctx, width, height, pxCoords, colorArr, colors, alpha, selCells, fatIdx) {
         /* draw single pixels into a pixel buffer and copy the buffer into a canvas */
 
        // by default the canvas has black pixels
@@ -1310,37 +1328,56 @@ function MaxPlot(div, top, left, width, height, args) {
                continue;
            var p = 4 * (pxY*width+pxX); // pointer to red value of pixel at x,y
 
-           var oldR = cData[p];
-           var oldG = cData[p+1];
-           var oldB = cData[p+2];
+           var valIdx = coordColors[i];
 
-           var newRgb = rgbColors[colorArr[i]];
-           var newR = (newRgb >>> 16) & 0xff;
-           var newG = (newRgb >>> 8)  & 0xff;
-           var newB = (newRgb)        & 0xff;
+           if (fatIdx!==null) {
+               // fattening mode: fat cluster is black, all the rest is grey
+               let grey;
+               if (valIdx===fatIdx)
+                   grey = 0xDD;
+               else
+                   grey = 0;
 
-           var mixR = ~~(oldR * invAlpha + newR * alpha);
-           var mixG = ~~(oldG * invAlpha + newG * alpha);
-           var mixB = ~~(oldB * invAlpha + newB * alpha);
+               cData[p] = grey;
+               cData[p+1] = grey;
+               cData[p+2] = grey;
+               cData[p+3] = 255; // no transparency... ever?
+           } else {
+               // normal colors
+               var oldR = cData[p];
+               var oldG = cData[p+1];
+               var oldB = cData[p+2];
 
-           cData[p] = mixR;
-           cData[p+1] = mixG;
-           cData[p+2] = mixB;
-           cData[p+3] = 255; // no transparency... ever?
-           count++;
+               var newRgb = rgbColors[colorArr[i]];
+               var newR = (newRgb >>> 16) & 0xff;
+               var newG = (newRgb >>> 8)  & 0xff;
+               var newB = (newRgb)        & 0xff;
+
+               var mixR = ~~(oldR * invAlpha + newR * alpha);
+               var mixG = ~~(oldG * invAlpha + newG * alpha);
+               var mixB = ~~(oldB * invAlpha + newB * alpha);
+
+               cData[p] = mixR;
+               cData[p+1] = mixG;
+               cData[p+2] = mixB;
+               cData[p+3] = 255; // no transparency... ever?
+            }
+               count++;
        }
 
        // overdraw the selection as black pixels
-        selCells.forEach(function(cellId) {
-           let pxX = pxCoords[2*cellId];
-           let pxY = pxCoords[2*cellId+1];
-           if (isHidden(pxX, pxY))
-                return;
-           let p = 4 * (pxY*width+pxX); // pointer to red value of pixel at x,y
-           cData[p] = 0;
-           cData[p+1] = 0;
-           cData[p+2] = 0;
-        })
+        if (fatIdx===null) {
+            selCells.forEach(function(cellId) {
+               let pxX = pxCoords[2*cellId];
+               let pxY = pxCoords[2*cellId+1];
+               if (isHidden(pxX, pxY))
+                    return;
+               let p = 4 * (pxY*width+pxX); // pointer to red value of pixel at x,y
+               cData[p] = 0;
+               cData[p+1] = 0;
+               cData[p+2] = 0;
+            })
+        }
 
        self.ctx.putImageData(canvasData, 0, 0);
        return count;
@@ -1557,7 +1594,8 @@ function MaxPlot(div, top, left, width, height, args) {
        statusDiv.style.width = width+"px";
 
        self.titleDiv.style.top = (height-gStatusHeight-gTitleSize)+"px";
-       self.sliderDiv.style.top = (height-gStatusHeight-gTitleSize)+"px";
+       if (self.sliderDiv)
+           self.sliderDiv.style.top = (height-gStatusHeight-gTitleSize)+"px";
 
     }
 
@@ -1761,13 +1799,17 @@ function MaxPlot(div, top, left, width, height, args) {
 
         drawBackground(self.ctx, self.background)
 
+        // if the labels are not shown, fattening should not be active
+        if (self.fatIdx && !self.doDrawLabels)
+            self.fatIdx = null;
+
         if (radius===0) {
             count = drawPixels(self.ctx, self.canvas.width, self.canvas.height, coords,
-                colArr, pal, alpha, self.selCells);
+                colArr, pal, alpha, self.selCells, self.fatIdx);
         }
 
         else if (radius===1 || radius===2) {
-            count = drawRect(self.ctx, coords, colArr, pal, radius, alpha, self.selCells);
+            count = drawRect(self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
         }
         else {
             switch (self.mode) {
@@ -2402,7 +2444,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.isSplit = function() {
         /* return true if this renderer has either a parent or a child plot = is in split screen mode */
-        return (self.parentPlot!==null || self.childPlot!==null)
+        return (isValid(self.parentPlot) || isValid(self.childPlot))
     }
 
     // https://stackoverflow.com/questions/73187456/canvas-determine-if-point-is-on-line

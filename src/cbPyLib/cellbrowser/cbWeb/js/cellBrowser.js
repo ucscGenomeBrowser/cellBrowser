@@ -4340,9 +4340,9 @@ var cellbrowser = function() {
         if (db.isAtacMode()) {
             let peakCount = geneSym.split("+").length;
             if (peakCount===1)
-                gLegend.title = "One peak selected";
+                gLegend.title = "One ATAC peak";
             else
-                gLegend.title = ("sum of "+geneSym.split("+").length) + " peaks";
+                gLegend.title = ("Sum of "+geneSym.split("+").length) + " ATAC peaks";
         }
         else {
             //  make a best effort to find the gene sym and gene ID
@@ -6801,7 +6801,6 @@ var cellbrowser = function() {
             if (renderer.isSplit())
             {
                 removeSplit(renderer);
-                $("#tpSplitOnGene").text(splitButtonLabel(true));
             } else {
                 $("#tpSplitOnGene").text(splitButtonLabel(false));
                 activateSplit();
@@ -7391,6 +7390,48 @@ var cellbrowser = function() {
         }
     }
 
+    function legendSetCheckboxes(status) {
+        /* set the legend checkboxes, status can be "none", "invert" or "all". Update the selection and redraw. */
+        let els = document.getElementsByClassName("tpLegendCheckbox");
+
+        //for (let el of els) {
+        for (let i=0; i<els.length; i++) {
+            let el = els[i];
+            var valIdx = parseInt(el.getAttribute("data-value-index"));
+            if (status==="none") {
+                if (el.checked)
+                    renderer.unselectByColor(valIdx);
+                el.checked = false;
+            }
+            else if (status==="all") {
+                if (!el.checked)
+                    renderer.selectByColor(valIdx);
+                el.checked = true;
+            }
+            else if (status==="invert") {
+                if (!el.checked) {
+                    el.checked = true;
+                    renderer.selectByColor(valIdx);
+                }
+                else {
+                    el.checked = false;
+                    renderer.unselectByColor(valIdx);
+                }
+            }
+            else if (status==="notNull") {
+                if (i===0) {
+                    el.checked = false;
+                    renderer.unselectByColor(valIdx);
+                }
+                else {
+                    el.checked = true;
+                    renderer.selectByColor(valIdx);
+                }
+            }
+        }
+        renderer.drawDots();
+    }
+
     function onLegendClearClick(ev) {
         /* unselect all checkboxes in the legend and clear the selection */
         if (gLegend.selectionDirection == "all") {
@@ -7459,8 +7500,6 @@ var cellbrowser = function() {
             ev.target.checked = false;
         }
         renderer.drawDots();
-        //ev.stopPropagation();
-        //$(this).blur();
     }
 
     function buildMinMaxPart(htmls) {
@@ -7530,8 +7569,11 @@ var cellbrowser = function() {
         if (subTitle)
             htmls.push('<div id="tpLegendSubTitle" >'+subTitle+"</div>");
 
-        htmls.push('<div class="tpHint">Click buttons/checkboxes below to select '+gSampleDesc+'s</small></div>');
-        //htmls.push("<small><button>All</button><button>None</button><button>Invert</button></small>");
+        htmls.push('<div class="tpHint">Click buttons to select '+gSampleDesc+'s</small></div>');
+        htmls.push("<small><button id='tpLegendAll'>All</button>");
+        htmls.push("<button id='tpLegendNone'>None</button>");
+        htmls.push("<button id='tpLegendInvert'>Invert</button></small>");
+        htmls.push("<button id='tpLegendNotNull'>&gt; 0</button></small>");
         htmls.push("</div>"); // title
         htmls.push('<div id="tpLegendHeader"><span id="tpLegendCol1"></span><span id="tpLegendCol2"></span></div>');
         htmls.push('<div id="tpLegendRows">');
@@ -7542,14 +7584,6 @@ var cellbrowser = function() {
             let count = rows[i].count;
             sum += count;
         }
-
-        // get the minimum frequency, so we know the precision needed. Otherwise we would show 0.00% for the small cell types
-        //var minFreq = 100;
-        //for (i = 0; i < rows.length; i++) {
-            //let count = rows[i].count;
-            //var freq  = 100*count/sum;
-            //minFreq = Math.min(freq, minFreq);
-        //}
 
         for (i = 0; i < rows.length; i++) {
             var row = rows[i];
@@ -7612,7 +7646,7 @@ var cellbrowser = function() {
         }
         htmls.push('</div>'); // tpLegendRows
 
-        htmls.push('<button id="tpExpColorButton" style="line-height:9x">Export</button>'); 
+        htmls.push('<button id="tpExpColorButton" style="margin-top: 3px; line-height:9x">Export Frequencies</button>'); 
 
         // add the div where the violin plot will later be shown
         htmls.push("<div id='tpViolin'>");
@@ -7621,6 +7655,7 @@ var cellbrowser = function() {
 
         var htmlStr = htmls.join("");
         $('#tpLegendContent').append(htmlStr);
+
         setLegendHeaders(gLegend.rowType);
 
         // tpLegendContent has to go only up to the bottom of the screen.
@@ -7642,6 +7677,11 @@ var cellbrowser = function() {
         $("#tpLegendClear").click( onLegendClearClick );
         $("#tpExprLimitApply").click( onLegendApplyLimitsClick );
         $("#tpExpColorButton").click( onLegendExportClick );
+
+        $("#tpLegendNone").click( function() { legendSetCheckboxes("none"); } );
+        $("#tpLegendAll").click( function() { legendSetCheckboxes("all"); } );
+        $("#tpLegendInvert").click( function() { legendSetCheckboxes("invert"); } );
+        $("#tpLegendNotNull").click( function() { legendSetCheckboxes("notNull"); } );
 
         $('.tpLegendLabel').click( onLegendLabelClick ); // clicking the legend should have the same effect as clicking the checkbox
         //$('.tpLegendLabel').attr( "title", "Click to select samples with this value. Shift click to select multiple values.");
@@ -8119,6 +8159,7 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
         renderer.unsplit();
         $("#tpSplitMenuEntry").text("Split Screen");
         renderer.drawDots();
+        $("#tpSplitOnGene").text(splitButtonLabel(true));
     }
 
     function activateSplit() {
@@ -8141,7 +8182,8 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
         renderer.childPlot.coordIdx = currCoordIdx; // keep for onActRendChange
 
         $("#tpSplitMenuEntry").text("Unsplit Screen");
-        $("#mpCloseButton").click( function() {removeSplit(renderer);} );
+        $("#mpCloseButton").click( function() { removeSplit(renderer);} );
+        $("#tpSplitOnGene").text(splitButtonLabel(false));
 
     }
 
