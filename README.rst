@@ -46,6 +46,7 @@ Many labs host their data at cells.ucsc.edu by sending it to us, but some groups
 * Lako Lab at Newcastle University, UK: http://retinalstemcellresearch.co.uk/CorneaCellAtlas/ from `Collins et al. 2021. The Ocular Surface. <https://www.sciencedirect.com/science/article/pii/S1542012421000215>`_
 * RNA Bioscience Initiative: https://www.pneuroonccellatlas.org/ and https://github.com/rnabioco/lung-scrna
 * Paul Gontarz, WUSTL, http://regmedsrv1.wustl.edu/Public_SPACE/pgontarz/Public_html/cellbrower/Exp1/
+* Dylan Farnsworth, U Oregon, https://pages.uoregon.edu/drf/browser/lens_230620/
 
 
 These papers have cell browsers made at UCSC:
