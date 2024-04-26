@@ -1464,7 +1464,7 @@ def metaToBin(inDir, inConf, outConf, fname, outDir):
     global errorFields
     if len(errorFields)>0:
         logging.error("Stopping now, since these fields were found with errors: %s. Run cbBuild with --force "
-            "to ignore these errors and build anyways." % ",".join(errorFields))
+            "to ignore these errors and build anyways OR check that number fields are not recognized as enum fields. " % ",".join(errorFields))
         if doForce:
             errorFields = []
         else:
