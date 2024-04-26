@@ -244,7 +244,7 @@ ExportToCellbrowser <- function(
         #}
     #}
   if (is.null(x = cluster.field)) {
-        message("No cluster field specified: Using the value of Idents() as a new field 'Cluster'")
+        message("No cluster field specified: Using the value of Idents()")
         # create a new meta data field named "Cluster"
         #newDf <- cbind(object@meta.data, Idents(object))
         # default name is "Idents(object)", not good, let's rename that to "Cluster"
