@@ -1118,7 +1118,7 @@ def typeForStrings(strings):
         return "float"
     return "int"
 
-emptyVals = ["", "null", "none", "None", "unknown", "nd", "n.d.", "Unknown", "NaN", "NA", "undefined", "Na"]
+emptyVals = ["", "null", "none", "None", "unknown", "nd", "n.d.", "Unknown", "NaN", "NA", "undefined", "Na", "na"]
 
 def likeEmptyString(val):
     " returns true if string is a well-known synonym of 'unknown' or 'NaN'. ported from cellbrowser.js "
