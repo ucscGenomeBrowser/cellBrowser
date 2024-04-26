@@ -264,10 +264,11 @@ ExportToCellbrowser <- function(
 
   if (is.null(x = meta.fields)) {
     meta.fields <- colnames(x = meta)
-    if (length(x = levels(x = Idents(object))) > 1) {
-      meta.fields <- c(meta.fields, ".ident")
-    }
+    #if (length(x = levels(x = Idents(object))) > 1) {
+      #meta.fields <- c(meta.fields, ".ident")
+    #}
   }
+
   if (!is.null(x = port) && is.null(x = cb.dir)) {
     stop("cb.dir parameter is needed when port is set")
   }
