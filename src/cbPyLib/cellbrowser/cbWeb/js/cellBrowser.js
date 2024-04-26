@@ -7646,7 +7646,7 @@ var cellbrowser = function() {
         }
         htmls.push('</div>'); // tpLegendRows
 
-        htmls.push('<button id="tpExpColorButton" style="margin-top: 3px; line-height:9x">Export Frequencies</button>'); 
+        htmls.push('<button id="tpExpColorButton" style="margin-top: 3px; line-height:9x">Export Legend</button>'); 
 
         // add the div where the violin plot will later be shown
         htmls.push("<div id='tpViolin'>");
