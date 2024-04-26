@@ -232,37 +232,35 @@ ExportToCellbrowser <- function(
   reducNames <- reductions
 
   # Use or find the default cluster field
+  #if (is.null(x = cluster.field)) {
+    ## find and use the default Idents() field as the cluster field
+    #idents <- Idents(object)
+    #for (colName in colnames(object@meta.data)) {
+        #col = object@meta.data[[colName]]
+        #if (identical(idents@.Data,col@.Data)) {
+            #message("Default Idents() meta field:",colName) 
+            #cluster.field <- colName
+            #break
+        #}
+    #}
   if (is.null(x = cluster.field)) {
-    # find and use the default Idents() field as the cluster field
-    idents <- Idents(object)
-    for (colName in colnames(object@meta.data)) {
-        col = object@meta.data[[colName]]
-        if (identical(idents@.Data,col@.Data)) {
-            message("Default Idents() meta field:",colName) 
-            cluster.field <- colName
-            break
-        }
-    }
-    if (is.null(x = cluster.field)) {
-        message("There is no meta field identical to idents(): using the value of Idents() as a new field 'Cluster'")
+        message("No cluster field specified: Using the value of Idents() as a new field 'Cluster'")
         # create a new meta data field named "Cluster"
-        newDf <- cbind(object@meta.data, Idents(object))
+        #newDf <- cbind(object@meta.data, Idents(object))
         # default name is "Idents(object)", not good, let's rename that to "Cluster"
-        names(newDf)[length(newDf)] <- "Cluster"
-        object@meta.data <- newDf
-        cluster.field <- "Cluster"
-    }
-
+        #names(newDf)[length(newDf)] <- "Cluster"
+        #object@meta.data <- newDf
+        #cluster.field <- "Cluster"
   } else {
-    message("A custom cluster field was specified: ", cluster.field)
-    Idents(object = object) <- cluster.field
-    # another, convoluted way to set the Idents field, if the command above makes trouble again
-    #Idents(object) <- as.factor([object[[cluster.field]], cluster.field])
+      message("A custom cluster field was specified: ", cluster.field)
+      Idents(object = object) <- cluster.field
+      # another, convoluted way to set the Idents field, if the command above makes trouble again
+      #Idents(object) <- as.factor([object[[cluster.field]], cluster.field])
   }
 
   # make sure that we have a cluster field
-  if (is.null(x = cluster.field))
-      stop("There was no cluster field provided and the auto-detection to find one based on Idents() did not work. Please provide a cluster field with cluster.field='xxx' from R or --clusterField=xxx if using cbImportSeurat. Possible meta annotation fields are: ", toString(colnames(x = meta)))
+  #if (is.null(x = cluster.field))
+      #stop("There was no cluster field provided and the auto-detection to find one based on Idents() did not work. Please provide a cluster field with cluster.field='xxx' from R or --clusterField=xxx if using cbImportSeurat. Possible meta annotation fields are: ", toString(colnames(x = meta)))
 
   if (is.null(x = meta.fields)) {
     meta.fields <- colnames(x = meta)
