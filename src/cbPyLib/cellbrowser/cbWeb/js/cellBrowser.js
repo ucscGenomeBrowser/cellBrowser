@@ -3534,25 +3534,31 @@ var cellbrowser = function() {
     }
 
     function setLabelField(labelField) {
-        /* change the field that is used for drawing the labels. Do not redraw. */
-        var metaInfo = db.findMetaInfo(labelField);
-        db.conf.activeLabelField = metaInfo.name;
+        /* change the field that is used for drawing the labels. 'null' means hide labels. Do not redraw. */
+        if (labelField===null) {
+            db.conf.activeLabelField = null;
+            renderer.setShowLabels(false);
+        }
+        else {
+            var metaInfo = db.findMetaInfo(labelField);
+            db.conf.activeLabelField = metaInfo.name;
 
-        if (metaInfo.arr) // preloaded
-            computeAndSetLabels(metaInfo.arr, metaInfo);
-        else
-            db.loadMetaVec(metaInfo, computeAndSetLabels);
+            if (metaInfo.arr) // preloaded
+                computeAndSetLabels(metaInfo.arr, metaInfo);
+            else
+                db.loadMetaVec(metaInfo, computeAndSetLabels);
+        }
     }
 
    function setColorByDropdown(fieldName) {
-       /* set the meta 'color by' dropdown to a given value. The value is the meta field name, not its label, nor its index */
+       /* set the meta 'color by' dropdown to a given value. The value is the meta field name, or its label, or its index */
        var fieldIdx  = db.fieldNameToIndex(fieldName);
        chosenSetValue("tpMetaCombo", "tpMetaVal_"+fieldIdx);
        //$('#tpMetaCombo').val("tpMetaVal_"+fieldIdx).trigger('chosen:updated');
    }
 
    function setLabelDropdown(fieldName) {
-       /* set the meta 'label by' dropdown to a given value. The value is the meta field name, nor its short label, nor its index */
+       /* set the meta 'label by' dropdown to a given value. The value is the meta field name, or its short label, or its index */
        var fieldIdx  = db.fieldNameToIndex(fieldName);
        //$('#tpLabelCombo').val("tpMetaVal_"+fieldIdx).trigger('chosen:updated');
        chosenSetValue("tpLabelCombo", "tpMetaVal_"+fieldIdx);
@@ -4580,6 +4586,16 @@ var cellbrowser = function() {
         return parts[0]+":"+prettyNumber(parts[1]);
     }
 
+    function htmlAddInfoIcon(htmls, helpText, placement) {
+        /* add an info icon with some text to htmls */
+        var iconHtml = '<svg style="width:0.9em" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Pro 6.1.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2022 Fonticons, Inc. --><path d="M256 0C114.6 0 0 114.6 0 256s114.6 256 256 256s256-114.6 256-256S397.4 0 256 0zM256 128c17.67 0 32 14.33 32 32c0 17.67-14.33 32-32 32S224 177.7 224 160C224 142.3 238.3 128 256 128zM296 384h-80C202.8 384 192 373.3 192 360s10.75-24 24-24h16v-64H224c-13.25 0-24-10.75-24-24S210.8 224 224 224h32c13.25 0 24 10.75 24 24v88h16c13.25 0 24 10.75 24 24S309.3 384 296 384z"/></svg>';
+        var addAttrs = "";
+        if (placement!==undefined)
+            addAttrs = " data-placement='"+placement+"'"
+        htmls.push("<span class='hasTooltip' title='"+helpText+"'"+addAttrs+">&nbsp;"+iconHtml+"</span>");
+        return htmls;
+    }
+
     function buildGeneTable(htmls, divId, title, subtitle, geneInfos, noteStr, helpText) {
     /* create gene expression info table. if htmls is null, update DIV with divId in-place. 
      * geneInfos is array of [gene, mouseover]. gene can be geneId+"|"+symbol. 
@@ -4598,8 +4614,7 @@ var cellbrowser = function() {
             htmls.push("<div style='display: inline; padding-left:3px; font-weight:bold'>"+title+"</div>");
             if (helpText) {
                 // https://fontawesome.com/icons/circle-info?s=solid
-                var iconHtml = '<svg style="width:0.9em" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Pro 6.1.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2022 Fonticons, Inc. --><path d="M256 0C114.6 0 0 114.6 0 256s114.6 256 256 256s256-114.6 256-256S397.4 0 256 0zM256 128c17.67 0 32 14.33 32 32c0 17.67-14.33 32-32 32S224 177.7 224 160C224 142.3 238.3 128 256 128zM296 384h-80C202.8 384 192 373.3 192 360s10.75-24 24-24h16v-64H224c-13.25 0-24-10.75-24-24S210.8 224 224 224h32c13.25 0 24 10.75 24 24v88h16c13.25 0 24 10.75 24 24S309.3 384 296 384z"/></svg>';
-                htmls.push("<span class='hasTooltip' title='"+helpText+"'>&nbsp;"+iconHtml+"</span>");
+                htmls = htmlAddInfoIcon(htmls, helpText);
             }
             if (subtitle) {
                 htmls.push('<div style="margin-top:6px" class="tpHint">');
@@ -5142,9 +5157,14 @@ var cellbrowser = function() {
 
     function onLabelComboChange(ev, choice) {
         /* called when user changes the label field combo box */
-        var fieldId = parseInt(choice.selected.split("_")[1]);
-        var fieldName = db.getMetaFields()[fieldId].name;
-        setLabelField(fieldName);
+        var fieldLabel = choice.selected.split("_")[1];
+        if (fieldLabel==="none")
+            setLabelField(null); // = switch off labels
+        else {
+            var fieldIdx = parseInt(fieldLabel);
+            var fieldName = db.getMetaFields()[fieldIdx].name;
+            setLabelField(fieldName);
+        }
         renderer.drawDots();
     }
 
@@ -5318,12 +5338,19 @@ var cellbrowser = function() {
         htmls.push('</div>');
     }
 
-    function buildMetaFieldCombo(htmls, idOuter, id, left, selectedField) {
+    function buildMetaFieldCombo(htmls, idOuter, id, left, selectedField, optStr) {
+        /* build htmls to select a meta data field from */
         var metaFieldInfo = db.getMetaFields();
         htmls.push('<div id="'+idOuter+'" style="padding-left:2px; display:inline">');
         //var entries = [["_none", ""]];
         var entries = [];
         var selIdx = 0;
+
+        // special handling for the 'Label by Annotation' dropdown
+        var doLabels = (optStr==="doLabels");
+        if (doLabels)
+            entries.push( ["tpMetaVal_none", "No label"] );
+
         for (var i = 1; i < metaFieldInfo.length; i++) { // starts at 1, skip ID field
             var field = metaFieldInfo[i];
             var fieldName = field.label;
@@ -6234,7 +6261,7 @@ var cellbrowser = function() {
         let topPad = 6;
         let leftPad = 6;
         let rowLabelWidth = 200;
-        let colLabelHeight = 80;
+        let colLabelHeight = 130;
 
         let maxDotSize = 30;
         let rowHeight = maxDotSize+4;
@@ -6741,8 +6768,11 @@ var cellbrowser = function() {
 
         htmls.push('<label style="padding-left: 2px; margin-bottom:8px; padding-top:8px" for="'+"tpMetaCombo"+'">Color by Annotation</label>');
         buildMetaFieldCombo(htmls, "tpMetaComboBox", "tpMetaCombo", 0);
-        htmls.push('<label style="padding-left: 2px; margin-bottom:8px; padding-top:8px" for="tpLabelCombo">Label by non-num. Annotation</label>');
-        buildMetaFieldCombo(htmls, "tpLabelComboBox", "tpLabelCombo", 0, db.conf.labelField);
+        htmls.push('<label style="padding-left: 2px; margin-bottom:8px; padding-top:8px" for="tpLabelCombo">Label by Annotation</label>');
+        htmls = htmlAddInfoIcon(htmls, "Choose a field to generate labels for. Labels will be placed in the center between all the cells with "+
+                "this annotation, so this is most useful for fields that label cells that are close together. Only non-numerical "+
+                "fields can be selected in this dropdown, as labels on numerical fields would not make sense.", "bottom");
+        buildMetaFieldCombo(htmls, "tpLabelComboBox", "tpLabelCombo", 0, db.conf.labelField, "doLabels");
 
         htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px" id="tpHoverHint" class="tpHint">Hover over a '+gSampleDesc+' to update data below</div>');
         htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px; display: none" id="tpSelectHint" class="tpHint">Cells selected. No update on hover.</div>');

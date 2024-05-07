@@ -4,6 +4,8 @@ import sys,argparse,re
 from collections import OrderedDict
 from os.path import join, basename, dirname, isfile
 from pathlib import Path
+import json
+import operator
 
 # These two functions copied and modified from cellbrowser.py
 def readLines(lines, fname):
@@ -17,6 +19,9 @@ def loadConfig(fname):
     """ parse python in fname and return variables as dictionary.
     add the directory of fname to the dict as 'inDir'.
     """
+
+    if fname.endswith(".json"):
+        return json.load(open(fname))
 
     conf = OrderedDict()
 
@@ -37,6 +42,9 @@ def main():
     parser.add_argument('datasetFile', type=str, help='file containing list of datasets in first column')
     parser.add_argument('tag', type=str, help='cellbrowser.conf tag you want values for, e.g. body_parts')
     parser.add_argument('-d', '--descConf', action='store_true', help='search for tag in desc.conf instead of cellbrowser.conf')
+    parser.add_argument('-j', '--json', action='store_true', help='search for tag in dataset.json in apache htdocs directory instead of cellbrowser.conf')
+    parser.add_argument('-s', '--sort', action='store_true', help='sort results')
+    parser.add_argument('-k', '--sortField', action='store', help='name of field to sort on')
     args = parser.parse_args()
 
     # From https://stackoverflow.com/questions/541390/extracting-extension-from-filename-in-python
@@ -51,7 +59,10 @@ def main():
         exit(1)
 
     # Turn input tags into a list
-    tags = args.tag.split()
+    if "," in args.tag:
+        tags = args.tag.split(",")
+    else:
+        tags = args.tag.split()
     tagIndex = dict()
 
     dfh = open(args.datasetFile)
@@ -76,6 +87,7 @@ def main():
     print(*header, sep=dsep)
 
     # Now process rest of datasetFile
+    outRows = []
     for line in dfh:
         if not line.startswith('#'):
             # split our line to pull out the dataset name
@@ -85,6 +97,8 @@ def main():
             # set up confName based on input options, default is to modify the cellbrowser.conf
             if args.descConf:
                 confName = join("/hive/data/inside/cells/datasets",dname,"desc.conf")
+            elif args.json:
+                confName = join("/usr/local/apache/htdocs-cells/",dname,"dataset.json")
             else:
                 confName = join("/hive/data/inside/cells/datasets",dname,"cellbrowser.conf")
 
@@ -103,10 +117,24 @@ def main():
                         # Case where we're tacking the tag onto the end of our file
                         else:
                             splitLine.append(tagVal)
-                print(*splitLine, sep='\t')
+                    else:
+                        splitLine.append("")
+                outRows.append(splitLine)
+                #print(*splitLine, sep='\t')
             else:
                 sys.stderr.write('Warning: "' + dname + '" does not have a cellbrowser.conf and/or desc.conf. You might want to double check your input file.\n')
 
+    if args.sort:
+        if args.sortField:
+            sortIdx = tagIndex[args.sortField]
+            print(outRows)
+            print(sortIdx)
+            outRows.sort(key=operator.itemgetter(sortIdx))
+        else:
+            outRows.sort()
+
+    for row in outRows:
+        print(*row, sep='\t')
 
 if __name__ == "__main__":
     main()

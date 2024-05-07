@@ -178,7 +178,12 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 }
 
 /* modify bootstrap tooltip defaults */
-.tooltip-inner { min-width: 220px; border-radius: 0; background-opacity: 50%}
+.tooltip .tooltip-inner { 
+        min-width: 220px; 
+        border-radius: 0; 
+        background-opacity: 50%;
+        text-align: left
+}
 
  .ui-widget-header { background: white} 
 .ui-state-active { background: green }
