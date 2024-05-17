@@ -3896,6 +3896,10 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, outDir):
     doAbort = False # temp hack # because of single cell cluster filtering in cbScanpy
     topMarkersDone = False
     for markerIdx, markerInfo in enumerate(markerFnames):
+        
+        if type(markerInfo)!=type(dict()):
+            errAbort("The 'markers' setting in cellbrowser.conf is not a dictionary but must be a dictionary with keys 'file' and 'label'.")
+
         markerFname = markerInfo["file"]
         markerLabel = markerInfo["shortLabel"]
 
