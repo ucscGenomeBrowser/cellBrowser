@@ -3540,6 +3540,7 @@ var cellbrowser = function() {
             renderer.setShowLabels(false);
         }
         else {
+            renderer.setShowLabels(true);
             var metaInfo = db.findMetaInfo(labelField);
             db.conf.activeLabelField = metaInfo.name;
 
@@ -3826,7 +3827,7 @@ var cellbrowser = function() {
        var rendConf = makeRendConf(db.conf, db.conf.sampleCount);
        renderer.initPlot(rendConf);
 
-       if (db.conf.showLabels===false)
+       if (db.conf.showLabels===false || db.conf.labelField===undefined || db.conf.labelField===null)
            renderer.setShowLabels(false);
 
        buildLeftSidebar();

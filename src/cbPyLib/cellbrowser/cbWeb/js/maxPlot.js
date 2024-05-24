@@ -72,11 +72,12 @@ function MaxPlot(div, top, left, width, height, args) {
     const gCloseButtonFromRight = 60; // distance of "close" button from right edge
 
     const nonFatColor = "F9F9F9"; // color used in fattening mode for all non-fat cells
+    const nonFatColorCircles = "BBBBBB"; // color used in fattening mode for all non-fat cells
 
     // the rest of the initialization is done at the end of this file,
     // because the init involves many functions that are not defined yet here
 
-    this.initCanvas = function (div, top, left, width, height) {
+    this.initCanvas = function (div, top, left, width, height, args) {
         /* initialize a new Canvas */
 
         div.style.top = top+"px";
@@ -103,9 +104,7 @@ function MaxPlot(div, top, left, width, height, args) {
             addStatusLine(height-gStatusHeight, left, width, gStatusHeight);
             addTitleDiv(height-gTitleSize-gStatusHeight-4, 8);
 
-            if (self.parentPlot===null)
-                addSliders(height-gStatusHeight-15, width);
-
+            console.log(self.parentPlot, self.childPlot);
             /* add the div used for the mouse selection/zoom rectangle to the DOM */
             var selectDiv = document.createElement('div');
             selectDiv.id = "mpSelectBox";
@@ -132,9 +131,12 @@ function MaxPlot(div, top, left, width, height, args) {
             // connected plots
             self.childPlot = null;    // plot that is syncing from us, see split()
             self.parentPlot = null;   // plot that syncs to us, see split()
+
         }
 
         addProgressBars(top+Math.round(height*0.3), left+30);
+        if (!args || args.showSliders===undefined || args.showSliders===true)
+            addSliders(height-gStatusHeight-30, width);
 
         // timer that is reset on every mouse move
         self.timer = null;
@@ -203,6 +205,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.background = null;
 
         self.activateMode(getAttr(args, "mode", "move"));
+
     };
 
     this.clear = function() {
@@ -244,7 +247,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         var elem = document.createElement('div');
         elem.id = "tpWatermark";
-        elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.5; z-index: 1000; top: 10px; left: 45px; text-align: left; vertical-align: top; color: black; font-size: 20px; font-weight:bold; font-style:oblique';
+        elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.5; top: 10px; left: 45px; text-align: left; vertical-align: top; color: black; font-size: 20px; font-weight:bold; font-style:oblique';
         elem.textContent = text;
         self.div.appendChild(elem);
         self.watermark = elem;
@@ -444,10 +447,10 @@ function MaxPlot(div, top, left, width, height, args) {
     function addSliders(fromTop, canvWidth) {
         /* add sliders for transparency and radius */
         // alpha reset slider: a label, a slider + a reset button
-        var sliderWidth = 120;
-        var fromLeft = canvWidth - 2*sliderWidth - 2*45 - 100;
+        var sliderWidth = 90;
+        var fromLeft = canvWidth - sliderWidth - 2*45 - 50;
 
-        var alphaSlider = createSliderSpan("mpAlphaSlider", sliderWidth, 10, 0);
+        var alphaSlider = createSliderSpan("mpAlphaSlider", sliderWidth, 10, 35);
         self.alphaSlider = alphaSlider; // see activateSliders() for the jquery UI part of the code, executed later
         alphaSlider.style.float = "left";
         //alphaSlider.style.top = "3px";
@@ -455,15 +458,14 @@ function MaxPlot(div, top, left, width, height, args) {
         // container for label + control elements
         var alphaCont = document.createElement('div');
         alphaCont.id = "mpAlphaCont";
-        alphaCont.style.top = "0px";
         //alphaCont.style.left = "150px"; // cellbrowser.css defines grid widths: 45
         alphaCont.className = "sliderContainer";
-        alphaCont.style.top = "0px"; // (fromTop-14)+"px";
-        alphaCont.style.left = "200px";
+        alphaCont.style.top = "15px"; // (fromTop-14)+"px";
+        alphaCont.style.left = "0px";
 
         var alphaLabel = document.createElement('div'); // contains the slider and the reset button, floats right
         alphaLabel.id = "alphaSliderLabel";
-        alphaLabel.textContent = "Transp";
+        alphaLabel.textContent = "Transparency";
         alphaLabel.className = "sliderLabel";
 
         // reset button
@@ -491,7 +493,7 @@ function MaxPlot(div, top, left, width, height, args) {
         alphaCont.appendChild(sliderReset);
 
         // Radius reset slider: label, slider and reset button
-        var radiusSlider = createSliderSpan("mpRadiusSlider", sliderWidth, 10, 20);
+        var radiusSlider = createSliderSpan("mpRadiusSlider", sliderWidth, 10, 35);
         radiusSlider.style.float = "left";
         self.radiusSlider = radiusSlider; // see activateSliders() for the jquery UI part of the code, executed later
 
@@ -504,6 +506,7 @@ function MaxPlot(div, top, left, width, height, args) {
         radiusCont.style.top = "0px"; //fromTop+"px";
         radiusCont.appendChild(radiusSlider)
 
+
         var radiusLabel = document.createElement('span'); // contains the slider and the reset button, floats right
         radiusLabel.id = "radiusSliderLabel";
         radiusLabel.textContent = "Circle Size";
@@ -513,12 +516,15 @@ function MaxPlot(div, top, left, width, height, args) {
         radiusCont.appendChild(radiusLabel);
         radiusCont.appendChild(radiusSlider);
         //radiusCont.appendChild(sliderReset);
+        var brEl = document.createElement('br');
+        radiusCont.appendChild(brEl);
 
         // add both to the big container div that holds all three slider elements
         var sliderDiv = document.createElement('span');
         sliderDiv.style.top = fromTop+"px";
         sliderDiv.style.left = fromLeft+"px";
         sliderDiv.style.position = "relative";
+        sliderDiv.style.zIndex = "10";
         sliderDiv.id = "mpSliderDiv";
         sliderDiv.appendChild(radiusCont);
         sliderDiv.appendChild(alphaCont);
@@ -1106,7 +1112,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         if (fatIdx!==null) {
             colCount = 2;
-            colors = [colors[fatIdx], "F0F0F0"];
+            colors = [colors[fatIdx], nonFatColorCircles];
         }
 
        off.width = (colCount+1) * tileWidth;
@@ -1306,7 +1312,7 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
 
-    function drawPixels(ctx, width, height, pxCoords, colorArr, colors, alpha, selCells, fatIdx) {
+    function drawPixels(ctx, width, height, pxCoords, coordColors, colors, alpha, selCells, fatIdx) {
         /* draw single pixels into a pixel buffer and copy the buffer into a canvas */
 
        // by default the canvas has black pixels
@@ -1333,7 +1339,7 @@ function MaxPlot(div, top, left, width, height, args) {
            if (fatIdx!==null) {
                // fattening mode: fat cluster is black, all the rest is grey
                let grey;
-               if (valIdx===fatIdx)
+               if (valIdx!==fatIdx)
                    grey = 0xDD;
                else
                    grey = 0;
@@ -1348,7 +1354,7 @@ function MaxPlot(div, top, left, width, height, args) {
                var oldG = cData[p+1];
                var oldB = cData[p+2];
 
-               var newRgb = rgbColors[colorArr[i]];
+               var newRgb = rgbColors[valIdx];
                var newR = (newRgb >>> 16) & 0xff;
                var newG = (newRgb >>> 8)  & 0xff;
                var newB = (newRgb)        & 0xff;
@@ -2873,8 +2879,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var opts = cloneObj(self.globalOpts);
         opts.showClose = true;
 
-        var plot2 = new MaxPlot(newDiv, newTop, newLeft, newWidth, newHeight, {"showClose" : true});
-        //plot2.canvas.style.borderLeft = "1px solid grey";
+        var plot2 = new MaxPlot(newDiv, newTop, newLeft, newWidth, newHeight, {"showClose" : true, "showSliders" : false});
 
         plot2.statusLine.style.display = "none";
 
@@ -2968,7 +2973,6 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     // object constructor code
-    self.initCanvas(div, top, left, width, height);
+    self.initCanvas(div, top, left, width, height, args);
     self.initPlot(args);
-
 }
