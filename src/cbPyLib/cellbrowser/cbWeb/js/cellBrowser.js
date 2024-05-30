@@ -8315,7 +8315,7 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
 
         var heatmap = new MaxHeat(div, {mainRenderer:renderer});
         //var colors = getFieldColors(clusterMetaInfo)
-        var colors = makeColorPalette(cDefGradPaletteHeat, 10);
+        var colors = makeColorPalette(cDefGradPaletteHeat, db.exprBinCount);
 
         heatmap.loadData(geneSyms, clusterNames, geneAvgs, colors);
         heatmap.draw();
