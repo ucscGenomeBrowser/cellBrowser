@@ -8252,7 +8252,13 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
 
             let groupAvgs = [];
             for (var groupIdx=0; groupIdx < groupCount; groupIdx++)
-                groupAvgs.push(Math.round(groupSums[groupIdx]/groupCounts[groupIdx]));
+            {
+                var cellCount = groupCounts[groupIdx];
+                var groupAvg = 0;
+                if (cellCount!==0)
+                    groupAvg = Math.round(groupSums[groupIdx]/cellCount);
+                groupAvgs.push(groupAvg);
+            }
             geneAvgs.push(groupAvgs);
 
         }
