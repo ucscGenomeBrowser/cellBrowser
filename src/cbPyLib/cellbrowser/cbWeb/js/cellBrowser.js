@@ -6196,6 +6196,9 @@ var cellbrowser = function() {
         titleY += 100;
         htmls.push("<text font-family='sans-serif' font-size='16' fill='black' text-anchor='start' x='"+titleX+"' y='"+titleY+"'>Expressed in Cells</text>");
 
+        titleY += 85;
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+(titleX-10)+"' y='"+titleY+"'>Exact values on mouse-over</text>");
+
         // draw five circles and 0% and 100% percent values underneath
         let circlesY = legendY+150;
         let lastCircleX = 0;
@@ -6233,8 +6236,6 @@ var cellbrowser = function() {
         htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+exprMinX+"' y='"+avgLabelY+"'>"+minLabel+"</text>");
         htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+(lastRectX-25)+"' y='"+avgLabelY+"'>"+maxLabel+"</text>");
 
-
-
     }
 
     function buildExprDotplot(parentDomId, geneSym, dotData, metaLabels, exprMin, exprMax) {
@@ -6261,14 +6262,14 @@ var cellbrowser = function() {
         //
         let topPad = 6;
         let leftPad = 6;
-        let rowLabelWidth = 200;
+        let rowLabelWidth = 300;
         let colLabelHeight = 130;
 
         let maxDotSize = 30;
         let rowHeight = maxDotSize+4;
         let colWidth = maxDotSize+4;
         let legendWidth = 200;
-        let legendHeight = 200;
+        let legendHeight = 220;
 
         let cellCountColWidth = 50;
 
@@ -6310,7 +6311,9 @@ var cellbrowser = function() {
                     sum += val;
             }
             let cellCount = exprArr.length;
-            let avg = sum / cellCount;
+            let avg = 0;
+            if (cellCount!==0)
+                avg = sum / cellCount;
             let nonZeroPercent = nonZeroCount / exprArr.length;
             rows.push( [cellCount, nonZeroPercent, avg] );
             avgMax = Math.max(avgMax, avg);
