@@ -82,12 +82,12 @@ var cellbrowser = function() {
     // color for missing value when coloring by expression value
     //var cNullColor = "CCCCCC";
     //const cNullColor = "DDDDDD";
-    //const cNullColor = "95DFFF"; //= light blue
-    const cNullColor = "e1f6ff"; //= light blue
+    //const cNullColor = "95DFFF"; //= light blue, also tried e1f6ff
+    const cNullColor = "eeeeee"; //= light blue
 
-    const cDefGradPalette = "tol-sq-blue";  // default legend gradient palette for gene expression
+    const cDefGradPalette = "magma";  // default legend gradient palette for gene expression
     // this is a special palette, tol-sq with the first entry being a light blue, so 0 stands out a bit more
-    const cDefGradPaletteHeat = "tol-sq";  // default legend gradient palette for the heatmap
+    const cDefGradPaletteHeat = "magma";  // default legend gradient palette for the heatmap
     const cDefQualPalette  = "rainbow"; // default legend palette for categorical values
 
     var datasetGradPalette = cDefGradPalette;
@@ -6277,8 +6277,7 @@ var cellbrowser = function() {
         let chartHeight = topPad+colLabelHeight+Math.max(legendHeight, rowCount*rowHeight);
         htmls.push("<svg xmlns='http://www.w3.org/2000/svg' height='"+chartHeight+"' width='"+chartWidth+"'>");
 
-        let colorPal = makeColorPalette("magma", 20);
-        colorPal = colorPal.reverse();
+        let colorPal = makeColorPalette(cDefGradPalette, 20);
 
         plotDotRowLabels(htmls, rowLabelWidth, leftPad, colLabelHeight, rowHeight, rowLabels);
         plotDotColumnLabels(htmls, leftPad+rowLabelWidth, topPad, colWidth, genes);
@@ -6997,11 +6996,12 @@ var cellbrowser = function() {
         var step = 1/n;
 
         var func = null;
+        var doRev = false;
         switch (palName) {
-            case 'inferno' : func =  scale.color.perceptual.inferno; break;
-            case 'viridis' : func =  scale.color.perceptual.viridis; break;
-            case 'magma' : func =  scale.color.perceptual.magma; break;
-            case 'plasma' : func =  scale.color.perceptual.plasma; break;
+            case 'inferno' : func =  scale.color.perceptual.inferno; doRev=true; break;
+            case 'viridis' : func =  scale.color.perceptual.viridis; doRev=true; break;
+            case 'magma' : func =  scale.color.perceptual.magma; doRev=true; break;
+            case 'plasma' : func =  scale.color.perceptual.plasma; doRev=true; break;
         }
 
         for (let x=0; x<n; x++) {
@@ -7010,6 +7010,10 @@ var cellbrowser = function() {
 
         if (pal.length!==n)
             console.log("palette is too small");
+
+        if (doRev)
+            pal = pal.reverse();
+
         return pal;
     }
 
@@ -7794,6 +7798,7 @@ var cellbrowser = function() {
             cellIds = [];
 
         var pal = makeColorPalette(datasetGradPalette, exprBinCount);
+        pal[0] = cNullColor; // this is hacky, but we don't want to color a table in beige if the values are 0
 
         //console.time("avgCalc");
         for (var i=0; i<quickGenes.length; i++) {
