@@ -83,7 +83,7 @@ var cellbrowser = function() {
     //var cNullColor = "CCCCCC";
     //const cNullColor = "DDDDDD";
     //const cNullColor = "95DFFF"; //= light blue, also tried e1f6ff
-    const cNullColor = "eeeeee"; //= light blue
+    const cNullColor = "e1f6ff"; //= light blue
 
     const cDefGradPalette = "magma";  // default legend gradient palette for gene expression
     // this is a special palette, tol-sq with the first entry being a light blue, so 0 stands out a bit more
@@ -630,6 +630,7 @@ var cellbrowser = function() {
         "dbgap" : "NCBI DbGaP",
         "biorxiv_url" : "BioRxiv preprint",
         "doi" : "Publication Fulltext",
+        "cbDoi" : "Data Citation DOI",
         "arrayexpress" : "ArrayExpress",
         "ena_project" : "European Nucleotide Archive",
         "hca_dcp" : "Human Cell Atlas Data Portal",
@@ -646,6 +647,7 @@ var cellbrowser = function() {
         "pmcid" : "https://www.ncbi.nlm.nih.gov/pmc/articles/",
         "dbgap" : "https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=",
         "doi" : "http://dx.doi.org/",
+        "cbDoi" : "http://dx.doi.org/",
         "ena_project" : "https://www.ebi.ac.uk/ena/data/view/",
         "cirm_dataset" : "https://cirm.ucsc.edu/d/",
         "arrayexpress" : "https://www.ebi.ac.uk/arrayexpress/experiments/",
@@ -985,6 +987,7 @@ var cellbrowser = function() {
         }
 
 
+        htmlAddLink(htmls, desc, "cbDoi");
         htmlAddLink(htmls, desc, "biorxiv_url");
         htmlAddLink(htmls, desc, "paper_url");
         htmlAddLink(htmls, desc, "other_url");
