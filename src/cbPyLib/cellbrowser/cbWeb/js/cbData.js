@@ -394,7 +394,7 @@ function CbDbFile(url) {
     self.name = url;
     self.url = url;
 
-    self.exprBinCount = 25;
+    self.exprBinCount = 10;
 
     // for quick gene name searching
     self.geneSyns = null; // array of [geneSynonymLowercase, geneId]
