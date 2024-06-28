@@ -6148,11 +6148,12 @@ var cellbrowser = function() {
         /* plot the names of the genes rightwards at the top */
         let y = minY;
         let fontSize = 14;
+
         for (let i=0; i < geneSyms.length; i++) {
             let label = geneSyms[i];
             let x = minX+(i+xDist)+(fontSize);
             htmls.push("<text font-family='sans-serif' font-weight='bold' font-size='"+fontSize+"' fill='black' transform='translate("+x+", "+y+
-                    ") rotate(90)' alignment-baseline='bottom' text-anchor='start'>"+label+"</text>");
+                    ") rotate(90)' alignment-baseline='bottom' text-anchor='end'>"+label+"</text>");
         }
     }
 
@@ -6266,7 +6267,13 @@ var cellbrowser = function() {
         let topPad = 6;
         let leftPad = 6;
         let rowLabelWidth = 300;
-        let colLabelHeight = 130;
+        let colLabelHeight = 50;
+
+        // column label row must have a height to fit the text. Assume that text width is 14
+        let maxTextLen = 0;
+        for (let i=0; i < genes.length; i++)
+            maxTextLen = Math.max(genes[i].length, maxTextLen);
+        colLabelHeight = Math.max(colLabelHeight, maxTextLen*14);
 
         let maxDotSize = 30;
         let rowHeight = maxDotSize+4;
@@ -6283,7 +6290,7 @@ var cellbrowser = function() {
         let colorPal = makeColorPalette(cDefGradPalette, 20);
 
         plotDotRowLabels(htmls, rowLabelWidth, leftPad, colLabelHeight, rowHeight, rowLabels);
-        plotDotColumnLabels(htmls, leftPad+rowLabelWidth, topPad, colWidth, genes);
+        plotDotColumnLabels(htmls, leftPad+rowLabelWidth, topPad+colLabelHeight, colWidth, genes);
         plotDotCircles(htmls, dotData, leftPad+rowLabelWidth, topPad+colLabelHeight, colWidth, rowHeight, maxDotSize, colorPal);
         plotLegend(htmls, dotData, leftPad+rowLabelWidth+(colCount*colWidth)+cellCountColWidth, topPad+colLabelHeight, colorPal, legendWidth, legendHeight, maxDotSize)
 
@@ -6539,12 +6546,14 @@ var cellbrowser = function() {
             //getById("tpGeneExprLimitApply").disabled = isDisabled;
         //});
         
-        // pick a reasonable default gene and meta var
-        let geneSym;
-        if (db.conf.quickGenes)
+        // use the current gene
+        let geneSym = getVar("gene");
+        
+        // if there is none, pick a reasonable default gene and meta var
+        if (geneSym===null && db.conf.quickGenes)
             geneSym = db.conf.quickGenes[0][0];
-        else
-            geneSym = db.getRandomLocus();
+        //if (geneSym===null)
+            //geneSym = db.getRandomLocus();
 
         let metaName = db.getDefaultColorField();
 
