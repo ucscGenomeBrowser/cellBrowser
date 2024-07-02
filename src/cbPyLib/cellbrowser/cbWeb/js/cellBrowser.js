@@ -82,12 +82,12 @@ var cellbrowser = function() {
     // color for missing value when coloring by expression value
     //var cNullColor = "CCCCCC";
     //const cNullColor = "DDDDDD";
-    //const cNullColor = "95DFFF"; //= light blue
+    //const cNullColor = "95DFFF"; //= light blue, also tried e1f6ff
     const cNullColor = "e1f6ff"; //= light blue
 
-    const cDefGradPalette = "tol-sq-blue";  // default legend gradient palette for gene expression
+    const cDefGradPalette = "magma";  // default legend gradient palette for gene expression
     // this is a special palette, tol-sq with the first entry being a light blue, so 0 stands out a bit more
-    const cDefGradPaletteHeat = "tol-sq";  // default legend gradient palette for the heatmap
+    const cDefGradPaletteHeat = "magma";  // default legend gradient palette for the heatmap
     const cDefQualPalette  = "rainbow"; // default legend palette for categorical values
 
     var datasetGradPalette = cDefGradPalette;
@@ -630,6 +630,7 @@ var cellbrowser = function() {
         "dbgap" : "NCBI DbGaP",
         "biorxiv_url" : "BioRxiv preprint",
         "doi" : "Publication Fulltext",
+        "cbDoi" : "Data Citation DOI",
         "arrayexpress" : "ArrayExpress",
         "ena_project" : "European Nucleotide Archive",
         "hca_dcp" : "Human Cell Atlas Data Portal",
@@ -646,6 +647,7 @@ var cellbrowser = function() {
         "pmcid" : "https://www.ncbi.nlm.nih.gov/pmc/articles/",
         "dbgap" : "https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=",
         "doi" : "http://dx.doi.org/",
+        "cbDoi" : "http://dx.doi.org/",
         "ena_project" : "https://www.ebi.ac.uk/ena/data/view/",
         "cirm_dataset" : "https://cirm.ucsc.edu/d/",
         "arrayexpress" : "https://www.ebi.ac.uk/arrayexpress/experiments/",
@@ -985,6 +987,7 @@ var cellbrowser = function() {
         }
 
 
+        htmlAddLink(htmls, desc, "cbDoi");
         htmlAddLink(htmls, desc, "biorxiv_url");
         htmlAddLink(htmls, desc, "paper_url");
         htmlAddLink(htmls, desc, "other_url");
@@ -6145,11 +6148,12 @@ var cellbrowser = function() {
         /* plot the names of the genes rightwards at the top */
         let y = minY;
         let fontSize = 14;
+
         for (let i=0; i < geneSyms.length; i++) {
             let label = geneSyms[i];
             let x = minX+(i+xDist)+(fontSize);
             htmls.push("<text font-family='sans-serif' font-weight='bold' font-size='"+fontSize+"' fill='black' transform='translate("+x+", "+y+
-                    ") rotate(90)' alignment-baseline='bottom' text-anchor='start'>"+label+"</text>");
+                    ") rotate(90)' alignment-baseline='bottom' text-anchor='end'>"+label+"</text>");
         }
     }
 
@@ -6196,6 +6200,9 @@ var cellbrowser = function() {
         titleY += 100;
         htmls.push("<text font-family='sans-serif' font-size='16' fill='black' text-anchor='start' x='"+titleX+"' y='"+titleY+"'>Expressed in Cells</text>");
 
+        titleY += 85;
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+(titleX-10)+"' y='"+titleY+"'>Exact values on mouse-over</text>");
+
         // draw five circles and 0% and 100% percent values underneath
         let circlesY = legendY+150;
         let lastCircleX = 0;
@@ -6233,8 +6240,6 @@ var cellbrowser = function() {
         htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+exprMinX+"' y='"+avgLabelY+"'>"+minLabel+"</text>");
         htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+(lastRectX-25)+"' y='"+avgLabelY+"'>"+maxLabel+"</text>");
 
-
-
     }
 
     function buildExprDotplot(parentDomId, geneSym, dotData, metaLabels, exprMin, exprMax) {
@@ -6261,14 +6266,20 @@ var cellbrowser = function() {
         //
         let topPad = 6;
         let leftPad = 6;
-        let rowLabelWidth = 200;
-        let colLabelHeight = 130;
+        let rowLabelWidth = 300;
+        let colLabelHeight = 50;
+
+        // column label row must have a height to fit the text. Assume that text width is 14
+        let maxTextLen = 0;
+        for (let i=0; i < genes.length; i++)
+            maxTextLen = Math.max(genes[i].length, maxTextLen);
+        colLabelHeight = Math.max(colLabelHeight, maxTextLen*14);
 
         let maxDotSize = 30;
         let rowHeight = maxDotSize+4;
         let colWidth = maxDotSize+4;
         let legendWidth = 200;
-        let legendHeight = 200;
+        let legendHeight = 220;
 
         let cellCountColWidth = 50;
 
@@ -6276,11 +6287,10 @@ var cellbrowser = function() {
         let chartHeight = topPad+colLabelHeight+Math.max(legendHeight, rowCount*rowHeight);
         htmls.push("<svg xmlns='http://www.w3.org/2000/svg' height='"+chartHeight+"' width='"+chartWidth+"'>");
 
-        let colorPal = makeColorPalette("magma", 20);
-        colorPal = colorPal.reverse();
+        let colorPal = makeColorPalette(cDefGradPalette, 20);
 
         plotDotRowLabels(htmls, rowLabelWidth, leftPad, colLabelHeight, rowHeight, rowLabels);
-        plotDotColumnLabels(htmls, leftPad+rowLabelWidth, topPad, colWidth, genes);
+        plotDotColumnLabels(htmls, leftPad+rowLabelWidth, topPad+colLabelHeight, colWidth, genes);
         plotDotCircles(htmls, dotData, leftPad+rowLabelWidth, topPad+colLabelHeight, colWidth, rowHeight, maxDotSize, colorPal);
         plotLegend(htmls, dotData, leftPad+rowLabelWidth+(colCount*colWidth)+cellCountColWidth, topPad+colLabelHeight, colorPal, legendWidth, legendHeight, maxDotSize)
 
@@ -6310,7 +6320,9 @@ var cellbrowser = function() {
                     sum += val;
             }
             let cellCount = exprArr.length;
-            let avg = sum / cellCount;
+            let avg = 0;
+            if (cellCount!==0)
+                avg = sum / cellCount;
             let nonZeroPercent = nonZeroCount / exprArr.length;
             rows.push( [cellCount, nonZeroPercent, avg] );
             avgMax = Math.max(avgMax, avg);
@@ -6534,12 +6546,14 @@ var cellbrowser = function() {
             //getById("tpGeneExprLimitApply").disabled = isDisabled;
         //});
         
-        // pick a reasonable default gene and meta var
-        let geneSym;
-        if (db.conf.quickGenes)
+        // use the current gene
+        let geneSym = getVar("gene");
+        
+        // if there is none, pick a reasonable default gene and meta var
+        if (geneSym===null && db.conf.quickGenes)
             geneSym = db.conf.quickGenes[0][0];
-        else
-            geneSym = db.getRandomLocus();
+        //if (geneSym===null)
+            //geneSym = db.getRandomLocus();
 
         let metaName = db.getDefaultColorField();
 
@@ -6994,11 +7008,12 @@ var cellbrowser = function() {
         var step = 1/n;
 
         var func = null;
+        var doRev = false;
         switch (palName) {
-            case 'inferno' : func =  scale.color.perceptual.inferno; break;
-            case 'viridis' : func =  scale.color.perceptual.viridis; break;
-            case 'magma' : func =  scale.color.perceptual.magma; break;
-            case 'plasma' : func =  scale.color.perceptual.plasma; break;
+            case 'inferno' : func =  scale.color.perceptual.inferno; doRev=true; break;
+            case 'viridis' : func =  scale.color.perceptual.viridis; doRev=true; break;
+            case 'magma' : func =  scale.color.perceptual.magma; doRev=true; break;
+            case 'plasma' : func =  scale.color.perceptual.plasma; doRev=true; break;
         }
 
         for (let x=0; x<n; x++) {
@@ -7007,6 +7022,10 @@ var cellbrowser = function() {
 
         if (pal.length!==n)
             console.log("palette is too small");
+
+        if (doRev)
+            pal = pal.reverse();
+
         return pal;
     }
 
@@ -7791,6 +7810,7 @@ var cellbrowser = function() {
             cellIds = [];
 
         var pal = makeColorPalette(datasetGradPalette, exprBinCount);
+        pal[0] = cNullColor; // this is hacky, but we don't want to color a table in beige if the values are 0
 
         //console.time("avgCalc");
         for (var i=0; i<quickGenes.length; i++) {
@@ -8252,7 +8272,13 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
 
             let groupAvgs = [];
             for (var groupIdx=0; groupIdx < groupCount; groupIdx++)
-                groupAvgs.push(Math.round(groupSums[groupIdx]/groupCounts[groupIdx]));
+            {
+                var cellCount = groupCounts[groupIdx];
+                var groupAvg = 0;
+                if (cellCount!==0)
+                    groupAvg = Math.round(groupSums[groupIdx]/cellCount);
+                groupAvgs.push(groupAvg);
+            }
             geneAvgs.push(groupAvgs);
 
         }
@@ -8315,7 +8341,7 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
 
         var heatmap = new MaxHeat(div, {mainRenderer:renderer});
         //var colors = getFieldColors(clusterMetaInfo)
-        var colors = makeColorPalette(cDefGradPaletteHeat, 10);
+        var colors = makeColorPalette(cDefGradPaletteHeat, db.exprBinCount);
 
         heatmap.loadData(geneSyms, clusterNames, geneAvgs, colors);
         heatmap.draw();

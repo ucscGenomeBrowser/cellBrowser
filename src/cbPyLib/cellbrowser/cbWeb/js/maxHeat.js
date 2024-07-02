@@ -316,7 +316,7 @@ function MaxHeat(div, args) {
         var colCount = colStartsSizes.length/2;
         
         var valToCoords = [];
-        for (var i=0; i<maxVal+1; i++) // why +1 ?
+        for (var i=0; i<maxVal+1; i++) // why +1 ? Because of float rounding edge cases. Easier like this than to understand the code. :-)
             valToCoords.push([]);
         
         // convert from rows (array of arrays) to arrays of of coords, one array per color
@@ -420,11 +420,6 @@ function MaxHeat(div, args) {
             break;
         }
         console.timeEnd("draw rects");
-
-        //var rowOrder = self.rowOrder;
-        //var rowScreenToData = [];
-        //for (var rowI=0; rowI<rowCount; rowI++)
-            //rowScreenToData
 
         ctx.restore();
 
