@@ -6270,6 +6270,7 @@ var cellbrowser = function() {
         let colLabelHeight = 50;
 
         // column label row must have a height to fit the text. Assume that text width is 14
+        // probably 14 is a bad idea and I should use document.getElementById('yourTextId').getComputedTextLength();
         let maxTextLen = 0;
         for (let i=0; i < genes.length; i++)
             maxTextLen = Math.max(genes[i].length, maxTextLen);
@@ -6290,7 +6291,7 @@ var cellbrowser = function() {
         let colorPal = makeColorPalette(cDefGradPalette, 20);
 
         plotDotRowLabels(htmls, rowLabelWidth, leftPad, colLabelHeight, rowHeight, rowLabels);
-        plotDotColumnLabels(htmls, leftPad+rowLabelWidth, topPad+colLabelHeight, colWidth, genes);
+        plotDotColumnLabels(htmls, leftPad+rowLabelWidth, topPad+colLabelHeight-10, colWidth, genes);
         plotDotCircles(htmls, dotData, leftPad+rowLabelWidth, topPad+colLabelHeight, colWidth, rowHeight, maxDotSize, colorPal);
         plotLegend(htmls, dotData, leftPad+rowLabelWidth+(colCount*colWidth)+cellCountColWidth, topPad+colLabelHeight, colorPal, legendWidth, legendHeight, maxDotSize)
 
@@ -6547,7 +6548,7 @@ var cellbrowser = function() {
         //});
         
         // use the current gene
-        let geneSym = getVar("gene");
+        let geneSym = getVar("gene", null);
         
         // if there is none, pick a reasonable default gene and meta var
         if (geneSym===null && db.conf.quickGenes)
