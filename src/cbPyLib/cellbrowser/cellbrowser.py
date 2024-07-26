@@ -2378,7 +2378,8 @@ def parseColors(inDir, inConf, outConf, colData):
     colors = {}
     for fieldName, fname in colorConf.items():
         if fieldName != "__default__" and fieldName not in metaFieldNames:
-            errAbort("fieldName %s from 'colors' specification is not a valid meta data field name. Possible names are: %s" % (repr(fieldName), repr(metaFieldNames)))
+            logging.warn("fieldName %s from 'colors' specification is not a valid meta data field name. Possible names are: %s" % (repr(fieldName), repr(metaFieldNames)))
+            continue
 
         fname = abspath(join(inDir, fname))
         if isfile(fname):
