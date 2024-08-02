@@ -742,7 +742,8 @@ function MaxPlot(div, top, left, width, height, args) {
 
             // line is entirely hidden
             if (startInvis && endInvis)
-                continue
+                continue;
+
             if (startInvis) {
                 x1 = constrainVal(x1, minX, maxX);
                 y1 = constrainVal(y1, minY, maxY);
@@ -816,6 +817,10 @@ function MaxPlot(div, top, left, width, height, args) {
        ctx.globalAlpha = alpha;
        var dblSize = 2*radius;
        var count = 0;
+
+       if (!(selCells===undefined || selCells.size===0))
+           colors = makeAllGreyHex(colors.length);
+
        for (var i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
            var pxY = pxCoords[2*i+1];
@@ -1230,7 +1235,7 @@ function MaxPlot(div, top, left, width, height, args) {
            let col = coordColors[cellId];
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
            ctx.drawImage(off, selImgId * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
-        })
+        });
 
        ctx.restore();
        return count;
@@ -1252,12 +1257,27 @@ function MaxPlot(div, top, left, width, height, args) {
         return intList;
     }
 
+    function makeAllGreyHex(count, exptIdx) {
+    /* return a list of count grey rgb integer values, except for one*/
+        var hexList = [];
+        for (var i = 0; i < count; i++) {
+            //var colInt = parseInt("cccc", 16);
+            hexList.push("b2b2b2");
+        }
+        return hexList;
+    }
+
     function drawRectBuffer(ctx, width, height, pxCoords, colorArr, colors, alpha, selCells) {
         /* Draw little rectangles with size 3 using a memory buffer*/
        var canvasData = ctx.getImageData(0, 0, width, height);
        var cData = canvasData.data;
 
-       var rgbColors = hexToInt(colors);
+       var rgbColors = null;
+       if (selCells.length===0)
+           rgbColors = hexToInt(colors);
+       else
+           rgbColors = makeAllGrey(colors.length);
+
        var invAlpha = 1.0 - alpha;
 
        // alpha-blend pixels into array
@@ -1266,6 +1286,7 @@ function MaxPlot(div, top, left, width, height, args) {
            var pxY = pxCoords[2*i+1];
            if (isHidden(pxX, pxY))
                continue;
+
            var p = 4 * (pxY*width+pxX); // pointer to red value of pixel at x,y
 
            var oldR = cData[p];
@@ -1496,9 +1517,6 @@ function MaxPlot(div, top, left, width, height, args) {
         var sw = sx2 - sx1; // size of slice of background image that is currently shown, in source pixels
         var sh = sy2 - sy1;
 
-        var ctxWidth  = self.canvas.width;
-        var ctxHeight = self.canvas.height;
-        
         // lame: since I wasn't able to figure out how to transform negative sx, sy to corrected dx, dy, coords - safari doesn't understand negative sx/sy - I simply use the scaleData function
         // somehow https://gist.github.com/Kaiido/ca9c837382d89b9d0061e96181d1d862 didn't work for me
         //var coords = [0.0, 0.0, dataRange.maxX, dataRange.maxY];
