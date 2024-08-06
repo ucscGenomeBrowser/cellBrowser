@@ -3743,7 +3743,6 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
     coordFnames = makeAbsDict(inConf, "coords")
     coordFnames = makeAbsDict(inConf, "coords", fnameKey="lineFile")
 
-    flipY = inConf.get("flipY", False) # R has a bottom screen 0 different than most drawing libraries
     useTwoBytes = False # to save space, coordinates are reduced to the range 0-65535
 
     hasLabels = False
@@ -3762,6 +3761,7 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
         coordLabel = inCoordInfo["shortLabel"]
         logging.info("Parsing coordinates for "+coordLabel+" from "+coordFname)
         # 'limits' is everything needed to transform coordinates to the final 0-1.0  or 0-65535 coord system
+        flipY = inConf.get("flipY", False) # R has a bottom screen 0 different than most drawing libraries
         flipY = bool(inCoordInfo.get("flipY", flipY))
 
         coords = parseCoordsAsDict(coordFname)
