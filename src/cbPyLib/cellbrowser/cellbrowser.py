@@ -4878,7 +4878,7 @@ def runSafeRankGenesGroups(adata, clusterField, minCells=5):
     sc.pp.filter_genes(adata, min_cells=minCells) # rank_genes_groups crashes on zero-value genes
 
     # cell clusters with a cell count = 1 crash rank_genes, so remove their cells
-    clusterCellCounts = list(adata.obs.groupby([clusterField]).apply(len).iteritems())
+    clusterCellCounts = list(adata.obs.groupby([clusterField]).apply(len).items())
     filterOutClusters = [cluster for (cluster,count) in clusterCellCounts if count==1]
     if len(filterOutClusters)!=0:
         logging.info("Removing cells in clusters %s, as they have only a single cell" % filterOutClusters)
@@ -4911,7 +4911,7 @@ def saveMarkers(adata, markerField, nb_marker, fname):
         col=list(concat.columns)
         col[0],col[-2]='z_score','gene'
         concat.columns=col
-        marker_df=marker_df.append(concat)
+        marker_df=pd.concat([marker_df,concat])
 
     #Rearranging columns -> Cluster, gene, score
     cols=marker_df.columns.tolist()
@@ -5063,16 +5063,28 @@ def check_nonnegative_integers(X):
 # copy end
 
 def exportScanpyOneFieldColor(fieldName, fieldValues, colors, outDir, configData):
-    " write a single color file, for one field "
+    "write a single color file, for one field"
     outFname = join(outDir, fieldName+"_colors.tsv")
     logging.info("Writing colors of field %s to %s" % (fieldName, outFname))
+    
+    # Debugging: print lengths and contents
+    #print(f"Field name: {fieldName}")
+    #print(f"Field values (length {len(fieldValues)}): {fieldValues}")
+    #print(f"Colors (length {len(colors)}): {colors}")
+
+    # Check lengths
+    if len(fieldValues) != len(colors):
+        logging.error(f"Mismatch in lengths: {len(fieldValues)} values vs {len(colors)} colors")
+        # Handle mismatch: you can either raise an exception or handle it gracefully
+        return
+
     ofh = open(outFname, "w")
-    assert(len(fieldValues)==len(colors))
+    assert len(fieldValues) == len(colors), f"Mismatch in lengths: {len(fieldValues)} values vs {len(colors)} colors"
     ofh.write("#val	color\n")
     for val, color in zip(fieldValues, colors):
         ofh.write("%s\t%s\n" % (val, color))
     ofh.close()
-    if not "colors" in configData:
+    if "colors" not in configData:
         configData["colors"] = {}
     configData["colors"][fieldName] = outFname
 
@@ -5080,8 +5092,17 @@ def exportScanpyColors(adata, outDir, configData):
     " create one tsv with the colors per color definition in adata "
     for fieldName in adata.obs.keys():
         colorKey = fieldName+"_colors"
-        if colorKey in adata.uns:
-            outFname = exportScanpyOneFieldColor(fieldName, adata.obs[fieldName].values.categories, adata.uns[colorKey], outDir, configData)
+        #if colorKey in adata.uns:
+            #outFname = exportScanpyOneFieldColor(fieldName, adata.obs[fieldName].values.categories, adata.uns[colorKey], outDir, configData)
+        if colorKey in adata.uns and adata.uns[colorKey] is not None and len(adata.uns[colorKey]) > 0:
+            fieldValues = adata.obs[fieldName].values.categories
+            colors = adata.uns[colorKey]    
+            # Check if colors is a list/array and has a non-zero length
+            if colors is not None and len(colors) > 0:
+                fieldValues = adata.obs[fieldName].values.categories
+                outFname = exportScanpyOneFieldColor(fieldName, fieldValues, colors, outDir, configData)
+            else:
+                logging.warning(f"Skipping {fieldName} because colors are not available or empty.")
     return configData
 
 def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=None,
