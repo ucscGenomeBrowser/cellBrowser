@@ -818,7 +818,7 @@ function MaxPlot(div, top, left, width, height, args) {
        var dblSize = 2*radius;
        var count = 0;
 
-       if (!(selCells===undefined || selCells.size===0))
+       if (selCells.size!==0)
            colors = makeAllGreyHex(colors.length);
 
        for (var i = 0; i < pxCoords.length/2; i++) {
@@ -840,7 +840,7 @@ function MaxPlot(div, top, left, width, height, args) {
            count++;
        }
 
-       // draw the selection as black rectangles
+       // overdraw the selection as black rectangles on top
        if (fatIdx===null) {
            ctx.globalAlpha = 0.7;
            ctx.fillStyle="black";
@@ -1111,16 +1111,20 @@ function MaxPlot(div, top, left, width, height, args) {
 
     function makeTemplates(radius, tileWidth, tileHeight, colors, fatIdx) {
     /* create an off-screen-canvas with the circle-templates that will be stamped later onto the bigger canvas 
-     * Add one final circle at the end with the outline, for the selection. */
+     * Add two circles at the end: 
+     * at index colors.length - circle with a black outline, for the selection later.
+     * at index colors.length+1 - grey circle, for the case when there is a selection active and everything else is grey
+     */
         var colCount = colors.length;
-        var off = document.createElement('canvas'); // not added to DOM, will be gc'ed
+        var off = document.createElement('canvas'); // not added to DOM, will be gc'ed at some point
 
         if (fatIdx!==null) {
             colCount = 2;
             colors = [colors[fatIdx], nonFatColorCircles];
+            //colors = ["000000", nonFatColorCircles];
         }
 
-       off.width = (colCount+1) * tileWidth;
+       off.width = (colCount+2) * tileWidth; // "+2" because we have two additional circles at the end
        off.height = tileHeight;
        var ctxOff = off.getContext('2d');
 
@@ -1128,19 +1132,24 @@ function MaxPlot(div, top, left, width, height, args) {
        for (var i = 0; i < colors.length; ++i) {
            ctxOff.fillStyle = "#"+colors[i];
            ctxOff.beginPath();
-           // arc(x, y, r, 0, 2*pi)
-           ctxOff.arc(i * tileWidth + radius +1, radius+1, radius, 0, 2 * Math.PI);
+           // parameters are: arc(x, y, r, 0, 2*pi)
+           ctxOff.arc(i * tileWidth + radius + 1, radius + 1, radius, 0, 2 * Math.PI);
            ctxOff.closePath();
            ctxOff.fill();
 
-           // only draw outline for big circles
-           if (radius>5) {
+           // only draw a pretty shaded outline for very big circles, at extremely high zoom levels
+           // or if we're in fattening mode and drawing the colored circle
+           if (radius > 6 || (fatIdx!==null && i==0)) {
                ctxOff.lineWidth=1.0;
-               var strokeCol = "#"+shadeColor(colors[i], 0.9);
+               var strokeCol = null;
+               if (fatIdx!==null)
+                   strokeCol = "#000000";
+               else
+                   strokeCol = "#"+shadeColor(colors[i], 0.9);
                ctxOff.strokeStyle=strokeCol;
 
                ctxOff.beginPath();
-               ctxOff.arc(i * tileWidth + radius + 1, radius +1, radius, 0, 2 * Math.PI);
+               ctxOff.arc(i * tileWidth + radius + 1, radius + 1, radius, 0, 2 * Math.PI);
                ctxOff.closePath();
                ctxOff.stroke();
            }
@@ -1153,8 +1162,18 @@ function MaxPlot(div, top, left, width, height, args) {
        ctxOff.strokeStyle="black";
        ctxOff.beginPath();
        // args: arc(x, y, r, 0, 2*pi)
-       ctxOff.arc((selImgId * tileWidth) + radius +1, radius+1, radius-1, 0, 2 * Math.PI);
+       ctxOff.arc((selImgId * tileWidth) + radius + 1, radius + 1, radius - 1, 0, 2 * Math.PI);
+       ctxOff.closePath();
        ctxOff.stroke();
+
+       // pre-render a grey circle for the non-selection, when something is selected, all the rest is drawn in grey
+       let greyImgId = colors.length + 1;
+       ctxOff.lineWidth = 1;
+       ctxOff.fillStyle = "#b2b2b2";
+       ctxOff.beginPath();
+       ctxOff.arc((greyImgId * tileWidth) + radius + 1, radius + 1, radius, 0, 2 * Math.PI);
+       ctxOff.closePath();
+       ctxOff.fill();
 
     return off;
     }
@@ -1181,7 +1200,7 @@ function MaxPlot(div, top, left, width, height, args) {
        return count;
     }
 
-    function blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius) {
+    function blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, selCells, greyIdx) {
    /* blit the circles onto the main canvas, using all colors */
        var count = 0;
        for (let i = 0; i < pxCoords.length/2; i++) {
@@ -1189,12 +1208,18 @@ function MaxPlot(div, top, left, width, height, args) {
            var pxY = pxCoords[2*i+1];
            if (isHidden(pxX, pxY))
                continue;
-           var col = coordColors[i];
+
+           var col = null;
+           // when a selection is active, draw everything in grey. This only works because the selection is overdrawn afterwards
+           // (The selection must be overdrawn later, because otherwise circles shine through the selection)
+           if (selCells.size===0)
+               col = coordColors[i];
+           else
+               col = greyIdx;
+
            count++;
-           // drawImage(img,sx,sy,swidth,sheight,x,y,width,height);
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
        }
-       //debug(count +" circles drawn");
        return count;
     }
 
@@ -1211,20 +1236,21 @@ function MaxPlot(div, top, left, width, height, args) {
        var tileHeight = tileWidth; // otherwise circles look cut off
 
        let off = makeTemplates(radius, tileWidth, tileHeight, colors, fatIdx);
+       var selOffIdx = colors.length; // second-to last template is the black outline, see makeTemplates()
+       let greyOffIdx = colors.length + 1; // last template is a grey circle
 
        ctx.save();
        if (alpha!==undefined)
            ctx.globalAlpha = alpha;
 
        let count = 0;
-       if (fatIdx!==null)
-            count = blitTwo(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, fatIdx, selImgId);
+       if (fatIdx===null)
+            count = blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, selCells, greyOffIdx);
         else
-            count = blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius);
+            count = blitTwo(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, fatIdx, selOffIdx);
 
        // overdraw the selection as solid black circle outlines
        ctx.globalAlpha = 0.7;
-       var selImgId = colors.length;
        selCells.forEach(function(cellId) {
            let pxX = pxCoords[2*cellId];
            let pxY = pxCoords[2*cellId+1];
@@ -1232,9 +1258,14 @@ function MaxPlot(div, top, left, width, height, args) {
                 return;
            // make sure that old leftover overlapping black circles don't shine through and redraw the circle
            // slow, but not sure what else I can do...
-           let col = coordColors[cellId];
+           let col = null;
+           if (fatIdx===null)
+               col = 0;
+           else
+               col = coordColors[cellId];
+               
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
-           ctx.drawImage(off, selImgId * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
+           ctx.drawImage(off, selOffIdx * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
         });
 
        ctx.restore();
@@ -1257,11 +1288,10 @@ function MaxPlot(div, top, left, width, height, args) {
         return intList;
     }
 
-    function makeAllGreyHex(count, exptIdx) {
-    /* return a list of count grey rgb integer values, except for one*/
+    function makeAllGreyHex(num) {
+    /* return a list of num grey hex strings */
         var hexList = [];
-        for (var i = 0; i < count; i++) {
-            //var colInt = parseInt("cccc", 16);
+        for (var i = 0; i < num; i++) {
             hexList.push("b2b2b2");
         }
         return hexList;
@@ -1342,7 +1372,12 @@ function MaxPlot(div, top, left, width, height, args) {
        var canvasData = ctx.getImageData(0, 0, width, height);
        var cData = canvasData.data;
 
-       var rgbColors = hexToInt(colors);
+       var rgbColors = null;
+       if (selCells.size===0)
+           rgbColors = hexToInt(colors);
+       else
+           rgbColors = hexToInt(makeAllGreyHex(colors.length)); // selection is active, all cells are grey, except the selection
+
        var invAlpha = 1.0 - alpha;
 
        var count = 0;
@@ -2237,7 +2272,6 @@ function MaxPlot(div, top, left, width, height, args) {
             }
         }
         self.scaleData();
-        self.selCells.clear();
         self._selUpdate();
     }
 

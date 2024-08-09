@@ -1,5 +1,3 @@
-// A viewer for (x,y) scatter plots of small circles
-// shows associated meta data (usually key->val attributes, one mapping per circle)
 // and expression data (string -> float, one mapping per circle)
 
 /* jshint -W097 */
@@ -19,18 +17,23 @@ var cellbrowser = function() {
     var gVersion = "$VERSION$"; // cellbrowser.py:copyStatic will replace this with the pip version or git release
     var gCurrentCoordName = null; // currently shown coordinates
 
-    // object with all information needed to map to the legend colors
+    // object with all information needed to map to the legend colors:
+    // all info about the current legend. gLegend.rows is an object with keys:
+    // color, defColor, label, count, intKey, strKey
+    // intKey can be int or str, depending on current coloring mode.
+    // E.g. in meta coloring, it's the metadata string value.
+    // When doing expression coloring, it's the expression bin index.
+    // strKey is used to save manually defined colors to localStorage, a string
     var gLegend = null;
+
+    // object with info about the current meta left side bar
+    // keys are:
+    // .rows = array of objects with .field and .value
+    var gMeta = {rows : [], mode:null};
 
     // optional second legend, for split screen mode
     var gOtherLegend = null;
 
-    // all info about the current legend. gLegend.rows is:
-    // [ colorHexStr, defaultColorHexStr, label, count, internalKey, uniqueKey ]
-    // internalKey can be int or str, depending on current coloring mode.
-    // E.g. in meta coloring, it's the metadata string value.
-    // When doing expression coloring, it's the expression bin index.
-    // uniqueKey is used to save manually defined colors to localStorage
 
     var renderer = null;
 
@@ -4413,6 +4416,9 @@ var cellbrowser = function() {
         /* show a dialog box with html in it */
         $('#tpDialog').remove();
 
+        if (options===undefined)
+            options = {};
+
         var addStr = "";
         if (options.width!==undefined)
             addStr = "max-width:"+options.width+"px;";
@@ -4876,11 +4882,13 @@ var cellbrowser = function() {
             if (uniqueKey==="")
                 uniqueKey = "_EMPTY_";
 
+            var color = null;
+            // default any color that looks like "NA" or "undefined" to grey
             if (likeEmptyString(label))
                 color = cNullColor;
             // override any color with the color specified in the current URL
             var savKey = COL_PREFIX+uniqueKey;
-            var color = getFromUrl(savKey, null);
+            color = getFromUrl(savKey, null);
 
             rows.push( {
                 "color": color,
@@ -5011,11 +5019,21 @@ var cellbrowser = function() {
         return metaInfo;
     }
 
+    function onSelectSameLinkClick (ev) {
+        let parent = ev.target.parentElement;
+        let metaIdx = parent.id.split("_")[1];
+        let metaBarField = gMeta.rows[metaIdx];
+        console.log(metaBarField);
+        findCellsMatchingQueryList([{"m":metaBarField.field, "eq":metaBarField.value}], 
+            function(cellIds) {
+                renderer.selectSet(cellIds);
+                }
+            );
+    }
+
     function onMetaMouseOver (event) {
     /* called when user hovers over meta element: shows the histogram of selected cells */
         var metaHist = db.metaHist;
-        if (metaHist===undefined || metaHist===null)
-            return;
 
         // mouseover over spans or divs will not find the id, so look at their parent, which is the main DIV
         var target = event.target;
@@ -5025,13 +5043,18 @@ var cellbrowser = function() {
 
         // change style of this field a little
         var metaSel = "#tpMetaBox_"+metaInfo.index;
-        //var backCol = "#666";
-        //var foreCol = "#FFF";
-        //$(metaSel).css({color: foreCol, backgroundColor: backCol});
-        //$(metaSel).children().css({color: foreCol, backgroundColor: backCol});
-        //$(metaSel).children().children().css({color: foreCol, backgroundColor: backCol});
         $(metaSel).addClass("tpMetaHover");
         $(metaSel+" .tpMetaValue").addClass("tpMetaHover");
+
+        $(".tpSameLink").remove();
+
+        if (gMeta.mode==="single" && metaInfo.type==="enum") {
+            $("#tpMetaLabel_"+metaInfo.index).append("<div class='tpSameLink' style='cursor: pointer; color:darkgrey; float:right'>Select same</div>");
+            $('.tpSameLink').on("click", onSelectSameLinkClick);
+        }
+
+        if (metaHist===undefined || metaHist===null)
+            return;
 
         var htmls = [];
 
@@ -5415,7 +5438,8 @@ var cellbrowser = function() {
         htmls.push('<select style="width:'+width+'px" id="'+id+'" placeholder="'+boxLabel+'" class="tpCombo">');
         htmls.push('</select>');
 
-        htmls.push('<div><button style="margin-top:4px" id="tpSplitOnGene">'+splitButtonLabel(true)+'</button></div>');
+        htmls.push('<div><button style="margin-top:4px" id="tpSplitOnGene">'+splitButtonLabel(true)+'</button>');
+        htmls.push('<button style="margin-left: 4px" id="tpMultiGene">Multi Gene</button></div>');
         htmls.push('<div><button style="margin-top:4px" id="tpResetColors">Reset to default cell type colors</button></div>');
         htmls.push('</div>');
     }
@@ -6766,6 +6790,64 @@ var cellbrowser = function() {
         //$('[title!=""]').tooltip();
     }
 
+    function onGenesLoadClick () {
+    /* user clicked 'load genes below' on the multi gene input dialog box */
+        let inText = $('#tpMultiGeneText').val();
+        inText = inText.trim().replace(/\r\n/g,"\n");
+        let geneNames = [];
+        if (inText.find("\n")!==-1) {
+            // multiple lines - use only first word on each line
+            inLines = inText.split("\n");
+            for (let l of inLines) {
+                if (l.startsWith("#"))
+                    continue;
+                let part1 = l.split(/ ,/)[0];
+                geneNames.push(part1);
+            }
+        } else {
+            // single line of text - accept comma or space or combinations
+            inText = inText.replace(/\n/g, " ");
+            inText = inText.replace(/,/g, " ");
+            inText = inText.replace(/ +/g, " ");
+            var idList = inText.split(" ");
+        }
+        //_dump(idList);
+        let outLines = [];
+        for (let i=0; i < idList.length; i++) {
+            let geneName = idList[i];
+            if (db.isGeneId(geneName)) {
+                outLines.push(geneName);
+                break;
+            }
+            let geneIds = db.findGenesExact(geneName);
+            if (geneIds.length===0) {
+                outLines.push("# "+geneName+": not found");
+                break;
+            }
+            if (geneIds.length>1) {
+                outLines.push("# "+geneName+": more than one matching gene ID, try entering gene IDs not symbols");
+                break;
+            }
+            outLines.push(geneIds[0]+" "+geneName);
+        }
+        alert(outLines.join("\n"));
+        //var re = new RegExp("\\*");
+    }
+
+    function onMultiGeneClick () {
+    /* user clicks the 'multi gene' button */
+        let htmls = [];
+        htmls.push("<div style='margin-bottom:5px'>");
+        htmls.push("<span>Enter multiple genes below. Either as a single line, comma- or space-separated. Or as one geneId or symbol per line.</span>");
+        htmls.push("<button id='tpGenesLoad' style='width: 150px; float:right'>Load genes below</button>");
+        htmls.push("</div>");
+
+        htmls.push("<textarea placeholder='Enter or paste gene names here' id='tpMultiGeneText' style='width:100%; height:100%'/>");
+        showDialogBox(htmls, "Color cells by the sum of expression values of multiple genes", {"width": 900, "height":600});
+
+        $('#tpGenesLoad').click( onGenesLoadClick );
+    }
+
     function buildLeftSidebar () {
     /* add the left sidebar with the meta data fields. db.loadConf
      * must have completed before this can be run, we need the meta field info. */
@@ -6861,6 +6943,8 @@ var cellbrowser = function() {
                 renderer.childPlot.activatePlot();
             }
         });
+
+        $("#tpMultiGene").click ( onMultiGeneClick );
 
         $("#tpLeftTabs").tabs();
         activateTab();
@@ -7456,6 +7540,11 @@ var cellbrowser = function() {
         for (let i=0; i<els.length; i++) {
             let el = els[i];
             var valIdx = parseInt(el.getAttribute("data-value-index"));
+            var valStr = null;
+
+            if (gLegend.type==="meta")
+                valStr = gLegend.rows[valIdx-1].label; // why -1 ?
+
             if (status==="none") {
                 if (el.checked)
                     renderer.unselectByColor(valIdx);
@@ -7477,7 +7566,7 @@ var cellbrowser = function() {
                 }
             }
             else if (status==="notNull") {
-                if (i===0) {
+                if ((i===0 && valStr===null) || (valStr!==null && likeEmptyString(valStr))) {
                     el.checked = false;
                     renderer.unselectByColor(valIdx);
                 }
@@ -8039,8 +8128,11 @@ var cellbrowser = function() {
                 rowDiv.html("<img src='"+fieldValue+"'></img>");
             } else
                 rowDiv.html(fieldValue);
-            rowDiv.attr('title', cellInfo[i]);
+            rowDiv.attr('title', fieldValue);
+            rowDiv.attr('data-one-cell', '1');
+            gMeta.rows.push( { field : metaInfo.label, value : fieldValue } );
         }
+        gMeta.mode="single";
 
         if (otherCellCount===0)
             $("#tpMetaNote").hide();
@@ -8297,7 +8389,7 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
         /* color by gene and select all cells in cluster */
         colorByLocus(geneName);
         // clusterName?
-        selectByColor
+        //selectByColor
     }
 
     function onHeatCellHover(rowIdx, colIdx, rowName, colName, value, ev) {
