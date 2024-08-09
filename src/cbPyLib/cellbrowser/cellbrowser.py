@@ -1394,7 +1394,8 @@ def metaToBin(inDir, inConf, outConf, fname, outDir):
         # very dumb heuristic to recognize fields that should not be treated as numbers but as enums
         # res.0.6 is the default field name for Seurat clustering. Field header sanitizing changes it to
         # res_0_6 which is not optimal, but namedtuple doesn't allow dots in names
-        if "luster" in cleanFieldName or \
+        if "eiden" in cleanFieldName or \
+                "luster" in cleanFieldName or \
                 "ouvain" in cleanFieldName or (fieldName.startswith("res_") and "_" in fieldName):
             forceType="enum"
 
