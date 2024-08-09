@@ -1460,10 +1460,10 @@ function CbDbFile(url) {
         return geneNameObjs;
     };
 
-    this.findGenesExact = function(geneSyns, geneSym) {
+    this.findGenesExact = function(geneSym) {
         /* search the geneSyns (arr of [syn, geneId]) for matches. Return arr of geneIds 
          * Used to resolve symbol to geneId (symToGene)*/
-        geneSym = geneSyns.toLowerCase();
+        geneSym = geneSym.toLowerCase();
         var geneSyns = self.geneSyns;
         var foundIds = [];
         for (var i=0; i<geneSyns.length; i++) {
@@ -1473,6 +1473,11 @@ function CbDbFile(url) {
                 foundIds.push(synRow[1]);
         }
         return foundIds;
+    }
+
+    this.isGeneId = function (geneId) {
+        /* check if a given string is a geneId */
+        return (geneId in self.geneOffsets);
     }
 
     function pickTssForGene(loc) {
