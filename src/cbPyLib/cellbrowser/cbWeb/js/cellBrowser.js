@@ -5120,8 +5120,15 @@ var cellbrowser = function() {
         /* user changed the layout in the combobox */
         var coordIdx = parseInt(params.selected);
 
-        var labelFieldIdx = parseInt($("#tpLabelCombo").val().split("_")[1]);
-        var labelFieldName = db.getMetaFields()[labelFieldIdx].name;
+        var labelFieldName = null;
+        var labelFieldVal = $("#tpLabelCombo").val();
+        if (labelFieldVal!==null) {
+            var labelFieldToken = $("#tpLabelCombo").val().split("_")[1];
+            if (labelFieldToken!=="none") {
+                var labelFieldIdx = parseInt(labelFieldToken);
+                labelFieldName = db.getMetaFields()[labelFieldIdx].name;
+            }
+        }
 
         loadCoordSet(coordIdx, labelFieldName);
 
