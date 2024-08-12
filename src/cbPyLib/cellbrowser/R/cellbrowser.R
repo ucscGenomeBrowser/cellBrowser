@@ -411,6 +411,7 @@ ExportToCellbrowser <- function(
       message("Writing top ", markers.n, ", cluster markers to ", fname)
       #markers.order <- ave(x = rownames(x = markers), markers$cluster, FUN = markers.helper)
       #top.markers <- markers[markers.order[!is.na(x = markers.order)], ]
+      require(dplyr);
       markers  %>% group_by(cluster) %>% top_n(n = markers.n, wt = avg_logFC)
       write.table(x = markers, file = fname, quote = FALSE, sep = "\t", col.names = NA)
     } else {
