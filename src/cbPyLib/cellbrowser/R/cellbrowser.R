@@ -412,7 +412,8 @@ ExportToCellbrowser <- function(
       #markers.order <- ave(x = rownames(x = markers), markers$cluster, FUN = markers.helper)
       #top.markers <- markers[markers.order[!is.na(x = markers.order)], ]
       require(dplyr);
-      markers  %>% group_by(cluster) %>% top_n(n = markers.n, wt = avg_logFC)
+      #markers  %>% group_by(cluster) %>% top_n(n = markers.n, wt = avg_logFC)
+      markers %>% group_by(cluster) %>% dplyr::filter(avg_log2FC > 1) %>% slice_head(n = markers.n)
       write.table(x = markers, file = fname, quote = FALSE, sep = "\t", col.names = NA)
     } else {
       message("No clusters found in Seurat object and no external marker file provided, so no marker genes can be computed")
