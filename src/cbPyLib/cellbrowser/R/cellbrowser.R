@@ -381,21 +381,20 @@ ExportToCellbrowser <- function(
   }
   if (is.null(markers.file) && !skip.markers) {
     if (length(levels(Idents(object))) > 1) {
-      markers.helper <- function(x) {
-        partition <- markers[x,]
+      #markers.helper <- function(x) {
+        #partition <- markers[x,]
 
         # Seurat4 changed the field name! grrrr...
-        if ("avg_log2FC" %in% colnames(markers))
-            avgs <- -partition$avg_log2FC
-        else
-            avgs <- -partition$avg_logFC
-
-        ord <- order(partition$p_val_adj < 0.05, avgs)
-        res <- x[ord]
-        naCount <- max(0, length(x) - markers.n)
-        res <- c(res[1:markers.n], rep(NA, naCount))
-        return(res)
-      }
+        #if ("avg_log2FC" %in% colnames(markers))
+            #avgs <- -partition$avg_log2FC
+        #else
+            #avgs <- -partition$avg_logFC
+        #ord <- order(partition$p_val_adj < 0.05, avgs)
+        #res <- x[ord]
+        #naCount <- max(0, length(x) - markers.n)
+        #res <- c(res[1:markers.n], rep(NA, naCount))
+        #return(res)
+      #}
       if (.hasSlot(object, "misc") && !is.null(x = object@misc["markers"][[1]])) {
         message("Found precomputed markers in obj@misc['markers']")
         markers <- object@misc["markers"]$markers
@@ -404,15 +403,16 @@ ExportToCellbrowser <- function(
         markers <- FindAllMarkers(
           object,
           do.print = TRUE,
-          print.bar = TRUE,
-          test.use = "wilcox",
-          logfc.threshold = 0.25
+          only.pos = TRUE,
+          logfc.threshold = 0.25,
+          min.pct = 0.25
         )
       }
       message("Writing top ", markers.n, ", cluster markers to ", fname)
-      markers.order <- ave(x = rownames(x = markers), markers$cluster, FUN = markers.helper)
-      top.markers <- markers[markers.order[!is.na(x = markers.order)], ]
-      write.table(x = top.markers, file = fname, quote = FALSE, sep = "\t", col.names = NA)
+      #markers.order <- ave(x = rownames(x = markers), markers$cluster, FUN = markers.helper)
+      #top.markers <- markers[markers.order[!is.na(x = markers.order)], ]
+      markers  %>% group_by(cluster) %>% top_n(n = markers.n, wt = avg_logFC)
+      write.table(x = markers, file = fname, quote = FALSE, sep = "\t", col.names = NA)
     } else {
       message("No clusters found in Seurat object and no external marker file provided, so no marker genes can be computed")
       file <- NULL
