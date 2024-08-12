@@ -403,7 +403,7 @@ ExportToCellbrowser <- function(
         markers <- FindAllMarkers(
           object,
           do.print = TRUE,
-          #only.pos = TRUE,
+          only.pos = TRUE,
           logfc.threshold = 0.25,
           min.pct = 0.25
         )
