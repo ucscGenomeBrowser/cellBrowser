@@ -1203,19 +1203,21 @@ function MaxPlot(div, top, left, width, height, args) {
     function blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, selCells, greyIdx) {
    /* blit the circles onto the main canvas, using all colors */
        var count = 0;
+       var useColor = false;
+       if (selCells.size===0)
+           useColor = true;
+
+       var col = greyIdx;
        for (let i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
            var pxY = pxCoords[2*i+1];
            if (isHidden(pxX, pxY))
                continue;
 
-           var col = null;
            // when a selection is active, draw everything in grey. This only works because the selection is overdrawn afterwards
            // (The selection must be overdrawn later, because otherwise circles shine through the selection)
-           if (selCells.size===0)
+           if (useColor)
                col = coordColors[i];
-           else
-               col = greyIdx;
 
            count++;
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
@@ -1249,7 +1251,7 @@ function MaxPlot(div, top, left, width, height, args) {
         else
             count = blitTwo(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, fatIdx, selOffIdx);
 
-       // overdraw the selection as solid black circle outlines
+       // overdraw the selection as circles with black outlines
        ctx.globalAlpha = 0.7;
        selCells.forEach(function(cellId) {
            let pxX = pxCoords[2*cellId];
@@ -1260,11 +1262,12 @@ function MaxPlot(div, top, left, width, height, args) {
            // slow, but not sure what else I can do...
            let col = null;
            if (fatIdx===null)
-               col = 0;
-           else
                col = coordColors[cellId];
-               
+           else
+               col = 0;
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
+
+           // now draw the black outline
            ctx.drawImage(off, selOffIdx * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
         });
 
