@@ -5076,12 +5076,11 @@ def exportScanpyOneFieldColor(fieldName, fieldValues, colors, outDir, configData
 
     # Check lengths
     if len(fieldValues) != len(colors):
-        logging.error(f"Mismatch in lengths: {len(fieldValues)} values vs {len(colors)} colors")
+        logging.error("Mismatch of lengths in h5ad: %s values vs %d colors" % (len(fieldValues), len(colors)))
         # Handle mismatch: you can either raise an exception or handle it gracefully
         return
 
     ofh = open(outFname, "w")
-    assert len(fieldValues) == len(colors), f"Mismatch in lengths: {len(fieldValues)} values vs {len(colors)} colors"
     ofh.write("#val	color\n")
     for val, color in zip(fieldValues, colors):
         ofh.write("%s\t%s\n" % (val, color))
@@ -5104,7 +5103,7 @@ def exportScanpyColors(adata, outDir, configData):
                 fieldValues = adata.obs[fieldName].values.categories
                 outFname = exportScanpyOneFieldColor(fieldName, fieldValues, colors, outDir, configData)
             else:
-                logging.warning(f"Skipping {fieldName} because colors are not available or empty.")
+                logging.warning("Skipping %s because colors are not available or empty." % fieldName)
     return configData
 
 def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=None,
