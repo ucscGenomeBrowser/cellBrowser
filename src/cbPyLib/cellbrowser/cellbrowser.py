@@ -7036,14 +7036,20 @@ def cbScanpyCli():
     copyFileIfDiffSize(matrixFname, join(outDir, basename(matrixFname)))
 
 def readGenesBarcodes(geneFname, barcodeFname):
-    " return two lists "
+    " read the features.tsv or barcodes.tsv file, return two lists "
     genes = []
     sep = sepForFile(geneFname)
     for l in openFile(geneFname):
         row = l.rstrip("\r\n").split(sep) # field 3 is "Gene Expression" in cr3
         if len(row)>1:
             geneId, sym = row[:2]
-            genes.append(geneId+"|"+sym)
+            # we have seen features.tsv files where geneId==sym which switched off gene ID resolution
+            # e.g. the t004 dataset 
+            if (geneId!=sym):
+                genes.append(geneId+"|"+sym)
+            else:
+                genes.append(geneId)
+
         else:
             geneId = row[0]
             genes.append(geneId)
