@@ -5069,6 +5069,7 @@ var cellbrowser = function() {
             function(cellIds) {
                 colorByMetaField(metaBarField.field);
                 renderer.selectSet(cellIds);
+                renderer.drawDots();
                 }
             );
     }
