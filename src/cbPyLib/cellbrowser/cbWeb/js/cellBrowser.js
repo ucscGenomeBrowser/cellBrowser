@@ -3437,9 +3437,7 @@ var cellbrowser = function() {
                 return;
             console.log("Received expression vector, for "+locusStr+", desc: "+geneDesc);
             // update the URL and possibly the gene combo box
-            //var fullLocusStr = locusStr;
             if (locusStr.indexOf("|") > -1) {
-                //fullLocusStr = peakListSerialize(); // the locus str can be +chr1:1-1000 to add a single gene, but we want all
                 if (locusStr.length < 600)
                     // this is rare, so just completely skip this URL change now
                     changeUrl({"locus":locusStr, "meta":null});
@@ -3468,9 +3466,14 @@ var cellbrowser = function() {
             if (db.isAtacMode()) {
                 locusWithSym = shortenRange(locusStr);
             } else {
-                let geneInfo = db.getGeneInfo(locusStr);
-                if ((geneInfo.sym!==geneInfo.geneId))
-                    locusWithSym = geneInfo.id+"|"+geneInfo.sym;
+                if (locusStr.indexOf("+")===-1) {
+                    let geneInfo = db.getGeneInfo(locusStr);
+                    if ((geneInfo.sym!==geneInfo.geneId))
+                        locusWithSym = geneInfo.id+"|"+geneInfo.sym;
+                } else { 
+                    locusWithSym = locusStr+"|MultiGenes";
+                    geneDesc = "multiple genes";
+                }
             }
 
             gRecentGenes.unshift([locusWithSym, geneDesc]); // insert at position 0
@@ -3488,6 +3491,11 @@ var cellbrowser = function() {
         db.loadExprAndDiscretize(locusStr, gotGeneVec, onProgress, db.conf.binStrategy);
 
     }
+
+    function colorByMultiGenes(geneIds, locusLabel) {
+        colorByLocus(geneIds.join("+"), null, locusLabel)
+    }
+
 
     function gotCoords(coords, info, clusterInfo, newRadius) {
         /* called when the coordinates have been loaded */
@@ -4388,9 +4396,13 @@ var cellbrowser = function() {
         }
         else {
             //  make a best effort to find the gene sym and gene ID
-            var geneInfo = db.getGeneInfo(geneSym);
-            geneSym = geneInfo.sym;
-            subTitle = geneInfo.id;
+            if (geneSym.indexOf("+")===-1) {
+                var geneInfo = db.getGeneInfo(geneSym);
+                geneSym = geneInfo.sym;
+                subTitle = geneInfo.id;
+            } else {
+                subTitle = "Sum of "+geneSym.split("+").length+" genes";
+            }
             gLegend.title = getGeneLabel()+": "+geneSym;
         }
 
@@ -5420,9 +5432,9 @@ var cellbrowser = function() {
             var field = metaFieldInfo[i];
             var fieldName = field.label;
             // cannot label on something that is a number or has a ton of values
-            var hasTooManyVals = (field.diffValCount>MAXCOLORCOUNT || field.type==="int" || field.type==="float");
-            if (hasTooManyVals)
-                continue;
+            //var hasTooManyVals = (field.diffValCount>MAXCOLORCOUNT || field.type==="int" || field.type==="float");
+            //if (hasTooManyVals)
+                //continue;
 
             entries.push( ["tpMetaVal_"+i, fieldName] );
             if (selectedField == fieldName) {
@@ -5471,7 +5483,7 @@ var cellbrowser = function() {
 
         htmls.push('<div><button style="margin-top:4px" id="tpSplitOnGene">'+splitButtonLabel(true)+'</button>');
         htmls.push('<button style="margin-left: 4px" id="tpMultiGene">Multi Gene</button></div>');
-        htmls.push('<div><button style="margin-top:4px" id="tpResetColors">Reset to default cell type colors</button></div>');
+        htmls.push('<div><button style="margin-top:4px" id="tpResetColors">Reset to default coloring</button></div>');
         htmls.push('</div>');
     }
 
@@ -5974,7 +5986,6 @@ var cellbrowser = function() {
         var geneId = ev.target.value;
         if (geneId==="") // "" = user deleted the gene.
             return;
-        //var geneId = db.getGeneInfo(geneId).;
         buildGeneExprPlots(geneId, null);
     }
 
@@ -6555,6 +6566,8 @@ var cellbrowser = function() {
         htmls.push('<label id="tpGeneExprMetaLabel" for="'+"tpGeneExprMetaCombo"+'">split by cell annotation</label>');
         buildMetaFieldCombo(htmls, "tpGeneExprMetaComboBox", "tpGeneExprMetaCombo", 0);
 
+        htmls.push('<button id="tpGeneExprAddMulti" style="padding-left: 15px; padding-right: 15px; padding-bottom: 5px; padding-top: 5px; margin-left: 15px">Add multiple genes</button>');
+
         //htmls.push('<input style="margin-left:4em" type="checkbox" id="tpGeneExprYLimitCheck"></input>');
         //htmls.push('<label style="margin-left:0.6em" for="tpGeneExprYLimitCheck">Set maximum to</label>');
         //htmls.push('<input style="margin-left:0.6em" type="text" id="tpGeneExprYLimit" size="7"></input>');
@@ -6578,6 +6591,7 @@ var cellbrowser = function() {
 
         $("#tpBackToCb").click( closeExprView );
         $('#tpCloseButton').click( closeExprView );
+        $('#tpGeneExprAddMulti').click( onGeneExprAddGenesClick  );
 
         /*
         $('#tpGeneExprFlipType').click( function() { 
@@ -6640,7 +6654,7 @@ var cellbrowser = function() {
             htmls.push('<button id="tpOpenDatasetButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Open another dataset" data-placement="bottom">Open...</button>');
 
         //if (!db.conf.atacSearch)
-        htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Violin Plot Viewer" data-placement="bottom">Gene Expression</button>');
+        htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Violin Plot Viewer" data-placement="bottom">Gene Expression Plots</button>');
 
         //var nextLeft = 220;
         if (db.conf.hubUrl!==undefined) {
@@ -6821,18 +6835,19 @@ var cellbrowser = function() {
         //$('[title!=""]').tooltip();
     }
 
-    function onGenesLoadClick () {
-    /* user clicked 'load genes below' on the multi gene input dialog box */
-        let inText = $('#tpMultiGeneText').val();
+    function parseGenesFromTextBox(textBoxQuery, onDone) {
+        //let inText = $('#tpMultiGeneText').val();
+        let inText = $(textBoxQuery).val();
+
         inText = inText.trim().replace(/\r\n/g,"\n");
         let geneNames = [];
-        if (inText.find("\n")!==-1) {
+        if (inText.indexOf("\n")!==-1) {
             // multiple lines - use only first word on each line
-            inLines = inText.split("\n");
+            let inLines = inText.split("\n");
             for (let l of inLines) {
                 if (l.startsWith("#"))
                     continue;
-                let part1 = l.split(/ ,/)[0];
+                let part1 = l.split(/[ ,]/)[0];
                 geneNames.push(part1);
             }
         } else {
@@ -6840,43 +6855,96 @@ var cellbrowser = function() {
             inText = inText.replace(/\n/g, " ");
             inText = inText.replace(/,/g, " ");
             inText = inText.replace(/ +/g, " ");
-            var idList = inText.split(" ");
+            geneNames = inText.split(" ");
         }
-        //_dump(idList);
+
+        // check if all the inputs are either a geneId or a uniquely resolving gene symbol
+        // if not, alert the user, fix the text box by commenting out the errors and stop.
         let outLines = [];
-        for (let i=0; i < idList.length; i++) {
-            let geneName = idList[i];
+        let allGeneIds = [];
+        let errCount = 0;
+        let allSyms = [];
+        for (let i=0; i < geneNames.length; i++) {
+            let geneName = geneNames[i];
             if (db.isGeneId(geneName)) {
                 outLines.push(geneName);
-                break;
+                allGeneIds.push(geneName);
+                allSyms.push(geneName);
             }
-            let geneIds = db.findGenesExact(geneName);
-            if (geneIds.length===0) {
-                outLines.push("# "+geneName+": not found");
-                break;
+            else {
+                // not a gene ID
+                let geneIds = db.findGenesExact(geneName);
+                if (geneIds.length===0) {
+                    outLines.push("# "+geneName+": not found");
+                    errCount++;
+                } else if (geneIds.length>1) {
+                    outLines.push("# "+geneName+": more than one matching gene ID, try entering gene IDs, not symbols");
+                    errCount++;
+                }
+                else {
+                    let geneId = geneIds[0];
+                    allGeneIds.push(geneId);
+                    outLines.push(geneId+" "+geneName);
+                    allSyms.push(geneName);
+                }
             }
-            if (geneIds.length>1) {
-                outLines.push("# "+geneName+": more than one matching gene ID, try entering gene IDs not symbols");
-                break;
-            }
-            outLines.push(geneIds[0]+" "+geneName);
         }
-        alert(outLines.join("\n"));
-        //var re = new RegExp("\\*");
+
+        let outLineStr = outLines.join('\n');
+        localStorage.setItem("multiGene", outLineStr);
+        if (errCount!==0) {
+            alert("At least one of the input geneIds are not found or is not unique. The input was corrected. ");
+            $(textBoxQuery).val(outLineStr);
+        } else {
+            $(".ui-dialog-content").dialog("close");
+            //colorByMultiGenes(allGeneIds, null, allSyms.join("+"));
+            onDone(allGeneIds, allSyms.join("+"));
+        }
+    }
+
+    function onMultiGeneLoadClick (ev) {
+    /* user clicked 'load genes below' on the multi gene input dialog box */
+        parseGenesFromTextBox("#tpMultiGeneText", colorByMultiGenes);
+    }
+
+    function buildMultiGeneBox (htmls) {
+        htmls.push("<div style='margin-bottom:5px'>");
+        htmls.push("<span>Enter multiple genes below. Either as a single line, separated by commas or spaces.<br>");
+        htmls.push("Or as one geneId or symbol per line, in which case only the first word of every line is used.</span>");
+        htmls.push("<button id='tpGenesLoad' style='height: 1.3em; width: 200px; float:right'>Load the genes below</button>");
+        htmls.push("</div>");
+
+        htmls.push("<textarea placeholder='Enter or paste gene names here' id='tpMultiGeneText' style='width:100%; height:100%'/>");
+    }
+
+    function onGeneExprAddGenesClick() {
+
+    }
+
+    function onGeneExprAddGenesClick() {
+        /* user clicked 'Add multiple genes' on the gene expression dialog */
+        let htmls = [];
+        buildMultiGeneBox(htmls);
+        showDialogBox(htmls, "Color cells by the sum of expression values of multiple genes", {"width": 900, "height":600});
+
+        let lastVal = localStorage.getItem("multiGene");
+        if (lastVal !== undefined)
+            $("#tpMultiGeneText").val(lastVal);
+
+        $('#tpGenesLoad').click( onGeneExprAddGenesLoadClick );
     }
 
     function onMultiGeneClick () {
     /* user clicks the 'multi gene' button */
         let htmls = [];
-        htmls.push("<div style='margin-bottom:5px'>");
-        htmls.push("<span>Enter multiple genes below. Either as a single line, comma- or space-separated. Or as one geneId or symbol per line.</span>");
-        htmls.push("<button id='tpGenesLoad' style='width: 150px; float:right'>Load genes below</button>");
-        htmls.push("</div>");
-
-        htmls.push("<textarea placeholder='Enter or paste gene names here' id='tpMultiGeneText' style='width:100%; height:100%'/>");
+        buildMultiGeneBox(htmls);
         showDialogBox(htmls, "Color cells by the sum of expression values of multiple genes", {"width": 900, "height":600});
 
-        $('#tpGenesLoad').click( onGenesLoadClick );
+        let lastVal = localStorage.getItem("multiGene");
+        if (lastVal !== undefined)
+            $("#tpMultiGeneText").val(lastVal);
+
+        $('#tpGenesLoad').click( onMultiGeneLoadClick );
     }
 
     function buildLeftSidebar () {
@@ -6959,6 +7027,7 @@ var cellbrowser = function() {
         activateTooltip('.hasTooltip');
 
         $("#tpResetColors").click ( function() { 
+            removeSplit(renderer);
             colorByDefaultField(undefined, true) 
             activateTab();
         });
