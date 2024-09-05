@@ -86,7 +86,8 @@ var cellbrowser = function() {
     //var cNullColor = "CCCCCC";
     //const cNullColor = "DDDDDD";
     //const cNullColor = "95DFFF"; //= light blue, also tried e1f6ff
-    const cNullColor = "e1f6ff"; //= light blue
+    //const cNullColor = "e1f6ff"; //= light blue
+    const cNullColor = "AFEFFF"; //= light blue
 
     const cDefGradPalette = "magma";  // default legend gradient palette for gene expression
     // this is a special palette, tol-sq with the first entry being a light blue, so 0 stands out a bit more
@@ -1743,7 +1744,6 @@ var cellbrowser = function() {
         clearSelectionState();
         renderer.selectClear();
         renderer.drawDots();
-
     }
 
     function onSelectNoneClick() {
@@ -1924,6 +1924,8 @@ var cellbrowser = function() {
             }
             else {
                 var metaValTag = $('#tpSelectMetaCombo_'+rowIdx).val();
+                if (metaValTag===undefined)
+                    continue; // if the user deleted a row
                 var metaIdx = parseInt(metaValTag.split("_")[1]);
                 var metaInfo = db.conf.metaFields[metaIdx];
                 var metaName = metaInfo.name;
@@ -2238,7 +2240,7 @@ var cellbrowser = function() {
             buildOneComboboxRow(htmls, comboWidth, i, query);
         }
 
-        htmls.push("<div id='tpSelectAddRowLink' class='link'>Add another search criterion</div>");
+        htmls.push("<div id='tpSelectAddRowLink' class='link'>Add another search criterion - cells must match both conditions</div>");
 
         showDialogBox(htmls, "Find cells based on annotation or gene expression", {showClose:true, height:dlgHeight, width:dlgWidth, buttons:buttons});
 
@@ -2631,21 +2633,40 @@ var cellbrowser = function() {
         });
     }
 
-    function onSelectByIdClick() {
-        /* Edit - select cells by ID */
-
+    function selectCellsById(cellIds, hasWildcards, onDone) {
+        /* create a new selection from the cells given the cell IDs, call onDone when ready with missing IDs. */
         function onSearchDone(searchRes) {
+            // little helper function
             var idxArr = searchRes[0];
             var notFoundIds = searchRes[1];
 
+            renderer.selectSet(idxArr);
+            renderer.drawDots();
+
+            if (cellIds.length===1) {
+                let cellId = cellIds[0];
+                db.loadMetaForCell(cellId, function(ci) {
+                    updateMetaBarOneCell(ci, cellCountBelow);
+                }, onProgress);
+            }
+
+            if (onDone)
+                onDone(notFoundIds);
+        }
+
+        db.loadFindCellIds(cellIds, onSearchDone, onProgressConsole, hasWildcards);
+    }
+
+    function onSelectByIdClick() {
+        /* Edit - Find cells by ID */
+
+
+        function onDone(notFoundIds) {
             if (notFoundIds.length!==0) {
                 $('#tpNotFoundIds').text("Could not find these IDs: "+notFoundIds.join(", "));
                 $('#tpNotFoundHint').text("Please fix them and click the OK button to try again.");
             } else
                 $( "#tpDialog" ).dialog( "close" );
-
-            renderer.selectSet(idxArr);
-            renderer.drawDots();
         }
 
         var dlgHeight = 500;
@@ -2662,7 +2683,7 @@ var cellbrowser = function() {
                 var re = new RegExp("\\*");
 
                 var hasWildcards = $("#tpHasWildcard")[0].checked;
-                db.loadFindCellIds(idList, onSearchDone, onProgressConsole, hasWildcards);
+                selectCellsById(idList, hasWildcards, onDone);
                 }
             }
         ];
@@ -3776,6 +3797,11 @@ var cellbrowser = function() {
                else
                    renderer.drawDots();
 
+               // this requires coordinates to be loaded
+               if (getVar("cell")!==undefined) {
+                   selectCellsById([getVar("cell")], false, null)
+               }
+
                //if (db.conf.multiModal && db.conf.multiModal.splitPrefix)
                    //renderer.split();
            }
@@ -3845,9 +3871,12 @@ var cellbrowser = function() {
        if ("traces" in db.conf.fileVersions)
            db.loadTraces(gotTraces);
 
+       // -- this should probably go into a new function handleVars() or something like that ---
        if (getVar("select")!==undefined) {
            selList = JSURL.parse(getVar("select"));
        }
+
+       // -- end of handleVars()?
 
        if (db.conf.atacSearch) {
            // peak loading needs the gene -> peak assignment, as otherwise can't show any peaks on the left
@@ -4892,7 +4921,7 @@ var cellbrowser = function() {
 
             rows.push( {
                 "color": color,
-                "defColor": null,
+                "defColor": color,
                 "label": label,
                 "count": count,
                 "intKey":valIdx,
@@ -5020,12 +5049,13 @@ var cellbrowser = function() {
     }
 
     function onSelectSameLinkClick (ev) {
+        /* user clicks the "select same" link in the meta bar */
         let parent = ev.target.parentElement;
         let metaIdx = parent.id.split("_")[1];
         let metaBarField = gMeta.rows[metaIdx];
-        console.log(metaBarField);
         findCellsMatchingQueryList([{"m":metaBarField.field, "eq":metaBarField.value}], 
             function(cellIds) {
+                colorByMetaField(metaBarField.field);
                 renderer.selectSet(cellIds);
                 }
             );
@@ -5048,8 +5078,8 @@ var cellbrowser = function() {
 
         $(".tpSameLink").remove();
 
-        if (gMeta.mode==="single" && metaInfo.type==="enum") {
-            $("#tpMetaLabel_"+metaInfo.index).append("<div class='tpSameLink' style='cursor: pointer; color:darkgrey; float:right'>Select same</div>");
+        if (gMeta.mode==="single" && metaInfo.type==="enum" && renderer.getSelection().length==1) {
+            $("#tpMeta_"+metaInfo.index).append("<div title='select all cells with this value in this meta data field' class='tpSameLink' style='cursor: pointer; color:darkgrey; float:right'>Select same</div>");
             $('.tpSameLink').on("click", onSelectSameLinkClick);
         }
 
@@ -5075,6 +5105,7 @@ var cellbrowser = function() {
 
         $('#tpMetaTip').css({top: tipTop+"px", left: metaBarWidth+"px", width:metaTipWidth+"px"});
         $('#tpMetaTip').show();
+        activateTooltip(".tpSameLink");
     }
 
     function buildComboBox(htmls, id, entries, selIdx, placeholder, width, opts) {
@@ -6740,8 +6771,8 @@ var cellbrowser = function() {
                     styleAdd = ";font-size:"+metaInfo.opt.fontSize;
             }
 
-            htmls.push("<div class='tpMetaValue' style='width:"+(metaBarWidth-2*metaBarMargin)+"px"+styleAdd+
-                "' data-field-name='"+metaInfo.name+"' id='tpMeta_" + i + "'>&nbsp;</div>");
+            htmls.push("<div class='tpMetaValue' style='"+styleAdd+
+                    "' data-field-name='"+metaInfo.name+"' id='tpMeta_" + i + "'>&nbsp;</div>");
             htmls.push("</div>"); // tpMetaBox
         }
         htmls.push("<div style='background-color:white; float:right' id='tpMetaNote' style='display:none; height:1em'></div>");
@@ -6759,8 +6790,8 @@ var cellbrowser = function() {
         activateTooltip(".tpMetaLabelHelp");
         $(".tpMetaLabel").click( onMetaClick );
         $(".tpMetaValue").click( onMetaClick );
-        $(".tpMetaValue").mouseover( onMetaMouseOver );
-        $(".tpMetaValue").mouseleave ( function() {
+        $(".tpMetaValue").on("mouseenter", onMetaMouseOver );
+        $(".tpMetaValue").on ("mouseout", function() {
             $('#tpMetaTip').hide();
             $('.tpMetaBox').removeClass("tpMetaHover");
             $('.tpMetaBox .tpMetaValue').removeClass("tpMetaHover");
@@ -6880,7 +6911,7 @@ var cellbrowser = function() {
         buildMetaFieldCombo(htmls, "tpLabelComboBox", "tpLabelCombo", 0, db.conf.labelField, "doLabels");
 
         htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px" id="tpHoverHint" class="tpHint">Hover over a '+gSampleDesc+' to update data below</div>');
-        htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px; display: none" id="tpSelectHint" class="tpHint">Cells selected. No update on hover.</div>');
+        htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px; display: none" id="tpSelectHint" class="tpHint">Cells are selected. No update on hover.</div>');
 
         htmls.push("<div id='tpMetaPanel'>");
         buildMetaPanel(htmls);
