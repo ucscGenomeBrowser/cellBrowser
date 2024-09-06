@@ -8797,7 +8797,8 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
                 geneListCol = i;
             }
             else if (colLabel==="pVal" || /[pP].[Vv]al.*/.test(colLabel)) {
-                colLabel = "P-value";
+                if (colLabel==="pVal" || colLabel==="p_val" || colLabel==="p-value")
+                    colLabel = "P-value";
                 pValCol = i-1; // the table displayed does not have the "id" column
                 isNumber = true;
                 if (i===2)
