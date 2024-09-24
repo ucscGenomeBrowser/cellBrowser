@@ -165,6 +165,7 @@ def sendDebugToFile(fname):
     logger.setLevel(logging.DEBUG) #By default, logs all messages
 
     # log to console
+    consLevel = logging.INFO
     ch = logging.StreamHandler() #StreamHandler logs to console
     ch.setLevel(consLevel)
     ch_format = logging.Formatter('%(asctime)s - %(message)s')
@@ -5509,6 +5510,14 @@ def fixupName(inConfFname, inConf):
 
         relPath = relpath(dirname(abspath(inConfFname)), dataRoot)
     else:
+        if not "name" in inConf:
+            errAbort("Not running in data hierarchy mode. "
+                "The config file %s needs at least the setting 'name' to a short string, e.g. 'cortex-dev'. "
+                "If you set  a dataRoot directory in your ~/.cellbrowser file or via the CBDATAROOT variable, then the input datasets "
+                "are assumed to be under one single directory and their subdirectory name is the datasetname. "
+                "See https://cellbrowser.readthedocs.io/en/master/collections.html "
+                "Otherwise, as now, they can be spread out over the entire filesystem but then the directory name cannot be used to "
+                "derive the cell browser dataset name. Instead, a 'name' setting must be present in every cellbrowser.conf file." % inConfName)
         relPath = inConf["name"]
 
     dsName = inConf["name"]
