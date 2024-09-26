@@ -5501,14 +5501,15 @@ def resolveOutDir(outDir):
 
 def fixupName(inConfFname, inConf):
     " detect hierarchical mode and construct the output path "
-    dataRoot = findRoot(inConfFname)
+    inFullPath = abspath(inConfFname)
+    dataRoot = findRoot(dirname(inFullPath))
     if dataRoot:
         if "name" in inConf:
-            logging.debug("using dataset hierarchies: 'name' in %s is ignored" % inConfFname)
+            logging.debug("using dataset hierarchies: 'name' in %s is ignored" % inFullPath)
         logging.debug("Deriving dataset name from path")
-        inConf["name"] = basename(dirname(abspath(inConfFname)))
+        inConf["name"] = basename(dirname(inFullPath))
 
-        relPath = relpath(dirname(abspath(inConfFname)), dataRoot)
+        relPath = relpath(dirname(inFullPath), dataRoot)
     else:
         if not "name" in inConf:
             errAbort("Not running in data hierarchy mode. "
