@@ -3647,7 +3647,8 @@ var cellbrowser = function() {
            peakListSetStatus(colorBy);
        } else
            // must be gene then
-           colorByLocus(colorBy, onDone);
+           var geneId = db.mustFindOneGeneExact(colorBy);
+           colorByLocus(geneId, onDone);
     }
 
    function makeFullLabel(db) {
@@ -6908,6 +6909,11 @@ var cellbrowser = function() {
         parseGenesFromTextBox("#tpMultiGeneText", colorByMultiGenes);
     }
 
+    function onGeneExprAddGenesLoadClick (ev) {
+    /* user clicked 'load genes below' on the multi gene input dialog box */
+        parseGenesFromTextBox("#tpMultiGeneText", colorByMultiGenes);
+    }
+
     function buildMultiGeneBox (htmls) {
         htmls.push("<div style='margin-bottom:5px'>");
         htmls.push("<span>Enter multiple genes below. Either as a single line, separated by commas or spaces.<br>");
@@ -6919,14 +6925,10 @@ var cellbrowser = function() {
     }
 
     function onGeneExprAddGenesClick() {
-
-    }
-
-    function onGeneExprAddGenesClick() {
         /* user clicked 'Add multiple genes' on the gene expression dialog */
         let htmls = [];
         buildMultiGeneBox(htmls);
-        showDialogBox(htmls, "Color cells by the sum of expression values of multiple genes", {"width": 900, "height":600});
+        showDialogBox(htmls, "Add mulitple genes to dot-plot", {"width": 900, "height":600});
 
         let lastVal = localStorage.getItem("multiGene");
         if (lastVal !== undefined)
