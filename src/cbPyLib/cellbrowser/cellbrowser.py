@@ -3469,11 +3469,15 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
         return {}
     logging.debug("Parsing %s" % fname)
     symToGene = None
+    nonUniqueSyms = defaultdict(set)
     if geneToSym is not None:
         symToGene = dict()
         for gene, sym in iterItems(geneToSym):
+            if sym in symToGene:
+                #logging.warning("Symbol %s is not unique, geneID %s" % (sym, gene))
+                nonUniqueSyms[sym].add(gene)
+                nonUniqueSyms[sym].add(symToGene[sym])
             symToGene[sym] = gene
-
 
     atacByChrom = None # only filled lazily if we find any ATAC quick ranges
     sep = sepForFile(fname)
@@ -3528,6 +3532,9 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
                 geneId = symToGene[sym]
             else:
                 errAbort("Gene %s in quickgenes file is neither a symbol nor a geneId" % repr(geneOrSym))
+            if sym in nonUniqueSyms:
+                logging.warn("Symb %s in quick genes files is not unique. Which of these genes do you mean: %s. "
+                        "Use geneId|sym in quickgenes file to solve this." % (sym, ",".join(nonUniqueSyms[sym])))
             geneStr = geneId+"|"+sym
 
         # case 5: it is an ATAC dataset and the quickgenes file has ranges
@@ -3979,7 +3986,14 @@ def readValidGenes(outDir, inConf):
     if len(geneToSym)==0:
         geneToSym = None
 
-    return set(syms), set(geneIds), geneToSym
+    symSet = set(syms)
+
+    #symCounts = Counter(syms).most_common()
+    #for sym, count in symCounts:
+        #if count > 1:
+            #logging.warn("Symbol %d is not unique" % count)
+
+    return symSet, set(geneIds), geneToSym
 
 def readQuickGenes(inConf, geneToSym, outDir, outConf):
     " read quick genes file and make sure that the genes in it are in the matrix "
