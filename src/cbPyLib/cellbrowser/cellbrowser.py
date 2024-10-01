@@ -3108,13 +3108,14 @@ def readFile(fname, encoding="utf8"):
 
 def readFileIntoDict(summInfo, key, inDir, fname, mustExist=False, encoding="utf8"):
     " return file with encoding as string into dictionary "
-    logging.debug("Reading file into dict. %s, inDir %s, file name %s" % (key, inDir, fname))
     fname = join(inDir, fname)
     if not isfile(fname):
         if mustExist:
             errAbort("%s does not exist" % fname)
         else:
             return
+
+    logging.debug("Reading file into dict. %s, inDir %s, file name %s" % (key, inDir, fname))
 
     if fname.endswith(".json"):
         data = readJson(fname)
@@ -3166,6 +3167,57 @@ def copyBackgroundImages(inDir, inConf, outConf, datasetDir):
         newImages.append(imageInfo)
     outConf["images"] = newImages
 
+def parseImageTsv(fname):
+    """ parse a tsv file with images to a nested dict structure and return it 
+    input is a four or five column tsv file with mandatory headers:
+        section, set, label, fname, (isDownload, optional)
+    output is a nested dict:
+        list of categories (dict)
+        Each category has "categoryLabel" and "categoryImageSets" (list)
+        Each imageSet is a dict with keys:
+            setLabel and images and downloads.
+            Each image has keys "file" and "label".
+            Each download has keys "file" and "label".
+    """
+    checkOk = False
+    sections = dict()
+    for row in textFileRows(open(fname)):
+        if row[:4]==["section", "set", "label", "fname"]:
+            checkOk = True
+            continue
+        section, imgSet, label, fname = row
+
+        isDownload = False
+        if len(row)>4:
+            isDownload = bool(row[4])
+
+        sections.setdefault(section, {})
+        sections[section].setdefault(imgSet, {})
+        sections[section][imgSet].setdefault(isDownload, []).append( (label, fname) )
+
+    if not checkOk:
+        errAbort("imagesFile files must be .json or .tsv. If .tsv, must have at least these columns: section, set, label, fname")
+
+    out = []
+    for sectionName, setDict in sections.items():
+        sectDict = {}
+        sectDict["categoryLabel"] = sectionName
+        for setName, downDict in setDict.items():
+            setDict = {}
+            setDict["setLabel"] = setName
+            for isDownload, imgs in downDict.items():
+                for img in imgs:
+                    label, fname = img
+                    if isDownload:
+                        keyName = "downloads"
+                    else:
+                        keyName = "images"
+                    setDict.setdefault(keyName, []).append({"file":fname, "label":label})
+            sectDict.setdefault("categoryImageSets", []).append(setDict)
+        out.append(sectDict)
+
+    return out
+
 def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=None):
     " write a json file that describes the dataset abstract/methods/downloads "
     confFname = join(inDir, "datasetDesc.conf")
@@ -3211,8 +3263,12 @@ def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=No
         readFileIntoDict(summInfo, "methods", inDir, summInfo["methodsFile"], mustExist=True)
         del summInfo["methodsFile"]
 
-    if "imageSetFile" in summInfo:
-        readFileIntoDict(summInfo, "imageSets", inDir, summInfo["imageSetsFile"], mustExist=True)
+    if "imagesFile" in summInfo:
+        imgFname = summInfo["imagesFile"]
+        if imgFname.endswith(".json"):
+            readFileIntoDict(summInfo, "imageSets", inDir, imgFname, mustExist=True)
+        else:
+            summInfo["imageSets"] = parseImageTsv(imgFname)
     else:
         readFileIntoDict(summInfo, "imageSets", inDir, "images.json")
 
@@ -3262,10 +3318,12 @@ def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=No
         for catInfo in summInfo["imageSets"]:
             for imageSet in catInfo["categoryImageSets"]:
                 imageSetFnames = set()
-                for dl in imageSet.get("downloads"):
-                    copyImageFile(inDir, dl, imageDir, doneNames, imageSetFnames)
-                for img in imageSet.get("images"):
-                    copyImageFile(inDir, img, imageDir, doneNames, imageSetFnames)
+                if "downloads" in imageSet:
+                    for dl in imageSet.get("downloads"):
+                        copyImageFile(inDir, dl, imageDir, doneNames, imageSetFnames)
+                if "images" in imageSet:
+                    for img in imageSet.get("images"):
+                        copyImageFile(inDir, img, imageDir, doneNames, imageSetFnames)
 
 
     # if we have a desc.conf: with so much data now in other files, generate the md5 from the data
