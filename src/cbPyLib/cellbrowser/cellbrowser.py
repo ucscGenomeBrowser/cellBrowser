@@ -3486,12 +3486,15 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
         if line.startswith("#"):
             continue
         line = removeBom(line)
+        line = line.rstrip("\r\n")
+        if len(line)==0:
+            continue
 
         hasDesc = False
         hasPmid = False
         if line.startswith("symbol"):
             continue
-        row = line.rstrip("\r\n").split(sep)
+        row = line.split(sep)
         geneOrSym = row[0]
 
         # case 1: user provides both geneId and symbol. Rare.
