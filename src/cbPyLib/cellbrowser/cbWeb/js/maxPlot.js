@@ -104,7 +104,6 @@ function MaxPlot(div, top, left, width, height, args) {
             addStatusLine(height-gStatusHeight, left, width, gStatusHeight);
             addTitleDiv(height-gTitleSize-gStatusHeight-4, 8);
 
-            console.log(self.parentPlot, self.childPlot);
             /* add the div used for the mouse selection/zoom rectangle to the DOM */
             var selectDiv = document.createElement('div');
             selectDiv.id = "mpSelectBox";
@@ -1851,7 +1850,7 @@ function MaxPlot(div, top, left, width, height, args) {
              alert("internal error: alpha is not defined");
         if (coords===null)
              alert("internal error: cannot draw if coordinates are not set yet");
-        if (colArr.length !== (coords.length>>1))
+        if (colArr && colArr.length !== (coords.length>>1))
             alert("internal error: cbDraw.drawDots - colorArr is not 1/2 of coords array. Got "+pal.length+" color values but coordinates for "+(coords.length/2)+" cells.");
 
         if (doSvg!==undefined) {

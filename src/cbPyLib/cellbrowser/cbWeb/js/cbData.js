@@ -853,15 +853,22 @@ function CbDbFile(url) {
 
     this.locusToOffset = function(name) {
         /* for both gene and ATAC mode: */
-        /* return an array [start, end, name] given a locus description (=a string: gene symbol or chr|start|end) */
+        /* return an array [start, end, name] given a locus description (=a string: gene ID/symbol or chr|start|end) */
         var off = null;
+        var geneId = name;
         //if (name.includes("|")) { // atac mode: name is chrom|start|end
         if (self.peakOffsets !== null) { // atac mode: name is chrom|start|end
             let pos = name.split("|");
             off = self.findAtacOffsets(pos[0], parseInt(pos[1]), parseInt(pos[2]));
         }
         else {
-            off = self.geneOffsets[name];
+            var geneIds = self.findGenesExact(name);
+            if (geneIds.length!==0) {
+                geneId = geneIds[0];
+                off = self.geneOffsets[geneIds[0]];
+                if (geneIds.length>1)
+                    alert("More than one match for gene name "+name+", using only first match.");
+            }
         }
 
         if (off===null || off===undefined) {
@@ -872,7 +879,7 @@ function CbDbFile(url) {
         let start = off[0];
         let len = off[1];
         let end = start+len;
-        return [start, end, name];
+        return [start, end, geneId];
     }
 
     this.namesToChunks = function(lociNames) {
@@ -1382,19 +1389,22 @@ function CbDbFile(url) {
 	return lo;
     }
 
-    function updateGeneSyns(geneSyns, name) {
+    function addToGeneSynsAndSplit(geneSyns, name) {
         /* given a symbol which can be geneId|sym, append to geneSyn array 1 or 2 tuples with [searchKey, geneId] */
+        var geneId = name;
+        var sym = name;
         if (name.indexOf("|")===-1) {
             // datasets with only one gene name: old behavior
             geneSyns.push( [name.toLowerCase(), name] );
         } else {
             // dataset with geneId and symbol
             var parts = name.split("|");
-            var geneId = parts[0];
-            var sym = parts[1];
+            geneId = parts[0];
+            sym = parts[1];
             geneSyns.push( [geneId.toLowerCase(), geneId] );
             geneSyns.push( [sym.toLowerCase(), geneId] );
         }
+        return [geneId, sym];
     }
 
     this.indexGenes = function() {
@@ -1405,24 +1415,16 @@ function CbDbFile(url) {
         var newIdx = {};
         var geneIdx = self.geneOffsets;
         var geneSyns = [];
-        for (var key in geneIdx) { // as of 2019, faster than Object.entries()
-            updateGeneSyns(geneSyns, key);
-
-            var val = geneIdx[key];
-            var sym = key;
-            var geneId = key;
-            if (key.indexOf("|")!==-1) {
-                var parts = key.split("|");
-                geneId = parts[0];
-                sym = parts[1];
-            }
-
-            var newVal = [val[0], val[1], sym];
-            newIdx[geneId] = newVal;
-                
-            self.geneOffsets=newIdx;
-            self.geneSyns = geneSyns;
+        for (var geneName in geneIdx) { // as of 2019, faster than Object.entries()
+            // a geneName can be either a single symbol or a string like geneId|sym
+            var offsets = geneIdx[geneName];
+            var geneIdSym = addToGeneSynsAndSplit(geneSyns, geneName);
+            var geneId = geneIdSym[0];
+            var sym = geneIdSym[1];
+            newIdx[geneId] = [offsets[0], offsets[1], sym];
         }
+        self.geneOffsets=newIdx;
+        self.geneSyns = geneSyns;
     }
 
     function searchGeneNames(geneSyns, searchStr) {
@@ -1437,7 +1439,7 @@ function CbDbFile(url) {
         return foundIds;
     }
 
-    this.findGeneIds = function(searchStr) {
+    this.findGeneIdsPrefixSuffix = function(searchStr) {
         /* return an array of matching geneIds for searchStr, uses self.geneSyns */
         searchStr = searchStr.toLowerCase();
         var geneSyns = self.geneSyns;
@@ -1452,7 +1454,7 @@ function CbDbFile(url) {
      * returns an array of objects with .id and .sym.
      * There is a version using this for ATAC mode, see findGenesAtac()
      * */
-        var foundIds = self.findGeneIds(searchStr);
+        var foundIds = self.findGeneIdsPrefixSuffix(searchStr);
         var geneNameObjs = [];
         for (var geneId of foundIds)
             geneNameObjs.push(self.getGeneInfo(geneId)); // for selectizeSendGenes
@@ -1475,6 +1477,18 @@ function CbDbFile(url) {
         return foundIds;
     }
 
+    this.mustFindOneGeneExact= function(symOrId) {
+        /* given a geneId or symbol, return the geneId. If 0 or >1 are found, abort and show error message. */
+        let geneIds = self.findGenesExact(symOrId);
+        if (geneIds.length===0) {
+            alert("Could not find gene symbold or ID: "+symOrId);
+            return null;
+        }
+        if (geneIds.length>1) {
+            alert("Found more than one geneId for symbol, using only the first match: "+symOrId);
+        }
+        return geneIds[0];
+    }
     this.isGeneId = function (geneId) {
         /* check if a given string is a geneId */
         return (geneId in self.geneOffsets);
@@ -1535,7 +1549,7 @@ function CbDbFile(url) {
     this.findGenesAtac = function(searchStr) {
         /* like findGenes(), but for ATAC mode: return an array of {.id and .sym} given a search string  */
         //var geneInfos = cbUtil.searchKeys(self.geneToTss, searchStr);
-        var geneIds = self.findGeneIds(searchStr);
+        var geneIds = self.findGeneIdsPrefixSuffix(searchStr);
 
         if (geneIds.length===0)
             return [];

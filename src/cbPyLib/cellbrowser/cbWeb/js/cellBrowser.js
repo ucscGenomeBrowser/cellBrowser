@@ -567,7 +567,7 @@ var cellbrowser = function() {
         img.src = url;
     }
 
-    function openDatasetLoadPane(datasetInfo) {
+    function openDatasetLoadPane(datasetInfo, openTab) {
         /* open dataset dialog: load html into the three panes  */
         //var datasetName = datasetInfo.name;
         //var md5 = datasetInfo.md5;
@@ -602,6 +602,8 @@ var cellbrowser = function() {
               })
               .then(function(desc) {
                   datasetDescToHtml(datasetInfo, desc);
+                  if (openTab==="images")
+                      $("#tabLinkImg").click();
               });
         }
         else {
@@ -617,7 +619,12 @@ var cellbrowser = function() {
           $( "#pane3" ).hide();
           $( "#tabLink3" ).hide();
         }
-        $("#tpOpenDialogTabs").tabs("refresh").tabs("option", "active", 0);
+        var tabIdx = 0;
+        if (openTab==="images")
+            tabIdx=3;
+        $("#tpOpenDialogTabs").tabs("refresh").tabs("option", "active", tabIdx);
+        if (openTab==="images")
+            $("#tabLinkImg").click();
     }
 
     let descLabels = {
@@ -816,7 +823,7 @@ var cellbrowser = function() {
         }
 
         let htmls = [];
-        htmls.push("<h4>Microscopy images</h4>");
+        htmls.push("<h4>Supplemental high-resolution images</h4>");
         // TOC
         let catIdx = 0;
         htmls.push("<div style='padding-bottom:8px'>Jump to: ");
@@ -840,27 +847,31 @@ var cellbrowser = function() {
             htmls.push("<div style='padding-left:1em; padding-top:4px' class='tpImgSets'>");
 
             for (let imgSet of catInfo.categoryImageSets) {
-                let imgLinks = [];
                 if (imgSet.setLabel)
                     htmls.push("<b>"+imgSet.setLabel+"</b><br>");
                 htmls.push("<div style='padding-left:1em;' class='tpImgSetLinks'>");
-                for (let img of imgSet.images) {
-                    imgLinks.push("Show: <a target=_blank href='"+imgDir+img.file+"'>"+img.label+"</a>");
+
+                if (imgSet.images) {
+                    let imgLinks = [];
+                    for (let img of imgSet.images) {
+                        // the "Show: label only makes sense if there are any downloads at all
+                        let imgPrefix = "";
+                        if (imgSet.downloads!==undefined)
+                            imgPrefix = "Show: ";
+                        imgLinks.push(imgPrefix+"<a target=_blank href='"+imgDir+img.file+"'>"+img.label+"</a> ");
+                    }
+                    htmls.push(imgLinks.join(", "));
                 }
-                htmls.push(imgLinks.join(", "));
 
                 if (imgSet.downloads) {
                     let dlLinks = [];
                     for (let dl of imgSet.downloads) {
-                        //dlLinks.push("<a href='"+imgDir+dl.file+"' download><span style='font-size:12px' class='material-icons-round'>get_app</span>"+dl.label+"</a>");
                         dlLinks.push("<a href='"+imgDir+dl.file+"' download>"+dl.label+"</a>");
                     }
-                    //htmls.push("<br><div style='padding-left: 1em'>Download: ");
                     htmls.push("<br><div>Download: ");
                     htmls.push(dlLinks.join(", "));
                     htmls.push("</div>");
                 }
-                //htmls.push("<br>");
                 htmls.push("</div>"); //  tpImgSetLinks
             }
             htmls.push("</div>"); //  tpImgSets
@@ -1284,10 +1295,11 @@ var cellbrowser = function() {
             $('#tpDatasetCount').text("("+shownCount+" dataset collections)");
     }
 
-    function openDatasetDialog(openDsInfo, selName) {
+    function openDatasetDialog(openDsInfo, selName, openTab) {
     /* build dataset open dialog,
      * - openDsInfo is the currently open object or a collection.
      * - selName is the currently selected dataset in this list
+     * - openTab is optional, "images" opens the image tab
      */
 
         var datasetList = [];
@@ -1601,7 +1613,7 @@ var cellbrowser = function() {
             filterDatasetsDom();
         connectOpenPane(selDatasetIdx, datasetList);
         // finally, activate the default pane and load its html
-        openDatasetLoadPane(openDsInfo);
+        openDatasetLoadPane(openDsInfo, openTab);
     }
 
     function onHideSelClick(ev) {
@@ -3138,6 +3150,7 @@ var cellbrowser = function() {
 
         let exprMax = exprArr[0];
         let exprMin = exprArr[0];
+
         for (var i=0; i < exprArr.length; i++) {
             var exprVal = exprArr[i];
             var metaVal = metaArr[i];
@@ -3642,14 +3655,17 @@ var cellbrowser = function() {
            setColorByDropdown(colorBy);
            $('#tpMetaBox_'+fieldIdx).addClass('tpMetaSelect');
        }
-       else if (colorType==="locus") {
-           colorByLocus(colorBy, onDone);
-           peakListSetStatus(colorBy);
-       } else
-           // must be gene then
-           var geneId = db.mustFindOneGeneExact(colorBy);
-           colorByLocus(geneId, onDone);
-    }
+       else {
+           if (colorType==="locus") {
+               colorByLocus(colorBy, onDone);
+               peakListSetStatus(colorBy);
+           } else {
+               // must be gene then
+               var geneId = db.mustFindOneGeneExact(colorBy);
+               colorByLocus(geneId, onDone);
+           }
+        }
+   }
 
    function makeFullLabel(db) {
        /* return full name of current dataset, including parent names */
@@ -5988,7 +6004,7 @@ var cellbrowser = function() {
         var geneId = ev.target.value;
         if (geneId==="") // "" = user deleted the gene.
             return;
-        buildGeneExprPlots(geneId, null);
+        buildGeneExprPlots([geneId], null);
     }
 
     function promiseGene(locusStr, onProgress, metaArr, metaCount) {
@@ -6015,7 +6031,7 @@ var cellbrowser = function() {
                 geneData.exprMax = exprMax;
                 geneData.avgMin = dotData.avgMin;
                 geneData.avgMax = dotData.avgMax;
-                geneData.locusStr = locusStr;
+                geneData.geneId = locusStr;
                 geneData.geneDesc = geneDesc;
                 resolve(geneData);
             }
@@ -6221,14 +6237,17 @@ var cellbrowser = function() {
             }, 5);
     }
 
-    function plotDotRowLabels(htmls, labelWidth, minX, minY, rowDist, labels) {
+    function plotDotRowLabels(htmls, labelWidth, minX, minY, rowDist, labels, cellCounts) {
         /* plot the names of the meta values downwards on the left */
         let x = minX;
         let fontSize = 14;
         for (let i=0; i < labels.length; i++) {
             let label = labels[i];
+            if (label==="")
+                label = "(empty)";
             let y = minY+(i*rowDist)+(fontSize);
-            htmls.push("<text font-family='sans-serif' font-size='"+fontSize+"' fill='black' alignment-baseline='bottom' text-anchor='start' x='"+x+"' y='"+y+"'>"+label+"</text>");
+            let tooltip = cellCounts[i]+" cells";
+            htmls.push("<text title='"+tooltip+"' font-family='sans-serif' font-size='"+fontSize+"' fill='black' alignment-baseline='bottom' text-anchor='start' x='"+x+"' y='"+y+"'>"+label+"</text>");
         }
     }
 
@@ -6239,7 +6258,7 @@ var cellbrowser = function() {
 
         for (let i=0; i < geneSyms.length; i++) {
             let label = geneSyms[i];
-            let x = minX+(i+xDist)+(fontSize);
+            let x = minX+(i*xDist)+(fontSize);
             htmls.push("<text font-family='sans-serif' font-weight='bold' font-size='"+fontSize+"' fill='black' transform='translate("+x+", "+y+
                     ") rotate(90)' alignment-baseline='bottom' text-anchor='end'>"+label+"</text>");
         }
@@ -6256,24 +6275,30 @@ var cellbrowser = function() {
         let binCount = colors.length;
         let binSize = (avgMax-avgMin)/binCount;
 
-        let x = leftPad+colDist+(0.5*colDist);
         for (let rowI=0; rowI < rows.length; rowI++) {
             let row = rows[rowI];
-            let cellCount = cellCounts[rowI];
-            let nonZeroPercent = row[0];
-            let avgExpr = row[1];
+            for (let colI=0; colI < row.length; colI++) {
+                let cellCount = cellCounts[rowI];
+                let colData = row[colI];
+                let nonZeroCount = colData[0];
+                let avgExpr = colData[1];
 
-            let y = topPad+(rowI*rowDist);
+                let y = topPad+(rowI*rowDist);
+                let x = leftPad+(colI*colDist)+(0.5*colDist);
 
-            let radius = Math.max(1, Math.round(nonZeroPercent*(maxDotSize*0.5)));
+                let nonZeroPercent = 0;
+                if (cellCount!==0)
+                    nonZeroPercent = nonZeroCount / cellCount;
+                let radius = Math.max(1, Math.round(nonZeroPercent*(maxDotSize*0.5)));
 
-            let alpha = 0.7;
+                let alpha = 0.7;
 
-            let colBin = Math.min(binCount, Math.round((avgExpr-avgMin) / binSize)); // at the edge, floating point problems can make it sometimes 21
-            let color = colors[colBin];
+                let colBin = Math.min(binCount, Math.round((avgExpr-avgMin) / binSize)); // at the edge, floating point problems can make it sometimes 21
+                let color = colors[colBin];
 
-            let tooltip = cellCount.toLocaleString('en-US')+" cells: expressing="+Math.round(100*nonZeroPercent)+"%, avgExpr="+avgExpr.toFixed(2);
-            htmls.push("<circle class='tpDotCircle' title='"+tooltip+"' cx='"+x+"' cy='"+y+"' r='"+radius+"' fill-opacity='"+alpha+"' fill='#"+color+"' />");
+                let tooltip = cellCount.toLocaleString('en-US')+" cells: expressing="+Math.round(100*nonZeroPercent)+"% ("+nonZeroCount+" cells), avgExpr="+avgExpr.toFixed(2);
+                htmls.push("<circle class='tpDotCircle' title='"+tooltip+"' cx='"+x+"' cy='"+y+"' r='"+radius+"' fill-opacity='"+alpha+"' fill='#"+color+"' />");
+            }
         }
     }
 
@@ -6330,13 +6355,17 @@ var cellbrowser = function() {
 
     }
 
-    let dotplotGenes = [];
+    let exprData = null;
 
-    function addDotPlotGenes(geneIds) {
-    }
-
-    function buildExprDotplot(parentDomId, genes, cellCounts, dotRows, metaLabels, avgMin, avgMax) {
+    function buildExprDotplot(parentDomId, exprData) {
         /* create an svg under parentDomId that shows dot plots for each meta category */
+        let genes = exprData.syms;
+        let cellCounts = exprData.cellCounts;
+        let dotRows = exprData.rows;
+        let metaLabels = exprData.metaLabels;
+        let avgMin = exprData.allAvgMin;
+        let avgMax = exprData.allAvgMax;
+
         let htmls = [];
         let parentEl = getById(parentDomId);
 
@@ -6384,7 +6413,7 @@ var cellbrowser = function() {
 
         let colorPal = makeColorPalette(cDefGradPalette, 20);
 
-        plotDotRowLabels(htmls, rowLabelWidth, leftPad, colLabelHeight, rowHeight, rowLabels);
+        plotDotRowLabels(htmls, rowLabelWidth, leftPad, colLabelHeight, rowHeight, rowLabels, cellCounts);
         plotDotColumnLabels(htmls, leftPad+rowLabelWidth, topPad+colLabelHeight-10, colWidth, genes);
         plotDotCircles(htmls, dotRows, leftPad+rowLabelWidth, topPad+colLabelHeight, colWidth, rowHeight, maxDotSize, colorPal, cellCounts, avgMin, avgMax);
         plotLegend(htmls, avgMin, avgMax, leftPad+rowLabelWidth+(colCount*colWidth)+cellCountColWidth, topPad+colLabelHeight, colorPal, legendWidth, legendHeight, maxDotSize)
@@ -6393,6 +6422,7 @@ var cellbrowser = function() {
 
         parentEl.innerHTML = htmls.join("");
         $(".tpDotCircle").tooltip({show:false}); // switch off animations. For some reason, the Bootstrap tooltip doesn't seem to work on the SVG tag
+        $("text").tooltip({show:false}); // switch off animations. For some reason, the Bootstrap tooltip doesn't seem to work on the SVG tag
     }
 
     //function summarizeGeneExpr(metaToExpr, doLog) {
@@ -6424,7 +6454,7 @@ var cellbrowser = function() {
     function calcDotData(metaToExpr, doLog) {
         /* summarize gene expression to an array of rows [cellCount, nonZeroPercent, avgExpr], one per row */
         /* input is an array of small exprArrays, one array of expression values per meta value */
-        /* returns object with o.rows of this array and o.avgMax and o.avgMin */
+        /* returns object with o.dotRows of this array and o.avgMax and o.avgMin */
         let rows = [];
         let avgMax = -1000000;
         let avgMin = 1000000;
@@ -6443,13 +6473,13 @@ var cellbrowser = function() {
             }
             let cellCount = exprArr.length;
             let avg = 0;
-            let nonZeroPercent = 0;
+            //let nonZeroPercent = 0;
             if (cellCount!==0) {
                 avg = sum / cellCount;
-                nonZeroPercent = nonZeroCount / cellCount;
+                //nonZeroPercent = nonZeroCount / cellCount;
             }
 
-            rows.push( [cellCount, nonZeroPercent, avg] );
+            rows.push( [cellCount, nonZeroCount, avg] );
             avgMax = Math.max(avgMax, avg);
             avgMin = Math.min(avgMin, avg);
         }
@@ -6482,9 +6512,58 @@ var cellbrowser = function() {
         progressLabel.text( label );
     }
 
-    var oldDotData = [];
-    var oldMetaArr = [];
-    var oldMetaCount = 0;
+    function exprDataLoadGenes(geneIds, exprData, onDone) {
+        /* add a list of geneIds to the current exprData object */
+        let promises = [];
+        for (let geneId of geneIds) {
+            geneId = geneId.split("|")[0]; // internal genes sometimes can be in format ENSG-ID|geneSymbol
+            if (exprData.geneIds.indexOf(geneId)===-1)
+                promises.push( promiseGene(geneId, geneExprOnProgress, exprData.metaData.arr, exprData.metaData.valCounts.length ));
+        }
+
+        // pull out necesssary data from exprData object
+        let rows = exprData.rows;
+        let cellCounts = exprData.cellCounts;
+        let allAvgMax = exprData.allAvgMax; // -1000000;
+        let allAvgMin = exprData.allAvgMin; // 1000000;
+
+        let addNewRows = false;
+        if (exprData.syms.length===0)
+            addNewRows = true;
+
+        // reformat gene expression to an array of gene symbols, an array of meta values, 
+        // an array of cell counts (one per meta value) and
+        // an array of [ [zeroPerc0, avg0], [zeroPerc1, avg1], ... ]
+        Promise.all(promises).then( function(resArr) {
+            let cellCountsDone = false; // we need to copy the cell counts only once, not for every gene again
+            //for (let geneData of resArr) {
+            for (let geneIdx = 0; geneIdx < resArr.length; geneIdx++) {
+                let geneData = resArr[geneIdx];
+                exprData.syms.push( geneData.geneDesc );
+                exprData.geneIds.push( geneData.geneId );
+                allAvgMax = Math.max(geneData.avgMax, allAvgMax);
+                allAvgMin = Math.min(geneData.avgMin, allAvgMin);
+
+                let dotRows = geneData.dotRows;
+
+                //for (let dotRow of geneData.dotRows) {
+                for (let rowIdx=0; rowIdx < dotRows.length; rowIdx++) {
+                    let dotRow = geneData.dotRows[rowIdx];
+                    if (addNewRows)
+                        rows.push( [] );
+
+                    rows[rowIdx].push( [dotRow[1], dotRow[2]] ); // copy over zeroPerc and avg
+                    if (!cellCountsDone) {
+                        cellCounts.push( dotRow[0] );
+                    }
+                }
+                cellCountsDone = true;
+            }
+            exprData.allAvgMin = allAvgMin;
+            exprData.allAvgMax = allAvgMax;
+            onDone();
+        });
+    }
 
     function buildGeneExprPlots(geneIds, metaName, plotType) {
         /* build the plots for the gene expression viewer */
@@ -6548,45 +6627,28 @@ var cellbrowser = function() {
         buildProgressBar('progressBarExpr');
         buildProgressBar('progressBarMeta');
 
+        if (exprData===null) {
+            exprData = {};
+            exprData.metaData = {};
+            exprData.metaLabels = [];
+            exprData.syms = [];
+            exprData.rows = [];
+            exprData.cellCounts = [];
+            exprData.geneIds = [];
+            exprData.allAvgMax = -1000000;
+            exprData.allAvgMin = +1000000;
+        }
+
         Promise.all([promiseMeta(metaName, geneExprOnProgress)]).then( function (resArr) {
-            let metaData = resArr[0];
-            let shortLabels = metaData.ui.shortLabels;
-            let metaArr = metaData.arr;
-            let metaCount = metaData.valCounts.length;
-            
-            let promises = [];
-            for (let geneId of geneIds) {
-                geneId = geneId.split("|")[0]; // internal genes sometimes can be in format ENSG-ID|geneSymbol
-                promises.push( promiseGene(geneId, geneExprOnProgress, metaArr, metaCount) )
-            }
+            exprData.metaData = resArr[0];
+            exprData.metaLabels = exprData.metaData.ui.shortLabels;
 
-            // reformat gene expression to an array of gene symbols, an array of meta values, 
-            // an array of cell counts (one per meta value) and
-            // an array of [ [zeroPerc0, avg0], [zeroPerc1, avg1], ... ]
-            Promise.all(promises).then( function(resArr) {
-                let syms = [];
-                let rows = [];
-                let cellCounts = [];
-                let cellCountsDone = false; // we need to copy the cell counts only once
-                let allAvgMax = -1000000;
-                let allAvgMin = 1000000;
-                for (let geneData of resArr) {
-                    syms.push( geneData.geneDesc );
-                    //exprMins.push( geneData.exprMin );
-                    //exprMaxs.push( geneData.exprMax );
-                    allAvgMax = Math.max(geneData.avgMax, allAvgMax);
-                    allAvgMin = Math.min(geneData.avgMin, allAvgMin);
+            function onGenesDone () { 
+                buildExprDotplot("tpExprViewPlot", exprData); 
+            };
 
-                    for (let dotRow of geneData.dotRows) {
-                        rows.push( [dotRow[1], dotRow[2]] ); // copy over zeroPerc and avg
-                        if (!cellCountsDone) {
-                            cellCounts.push( dotRow[0] );
-                        }
-                    }
-                    cellCountsDone = true;
-                }
-                buildExprDotplot("tpExprViewPlot", syms, cellCounts, rows, shortLabels, allAvgMin, allAvgMax);
-            });
+            exprDataLoadGenes(geneIds, exprData, onGenesDone);
+
         });
 
         //Promise.all([promiseGene(geneId, geneExprOnProgress), promiseMeta(metaName, geneExprOnProgress)]).then( function(resArr) {
@@ -6752,6 +6814,9 @@ var cellbrowser = function() {
         htmls.push("<div id='tpToolBar' style='position:absolute;left:"+fromLeft+"px;top:"+fromTop+"px'>");
         htmls.push('<button title="More info about this dataset: abstract, methods, data download, etc." id="tpButtonInfo" type="button" class="ui-button tpIconButton" data-placement="bottom">Info &amp; Download</button>');
 
+        if (db.conf.fileVersions.supplImageConf)
+            htmls.push('<button id="tpOpenImgButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Show supplemental hi-res images submitted with this dataset" data-placement="bottom">Supplemental Images</button>');
+
         if (!getVar("suppressOpenButton", false))
             htmls.push('<button id="tpOpenDatasetButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Open another dataset" data-placement="bottom">Open...</button>');
 
@@ -6797,8 +6862,11 @@ var cellbrowser = function() {
         activateTooltip('#tpOpenUcsc');
         activateTooltip('#tpOpenDatasetButton');
         activateTooltip('#tpOpenExprButton');
+        activateTooltip('#tpOpenImgButton');
 
         $('#tpButtonInfo').click( function() { openDatasetDialog(db.conf, db.name) } );
+
+        $('#tpOpenImgButton').click( function() { openDatasetDialog(db.conf, db.name, "images") } );
 
         activateCombobox("tpLayoutCombo", layoutComboWidth);
 
@@ -6938,6 +7006,7 @@ var cellbrowser = function() {
     }
 
     function parseGenesFromTextBox(textBoxQuery, onDone) {
+        /* parse the geneIds from a text box that matches selector textBoxQuery. runs onDone(geneIds) when done */
         //let inText = $('#tpMultiGeneText').val();
         let inText = $(textBoxQuery).val();
 
@@ -7000,18 +7069,26 @@ var cellbrowser = function() {
         } else {
             $(".ui-dialog-content").dialog("close");
             //colorByMultiGenes(allGeneIds, null, allSyms.join("+"));
-            onDone(allGeneIds, allSyms);
+            return { "geneIds":allGeneIds, "syms" : allSyms };
         }
     }
 
     function onMultiGeneLoadClick (ev) {
-    /* user clicked 'load genes below' on the multi gene input dialog box */
-        parseGenesFromTextBox("#tpMultiGeneText", colorByMultiGenes);
+    /* user clicked 'load genes below' on the multi gene input dialog box to color the UMAP plot */
+        let inGenes = parseGenesFromTextBox("#tpMultiGeneText");
+        colorByMultiGenes(inGenes.geneIds, inGenes.syms);
     }
 
     function onGeneExprAddGenesLoadClick (ev) {
-    /* user clicked 'load genes below' on the multi gene input dialog box */
-        parseGenesFromTextBox("#tpMultiGeneText", colorByMultiGenes);
+    /* user clicked 'load genes below' on the multi gene input dialog box to update the dotplot */
+        let inGenes = parseGenesFromTextBox("#tpMultiGeneText");
+
+        function onExprDataDone() {
+            buildExprDotplot("tpExprViewPlot", exprData); 
+        }
+
+        exprDataLoadGenes(inGenes.geneIds, exprData, onExprDataDone);
+
     }
 
     function buildMultiGeneBox (htmls) {
@@ -7043,7 +7120,7 @@ var cellbrowser = function() {
         if (lastVal !== undefined)
             $("#tpMultiGeneText").val(lastVal);
 
-        $('#tpGenesLoad').click( onGeneExprLoadGenesClick );
+        $('#tpGenesLoad').click( onGeneExprAddGenesLoadClick );
     }
 
     function onMultiGeneClick () {
