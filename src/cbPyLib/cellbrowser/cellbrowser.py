@@ -3179,11 +3179,17 @@ def parseImageTsv(fname):
             Each image has keys "file" and "label".
             Each download has keys "file" and "label".
     """
-    checkOk = False
-    sections = dict()
+    headerOk = False
+    sections = OrderedDict()
+    headers = None
     for row in textFileRows(open(fname)):
-        if row[:4]==["section", "set", "label", "fname"]:
-            checkOk = True
+        row[0] = row[0].lstrip("#")
+        if headers is None:
+            headers = row
+            if not headers[:4]==["section", "set", "label", "fname"]:
+                headerOk = True
+            if headerOk:
+                errAbort("imagesFile files must be .json or .tsv. If .tsv, must have at least these columns in this order: section, set, label, fname. Header found was: %s" % headers)
             continue
         section, imgSet, label, fname = row
 
@@ -3191,12 +3197,9 @@ def parseImageTsv(fname):
         if len(row)>4:
             isDownload = bool(row[4])
 
-        sections.setdefault(section, {})
-        sections[section].setdefault(imgSet, {})
+        sections.setdefault(section, OrderedDict())
+        sections[section].setdefault(imgSet, OrderedDict())
         sections[section][imgSet].setdefault(isDownload, []).append( (label, fname) )
-
-    if not checkOk:
-        errAbort("imagesFile files must be .json or .tsv. If .tsv, must have at least these columns: section, set, label, fname")
 
     out = []
     for sectionName, setDict in sections.items():
@@ -3269,8 +3272,9 @@ def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=No
             readFileIntoDict(summInfo, "imageSets", inDir, imgFname, mustExist=True)
         else:
             summInfo["imageSets"] = parseImageTsv(imgFname)
-    else:
-        readFileIntoDict(summInfo, "imageSets", inDir, "images.json")
+        outConf["fileVersions"]["supplImageConf"] = getFileVersion(imgFname)
+    #else:
+        #readFileIntoDict(summInfo, "imageSets", inDir, "images.json")
 
     # import the unit description from cellbrowser.conf
     if "unit" in outConf and not "unitDesc" in summInfo:
