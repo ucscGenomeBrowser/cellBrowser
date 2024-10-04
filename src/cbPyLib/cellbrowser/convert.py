@@ -19,12 +19,14 @@ def cbToolCli_parseArgs(showHelp=False):
 Command is one of:
     mtx2tsv   - convert matrix market to .tsv.gz
     matCatCells - merge expression matrices into a big tsv.gz matrix.
+        This command adds more cells. Adds cells on the right side of the matrix.
         If you have files from different cells, same assay, same genes, this
         allows to merge them into a bigger matrix. Format is one-line-per-gene.
         Matrices must have identical genes in the same order and the same number of
         lines. Handles .csv files, otherwise defaults to tab-sep input. gzip OK.
     matCatGenes - concatenate expression matrices. If you have data from the same cells but with different
-        assays (multi-modal), this allows to merge them and add a prefix to every gene.
+        genes (assays, multi-modal), this allows to merge them and add a prefix to every gene.
+        This command adds more genes. Adds genes to the end of the matrix.
     metaCat - concat/join meta tables on the first (cell ID) field or reorder their fields
     reorder - reorder the meta fields
 
@@ -719,10 +721,10 @@ def cbImportScanpy_parseArgs(showHelp=False):
             help="do not try to calculate cluster-specific marker genes. Only useful for the rare datasets where a bug in scanpy crashes the marker gene calculation.")
 
     parser.add_option("", "--proc", dest="useProc", action="store_true",
-        help="when exporting, do not use the raw input data, instead use the normalized and corrected matrix scanpy. This has no effect if the anndata.raw attribute is not present in the anndata object")
+        help="when exporting, do not use the raw input data, instead use the normalized and corrected matrix, aka 'ad.X'. This has no effect if the anndata.raw attribute is not present in the anndata object")
 
     parser.add_option("-l", "--layer", dest="layer", action="store",
-            help="Specify the layer to export. This takes precedence over --useProc.")
+            help="Specify the layer to export. This takes precedence over --proc.")
 
     parser.add_option("", "--atac", dest="atac", action="store",
             help="Indicate that this is an ATAC dataset and specify genome assembly and gene model, for example 'hg38.gencode-42'. Use 'cbGenes ls' to show the list of all available gene models on your disk or cbGenes fetch to download other ones. This will only be passed through to cellbrowser.conf.")
