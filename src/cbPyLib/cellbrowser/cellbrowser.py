@@ -4676,6 +4676,14 @@ def filterFields(anndata, coordFields):
     coordFields = filtCoordFields
     return coordFields
 
+def hasScanpySpatialData(ad):
+    " detect if anndata has spatial data. HTAN files are not spatial as we know it "
+    if "spatial" in ad.uns:
+        if ad.uns["spatial"].get("is_single", False): # example: htan-mskcc-glasner
+            return False
+    else:
+        returnFalse
+
 def writeAnndataCoords(anndata, coordFields, outDir, desc):
     " write all embedding coordinates from anndata object to outDir, the new filename is <coordName>_coords.tsv "
     import pandas as pd
@@ -4683,7 +4691,7 @@ def writeAnndataCoords(anndata, coordFields, outDir, desc):
     if coordFields=="all" or coordFields is None:
         coordFields = getObsmKeys(anndata)
 
-    if "spatial" in coordFields:
+    if hasScanpySpatialData(anndata):
         # spatial datasets have a ton of obsm attributes that are usually not coordinates
         coordFields = filterFields(anndata, coordFields)
 
@@ -4698,8 +4706,13 @@ def writeAnndataCoords(anndata, coordFields, outDir, desc):
         # X_tsne - newer versions
         # also seen in the wild: X_Compartment_tSNE
         if fieldName=="spatial" and "spatial" in anndata.uns and len(anndata.uns["spatial"])>1:
-            logging.debug("Not exporting spatial coords, because more than one slide")
-            continue
+
+            if anndata.uns["spatial"].get("is_single", False): # see hasScanpySpatialData()
+                logging.info("ad.uns has 'is_single', exporting coordinates")
+            else:
+                logging.info("Not exporting spatial coords, because more than one slide")
+                continue
+
         coordName = fieldName.replace("X_draw_graph_","").replace("X_","")
         fullName = coordLabels.get(coordName, coordName)
 
@@ -5353,7 +5366,7 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     fname = join(outDir, "meta.tsv")
     meta_df.to_csv(fname,sep='\t', index_label="cellId")
 
-    if "spatial" in adata.uns:
+    if hasScanpySpatialData(adata):
         configData, coordDescs = exportScanpySpatial(adata, outDir, configData, coordDescs)
 
     configData = exportScanpyColors(adata, outDir, configData)
