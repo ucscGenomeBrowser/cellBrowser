@@ -4676,24 +4676,27 @@ def filterFields(anndata, coordFields):
     coordFields = filtCoordFields
     return coordFields
 
-def hasScanpySpatialData(ad):
-    " detect if anndata has spatial data. HTAN files are not spatial as we know it "
-    if "spatial" in ad.uns:
-        if ad.uns["spatial"].get("is_single", False): # example: htan-mskcc-glasner
-            return False
-    else:
-        returnFalse
+#def hasScanpySpatialData(ad):
+#    " detect if anndata has spatial data. HTAN files are not spatial as we know it "
+#    if "spatial" in ad.uns:
+#        if ad.uns["spatial"].get("is_single", False): # example: htan-mskcc-glasner
+#            return False
+#    else:
+#        returnFalse
 
 def writeAnndataCoords(anndata, coordFields, outDir, desc):
     " write all embedding coordinates from anndata object to outDir, the new filename is <coordName>_coords.tsv "
     import pandas as pd
 
+    if "spatial" in anndata.uns and "is_single" in anndata.uns["spatial"]:
+        del anndata.uns["spatial"]["is_single"]
+
     if coordFields=="all" or coordFields is None:
         coordFields = getObsmKeys(anndata)
 
-    if hasScanpySpatialData(anndata):
-        # spatial datasets have a ton of obsm attributes that are usually not coordinates
-        coordFields = filterFields(anndata, coordFields)
+    #if hasScanpySpatialData(anndata):
+    # spatial datasets have a ton of obsm attributes that are usually not coordinates
+    coordFields = filterFields(anndata, coordFields)
 
     # move over a field to obs:
     # ad.obs = pd.concat([ad.obs, ad.obsm["ctype_props"]], axis=1)
@@ -4707,7 +4710,7 @@ def writeAnndataCoords(anndata, coordFields, outDir, desc):
         # also seen in the wild: X_Compartment_tSNE
         if fieldName=="spatial" and "spatial" in anndata.uns and len(anndata.uns["spatial"])>1:
 
-            if anndata.uns["spatial"].get("is_single", False): # see hasScanpySpatialData()
+            if anndata.uns["spatial"].get("is_single", False):
                 logging.info("ad.uns has 'is_single', exporting coordinates")
             else:
                 logging.info("Not exporting spatial coords, because more than one slide")
@@ -5048,11 +5051,16 @@ def exportScanpySpatial(adata, outDir, configData, coordDescs):
 
     libraries = adata.uns["spatial"].keys()
     for library_id in libraries:
-    #Out[8]: dict_keys(['C47', 'C50', 'C56', 'IBM29', 'IBM31', 'IBM35', 'SRP1', 'SRP4'])
+        #Out[8]: dict_keys(['C47', 'C50', 'C56', 'IBM29', 'IBM31', 'IBM35', 'SRP1', 'SRP4'])
+        if library_id == "is_single":
+            continue
 
         coordsDone = False
         imgConfigs = []
         for img_key in ["hires", "lowres"]:
+
+            if not img_key in adata.uns["spatial"][library_id]["images"]:
+                continue
             crop_coord = None
             na_color = None
             size = 1.0
@@ -5082,19 +5090,20 @@ def exportScanpySpatial(adata, outDir, configData, coordDescs):
             imgConfigs.append({"file":imgFname, "label":label, "radius":circle_radius, \
                     "scale_factor":scale_factor})
 
-            meta = dict(spatial_data["metadata"])
-            meta["label"] = label
-            meta["py_spot_size"] = spot_size
-            meta["py_radius"] = circle_radius
-            meta["py_size"] = size
-            meta["scalefactors"] = spatial_data["scalefactors"]
-            if crop_coord is not None:
-                meta["crop_coord"] = crop_coord
+            if "metadata" in spatial_data:
+                meta = dict(spatial_data["metadata"])
+                meta["label"] = label
+                meta["py_spot_size"] = spot_size
+                meta["py_radius"] = circle_radius
+                meta["py_size"] = size
+                meta["scalefactors"] = spatial_data["scalefactors"]
+                if crop_coord is not None:
+                    meta["crop_coord"] = crop_coord
 
-            if "spatialMeta" not in configData:
-                configData["spatialMeta"] = []
+                if "spatialMeta" not in configData:
+                    configData["spatialMeta"] = []
 
-            configData["spatialMeta"].append(meta)
+                configData["spatialMeta"].append(meta)
 
             if not coordsDone:
                 # the 10X scale_factor indicates the relationship between pixels in the lowres/hires
@@ -5366,8 +5375,7 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     fname = join(outDir, "meta.tsv")
     meta_df.to_csv(fname,sep='\t', index_label="cellId")
 
-    if hasScanpySpatialData(adata):
-        configData, coordDescs = exportScanpySpatial(adata, outDir, configData, coordDescs)
+    configData, coordDescs = exportScanpySpatial(adata, outDir, configData, coordDescs)
 
     configData = exportScanpyColors(adata, outDir, configData)
 
