@@ -4689,7 +4689,11 @@ def writeAnndataCoords(anndata, coordFields, outDir, desc):
     import pandas as pd
 
     if "spatial" in anndata.uns and "is_single" in anndata.uns["spatial"]:
+        logging.warn("Data fix: Found 'is_single' in ad.uns, removing this field")
         del anndata.uns["spatial"]["is_single"]
+        if len(anndata.uns["spatial"])==0:
+            logging.warn("Data fix: No spatial data left, removing ad.uns['spatial']")
+            del anndata.uns["spatial"]
 
     if coordFields=="all" or coordFields is None:
         coordFields = getObsmKeys(anndata)
@@ -4708,13 +4712,10 @@ def writeAnndataCoords(anndata, coordFields, outDir, desc):
         # X_draw_graph_tsne - old versions
         # X_tsne - newer versions
         # also seen in the wild: X_Compartment_tSNE
-        if fieldName=="spatial" and "spatial" in anndata.uns and len(anndata.uns["spatial"])>1:
-
-            if anndata.uns["spatial"].get("is_single", False):
-                logging.info("ad.uns has 'is_single', exporting coordinates")
-            else:
-                logging.info("Not exporting spatial coords, because more than one slide")
-                continue
+        #if fieldName=="spatial" and "spatial" in anndata.uns and len(anndata.uns["spatial"])>1:
+        if fieldName=="spatial" and "spatial" in anndata.uns:
+            logging.info("Not exporting spatial coords, because there are spatial images, exporting spatial coords later with the images")
+            continue
 
         coordName = fieldName.replace("X_draw_graph_","").replace("X_","")
         fullName = coordLabels.get(coordName, coordName)
@@ -4979,8 +4980,8 @@ def runSafeRankGenesGroups(adata, clusterField, minCells=5):
     clusterCellCounts = list(adata.obs.groupby([clusterField]).apply(len).items())
     filterOutClusters = [cluster for (cluster,count) in clusterCellCounts if count==1]
     if len(filterOutClusters)!=0:
-        logging.info("Removing cells in clusters %s, as they have only a single cell" % filterOutClusters)
-        adata = adata[~adata.obs[clusterField].isin(filterOutClusters)]
+       logging.info("Removing cells in clusters %s, as they have only a single cell, will mess up marker gene scoring" % filterOutClusters)
+       adata = adata[~adata.obs[clusterField].isin(filterOutClusters)]
 
     logging.info("Calculating 100 marker genes for each cluster")
     # working around bug in scanpy 1.9.1, see https://github.com/scverse/scanpy/issues/2181
@@ -5287,6 +5288,9 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
 
     coordFields = writeAnndataCoords(adata, coordFields, outDir, coordDescs)
 
+    configData, coordDescs = exportScanpySpatial(adata, outDir, configData, coordDescs)
+
+
     if len(coordDescs)==0:
         raise ValueError("No valid embeddings were found in anndata.obsm but at least one array of coordinates is required. Keys  obsm: %s" % (coordFields))
 
@@ -5374,8 +5378,6 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     meta_df.rename(metaFields, axis=1, inplace=True)
     fname = join(outDir, "meta.tsv")
     meta_df.to_csv(fname,sep='\t', index_label="cellId")
-
-    configData, coordDescs = exportScanpySpatial(adata, outDir, configData, coordDescs)
 
     configData = exportScanpyColors(adata, outDir, configData)
 
