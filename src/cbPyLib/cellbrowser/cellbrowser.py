@@ -4676,14 +4676,6 @@ def filterFields(anndata, coordFields):
     coordFields = filtCoordFields
     return coordFields
 
-#def hasScanpySpatialData(ad):
-#    " detect if anndata has spatial data. HTAN files are not spatial as we know it "
-#    if "spatial" in ad.uns:
-#        if ad.uns["spatial"].get("is_single", False): # example: htan-mskcc-glasner
-#            return False
-#    else:
-#        returnFalse
-
 def writeAnndataCoords(anndata, coordFields, outDir, desc):
     " write all embedding coordinates from anndata object to outDir, the new filename is <coordName>_coords.tsv "
     import pandas as pd
@@ -4698,7 +4690,6 @@ def writeAnndataCoords(anndata, coordFields, outDir, desc):
     if coordFields=="all" or coordFields is None:
         coordFields = getObsmKeys(anndata)
 
-    #if hasScanpySpatialData(anndata):
     # spatial datasets have a ton of obsm attributes that are usually not coordinates
     coordFields = filterFields(anndata, coordFields)
 
@@ -4712,9 +4703,8 @@ def writeAnndataCoords(anndata, coordFields, outDir, desc):
         # X_draw_graph_tsne - old versions
         # X_tsne - newer versions
         # also seen in the wild: X_Compartment_tSNE
-        #if fieldName=="spatial" and "spatial" in anndata.uns and len(anndata.uns["spatial"])>1:
         if fieldName=="spatial" and "spatial" in anndata.uns:
-            logging.info("Not exporting spatial coords, because there are spatial images, exporting spatial coords later with the images")
+            logging.info("Not exporting spatial coords now, because there are also spatial images. Will export these coords later.")
             continue
 
         coordName = fieldName.replace("X_draw_graph_","").replace("X_","")
@@ -5046,15 +5036,16 @@ def exportScanpySpatial(adata, outDir, configData, coordDescs):
         _check_scale_factor, _check_crop_coord, _check_na_color
 
 
-    #library_id = _empty
+    if not ("spatial" in adata.obsm and "spatial" in adata.uns):
+        logging.debug("No 'spatial' key found in adata.obsm")
+        return configData, coordDescs
+
     import pandas as pd
     coordDf=pd.DataFrame(adata.obsm["spatial"],index=adata.obs.index)
 
     libraries = adata.uns["spatial"].keys()
     for library_id in libraries:
         #Out[8]: dict_keys(['C47', 'C50', 'C56', 'IBM29', 'IBM31', 'IBM35', 'SRP1', 'SRP4'])
-        if library_id == "is_single":
-            continue
 
         coordsDone = False
         imgConfigs = []
@@ -5289,7 +5280,6 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     coordFields = writeAnndataCoords(adata, coordFields, outDir, coordDescs)
 
     configData, coordDescs = exportScanpySpatial(adata, outDir, configData, coordDescs)
-
 
     if len(coordDescs)==0:
         raise ValueError("No valid embeddings were found in anndata.obsm but at least one array of coordinates is required. Keys  obsm: %s" % (coordFields))
