@@ -3491,8 +3491,8 @@ var cellbrowser = function() {
                     if ((geneInfo.sym!==geneInfo.geneId))
                         locusWithSym = geneInfo.id+"|"+geneInfo.sym;
                 } else { 
-                    locusWithSym = locusStr+"|MultiGenes";
-                    geneDesc = "multiple genes";
+                    locusWithSym = locusStr+"|Sum of "+geneDesc;
+                    //geneDesc = geneDesc;
                 }
             }
 
@@ -6264,8 +6264,8 @@ var cellbrowser = function() {
         }
     }
 
-    function plotDotColumnLabels(htmls, minX, minY, xDist, geneSyms) {
-        /* plot the names of the genes rightwards at the top */
+    function plotDotColumnLabels(htmls, minX, minY, xDist, geneSyms, fill) {
+        /* plot the names of the genes rightwards at the top and slanted. Returns the maximum height of them */
         let y = minY-5;
         let fontSize = 14;
 
@@ -6273,9 +6273,33 @@ var cellbrowser = function() {
             let label = geneSyms[i];
             let x = minX+(i*xDist)+(fontSize);
             htmls.push("<text class='tpExprColLabel' data-gene='"+label+"' font-family='sans-serif' font-weight='bold' font-size='"+
-                    fontSize+"' fill='black' transform='translate("+x+", "+y+
+                    fontSize+"' fill='"+fill+"' transform='translate("+x+", "+y+
                     ") rotate(45)' alignment-baseline='bottom' text-anchor='end'>ⓧ"+label+"</text>");
         }
+    }
+
+    function plotDotColumnLabelsAutoSize(parentEl, htmls, minX, minY, xDist, geneSyms) {
+        /* plot the the names of the genes at the top. return height */
+        // we need to know the height of the gene name boxes, so plot these and measure their height
+        let htmls2 = [];
+        let chartHeight = 500;
+        let chartWidth = 500;
+        htmls2.push("<svg xmlns='http://www.w3.org/2000/svg' height='"+chartHeight+"' width='"+chartWidth+"'>");
+        plotDotColumnLabels(htmls2, minX, 300, xDist, geneSyms, "white");
+        htmls2.push("</svg>");
+
+        parentEl.innerHTML = htmls.join("");
+
+        let domEls = document.getElementsByClassName("tpExprColLabel");
+        let maxHeight = 0;
+        for (let el of domEls) {
+            maxHeight = Math.max(maxHeight, el.getBBox().height);
+        }
+
+        parentEl.innerHTML = "";
+
+        plotDotColumnLabels(htmls, minX, minY+maxHeight, xDist, geneSyms, "black");
+        return maxHeight;
     }
 
     function plotDotCircles(htmls, dotRows, leftPad, topPad, colDist, rowDist, maxDotSize, colors, cellCounts, avgMin, avgMax) {
@@ -6416,14 +6440,14 @@ var cellbrowser = function() {
         let topPad = 6;
         let leftPad = 6;
         let rowLabelWidth = 300;
-        let colLabelHeight = 50;
+        //let colLabelHeight = 50;
 
         // column label row must have a height to fit the text. Assume that text width is 14
         // probably 14 is a bad idea and I should use document.getElementById('yourTextId').getComputedTextLength();
-        let maxTextLen = 0;
-        for (let i=0; i < genes.length; i++)
-            maxTextLen = Math.max(genes[i].length, maxTextLen);
-        colLabelHeight = Math.max(colLabelHeight, maxTextLen*14);
+        //let maxTextLen = 0;
+        //for (let i=0; i < genes.length; i++)
+            //maxTextLen = Math.max(genes[i].length, maxTextLen);
+        //colLabelHeight = Math.max(colLabelHeight, maxTextLen*14);
 
         let maxDotSize = 30;
         let rowHeight = maxDotSize+4;
@@ -6433,16 +6457,18 @@ var cellbrowser = function() {
 
         let cellCountColWidth = 50;
 
-        let chartWidth = leftPad+rowLabelWidth+(colWidth*colCount)+legendWidth+cellCountColWidth+1; // +1 because the legend box can be 2 pixels wide
-        let chartHeight = topPad+colLabelHeight+Math.max(legendHeight, rowCount*rowHeight);
-        htmls.push("<svg xmlns='http://www.w3.org/2000/svg' height='"+chartHeight+"' width='"+chartWidth+"'>");
+        let colLabelHeight = plotDotColumnLabelsAutoSize(parentEl, htmls, leftPad+rowLabelWidth, topPad, colWidth, genes);
 
         let colorPal = makeColorPalette(cDefGradPalette, 20);
 
         plotDotRowLabels(htmls, rowLabelWidth, leftPad, colLabelHeight, rowHeight, rowLabels, cellCounts);
-        plotDotColumnLabels(htmls, leftPad+rowLabelWidth, topPad+colLabelHeight-10, colWidth, genes);
         plotDotCircles(htmls, dotRows, leftPad+rowLabelWidth, topPad+colLabelHeight, colWidth, rowHeight, maxDotSize, colorPal, cellCounts, avgMin, avgMax);
         plotLegend(htmls, avgMin, avgMax, leftPad+rowLabelWidth+(colCount*colWidth)+cellCountColWidth, topPad+colLabelHeight, colorPal, legendWidth, legendHeight, maxDotSize)
+
+        let chartWidth = leftPad+rowLabelWidth+(colWidth*colCount)+legendWidth+cellCountColWidth+1; // +1 because the legend box can be 2 pixels wide
+        let chartHeight = topPad+colLabelHeight+Math.max(legendHeight, rowCount*rowHeight);
+
+        htmls.unshift("<svg xmlns='http://www.w3.org/2000/svg' height='"+chartHeight+"' width='"+chartWidth+"'>");
 
         htmls.push("</svg>");
 
