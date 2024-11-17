@@ -64,6 +64,7 @@ function MaxPlot(div, top, left, width, height, args) {
     const gTextSize = 16; // size of cluster labels
     const gTitleSize = 18; // size of title text
     const gStatusHeight = 14; // height of status bar
+    const gSliderFromBottom = 45; // distance from buttom to top of slider div
     const gZoomButtonSize = 30; // size of zoom buttons
     const gZoomFromLeft = 10;  // position of zoom buttons from left
     const gZoomFromBottom = 140;  // position of zoom buttons from bottom
@@ -135,7 +136,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         addProgressBars(top+Math.round(height*0.3), left+30);
         if (!args || args.showSliders===undefined || args.showSliders===true)
-            addSliders(height-gStatusHeight-30, width);
+            addSliders(height-gStatusHeight-gSliderFromBottom, width);
 
         // timer that is reset on every mouse move
         self.timer = null;
@@ -761,7 +762,7 @@ function MaxPlot(div, top, left, width, height, args) {
         return pxLines;
     }
 
-    function scaleCoords(coords, borderSize, zoomRange, winWidth, winHeight, annots) {
+    function scaleCoords(coords, borderSize, zoomRange, winWidth, winHeight, annots, keepAspect) {
     /* scale list of [x (float),y (float)] to integer pixels on screen and
      * annots is an array with on-screen annotations in the format (x, y,
      * otherInfo) that is also scaled.  return [array of (x (int), y (int)),
@@ -784,6 +785,11 @@ function MaxPlot(div, top, left, width, height, args) {
         var spanY = maxY - minY;
         var xMult = winWidth / spanX;
         var yMult = winHeight / spanY;
+
+        if (keepAspect) {
+            xMult = Math.min(xMult, yMult);
+            yMult = Math.min(xMult, yMult);
+        }
 
         // transform from data floats to screen pixel coordinates
         var pixelCoords = new Uint16Array(coords.length);
@@ -1117,11 +1123,11 @@ function MaxPlot(div, top, left, width, height, args) {
         var colCount = colors.length;
         var off = document.createElement('canvas'); // not added to DOM, will be gc'ed at some point
 
-        if (fatIdx!==null) {
-            colCount = 2;
-            colors = [colors[fatIdx], nonFatColorCircles];
-            //colors = ["000000", nonFatColorCircles];
-        }
+        //if (fatIdx!==null) {
+            //colCount = 2;
+            //colors = [colors[fatIdx], nonFatColorCircles];
+            //colors.push(nonFatColorCircles);
+        //}
 
        off.width = (colCount+2) * tileWidth; // "+2" because we have two additional circles at the end
        off.height = tileHeight;
@@ -1597,7 +1603,9 @@ function MaxPlot(div, top, left, width, height, args) {
        var borderMargin = self.port.radius;
        self.calcRadius();
 
-       self.coords.px = scaleCoords(self.coords.orig, borderMargin, self.port.zoomRange, self.canvas.width, self.canvas.height);
+       let keepAspect = (self.background !== null);
+
+       self.coords.px = scaleCoords(self.coords.orig, borderMargin, self.port.zoomRange, self.canvas.width, self.canvas.height, keepAspect);
        if (self.coords.lines)
            self.coords.pxLines = scaleLines(self.coords.lines, self.port.zoomRange, self.canvas.width, self.canvas.height);
        self.scaleBackground(self.background, self.port.initZoom, self.port.zoomRange);
@@ -1655,8 +1663,9 @@ function MaxPlot(div, top, left, width, height, args) {
        statusDiv.style.width = width+"px";
 
        self.titleDiv.style.top = (height-gStatusHeight-gTitleSize)+"px";
+
        if (self.sliderDiv)
-           self.sliderDiv.style.top = (height-gStatusHeight-gTitleSize)+"px";
+           self.sliderDiv.style.top = (height-gStatusHeight-gSliderFromBottom)+"px";
 
     }
 
@@ -2947,7 +2956,7 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.col.arr = self.col.arr;
 
         if (self.background)
-            plot2.setBackground (self.background.img);
+            plot2.setBackground (self.background.image);
 
         self.setSize(newWidth, newHeight, false); // will call scaleData(), but not redraw.
 

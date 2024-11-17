@@ -2836,29 +2836,6 @@ var cellbrowser = function() {
          //htmls.push('<li><a href="#" id="tpFilterButton">Hide selected '+gSampleDesc+'s</a></li>');
          //htmls.push('<li><a href="#" id="tpShowAllButton">Show all '+gSampleDesc+'</a></li>');
          htmls.push('<li><a href="#" id="tpHideShowLabels"><span id="tpHideMenuEntry">Hide labels</span><span class="dropmenu-item-content">c l</span></a></li>');
-         //htmls.push('<li><hr class="half-rule"></li>');
-
-         //htmls.push('<li class="dropdown-submenu"><a tabindex="0" href="#">Transparency</a>');
-           //htmls.push('<ul class="dropdown-menu" id="tpTransMenu">');
-             //htmls.push('<li id="tpTrans0"><a href="#">0%</a></li>');
-             //htmls.push('<li id="tpTrans40"><a href="#">40%</a></li>');
-             //htmls.push('<li id="tpTrans60"><a href="#">60%</a></li>');
-             //htmls.push('<li id="tpTrans80"><a href="#">80%</a></li>');
-           //htmls.push('</ul>'); // Transparency sub-menu
-         //htmls.push('</li>');   // sub-menu container
-
-         //htmls.push('<li class="dropdown-submenu"><a tabindex="0" href="#">Circle size</a>');
-           //htmls.push('<ul class="dropdown-menu" id="tpSizeMenu">');
-             //htmls.push('<li id="tpSize1"><a href="#">1 px</a></li>');
-             //htmls.push('<li id="tpSize2"><a href="#">2 px</a></li>');
-             //htmls.push('<li id="tpSize3"><a href="#">3 px</a></li>');
-             //htmls.push('<li id="tpSize4"><a href="#">4 px</a></li>');
-             //htmls.push('<li id="tpSize5"><a href="#">5 px</a></li>');
-             //htmls.push('<li id="tpSize6"><a href="#">6 px</a></li>');
-             //htmls.push('<li id="tpSize7"><a href="#">7 px</a></li>');
-             //htmls.push('<li id="tpSize8"><a href="#">8 px</a></li>');
-           //htmls.push('</ul>'); // Circle size sub-menu
-         //htmls.push('</li>');   // sub-menu container
 
          htmls.push('</ul>'); // View dropdown-menu
          htmls.push('</li>'); // View dropdown container
@@ -3491,8 +3468,9 @@ var cellbrowser = function() {
                     if ((geneInfo.sym!==geneInfo.geneId))
                         locusWithSym = geneInfo.id+"|"+geneInfo.sym;
                 } else { 
-                    locusWithSym = locusStr+"|MultiGenes";
-                    geneDesc = "multiple genes";
+                    let geneCount = locusStr.split("+").length;
+                    locusWithSym = locusStr+"|"+geneCount+" genes";
+                    //geneDesc = "multiple genes";
                 }
             }
 
@@ -6620,8 +6598,10 @@ var cellbrowser = function() {
 
         //let geneIds = [geneId];
         if (geneIds===null) {
-            geneIds = [ getById("tpGeneExprGeneCombo").value ];
-        } 
+            geneIds = getById("tpGeneExprGeneCombo").value;
+        } else {
+            geneIds = geneIds[0].split("+");
+        }
 
         //else {
             //geneIds = geneId.split("|")[0]; // internal genes sometimes can be in format ENSG-ID|geneSymbol
@@ -6630,7 +6610,7 @@ var cellbrowser = function() {
 
         let geneIdStr = geneIds.join("|");
         let urlOpts = {"exprGene":geneIdStr, "exprMeta":metaName};
-        selectizeSetValue("tpGeneExprGeneCombo", geneIdStr);
+        selectizeSetValue("tpGeneExprGeneCombo", geneIdStr.split("|")[0]);
         //if (forceExprMax && forceExprMax!="") {
             //limitCheckbox.checked = true;
             //limitInput.value = forceExprMax;
@@ -7872,7 +7852,7 @@ var cellbrowser = function() {
             var valStr = null;
 
             if (gLegend.type==="meta")
-                valStr = gLegend.rows[valIdx-1].label; // why -1 ?
+                valStr = gLegend.rows[valIdx].label;
 
             if (status==="none") {
                 if (el.checked)

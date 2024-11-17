@@ -487,6 +487,14 @@ function CbDbFile(url) {
         var meta = null;
         var labelMids; // null means: no json file found
 
+        var coordInfo = self.conf.coords[coordIdx];
+        if (coordInfo===null) {
+           alert("Could not find coordinates with name "+this.coordName);
+           return;
+        }
+
+        let hasSpatial = coordInfo.images || self.conf.spatial;
+
         function binDone(data, other) {
             binData = data;
             meta = other;
@@ -505,13 +513,7 @@ function CbDbFile(url) {
             return;
         }
 
-        var coordInfo = self.conf.coords[coordIdx];
-        if (coordInfo===null) {
-           alert("Could not find coordinates with name "+this.coordName);
-           return;
-        }
-
-        if (coordInfo.images || self.conf.spatial) {
+        if (hasSpatial) {
            var spatials = coordInfo.images;
                if (!spatials)// older placement of the object
                    spatials = self.conf.spatial; //now spatial settings must be on the coords to support multi-coord datasets
@@ -1477,8 +1479,8 @@ function CbDbFile(url) {
         return foundIds;
     }
 
-    this.mustFindOneGeneExact= function(symOrId) {
-        /* given a geneId or symbol, return the geneId. If 0 or >1 are found, abort and show error message. */
+    this.mustFindOneGeneExact= function(symOrId) { /* given a geneId or symbol, return the geneId. If 0 or >1 are found, abort and show error message. */
+        if (symOrId.
         let geneIds = self.findGenesExact(symOrId);
         if (geneIds.length===0) {
             alert("Could not find gene symbold or ID: "+symOrId);
@@ -1494,6 +1496,7 @@ function CbDbFile(url) {
         return (geneId in self.geneOffsets);
     }
 
+    function pickTssForGene(loc) {
     function pickTssForGene(loc) {
         /* given a chromLoc tuple (start, end, strand, sym), return the TSS of the gene (start or end )*/
         var start = loc[0];
@@ -1685,7 +1688,6 @@ function CbDbFile(url) {
                    },
                    onProgress, strategy);
            }
-       }
     };
 
     this.loadGeneSetExpr = function(onDone) {
