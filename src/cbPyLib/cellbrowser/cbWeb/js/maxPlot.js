@@ -762,7 +762,7 @@ function MaxPlot(div, top, left, width, height, args) {
         return pxLines;
     }
 
-    function scaleCoords(coords, borderSize, zoomRange, winWidth, winHeight, annots, keepAspect) {
+    function scaleCoords(coords, borderSize, zoomRange, winWidth, winHeight, annots, aspectRatio) {
     /* scale list of [x (float),y (float)] to integer pixels on screen and
      * annots is an array with on-screen annotations in the format (x, y,
      * otherInfo) that is also scaled.  return [array of (x (int), y (int)),
@@ -778,18 +778,22 @@ function MaxPlot(div, top, left, width, height, args) {
         var minY = zoomRange.minY;
         var maxY = zoomRange.maxY;
 
+        var spanX = maxX - minX;
+        var spanY = maxY - minY;
+
+        //if (aspectRatio) {
+            //xMult = Math.min(xMult, yMult);
+            //yMult = Math.min(xMult, yMult);
+            //let ratio = spanX / spanY;
+            //spanY = spanY*0.5;
+        //}
+
         winWidth = winWidth-(2*borderSize);
         winHeight = winHeight-(2*borderSize);
 
-        var spanX = maxX - minX;
-        var spanY = maxY - minY;
         var xMult = winWidth / spanX;
         var yMult = winHeight / spanY;
 
-        if (keepAspect) {
-            xMult = Math.min(xMult, yMult);
-            yMult = Math.min(xMult, yMult);
-        }
 
         // transform from data floats to screen pixel coordinates
         var pixelCoords = new Uint16Array(coords.length);
@@ -1560,7 +1564,8 @@ function MaxPlot(div, top, left, width, height, args) {
         var sw = sx2 - sx1; // size of slice of background image that is currently shown, in source pixels
         var sh = sy2 - sy1;
 
-        // lame: since I wasn't able to figure out how to transform negative sx, sy to corrected dx, dy, coords - safari doesn't understand negative sx/sy - I simply use the scaleData function
+        // lame: since I wasn't able to figure out how to transform negative sx, sy to corrected dx, dy, coords - safari doesn't 
+        // understand negative sx/sy - I simply use the scaleData function
         // somehow https://gist.github.com/Kaiido/ca9c837382d89b9d0061e96181d1d862 didn't work for me
         //var coords = [0.0, 0.0, dataRange.maxX, dataRange.maxY];
         //var newCoords = scaleCoords(coords, 0, zoomRange, ctxWidth, ctxHeight, [])
@@ -1603,9 +1608,9 @@ function MaxPlot(div, top, left, width, height, args) {
        var borderMargin = self.port.radius;
        self.calcRadius();
 
-       let keepAspect = (self.background !== null);
-
-       self.coords.px = scaleCoords(self.coords.orig, borderMargin, self.port.zoomRange, self.canvas.width, self.canvas.height, keepAspect);
+       let w = self.canvas.width;
+       let h = self.canvas.height;
+       self.coords.px = scaleCoords(self.coords.orig, borderMargin, self.port.zoomRange, w, h, self.coords.aspectRatio);
        if (self.coords.lines)
            self.coords.pxLines = scaleLines(self.coords.lines, self.port.zoomRange, self.canvas.width, self.canvas.height);
        self.scaleBackground(self.background, self.port.initZoom, self.port.zoomRange);
@@ -1747,6 +1752,8 @@ function MaxPlot(div, top, left, width, height, args) {
 
        self.coords.orig = coords;
        self.coords.labels = clusterLabels;
+       if (coordInfo.aspectRatio)
+           self.coords.aspectRatio = coordInfo.aspectRatio;
 
        var count = 0;
        for (var i = 0; i < coords.length/2; i++) {
@@ -1988,7 +1995,6 @@ function MaxPlot(div, top, left, width, height, args) {
        self.resetAlpha();
        self.resetRadius();
        self.scaleData();
-       //self.drawDots();
     };
 
     this.zoomTo = function(x1, y1, x2, y2) {
