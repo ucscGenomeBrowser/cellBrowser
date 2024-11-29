@@ -8869,8 +8869,9 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
                 click: function() { $( this ).dialog( "close" ) }
             });
             htmls.push("No marker genes are available in this dataset. " +
-                "To add marker genes, contact the original authors of the dataset and ask them to add " +
-                " them to the cell browser.");
+                "To add marker genes, if this is the cells.ucsc.edu website, contact us (cells@ucsc.edu) and ask us to add cluster markers " +
+                "or contact the original authors of the dataset and ask them to send " +
+                " us cluster markers.");
         } else {
             htmls.push("Sorted by the column which is highlighted. Click gene symbols below to color plot by gene<br>");
             buttons.push({
