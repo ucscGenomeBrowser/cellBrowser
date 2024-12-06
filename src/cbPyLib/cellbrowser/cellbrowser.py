@@ -1373,6 +1373,8 @@ def metaToBin(inDir, inConf, outConf, fname, outDir):
     # we have to strip special chars so fix the user's field names to our format
     sanEnumFields = []
     if enumFields is not None:
+        if "" in enumFields:
+            errAbort("The enumFields statement in cellbrowser.conf must not contain an empty string")
         sanEnumFields = [sanitizeName(n) for n in enumFields]
 
     fieldInfo = []
@@ -2835,6 +2837,7 @@ nonAscii = re.compile(r'[^a-zA-Z_0-9+]')
 def sanitizeName(name):
     " remove all nonalpha chars, allow underscores, special treatment for %, + and -. Makes a valid file name. "
     assert(name!=None)
+    origName = name
     # some characters are actually pretty common and there we have seen fields where the only 
     # difference are these characters
     # if this continues to be aproblem, maybe append the MD5 of a raw field name to the sanitized name
@@ -2848,7 +2851,7 @@ def sanitizeName(name):
     if newName!=name:
         logging.debug("Sanitized %s -> %s" % (repr(name), newName))
     if (len(newName)==0):
-        errAbort("Field name %s has only special chars?" % name)
+        errAbort("Field name %s has only special chars?" % repr(origName))
     return newName
 
 def nonAlphaToUnderscores(name):
@@ -5282,7 +5285,7 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     configData, coordDescs = exportScanpySpatial(adata, outDir, configData, coordDescs)
 
     if len(coordDescs)==0:
-        raise ValueError("No valid embeddings were found in anndata.obsm but at least one array of coordinates is required. Keys  obsm: %s" % (coordFields))
+        logging.warn("No valid embeddings were found in anndata.obsm but at least one array of coordinates is usually required. Keys obsm: %s" % (coordFields))
 
     ##Check for cluster markers
     if (markerField not in adata.uns or clusterField is not None) and not skipMarkers:
@@ -6626,6 +6629,7 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname, skipMa
     conf["pcCount"] = conf.get("pcCount", "auto")
     conf["doLayouts"] = doLayouts
     conf["doLouvain"] = conf.get("doLouvain", True)
+    conf["doPca"] = conf.get("doPca", True)
     conf["louvainNeighbors"] = int(conf.get("louvainNeighbors", 6))
     conf["louvainRes"] = float(conf.get("louvainRes", 1.0))
 
@@ -6791,50 +6795,51 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname, skipMa
         pipeLog('Scaling data, max_value=%d' % maxValue)
         sc.pp.scale(adata, max_value=maxValue)
 
-    pcCount = conf["pcCount"]
+    if conf["doPca"]:
+        pcCount = conf["pcCount"]
 
-    if pcCount=="auto":
-        firstPcCount = 100
-    else:
-        firstPcCount = pcCount
+        if pcCount=="auto":
+            firstPcCount = 100
+        else:
+            firstPcCount = pcCount
 
-    pipeLog('Performing initial PCA, number of PCs: %d' % firstPcCount)
-    sc.tl.pca(adata, n_comps=firstPcCount)
-    #Multiply by -1 to compare with Seurat
-    #adata.obsm['X_pca'] *= -1
-    #Plot of pca variance ratio to see if formula matches visual determination of pc_nb to use
-    sc.pl.pca_variance_ratio(adata, log=True)
+        pipeLog('Performing initial PCA, number of PCs: %d' % firstPcCount)
+        sc.tl.pca(adata, n_comps=firstPcCount)
+        #Multiply by -1 to compare with Seurat
+        #adata.obsm['X_pca'] *= -1
+        #Plot of pca variance ratio to see if formula matches visual determination of pc_nb to use
+        sc.pl.pca_variance_ratio(adata, log=True)
 
-    #Computing number of PCs to be used in clustering
-    if pcCount == "auto":
-        pipeLog("Estimating number of useful PCs based on Shekar et al, Cell 2016")
-        pipeLog("PC weight cutoff used is (sqrt(# of Genes/# of cells) + 1)^2")
-        pipeLog("See http://www.cell.com/cell/fulltext/S0092-8674(16)31007-8, STAR methods")
-        pc_cutoff = ( np.sqrt(float(len(adata.var))/len(adata.obs)) +1 ) **2
-        pc_nb = 0
-        for i in adata.uns['pca']['variance']:
-            if i > pc_cutoff:
-                pc_nb+=1
-        pipeLog('%d PCs will be used for tSNE and clustering' % pc_nb)
-        if pc_nb <= 2:
-            errAbort("Number of useful PCs is too small. The formula from Shekar et all did not work (not gene expression data?). Please set the "
-                    "number of PCs manually via the pcCount variable in scanpy.conf")
+        #Computing number of PCs to be used in clustering
+        if pcCount == "auto":
+            pipeLog("Estimating number of useful PCs based on Shekar et al, Cell 2016")
+            pipeLog("PC weight cutoff used is (sqrt(# of Genes/# of cells) + 1)^2")
+            pipeLog("See http://www.cell.com/cell/fulltext/S0092-8674(16)31007-8, STAR methods")
+            pc_cutoff = ( np.sqrt(float(len(adata.var))/len(adata.obs)) +1 ) **2
+            pc_nb = 0
+            for i in adata.uns['pca']['variance']:
+                if i > pc_cutoff:
+                    pc_nb+=1
+            pipeLog('%d PCs will be used for tSNE and clustering' % pc_nb)
+            if pc_nb <= 2:
+                errAbort("Number of useful PCs is too small. The formula from Shekar et all did not work (not gene expression data?). Please set the "
+                        "number of PCs manually via the pcCount variable in scanpy.conf")
 
-    else:
-        pc_nb = int(pcCount)
-        pipeLog("Using %d PCs as configured in config" % pcCount)
+        else:
+            pc_nb = int(pcCount)
+            pipeLog("Using %d PCs as configured in config" % pcCount)
 
-    if "tsne" in doLayouts:
+    if conf["doPca"] and "tsne" in doLayouts:
         pipeLog('Performing tSNE')
         sc.tl.tsne(adata, n_pcs=int(pc_nb), random_state=2, n_jobs=8)
 
-    if not inCluster or "umap" in doLayouts or conf["doLouvain"]:
+    if conf["doPca"] and (not inCluster or "umap" in doLayouts or conf["doLouvain"]):
         neighbors = conf["louvainNeighbors"]
         res = conf["louvainRes"]
         pipeLog('Running knn, using %d PCs and %d neighbors' % (pc_nb, neighbors))
         sc.pp.neighbors(adata, n_pcs=int(pc_nb), n_neighbors=neighbors)
 
-    if not inCluster or conf["doLouvain"]:
+    if not inCluster or (conf["doPca"] and conf["doLouvain"]):
         pipeLog('Performing Louvain Clustering, resolution %f' % (res))
         sc.tl.louvain(adata, resolution=res)
         pipeLog("Found %d louvain clusters" % len(adata.obs['louvain'].unique()))
@@ -6849,13 +6854,6 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname, skipMa
             sc.pl.tsne(adata, color=clusterField)
         except:
             logging.error("Error while plotting with Scanpy, ignoring the error")
-
-    #Clustering. Default Resolution: 1
-    #res = 1.0
-    #pipeLog('Performing Louvain Clustering, resolution = %f' % res)
-    #sc.pp.neighbors(adata, n_pcs=int(pc_nb))
-    #sc.tl.louvain(adata, resolution=res)
-    #sc.pl.tsne(adata, color='louvain')
 
     if "umap" in doLayouts:
         pipeLog("Performing UMAP")
@@ -7123,7 +7121,8 @@ def cbScanpyCli():
     if "_raw" in dir(adata) and "_var" in dir(adata.raw) and "_index" in list(adata.raw.var.columns):
         adata._raw._var.rename(columns={'_index': 'features'}, inplace=True)
 
-    adata.write(adFname)
+    if params.get("doH5ad", True):
+        adata.write(adFname)
 
     scanpyToCellbrowser(adata, outDir, datasetName=datasetName, skipMarkers=skipMarkers,
             clusterField=inCluster, skipMatrix=(copyMatrix or skipMatrix), matrixFormat=matrixFormat,
