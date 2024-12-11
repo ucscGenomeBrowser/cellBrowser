@@ -6403,7 +6403,7 @@ var cellbrowser = function() {
         let exprMinX = legendX+10;
         let avgLabelY = rectY+50;
         htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+exprMinX+"' y='"+avgLabelY+"'>"+minLabel+"</text>");
-        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+(lastRectX-25)+"' y='"+avgLabelY+"'>"+maxLabel+"</text>");
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='end' x='"+(lastRectX)+"' y='"+avgLabelY+"'>"+maxLabel+"</text>");
 
     }
 
@@ -6538,6 +6538,7 @@ var cellbrowser = function() {
             var geneSym = ev.target.getAttribute("data-gene");
             exprDataRemoveGene(geneSym);
             buildExprDotplot("tpExprViewPlot", exprData); 
+            selectizeSetValue("tpGeneExprGeneCombo", ""); // clear the dropdown box
         }
 
         $(".tpExprColLabel").on("click", onExprColLabelClick);
@@ -6578,6 +6579,10 @@ var cellbrowser = function() {
         let rows = [];
         let avgMax = -1000000;
         let avgMin = 1000000;
+        if (metaToExpr.length===0) {
+            avgMax = NaN;
+            avgMin = Nan;
+        }
         for (let metaIdx=0; metaIdx < metaToExpr.length; metaIdx++) {
             let exprArr = metaToExpr[metaIdx];
             let nonZeroCount = 0;
@@ -6637,6 +6642,12 @@ var cellbrowser = function() {
         let allAvgMax = -1000000;
         let allAvgMin = 1000000;
 
+        if (exprData.geneIds.length===0) {
+            allAvgMax = NaN;
+            allAvgMin = NaN;
+        }
+
+
         let rows = exprData.rows;
         for (let row of rows) {
             for (let geneData of row) {
@@ -6657,6 +6668,8 @@ var cellbrowser = function() {
             geneId = geneId.split("|")[0]; // internal genes sometimes can be in format ENSG-ID|geneSymbol
             if (exprData.geneIds.indexOf(geneId)===-1)
                 promises.push( promiseGene(geneId, geneExprOnProgress, exprData.metaData.arr, exprData.metaData.valCounts.length ));
+            else
+                alert("This gene is already on the plot");
         }
 
         // pull out necesssary data from exprData object
@@ -6752,8 +6765,8 @@ var cellbrowser = function() {
             exprData.rows = [];
             exprData.cellCounts = [];
             exprData.geneIds = [];
-            exprData.allAvgMax = -1000000;
-            exprData.allAvgMin = +1000000;
+            exprData.allAvgMax = NaN;
+            exprData.allAvgMin = NaN;
         }
 
         Promise.all([promiseMeta(metaName, geneExprOnProgress)]).then( function (resArr) {
@@ -9176,7 +9189,8 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
                 else if (j===pValCol)
                     htmls.push(parseFloat(val).toPrecision(5)); // five digits ought to be enough for everyone
                 else
-                    htmls.push(val);
+                    //htmls.push(val);
+                    geneListFormat(htmls, val, geneSym);
                 htmls.push("</td>");
             }
             htmls.push("</tr>");
