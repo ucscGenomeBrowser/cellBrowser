@@ -5439,15 +5439,12 @@ var cellbrowser = function() {
         for (var i = 1; i < metaFieldInfo.length; i++) { // starts at 1, skip ID field
             var field = metaFieldInfo[i];
             var fieldName = field.label;
-            if (optStr==="noNums") {
-                var hasTooManyVals = (field.type==="int" || field.type==="float");
-                if (hasTooManyVals)
+            var isNumeric = (field.type==="int" || field.type==="float");
+            var hasTooManyVals = (field.diffValCount>MAXCOLORCOUNT);
+            if ((optStr==="noNums" && isNumeric) || 
+                (optStr=='doLabels' && (isNumeric || hasTooManyVals))) {
                     continue;
             }
-            // cannot label on something that is a number or has a ton of values
-            //var hasTooManyVals = (field.diffValCount>MAXCOLORCOUNT || field.type==="int" || field.type==="float");
-            //if (hasTooManyVals)
-                //continue;
 
             entries.push( ["tpMetaVal_"+i, fieldName] );
             if (selectedField == fieldName) {
@@ -6863,8 +6860,22 @@ var cellbrowser = function() {
 
         htmls.push('<label id="tpGeneExprMetaLabel" for="'+"tpGeneExprMetaCombo"+'">Split by cell annotation</label>');
 
-        let fieldName = getActiveColorField();
-        buildMetaFieldCombo(htmls, "tpGeneExprMetaComboBox", "tpGeneExprMetaCombo", 0, fieldName, "noNums");
+        // try to use the current color field, but you cannot split on a number, so fall back to the default color field
+        let metaName = getActiveColorField();
+        //let metaName = getActiveColorField();;
+        metaName = getVar("exprMeta", metaName);
+
+        var fieldInfo = db.findMetaInfo(metaName);
+        if (fieldInfo.type!=="enum") {
+            metaName = db.getDefaultColorField();
+            changeUrl({"exprMeta":metaName});
+            fieldInfo = db.findMetaInfo(metaName);
+            if (fieldInfo.type!=="enum") {
+                alert("The default color field is a numerical field, select a non-numerical categorical field instead. Also, contact us.");
+            }
+        }
+
+        buildMetaFieldCombo(htmls, "tpGeneExprMetaComboBox", "tpGeneExprMetaCombo", 0, metaName, "noNums");
         htmlAddInfoIcon(htmls, "Expression data can only be split by categorical fields. Numerical fields are not shown here.");
         
 
@@ -6935,11 +6946,8 @@ var cellbrowser = function() {
         if (geneSym==null)
             geneSym = db.getRandomLocus();
 
-        let metaName = getActiveColorField();;
-
         // URL variables can override the defaults
         let geneIds = getVar("exprGene", geneSym).split(" ");
-        metaName = getVar("exprMeta", metaName);
 
         buildGeneExprPlotsAddGenes(geneIds, metaName); 
     }
@@ -7069,7 +7077,7 @@ var cellbrowser = function() {
             var fieldMouseOver = metaInfo.desc;
 
             // fields without binning and with too many unique values are greyed out
-            var isGrey = (metaInfo==="enum" && metaInfo.diffValCount>MAXCOLORCOUNT && metaInfo.binMethod===undefined);
+            var isGrey = (metaInfo.type==="enum" && metaInfo.diffValCount>MAXCOLORCOUNT && metaInfo.binMethod===undefined);
 
             var addClass = "";
             var addTitle="";
@@ -7295,7 +7303,7 @@ var cellbrowser = function() {
         htmls.push('<label style="padding-left: 2px; margin-bottom:8px; padding-top:8px" for="tpLabelCombo">Label by Annotation</label>');
         htmls = htmlAddInfoIcon(htmls, "Choose a field to generate labels for. Labels will be placed in the center between all the cells with "+
                 "this annotation, so this is most useful for fields that label cells that are close together. Numerical "+
-                "fields with several hundred values cannot be selected here, as labeling them would not make sense.", "bottom");
+                "fields or fields with several hundred values cannot be selected here, as the labels would fill the screen.", "bottom");
         buildMetaFieldCombo(htmls, "tpLabelComboBox", "tpLabelCombo", 0, db.conf.labelField, "doLabels");
 
         htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px" id="tpHoverHint" class="tpHint">Hover over a '+gSampleDesc+' to update data below</div>');
@@ -8537,7 +8545,7 @@ var cellbrowser = function() {
             let metaInfo = fieldInfos[metaIdx];
 
             if (i===0) {
-                changeUrl({"cell":fieldValue});
+                //changeUrl({"cell":fieldValue});
                 if (db.traces)
                     plotTrace(fieldValue);
             }
@@ -8645,9 +8653,11 @@ var cellbrowser = function() {
 
     function resetFattening() {
     /* remove the highlighted cluster */
-        $(".tpLegendHl").removeClass("tpLegendHl");
-        renderer.fatIdx = null;
-        renderer.drawDots();
+        if (renderer.fatIdx!==null) {
+            $(".tpLegendHl").removeClass("tpLegendHl");
+            renderer.fatIdx = null;
+            renderer.drawDots();
+        }
     }
 
 function onClusterNameHover(clusterName, nameIdx, ev) {
@@ -9483,6 +9493,8 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
            var div = document.createElement('div');
            div.id = "tpMaxPlot";
            renderer = new MaxPlot(div, canvTop, canvLeft, canvWidth, canvHeight);
+           window.renderer = renderer; // XX undo this?
+
            document.body.appendChild(div);
            activateTooltip(".mpButton"); // tpMaxPlot has no special tooltip support itself
            renderer.activateSliders();

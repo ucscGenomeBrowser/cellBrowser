@@ -561,7 +561,7 @@ function CbDbFile(url) {
     };
 
     this.getDefaultColorField = function() {
-        /* return a pair: [0] is "meta" or "gene" and [1] is the field name or the gene */
+        /* return the meta field to colors on */
         if (self.conf.clusterField)
             return self.conf.clusterField; // just for backwards-compat. with old datasets
         else
