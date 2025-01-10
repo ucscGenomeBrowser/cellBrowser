@@ -105,7 +105,7 @@ var cellbrowser = function() {
     var METABOXTITLE   = "By Annotation";
 
     // maximum number of distinct values that one can color on
-    const MAXCOLORCOUNT = 500;
+    const MAXCOLORCOUNT = 1500;
 
     // histograms show only the top X values and summarize the rest into "other"
     var HISTOCOUNT = 12;
