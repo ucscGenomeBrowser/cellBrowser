@@ -2495,7 +2495,8 @@ def readMatrixSampleNames(fname):
         return ret
 
     else:
-        return readHeaders(fname)[1:]
+        names = readHeaders(fname)[1:]
+        return names
 
 def metaReorderFilter(matrixFname, metaFname, fixedMetaFname, keepFields):
     """ check and reorder the meta data, has to be in the same order as the

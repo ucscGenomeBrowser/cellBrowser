@@ -3029,6 +3029,7 @@ var cellbrowser = function() {
 
     function getActiveColorField() {
         /* return the current field that is used for coloring the UMAP */
+        // XX Probably should use db.conf.activeColorField here! - a recent addition
         let fieldName = getVar("meta");
         if (fieldName===undefined)
             fieldName = db.getDefaultColorField();
@@ -3093,6 +3094,8 @@ var cellbrowser = function() {
            changeUrl({"meta":null, "gene":null});
         else
            changeUrl({"meta":fieldName, "gene":null});
+
+        db.conf.activeColorField = fieldName;
 
         if (metaInfo.arr) // eg custom fields
             onMetaArrLoaded(metaInfo.arr, metaInfo);
@@ -8642,12 +8645,15 @@ var cellbrowser = function() {
             showTooltip(ev.clientX+15, ev.clientY, lineLabel);
     }
 
-    function fattenCluster(clusterName) {
+    function fattenCluster(clusterName, valIdx) {
     /* highlight one of the clusters */
-        let valIdx = legendLabelGetIdx(gLegend, clusterName);
         renderer.fatIdx = valIdx;
         renderer.drawDots();
-        let legQuery = "#tpLegend_"+valIdx;
+
+        // also highlight the legend
+        let legendRowIdx = legendLabelGetIdx(gLegend, clusterName);
+        let legQuery = "#tpLegend_"+legendRowIdx;
+        $(".tpLegendHl").removeClass("tpLegendHl");
         $(legQuery).addClass("tpLegendHl");
     }
 
@@ -8664,7 +8670,7 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
         /* user hovers over cluster label */
         var labelLines = [clusterName];
 
-        var labelField = db.conf.labelField;
+        var labelField = db.conf.activeLabelField;
         var metaInfo = db.findMetaInfo(labelField);
         var longLabels = metaInfo.ui.longLabels;
         if (longLabels) {
@@ -8678,7 +8684,7 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
             }
         }
 
-        if (labelField == db.conf.activeLabelField) {
+        if (labelField == db.conf.labelField) {
             if (db.conf.topMarkers!==undefined) {
                 labelLines.push("Top enriched/depleted markers: "+db.conf.topMarkers[clusterName].join(", "));
             }
@@ -8696,7 +8702,11 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
         labelLines.push("Alt/Option-Click to select cells in cluster; Shift-Click to add cluster to selection");
         showTooltip(ev.clientX+15, ev.clientY, labelLines.join("<br>"));
 
-        fattenCluster(clusterName);
+        // XX currently, switch off fattening if there is a difference between label/color fields
+        if (db.conf.activeLabelField==db.conf.activeColorField) {
+            var valIdx = findMetaValIndex(metaInfo, clusterName);
+            fattenCluster(clusterName, valIdx);
+        }
     }
 
     function onNoClusterNameHover(ev) {
