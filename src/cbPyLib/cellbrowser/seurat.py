@@ -423,7 +423,7 @@ def readExportScript(cmds):
     cmds.insert(0, 'library(Matrix, warn.conflicts=FALSE)')
     cmds.insert(0, 'library(R.utils, warn.conflicts=FALSE)')
     # we need a few packages for the export. Install them unless already installed
-    cmds.insert(0, 'install.packages(setdiff(c("jpeg", "R.utils", "Matrix"), rownames(installed.packages())), repos="http://cran.us.r-project.org")')
+    cmds.insert(0, 'install.packages(setdiff(c("jpeg", "R.utils", "Matrix", "dplyr"), rownames(installed.packages())), repos="http://cran.us.r-project.org")')
 
     assert(len(cmds)!=0)
     return cmds

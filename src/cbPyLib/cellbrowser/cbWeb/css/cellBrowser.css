@@ -48,6 +48,10 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         margin-right: 6px;
 }
 
+.tpTitle {
+        z-index: 100;
+}
+
 .tpGeneExprCombo {
         margin-left: 6px;
         margin-right: 6px;
@@ -92,6 +96,7 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         position : absolute;
         display: grid;
         grid-template-columns: 45px 120px 15px;
+        background: rgba(255,255,255,0.5);
 }
 
 .sliderLabel {
@@ -130,8 +135,9 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 .ui-menu-item { font-size:13px }
 .ui-menu .ui-menu-item-wrapper { padding: 1px 1em 1px .4em; }
 .ui-tooltip { font-size: 13px }
-#tpButtonInfo { height: 24px; top: 1px; margin-right: 8px; width: 120px; border-radius: 4px }
+#tpButtonInfo { height: 24px; top: 1px; margin-right: 8px; border-radius: 4px; padding-top: 4px }
 .tpDialogInput { margin-left: 12px; margin-top: 5px; margin-bottom: 12px; }
+#tpDialog { z-index: 1001; }}
 
 .tpIconButton { 
         padding: 1px 2px 1px 2px; 
@@ -166,6 +172,13 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         text-decoration: underline; 
         color: #0000EE; 
         cursor: pointer; 
+}
+
+.tpSameLink {
+    text-decoration: underline; 
+    cursor: pointer; 
+    color: darkgrey; 
+    float: right
 }
 
 .tpDatasetPane {
@@ -319,12 +332,15 @@ input[type=checkbox], input[type=radio] {
 }
 
 .tpMetaBox { font-size: 13px; cursor:default; overflow:hidden }
-.tpMetaHover { color: #FFF; background-color: #666}
+.tpMetaHover { 
+        color: white; 
+        background-color: #333 !important;
+}
 .tpMetaLabel { font-weight: bold; padding-left: 2px}
 .tpMetaLabelGrey { color: #666666}
 .tpMetaMultiVal { font-style: italic; color: gray }
 .tpMetaHistLabel { text-decoration: underline; color: blue }
-.tpMetaValue { height: 1.3em; margin-left: 8px; padding-left: 3px; background-color:#EEE; }
+.tpMetaValue { height: 1.3em; padding-left: 3px; background-color:#EEE; }
 .tpMetaSelect { outline: 2px solid black; background-color: #DEDEDE }
 .tpMetaValueSelect { background-color: #CCC}
 .tpMetaPerc { color:grey; float:right }
@@ -342,7 +358,7 @@ button { line-height: 12px }
 .btn-default { background: linear-gradient(#fff 20%, #f7f7f7 60%, #f5f5f5 100%) }
 
 #tpButtonBar {display: block; }
-.tpButton { border-radius: 0; font-size: 15px; display: inline-block; background-color: #f6f6f6; border: 1px solid #c5c5c5; margin: 1px 3px 1px 1px; padding: 1px 3px 1px 3px; cursor:default; vertical-align: middle; user-select: none}
+.tpButton { border-radius: 0; font-size: 15px; display: inline-block; background-color: #f6f6f6; border: 1px solid #c5c5c5; margin: 1px 3px 1px 1px; padding: 1px 3px 1px 3px; cursor:default; vertical-align: middle; user-select: none; }
 .tpButton:active { background-color: #888; }
 .tpButton active { background-color: #888; }
 .tpButton:hover { background-color: #eee }

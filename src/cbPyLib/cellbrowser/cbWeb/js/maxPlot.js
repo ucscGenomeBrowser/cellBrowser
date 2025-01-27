@@ -64,6 +64,7 @@ function MaxPlot(div, top, left, width, height, args) {
     const gTextSize = 16; // size of cluster labels
     const gTitleSize = 18; // size of title text
     const gStatusHeight = 14; // height of status bar
+    const gSliderFromBottom = 45; // distance from buttom to top of slider div
     const gZoomButtonSize = 30; // size of zoom buttons
     const gZoomFromLeft = 10;  // position of zoom buttons from left
     const gZoomFromBottom = 140;  // position of zoom buttons from bottom
@@ -72,7 +73,8 @@ function MaxPlot(div, top, left, width, height, args) {
     const gCloseButtonFromRight = 60; // distance of "close" button from right edge
 
     const nonFatColor = "F9F9F9"; // color used in fattening mode for all non-fat cells
-    const nonFatColorCircles = "BBBBBB"; // color used in fattening mode for all non-fat cells
+    const nonFatColorRect = "DDDDDD"; // rectangle mode: color used in fattening mode for all non-fat cells
+    const nonFatColorCircles = "BBBBBB"; // color used in fattening mode for all non-fat cell circles
 
     // the rest of the initialization is done at the end of this file,
     // because the init involves many functions that are not defined yet here
@@ -104,7 +106,6 @@ function MaxPlot(div, top, left, width, height, args) {
             addStatusLine(height-gStatusHeight, left, width, gStatusHeight);
             addTitleDiv(height-gTitleSize-gStatusHeight-4, 8);
 
-            console.log(self.parentPlot, self.childPlot);
             /* add the div used for the mouse selection/zoom rectangle to the DOM */
             var selectDiv = document.createElement('div');
             selectDiv.id = "mpSelectBox";
@@ -136,7 +137,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         addProgressBars(top+Math.round(height*0.3), left+30);
         if (!args || args.showSliders===undefined || args.showSliders===true)
-            addSliders(height-gStatusHeight-30, width);
+            addSliders();
 
         // timer that is reset on every mouse move
         self.timer = null;
@@ -146,6 +147,31 @@ function MaxPlot(div, top, left, width, height, args) {
         /* special coords are used for circles that are off-screen or otherwise not visible */
        return ((x===HIDCOORD && y===HIDCOORD)) // not shown (e.g. no coordinate or off-screen)
     }
+
+    function hexToGrey(hexColors) {
+        let greyArray = []
+        for (let i = 0; i < hexColors.length; i++) {
+            // Extract red, green, and blue components
+            let hexColor = hexColors[i];
+            const maxCol = 200;
+            const addCol = 20;
+            const red = Math.max(maxCol, addCol+parseInt(hexColor.slice(1, 3), 16));
+            const green = Math.max(maxCol, addCol+parseInt(hexColor.slice(3, 5), 16));
+            const blue = Math.max(maxCol, addCol+parseInt(hexColor.slice(5, 7), 16));
+
+            // Calculate the grayscale value using the luminosity method
+            const gray = Math.round(0.2126 * red + 0.7152 * green + 0.0722 * blue);
+
+            // Convert the grayscale value to a two-character hex string
+            const grayHex = gray.toString(16).padStart(2, '0');
+
+            // Return the grayscale hex color
+            const greySixHex = `${grayHex}${grayHex}${grayHex}`;
+            greyArray.push(greySixHex);
+        }
+        return greyArray;
+    }
+
 
     this.initPort = function(args) {
         /* init all viewport related state (zoom, radius, alpha) */
@@ -444,11 +470,11 @@ function MaxPlot(div, top, left, width, height, args) {
         self.drawDots();
     }
 
-    function addSliders(fromTop, canvWidth) {
+    function addSliders() {
         /* add sliders for transparency and radius */
         // alpha reset slider: a label, a slider + a reset button
         var sliderWidth = 90;
-        var fromLeft = canvWidth - sliderWidth - 2*45 - 50;
+        //var fromLeft = canvWidth - sliderWidth - 2*45 - 50;
 
         var alphaSlider = createSliderSpan("mpAlphaSlider", sliderWidth, 10, 35);
         self.alphaSlider = alphaSlider; // see activateSliders() for the jquery UI part of the code, executed later
@@ -460,7 +486,7 @@ function MaxPlot(div, top, left, width, height, args) {
         alphaCont.id = "mpAlphaCont";
         //alphaCont.style.left = "150px"; // cellbrowser.css defines grid widths: 45
         alphaCont.className = "sliderContainer";
-        alphaCont.style.top = "15px"; // (fromTop-14)+"px";
+        alphaCont.style.top = "15px"; 
         alphaCont.style.left = "0px";
 
         var alphaLabel = document.createElement('div'); // contains the slider and the reset button, floats right
@@ -502,15 +528,15 @@ function MaxPlot(div, top, left, width, height, args) {
         var radiusCont = document.createElement('span');
         radiusCont.className = "sliderContainer";
         radiusCont.id = "mpRadiusDiv";
-        radiusCont.style.left = "0px"; //fromLeft+"px";
-        radiusCont.style.top = "0px"; //fromTop+"px";
+        radiusCont.style.left = "0px"; 
+        radiusCont.style.top = "0px";
         radiusCont.appendChild(radiusSlider)
 
 
         var radiusLabel = document.createElement('span'); // contains the slider and the reset button, floats right
         radiusLabel.id = "radiusSliderLabel";
         radiusLabel.textContent = "Circle Size";
-        radiusLabel.style.width = "80px";
+        radiusLabel.style.width = "110px";
         radiusLabel.className = "sliderLabel";
 
         radiusCont.appendChild(radiusLabel);
@@ -521,14 +547,17 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // add both to the big container div that holds all three slider elements
         var sliderDiv = document.createElement('span');
-        sliderDiv.style.top = fromTop+"px";
-        sliderDiv.style.left = fromLeft+"px";
-        sliderDiv.style.position = "relative";
+        //sliderDiv.style.top = fromTop+"px";
+        //sliderDiv.style.left = fromLeft+"px";
+        sliderDiv.style.bottom = "28px";
+        sliderDiv.style.right = "200px";
+        sliderDiv.style.position = "absolute";
         sliderDiv.style.zIndex = "10";
         sliderDiv.id = "mpSliderDiv";
         sliderDiv.appendChild(radiusCont);
         sliderDiv.appendChild(alphaCont);
         self.div.appendChild(sliderDiv);
+        //self.canvasDiv.appendChild(sliderDiv);
         self.sliderDiv = sliderDiv; // for quickResize()
     }
 
@@ -642,10 +671,11 @@ function MaxPlot(div, top, left, width, height, args) {
     function addCanvasToDiv(div, top, left, width, height) {
         /* add a canvas element to the body element of the current page and keep left/top/width/eight in self */
         var canv = document.createElement('canvas');
+        self.canvasDiv = canv;
         canv.id = 'mpCanvas';
         //canv.style.border = "1px solid #AAAAAA";
         canv.style.backgroundColor = "white";
-        canv.style.position = "absolute";
+        canv.style.position = "relative";
         canv.style.display = "block";
         canv.style.width = width+"px";
         canv.style.height = height+"px";
@@ -742,7 +772,8 @@ function MaxPlot(div, top, left, width, height, args) {
 
             // line is entirely hidden
             if (startInvis && endInvis)
-                continue
+                continue;
+
             if (startInvis) {
                 x1 = constrainVal(x1, minX, maxX);
                 y1 = constrainVal(y1, minY, maxY);
@@ -761,7 +792,7 @@ function MaxPlot(div, top, left, width, height, args) {
         return pxLines;
     }
 
-    function scaleCoords(coords, borderSize, zoomRange, winWidth, winHeight, annots) {
+    function scaleCoords(coords, borderSize, zoomRange, winWidth, winHeight, annots, aspectRatio) {
     /* scale list of [x (float),y (float)] to integer pixels on screen and
      * annots is an array with on-screen annotations in the format (x, y,
      * otherInfo) that is also scaled.  return [array of (x (int), y (int)),
@@ -777,13 +808,22 @@ function MaxPlot(div, top, left, width, height, args) {
         var minY = zoomRange.minY;
         var maxY = zoomRange.maxY;
 
+        var spanX = maxX - minX;
+        var spanY = maxY - minY;
+
+        //if (aspectRatio) {
+            //xMult = Math.min(xMult, yMult);
+            //yMult = Math.min(xMult, yMult);
+            //let ratio = spanX / spanY;
+            //spanY = spanY*0.5;
+        //}
+
         winWidth = winWidth-(2*borderSize);
         winHeight = winHeight-(2*borderSize);
 
-        var spanX = maxX - minX;
-        var spanY = maxY - minY;
         var xMult = winWidth / spanX;
         var yMult = winHeight / spanY;
+
 
         // transform from data floats to screen pixel coordinates
         var pixelCoords = new Uint16Array(coords.length);
@@ -816,6 +856,13 @@ function MaxPlot(div, top, left, width, height, args) {
        ctx.globalAlpha = alpha;
        var dblSize = 2*radius;
        var count = 0;
+
+       if (selCells.size!==0 || fatIdx!==null)
+           //colors = makeAllGreyHex(colors.length);
+           colors = hexToGrey(colors);
+
+       var fatCells = [];
+
        for (var i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
            var pxY = pxCoords[2*i+1];
@@ -824,19 +871,25 @@ function MaxPlot(div, top, left, width, height, args) {
 
            var valIdx = coordColors[i];
            var col = colors[valIdx];
-           if (fatIdx!==null)
-               if (valIdx===fatIdx)
-                   col = "000000";
-               else
-                   col = "DDDDDD";
+           if (fatIdx!==null) {
+               if (valIdx===fatIdx) {
+                   // fattened cells must be overdrawn later, so just save their coords now
+                   fatCells.push(pxX);
+                   fatCells.push(pxY);
+                   continue
+               }
+               //else
+                   //col = "DDDDDD";
+                   //col = nonFatColorRect;
+           }
 
            ctx.fillStyle="#"+col;
            ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
            count++;
        }
 
-       // draw the selection as black rectangles
-       if (fatIdx===null) {
+       // overdraw the selection as black rectangles on top
+       //if (fatIdx===null) {
            ctx.globalAlpha = 0.7;
            ctx.fillStyle="black";
             selCells.forEach(function(cellId) {
@@ -845,8 +898,19 @@ function MaxPlot(div, top, left, width, height, args) {
                ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
                count += 1;
             })
+       //}
+       // overdraw the fattened cells as blue rectangles on top
+       if (fatCells.length!==0) {
+           ctx.globalAlpha = 0.7;
+           ctx.fillStyle="blue";
+           for (var i = 0; i < fatCells.length/2; i++) {
+               var pxX = fatCells[2*i];
+               var pxY = fatCells[2*i+1];
+               ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
+               count++;
+           }
        }
-       debug(count+" rectangles drawn (including selection)");
+       debug(count+" rectangles drawn (including selection+fattening)");
        ctx.restore();
        return count;
     }
@@ -1104,18 +1168,30 @@ function MaxPlot(div, top, left, width, height, args) {
         return (0x1000000+(Math.round((t-R)*p)+R)*0x10000+(Math.round((t-G)*p)+G)*0x100+(Math.round((t-B)*p)+B)).toString(16).slice(1);
     }
 
-    function makeTemplates(radius, tileWidth, tileHeight, colors, fatIdx) {
+    function makeCircleTemplates(radius, tileWidth, tileHeight, colors, fatIdx) {
     /* create an off-screen-canvas with the circle-templates that will be stamped later onto the bigger canvas 
-     * Add one final circle at the end with the outline, for the selection. */
-        var colCount = colors.length;
-        var off = document.createElement('canvas'); // not added to DOM, will be gc'ed
+     * Returns the canvas. This feels very much like sprites on the AMIGA in the 1980s.
+     *
+     * returns an object with these attributes:
+     *   .off       = off-screen canvas
+     *   .selImgIdx = index on off with circle with a black outline only, for the selection
+     *   .greyImgIdx= index on off with grey circle for the non-selected cells
+     *   .nonFatImgIdx (only when fatIdx is != null) = index on off with grey circle(?) for the non-fattened cells
+     */
+       var off = document.createElement('canvas'); // not added to DOM, will be gc'ed at some point
 
-        if (fatIdx!==null) {
-            colCount = 2;
-            colors = [colors[fatIdx], nonFatColorCircles];
-        }
+       var nonFatImgIdx = 0;
 
-       off.width = (colCount+1) * tileWidth;
+       if (fatIdx!==null) {
+           //colCount = 2;
+           //colors = [colors[fatIdx], nonFatColorCircles];
+            nonFatImgIdx = colors.length;
+            colors.push(nonFatColorCircles);
+       }
+
+       var colCount = colors.length;
+
+       off.width = (colCount+2) * tileWidth; // "+2" because we have three additional circles at the end
        off.height = tileHeight;
        var ctxOff = off.getContext('2d');
 
@@ -1123,19 +1199,22 @@ function MaxPlot(div, top, left, width, height, args) {
        for (var i = 0; i < colors.length; ++i) {
            ctxOff.fillStyle = "#"+colors[i];
            ctxOff.beginPath();
-           // arc(x, y, r, 0, 2*pi)
-           ctxOff.arc(i * tileWidth + radius +1, radius+1, radius, 0, 2 * Math.PI);
+           // parameters are: arc(x, y, r, 0, 2*pi)
+           ctxOff.arc(i * tileWidth + radius + 1, radius + 1, radius, 0, 2 * Math.PI);
            ctxOff.closePath();
            ctxOff.fill();
 
-           // only draw outline for big circles
-           if (radius>5) {
+           // only draw a pretty shaded outline for very big circles, at extremely high zoom levels
+           if (radius > 6) {
                ctxOff.lineWidth=1.0;
                var strokeCol = "#"+shadeColor(colors[i], 0.9);
+               //if (fatIdx!==null)
+                   //strokeCol = "#000000";
+               //else
                ctxOff.strokeStyle=strokeCol;
 
                ctxOff.beginPath();
-               ctxOff.arc(i * tileWidth + radius + 1, radius +1, radius, 0, 2 * Math.PI);
+               ctxOff.arc(i * tileWidth + radius + 1, radius + 1, radius, 0, 2 * Math.PI);
                ctxOff.closePath();
                ctxOff.stroke();
            }
@@ -1148,49 +1227,105 @@ function MaxPlot(div, top, left, width, height, args) {
        ctxOff.strokeStyle="black";
        ctxOff.beginPath();
        // args: arc(x, y, r, 0, 2*pi)
-       ctxOff.arc((selImgId * tileWidth) + radius +1, radius+1, radius-1, 0, 2 * Math.PI);
+       ctxOff.arc((selImgId * tileWidth) + radius + 1, radius + 1, radius - 1, 0, 2 * Math.PI);
+       ctxOff.closePath();
        ctxOff.stroke();
 
-    return off;
+       // pre-render a grey circle for the non-selection, when something is selected, all the rest is drawn in grey
+       let greyImgId = colors.length + 1;
+       ctxOff.lineWidth = 1;
+       ctxOff.fillStyle = "#b2b2b2";
+       ctxOff.beginPath();
+       ctxOff.arc((greyImgId * tileWidth) + radius + 1, radius + 1, radius, 0, 2 * Math.PI);
+       ctxOff.closePath();
+       ctxOff.fill();
+
+    let ret = {};
+    ret.off = off;
+    ret.selImgIdx = selImgId;
+    ret.greyImgIdx = greyImgId;
+    ret.nonFatImgIdx = nonFatImgIdx;
+    return ret;
     }
 
-    function blitTwo(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, fatIdx, selImgId) {
+    //function blitTwo(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, fatIdx, selImgId) {
     /* blit only the fatIdx circle in color, and all the rest in grey. Also draw selection circles. */
-       var count = 0;
-       for (let i = 0; i < pxCoords.length/2; i++) {
-           var pxX = pxCoords[2*i];
-           var pxY = pxCoords[2*i+1];
-           if (isHidden(pxX, pxY))
-               continue;
-           var col = coordColors[i];
-           if (col===fatIdx)
-                col = 0;
-           else 
-                col = 1;
-           count++;
-           ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
+       //var count = 0;
+       //for (let i = 0; i < pxCoords.length/2; i++) {
+           //var pxX = pxCoords[2*i];
+           //var pxY = pxCoords[2*i+1];
+           //if (isHidden(pxX, pxY))
+               //continue;
+           //var col = coordColors[i];
+           //if (col===fatIdx)
+                //col = 0;
+           //else 
+                //col = 1;
+           //count++;
+           //ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
+//
+           //if (radius>=5)
+               //ctx.drawImage(off, selImgId * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
+       //}
+       //return count;
+    //}
 
-           if (radius>=5)
-               ctx.drawImage(off, selImgId * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
-       }
-       return count;
-    }
-
-    function blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius) {
+    function blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, selCells, greyIdx, fatIdx) {
    /* blit the circles onto the main canvas, using all colors */
        var count = 0;
+       var hasSelection = false;
+       if (selCells.size!==0)
+           hasSelection = true;
+
+       var col = 0;
        for (let i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
            var pxY = pxCoords[2*i+1];
            if (isHidden(pxX, pxY))
                continue;
-           var col = coordColors[i];
+
+           // when a selection is active, draw everything in grey. This only works because the selection is overdrawn afterwards
+           // (The selection must be overdrawn later, because otherwise circles shine through the selection)
+           col = coordColors[i];
+           if (fatIdx===null) {
+               if (hasSelection)
+                   col = greyIdx;
+            }
+            else if (!hasSelection && !(fatIdx!=null && fatIdx===col))
+                   col = greyIdx;
+
            count++;
-           // drawImage(img,sx,sy,swidth,sheight,x,y,width,height);
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
        }
-       //debug(count +" circles drawn");
+
+       if (fatIdx!==null) {
+           for (let i = 0; i < pxCoords.length/2; i++) {
+               col = coordColors[i];
+               if (fatIdx!==col)
+                   continue;
+               var pxX = pxCoords[2*i];
+               var pxY = pxCoords[2*i+1];
+               if (isHidden(pxX, pxY))
+                   continue;
+               count++;
+               ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
+           }
+        }
        return count;
+    }
+
+    function copyColorsOnly(coordColors, fatIdx, nonFatImgIdx)
+    /* copy numbers in coordColors array to a new array of the same size and keep only fatIdx, set, all others to nonFatImgIdx */
+    {
+        let newArr = new Array(coordColors.length);
+        for (let i=0; i<coordColors.length; i++) {
+            let colIdx = coordColors[i];
+            if (colIdx===fatIdx)
+                newArr[i] = fatIdx;
+            else
+                newArr[i] = nonFatImgIdx;
+        }
+        return newArr;
     }
 
 
@@ -1205,21 +1340,28 @@ function MaxPlot(div, top, left, width, height, args) {
        var tileWidth = diam + 2; // must add one pixel on each side, space for antialising
        var tileHeight = tileWidth; // otherwise circles look cut off
 
-       let off = makeTemplates(radius, tileWidth, tileHeight, colors, fatIdx);
+       let templates = makeCircleTemplates(radius, tileWidth, tileHeight, colors, fatIdx);
+
+       let off = templates.off;
 
        ctx.save();
        if (alpha!==undefined)
            ctx.globalAlpha = alpha;
 
        let count = 0;
-       if (fatIdx!==null)
-            count = blitTwo(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, fatIdx, selImgId);
-        else
-            count = blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius);
+       let origCoordColors = null;
+       if (fatIdx!==null) {
+           origCoordColors = coordColors;
+           coordColors = copyColorsOnly(origCoordColors, fatIdx, templates.nonFatImgIdx);
+       }
+       
+       count = blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, selCells, templates.greyImgIdx, fatIdx);
+       if (origCoordColors)
+            coordColors = origCoordColors;
 
-       // overdraw the selection as solid black circle outlines
+       // overdraw the selection as circles with black outlines
        ctx.globalAlpha = 0.7;
-       var selImgId = colors.length;
+       var selImgIdx = templates.selImgIdx; // second-to last template is the black outline, see makeCircleTemplates()
        selCells.forEach(function(cellId) {
            let pxX = pxCoords[2*cellId];
            let pxY = pxCoords[2*cellId+1];
@@ -1229,8 +1371,10 @@ function MaxPlot(div, top, left, width, height, args) {
            // slow, but not sure what else I can do...
            let col = coordColors[cellId];
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
-           ctx.drawImage(off, selImgId * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
-        })
+
+           // and draw the black outline
+           ctx.drawImage(off, selImgIdx * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
+        });
 
        ctx.restore();
        return count;
@@ -1252,12 +1396,26 @@ function MaxPlot(div, top, left, width, height, args) {
         return intList;
     }
 
+    function makeAllGreyHex(num) {
+    /* return a list of num grey hex strings */
+        var hexList = [];
+        for (var i = 0; i < num; i++) {
+            hexList.push("b2b2b2");
+        }
+        return hexList;
+    }
+
     function drawRectBuffer(ctx, width, height, pxCoords, colorArr, colors, alpha, selCells) {
         /* Draw little rectangles with size 3 using a memory buffer*/
        var canvasData = ctx.getImageData(0, 0, width, height);
        var cData = canvasData.data;
 
-       var rgbColors = hexToInt(colors);
+       var rgbColors = null;
+       if (selCells.length===0)
+           rgbColors = hexToInt(colors);
+       else
+           rgbColors = makeAllGrey(colors.length);
+
        var invAlpha = 1.0 - alpha;
 
        // alpha-blend pixels into array
@@ -1266,6 +1424,7 @@ function MaxPlot(div, top, left, width, height, args) {
            var pxY = pxCoords[2*i+1];
            if (isHidden(pxX, pxY))
                continue;
+
            var p = 4 * (pxY*width+pxX); // pointer to red value of pixel at x,y
 
            var oldR = cData[p];
@@ -1321,7 +1480,12 @@ function MaxPlot(div, top, left, width, height, args) {
        var canvasData = ctx.getImageData(0, 0, width, height);
        var cData = canvasData.data;
 
-       var rgbColors = hexToInt(colors);
+       var rgbColors = null;
+       if (selCells.size===0)
+           rgbColors = hexToInt(colors);
+       else
+           rgbColors = hexToInt(makeAllGreyHex(colors.length)); // selection is active, all cells are grey, except the selection
+
        var invAlpha = 1.0 - alpha;
 
        var count = 0;
@@ -1496,10 +1660,8 @@ function MaxPlot(div, top, left, width, height, args) {
         var sw = sx2 - sx1; // size of slice of background image that is currently shown, in source pixels
         var sh = sy2 - sy1;
 
-        var ctxWidth  = self.canvas.width;
-        var ctxHeight = self.canvas.height;
-        
-        // lame: since I wasn't able to figure out how to transform negative sx, sy to corrected dx, dy, coords - safari doesn't understand negative sx/sy - I simply use the scaleData function
+        // lame: since I wasn't able to figure out how to transform negative sx, sy to corrected dx, dy, coords - safari doesn't 
+        // understand negative sx/sy - I simply use the scaleData function
         // somehow https://gist.github.com/Kaiido/ca9c837382d89b9d0061e96181d1d862 didn't work for me
         //var coords = [0.0, 0.0, dataRange.maxX, dataRange.maxY];
         //var newCoords = scaleCoords(coords, 0, zoomRange, ctxWidth, ctxHeight, [])
@@ -1542,7 +1704,9 @@ function MaxPlot(div, top, left, width, height, args) {
        var borderMargin = self.port.radius;
        self.calcRadius();
 
-       self.coords.px = scaleCoords(self.coords.orig, borderMargin, self.port.zoomRange, self.canvas.width, self.canvas.height);
+       let w = self.canvas.width;
+       let h = self.canvas.height;
+       self.coords.px = scaleCoords(self.coords.orig, borderMargin, self.port.zoomRange, w, h, self.coords.aspectRatio);
        if (self.coords.lines)
            self.coords.pxLines = scaleLines(self.coords.lines, self.port.zoomRange, self.canvas.width, self.canvas.height);
        self.scaleBackground(self.background, self.port.initZoom, self.port.zoomRange);
@@ -1600,8 +1764,9 @@ function MaxPlot(div, top, left, width, height, args) {
        statusDiv.style.width = width+"px";
 
        self.titleDiv.style.top = (height-gStatusHeight-gTitleSize)+"px";
+
        if (self.sliderDiv)
-           self.sliderDiv.style.top = (height-gStatusHeight-gTitleSize)+"px";
+           self.sliderDiv.style.top = (height-gStatusHeight-gSliderFromBottom)+"px";
 
     }
 
@@ -1683,6 +1848,8 @@ function MaxPlot(div, top, left, width, height, args) {
 
        self.coords.orig = coords;
        self.coords.labels = clusterLabels;
+       if (coordInfo.aspectRatio)
+           self.coords.aspectRatio = coordInfo.aspectRatio;
 
        var count = 0;
        for (var i = 0; i < coords.length/2; i++) {
@@ -1795,7 +1962,7 @@ function MaxPlot(div, top, left, width, height, args) {
              alert("internal error: alpha is not defined");
         if (coords===null)
              alert("internal error: cannot draw if coordinates are not set yet");
-        if (colArr.length !== (coords.length>>1))
+        if (colArr && colArr.length !== (coords.length>>1))
             alert("internal error: cbDraw.drawDots - colorArr is not 1/2 of coords array. Got "+pal.length+" color values but coordinates for "+(coords.length/2)+" cells.");
 
         if (doSvg!==undefined) {
@@ -1924,11 +2091,15 @@ function MaxPlot(div, top, left, width, height, args) {
        self.resetAlpha();
        self.resetRadius();
        self.scaleData();
-       //self.drawDots();
     };
 
+    this.zoomToTest = function(x1, y1, x2, y2) {
+       self.port.zoomRange = {"minX":x1, "minY":y1, "maxX":x2, "maxY":y2};
+       self.scaleData();
+    }
+
     this.zoomTo = function(x1, y1, x2, y2) {
-       /* zoom to rectangle defined by two points */
+       /* zoom to rectangle defined by two pixel points */
        // make sure that x1<x2 and y1<y2 - can happen if mouse movement was upwards
        debug("Zooming to pixels: ", x1, y1, x2, y2);
        var pxMinX = Math.min(x1, x2);
@@ -1968,8 +2139,6 @@ function MaxPlot(div, top, left, width, height, args) {
      * */
         var zr = self.port.zoomRange;
         var iz = self.port.initZoom;
-
-        debug("old zoomfact "+self.port.zoomFact);
 
         var xRange = Math.abs(zr.maxX-zr.minX);
         var yRange = Math.abs(zr.maxY-zr.minY);
@@ -2219,7 +2388,6 @@ function MaxPlot(div, top, left, width, height, args) {
             }
         }
         self.scaleData();
-        self.selCells.clear();
         self._selUpdate();
     }
 
@@ -2893,7 +3061,7 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.col.arr = self.col.arr;
 
         if (self.background)
-            plot2.setBackground (self.background.img);
+            plot2.setBackground (self.background.image);
 
         self.setSize(newWidth, newHeight, false); // will call scaleData(), but not redraw.
 

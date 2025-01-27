@@ -165,6 +165,7 @@ def sendDebugToFile(fname):
     logger.setLevel(logging.DEBUG) #By default, logs all messages
 
     # log to console
+    consLevel = logging.INFO
     ch = logging.StreamHandler() #StreamHandler logs to console
     ch.setLevel(consLevel)
     ch_format = logging.Formatter('%(asctime)s - %(message)s')
@@ -1372,6 +1373,8 @@ def metaToBin(inDir, inConf, outConf, fname, outDir):
     # we have to strip special chars so fix the user's field names to our format
     sanEnumFields = []
     if enumFields is not None:
+        if "" in enumFields:
+            errAbort("The enumFields statement in cellbrowser.conf must not contain an empty string")
         sanEnumFields = [sanitizeName(n) for n in enumFields]
 
     fieldInfo = []
@@ -1394,7 +1397,8 @@ def metaToBin(inDir, inConf, outConf, fname, outDir):
         # very dumb heuristic to recognize fields that should not be treated as numbers but as enums
         # res.0.6 is the default field name for Seurat clustering. Field header sanitizing changes it to
         # res_0_6 which is not optimal, but namedtuple doesn't allow dots in names
-        if "luster" in cleanFieldName or \
+        if "eiden" in cleanFieldName or \
+                "luster" in cleanFieldName or \
                 "ouvain" in cleanFieldName or (fieldName.startswith("res_") and "_" in fieldName):
             forceType="enum"
 
@@ -2378,7 +2382,8 @@ def parseColors(inDir, inConf, outConf, colData):
     colors = {}
     for fieldName, fname in colorConf.items():
         if fieldName != "__default__" and fieldName not in metaFieldNames:
-            errAbort("fieldName %s from 'colors' specification is not a valid meta data field name. Possible names are: %s" % (repr(fieldName), repr(metaFieldNames)))
+            logging.warn("fieldName %s from 'colors' specification is not a valid meta data field name. Possible names are: %s" % (repr(fieldName), repr(metaFieldNames)))
+            continue
 
         fname = abspath(join(inDir, fname))
         if isfile(fname):
@@ -2490,7 +2495,8 @@ def readMatrixSampleNames(fname):
         return ret
 
     else:
-        return readHeaders(fname)[1:]
+        names = readHeaders(fname)[1:]
+        return names
 
 def metaReorderFilter(matrixFname, metaFname, fixedMetaFname, keepFields):
     """ check and reorder the meta data, has to be in the same order as the
@@ -2832,6 +2838,7 @@ nonAscii = re.compile(r'[^a-zA-Z_0-9+]')
 def sanitizeName(name):
     " remove all nonalpha chars, allow underscores, special treatment for %, + and -. Makes a valid file name. "
     assert(name!=None)
+    origName = name
     # some characters are actually pretty common and there we have seen fields where the only 
     # difference are these characters
     # if this continues to be aproblem, maybe append the MD5 of a raw field name to the sanitized name
@@ -2845,7 +2852,7 @@ def sanitizeName(name):
     if newName!=name:
         logging.debug("Sanitized %s -> %s" % (repr(name), newName))
     if (len(newName)==0):
-        errAbort("Field name %s has only special chars?" % name)
+        errAbort("Field name %s has only special chars?" % repr(origName))
     return newName
 
 def nonAlphaToUnderscores(name):
@@ -3105,13 +3112,14 @@ def readFile(fname, encoding="utf8"):
 
 def readFileIntoDict(summInfo, key, inDir, fname, mustExist=False, encoding="utf8"):
     " return file with encoding as string into dictionary "
-    logging.debug("Reading file into dict. %s, inDir %s, file name %s" % (key, inDir, fname))
     fname = join(inDir, fname)
     if not isfile(fname):
         if mustExist:
             errAbort("%s does not exist" % fname)
         else:
             return
+
+    logging.debug("Reading file into dict. %s, inDir %s, file name %s" % (key, inDir, fname))
 
     if fname.endswith(".json"):
         data = readJson(fname)
@@ -3163,6 +3171,60 @@ def copyBackgroundImages(inDir, inConf, outConf, datasetDir):
         newImages.append(imageInfo)
     outConf["images"] = newImages
 
+def parseImageTsv(fname):
+    """ parse a tsv file with images to a nested dict structure and return it 
+    input is a four or five column tsv file with mandatory headers:
+        section, set, label, fname, (isDownload, optional)
+    output is a nested dict:
+        list of categories (dict)
+        Each category has "categoryLabel" and "categoryImageSets" (list)
+        Each imageSet is a dict with keys:
+            setLabel and images and downloads.
+            Each image has keys "file" and "label".
+            Each download has keys "file" and "label".
+    """
+    headerOk = False
+    sections = OrderedDict()
+    headers = None
+    for row in textFileRows(open(fname)):
+        row[0] = row[0].lstrip("#")
+        if headers is None:
+            headers = row
+            if not headers[:4]==["section", "set", "label", "fname"]:
+                headerOk = True
+            if headerOk:
+                errAbort("imagesFile files must be .json or .tsv. If .tsv, must have at least these columns in this order: section, set, label, fname. Header found was: %s" % headers)
+            continue
+        section, imgSet, label, fname = row
+
+        isDownload = False
+        if len(row)>4:
+            isDownload = bool(row[4])
+
+        sections.setdefault(section, OrderedDict())
+        sections[section].setdefault(imgSet, OrderedDict())
+        sections[section][imgSet].setdefault(isDownload, []).append( (label, fname) )
+
+    out = []
+    for sectionName, setDict in sections.items():
+        sectDict = {}
+        sectDict["categoryLabel"] = sectionName
+        for setName, downDict in setDict.items():
+            setDict = {}
+            setDict["setLabel"] = setName
+            for isDownload, imgs in downDict.items():
+                for img in imgs:
+                    label, fname = img
+                    if isDownload:
+                        keyName = "downloads"
+                    else:
+                        keyName = "images"
+                    setDict.setdefault(keyName, []).append({"file":fname, "label":label})
+            sectDict.setdefault("categoryImageSets", []).append(setDict)
+        out.append(sectDict)
+
+    return out
+
 def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=None):
     " write a json file that describes the dataset abstract/methods/downloads "
     confFname = join(inDir, "datasetDesc.conf")
@@ -3208,10 +3270,15 @@ def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=No
         readFileIntoDict(summInfo, "methods", inDir, summInfo["methodsFile"], mustExist=True)
         del summInfo["methodsFile"]
 
-    if "imageSetFile" in summInfo:
-        readFileIntoDict(summInfo, "imageSets", inDir, summInfo["imageSetsFile"], mustExist=True)
-    else:
-        readFileIntoDict(summInfo, "imageSets", inDir, "images.json")
+    if "imagesFile" in summInfo:
+        imgFname = summInfo["imagesFile"]
+        if imgFname.endswith(".json"):
+            readFileIntoDict(summInfo, "imageSets", inDir, imgFname, mustExist=True)
+        else:
+            summInfo["imageSets"] = parseImageTsv(imgFname)
+        outConf["fileVersions"]["supplImageConf"] = getFileVersion(imgFname)
+    #else:
+        #readFileIntoDict(summInfo, "imageSets", inDir, "images.json")
 
     # import the unit description from cellbrowser.conf
     if "unit" in outConf and not "unitDesc" in summInfo:
@@ -3259,10 +3326,12 @@ def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=No
         for catInfo in summInfo["imageSets"]:
             for imageSet in catInfo["categoryImageSets"]:
                 imageSetFnames = set()
-                for dl in imageSet.get("downloads"):
-                    copyImageFile(inDir, dl, imageDir, doneNames, imageSetFnames)
-                for img in imageSet.get("images"):
-                    copyImageFile(inDir, img, imageDir, doneNames, imageSetFnames)
+                if "downloads" in imageSet:
+                    for dl in imageSet.get("downloads"):
+                        copyImageFile(inDir, dl, imageDir, doneNames, imageSetFnames)
+                if "images" in imageSet:
+                    for img in imageSet.get("images"):
+                        copyImageFile(inDir, img, imageDir, doneNames, imageSetFnames)
 
 
     # if we have a desc.conf: with so much data now in other files, generate the md5 from the data
@@ -3466,11 +3535,15 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
         return {}
     logging.debug("Parsing %s" % fname)
     symToGene = None
+    nonUniqueSyms = defaultdict(set)
     if geneToSym is not None:
         symToGene = dict()
         for gene, sym in iterItems(geneToSym):
+            if sym in symToGene:
+                #logging.warning("Symbol %s is not unique, geneID %s" % (sym, gene))
+                nonUniqueSyms[sym].add(gene)
+                nonUniqueSyms[sym].add(symToGene[sym])
             symToGene[sym] = gene
-
 
     atacByChrom = None # only filled lazily if we find any ATAC quick ranges
     sep = sepForFile(fname)
@@ -3479,12 +3552,15 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
         if line.startswith("#"):
             continue
         line = removeBom(line)
+        line = line.rstrip("\r\n")
+        if len(line)==0:
+            continue
 
         hasDesc = False
         hasPmid = False
         if line.startswith("symbol"):
             continue
-        row = line.rstrip("\r\n").split(sep)
+        row = line.split(sep)
         geneOrSym = row[0]
 
         # case 1: user provides both geneId and symbol. Rare.
@@ -3525,6 +3601,9 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
                 geneId = symToGene[sym]
             else:
                 errAbort("Gene %s in quickgenes file is neither a symbol nor a geneId" % repr(geneOrSym))
+            if sym in nonUniqueSyms:
+                logging.warn("Symb %s in quick genes files is not unique. Which of these genes do you mean: %s. "
+                        "Use geneId|sym in quickgenes file to solve this." % (sym, ",".join(nonUniqueSyms[sym])))
             geneStr = geneId+"|"+sym
 
         # case 5: it is an ATAC dataset and the quickgenes file has ranges
@@ -3742,7 +3821,6 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
     coordFnames = makeAbsDict(inConf, "coords")
     coordFnames = makeAbsDict(inConf, "coords", fnameKey="lineFile")
 
-    flipY = inConf.get("flipY", False) # R has a bottom screen 0 different than most drawing libraries
     useTwoBytes = False # to save space, coordinates are reduced to the range 0-65535
 
     hasLabels = False
@@ -3761,6 +3839,7 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
         coordLabel = inCoordInfo["shortLabel"]
         logging.info("Parsing coordinates for "+coordLabel+" from "+coordFname)
         # 'limits' is everything needed to transform coordinates to the final 0-1.0  or 0-65535 coord system
+        flipY = inConf.get("flipY", False) # R has a bottom screen 0 different than most drawing libraries
         flipY = bool(inCoordInfo.get("flipY", flipY))
 
         coords = parseCoordsAsDict(coordFname)
@@ -3976,7 +4055,14 @@ def readValidGenes(outDir, inConf):
     if len(geneToSym)==0:
         geneToSym = None
 
-    return set(syms), set(geneIds), geneToSym
+    symSet = set(syms)
+
+    #symCounts = Counter(syms).most_common()
+    #for sym, count in symCounts:
+        #if count > 1:
+            #logging.warn("Symbol %d is not unique" % count)
+
+    return symSet, set(geneIds), geneToSym
 
 def readQuickGenes(inConf, geneToSym, outDir, outConf):
     " read quick genes file and make sure that the genes in it are in the matrix "
@@ -4560,7 +4646,7 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         "clusterField", "defColorField", "xenaPhenoId", "xenaId", "hubUrl", "showLabels", "ucscDb",
         "unit", "violinField", "visibility", "coordLabel", "lineWidth", "hideDataset", "hideDownload",
         "metaBarWidth", "supplFiles", "defQuantPal", "defCatPal", "clusterPngDir", "wrangler", "shepherd",
-        "binStrategy",
+        "binStrategy", "split",
         "lineAlpha", "lineWidth", "lineColor",
         # the following are there only for old datasets, they are now nested under "facets"
         "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays", # these are just here for backwards-compatibility and will eventually get removed
@@ -4598,12 +4684,18 @@ def writeAnndataCoords(anndata, coordFields, outDir, desc):
     " write all embedding coordinates from anndata object to outDir, the new filename is <coordName>_coords.tsv "
     import pandas as pd
 
+    if "spatial" in anndata.uns and "is_single" in anndata.uns["spatial"]:
+        logging.warn("Data fix: Found 'is_single' in ad.uns, removing this field")
+        del anndata.uns["spatial"]["is_single"]
+        if len(anndata.uns["spatial"])==0:
+            logging.warn("Data fix: No spatial data left, removing ad.uns['spatial']")
+            del anndata.uns["spatial"]
+
     if coordFields=="all" or coordFields is None:
         coordFields = getObsmKeys(anndata)
 
-    if "spatial" in coordFields:
-        # spatial datasets have a ton of obsm attributes that are usually not coordinates
-        coordFields = filterFields(anndata, coordFields)
+    # spatial datasets have a ton of obsm attributes that are usually not coordinates
+    coordFields = filterFields(anndata, coordFields)
 
     # move over a field to obs:
     # ad.obs = pd.concat([ad.obs, ad.obsm["ctype_props"]], axis=1)
@@ -4615,9 +4707,10 @@ def writeAnndataCoords(anndata, coordFields, outDir, desc):
         # X_draw_graph_tsne - old versions
         # X_tsne - newer versions
         # also seen in the wild: X_Compartment_tSNE
-        if fieldName=="spatial" and "spatial" in anndata.uns and len(anndata.uns["spatial"])>1:
-            logging.debug("Not exporting spatial coords, because more than one slide")
+        if fieldName=="spatial" and "spatial" in anndata.uns:
+            logging.info("Not exporting spatial coords now, because there are also spatial images. Will export these coords later.")
             continue
+
         coordName = fieldName.replace("X_draw_graph_","").replace("X_","")
         fullName = coordLabels.get(coordName, coordName)
 
@@ -4878,11 +4971,11 @@ def runSafeRankGenesGroups(adata, clusterField, minCells=5):
     sc.pp.filter_genes(adata, min_cells=minCells) # rank_genes_groups crashes on zero-value genes
 
     # cell clusters with a cell count = 1 crash rank_genes, so remove their cells
-    clusterCellCounts = list(adata.obs.groupby([clusterField]).apply(len).iteritems())
+    clusterCellCounts = list(adata.obs.groupby([clusterField]).apply(len).items())
     filterOutClusters = [cluster for (cluster,count) in clusterCellCounts if count==1]
     if len(filterOutClusters)!=0:
-        logging.info("Removing cells in clusters %s, as they have only a single cell" % filterOutClusters)
-        adata = adata[~adata.obs[clusterField].isin(filterOutClusters)]
+       logging.info("Removing cells in clusters %s, as they have only a single cell, will mess up marker gene scoring" % filterOutClusters)
+       adata = adata[~adata.obs[clusterField].isin(filterOutClusters)]
 
     logging.info("Calculating 100 marker genes for each cluster")
     # working around bug in scanpy 1.9.1, see https://github.com/scverse/scanpy/issues/2181
@@ -4911,7 +5004,7 @@ def saveMarkers(adata, markerField, nb_marker, fname):
         col=list(concat.columns)
         col[0],col[-2]='z_score','gene'
         concat.columns=col
-        marker_df=marker_df.append(concat)
+        marker_df=pd.concat([marker_df,concat])
 
     #Rearranging columns -> Cluster, gene, score
     cols=marker_df.columns.tolist()
@@ -4947,17 +5040,23 @@ def exportScanpySpatial(adata, outDir, configData, coordDescs):
         _check_scale_factor, _check_crop_coord, _check_na_color
 
 
-    #library_id = _empty
+    if not ("spatial" in adata.obsm and "spatial" in adata.uns):
+        logging.debug("No 'spatial' key found in adata.obsm")
+        return configData, coordDescs
+
     import pandas as pd
     coordDf=pd.DataFrame(adata.obsm["spatial"],index=adata.obs.index)
 
     libraries = adata.uns["spatial"].keys()
     for library_id in libraries:
-    #Out[8]: dict_keys(['C47', 'C50', 'C56', 'IBM29', 'IBM31', 'IBM35', 'SRP1', 'SRP4'])
+        #Out[8]: dict_keys(['C47', 'C50', 'C56', 'IBM29', 'IBM31', 'IBM35', 'SRP1', 'SRP4'])
 
         coordsDone = False
         imgConfigs = []
         for img_key in ["hires", "lowres"]:
+
+            if not img_key in adata.uns["spatial"][library_id]["images"]:
+                continue
             crop_coord = None
             na_color = None
             size = 1.0
@@ -4987,19 +5086,20 @@ def exportScanpySpatial(adata, outDir, configData, coordDescs):
             imgConfigs.append({"file":imgFname, "label":label, "radius":circle_radius, \
                     "scale_factor":scale_factor})
 
-            meta = dict(spatial_data["metadata"])
-            meta["label"] = label
-            meta["py_spot_size"] = spot_size
-            meta["py_radius"] = circle_radius
-            meta["py_size"] = size
-            meta["scalefactors"] = spatial_data["scalefactors"]
-            if crop_coord is not None:
-                meta["crop_coord"] = crop_coord
+            if "metadata" in spatial_data:
+                meta = dict(spatial_data["metadata"])
+                meta["label"] = label
+                meta["py_spot_size"] = spot_size
+                meta["py_radius"] = circle_radius
+                meta["py_size"] = size
+                meta["scalefactors"] = spatial_data["scalefactors"]
+                if crop_coord is not None:
+                    meta["crop_coord"] = crop_coord
 
-            if "spatialMeta" not in configData:
-                configData["spatialMeta"] = []
+                if "spatialMeta" not in configData:
+                    configData["spatialMeta"] = []
 
-            configData["spatialMeta"].append(meta)
+                configData["spatialMeta"].append(meta)
 
             if not coordsDone:
                 # the 10X scale_factor indicates the relationship between pixels in the lowres/hires
@@ -5063,16 +5163,27 @@ def check_nonnegative_integers(X):
 # copy end
 
 def exportScanpyOneFieldColor(fieldName, fieldValues, colors, outDir, configData):
-    " write a single color file, for one field "
+    "write a single color file, for one field"
     outFname = join(outDir, fieldName+"_colors.tsv")
     logging.info("Writing colors of field %s to %s" % (fieldName, outFname))
+    
+    # Debugging: print lengths and contents
+    #print(f"Field name: {fieldName}")
+    #print(f"Field values (length {len(fieldValues)}): {fieldValues}")
+    #print(f"Colors (length {len(colors)}): {colors}")
+
+    # Check lengths
+    if len(fieldValues) != len(colors):
+        logging.error("Mismatch of lengths in h5ad: %s values vs %d colors" % (len(fieldValues), len(colors)))
+        # Handle mismatch: you can either raise an exception or handle it gracefully
+        return
+
     ofh = open(outFname, "w")
-    assert(len(fieldValues)==len(colors))
     ofh.write("#val	color\n")
     for val, color in zip(fieldValues, colors):
         ofh.write("%s\t%s\n" % (val, color))
     ofh.close()
-    if not "colors" in configData:
+    if "colors" not in configData:
         configData["colors"] = {}
     configData["colors"][fieldName] = outFname
 
@@ -5080,8 +5191,17 @@ def exportScanpyColors(adata, outDir, configData):
     " create one tsv with the colors per color definition in adata "
     for fieldName in adata.obs.keys():
         colorKey = fieldName+"_colors"
-        if colorKey in adata.uns:
-            outFname = exportScanpyOneFieldColor(fieldName, adata.obs[fieldName].values.categories, adata.uns[colorKey], outDir, configData)
+        #if colorKey in adata.uns:
+            #outFname = exportScanpyOneFieldColor(fieldName, adata.obs[fieldName].values.categories, adata.uns[colorKey], outDir, configData)
+        if colorKey in adata.uns and adata.uns[colorKey] is not None and len(adata.uns[colorKey]) > 0:
+            fieldValues = adata.obs[fieldName].values.categories
+            colors = adata.uns[colorKey]    
+            # Check if colors is a list/array and has a non-zero length
+            if colors is not None and len(colors) > 0:
+                fieldValues = adata.obs[fieldName].values.categories
+                outFname = exportScanpyOneFieldColor(fieldName, fieldValues, colors, outDir, configData)
+            else:
+                logging.warning("Skipping %s because colors are not available or empty." % fieldName)
     return configData
 
 def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=None,
@@ -5163,8 +5283,10 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
 
     coordFields = writeAnndataCoords(adata, coordFields, outDir, coordDescs)
 
+    configData, coordDescs = exportScanpySpatial(adata, outDir, configData, coordDescs)
+
     if len(coordDescs)==0:
-        raise ValueError("No valid embeddings were found in anndata.obsm but at least one array of coordinates is required. Keys  obsm: %s" % (coordFields))
+        logging.warn("No valid embeddings were found in anndata.obsm but at least one array of coordinates is usually required. Keys obsm: %s" % (coordFields))
 
     ##Check for cluster markers
     if (markerField not in adata.uns or clusterField is not None) and not skipMarkers:
@@ -5250,9 +5372,6 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     meta_df.rename(metaFields, axis=1, inplace=True)
     fname = join(outDir, "meta.tsv")
     meta_df.to_csv(fname,sep='\t', index_label="cellId")
-
-    if "spatial" in adata.uns:
-        configData, coordDescs = exportScanpySpatial(adata, outDir, configData, coordDescs)
 
     configData = exportScanpyColors(adata, outDir, configData)
 
@@ -5478,15 +5597,24 @@ def resolveOutDir(outDir):
 
 def fixupName(inConfFname, inConf):
     " detect hierarchical mode and construct the output path "
-    dataRoot = findRoot(inConfFname)
+    inFullPath = abspath(inConfFname)
+    dataRoot = findRoot(dirname(inFullPath))
     if dataRoot:
         if "name" in inConf:
-            logging.debug("using dataset hierarchies: 'name' in %s is ignored" % inConfFname)
+            logging.debug("using dataset hierarchies: 'name' in %s is ignored" % inFullPath)
         logging.debug("Deriving dataset name from path")
-        inConf["name"] = basename(dirname(abspath(inConfFname)))
+        inConf["name"] = basename(dirname(inFullPath))
 
-        relPath = relpath(dirname(abspath(inConfFname)), dataRoot)
+        relPath = relpath(dirname(inFullPath), dataRoot)
     else:
+        if not "name" in inConf:
+            errAbort("Not running in data hierarchy mode. "
+                "The config file %s needs at least the setting 'name' to a short string, e.g. 'cortex-dev'. "
+                "If you set  a dataRoot directory in your ~/.cellbrowser file or via the CBDATAROOT variable, then the input datasets "
+                "are assumed to be under one single directory and their subdirectory name is the datasetname. "
+                "See https://cellbrowser.readthedocs.io/en/master/collections.html "
+                "Otherwise, as now, they can be spread out over the entire filesystem but then the directory name cannot be used to "
+                "derive the cell browser dataset name. Instead, a 'name' setting must be present in every cellbrowser.conf file." % inConfName)
         relPath = inConf["name"]
 
     dsName = inConf["name"]
@@ -5756,7 +5884,7 @@ def cbBuildCli():
 
             filtConf = []
             for cf in confFnames:
-                if "old/" in cf or "tmp/" in cf or "not-used/" in cf or "temp/" in cf or "orig/" in cf or "ignore/" in cf or "skip/" in cf:
+                if "old/" in cf or "tmp/" in cf or "not-used/" in cf or "temp/" in cf or "orig/" in cf or "ignore/" in cf or "skip/" in cf or "marker-recalc" in cf:
                     logging.debug("Skipping %s, name suggests that it should be skipped" % cf)
                     continue
                 cfDepth = cf.count("/")
@@ -5767,7 +5895,7 @@ def cbBuildCli():
                 filtConf.append(cf)
             confFnames = filtConf
 
-            logging.debug("recursive config filenames without anything that contains old/tmp/temp/not-used: %s" % confFnames)
+            logging.debug("recursive config filenames without anything that contains old/tmp/temp/not-used/marker-recalc: %s" % confFnames)
             for cf in confFnames:
                 logging.info("Recursive mode: processing %s" % cf)
                 build(cf, outDir, redo=options.redo)
@@ -6502,6 +6630,7 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname, skipMa
     conf["pcCount"] = conf.get("pcCount", "auto")
     conf["doLayouts"] = doLayouts
     conf["doLouvain"] = conf.get("doLouvain", True)
+    conf["doPca"] = conf.get("doPca", True)
     conf["louvainNeighbors"] = int(conf.get("louvainNeighbors", 6))
     conf["louvainRes"] = float(conf.get("louvainRes", 1.0))
 
@@ -6667,50 +6796,51 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname, skipMa
         pipeLog('Scaling data, max_value=%d' % maxValue)
         sc.pp.scale(adata, max_value=maxValue)
 
-    pcCount = conf["pcCount"]
+    if conf["doPca"]:
+        pcCount = conf["pcCount"]
 
-    if pcCount=="auto":
-        firstPcCount = 100
-    else:
-        firstPcCount = pcCount
+        if pcCount=="auto":
+            firstPcCount = 100
+        else:
+            firstPcCount = pcCount
 
-    pipeLog('Performing initial PCA, number of PCs: %d' % firstPcCount)
-    sc.tl.pca(adata, n_comps=firstPcCount)
-    #Multiply by -1 to compare with Seurat
-    #adata.obsm['X_pca'] *= -1
-    #Plot of pca variance ratio to see if formula matches visual determination of pc_nb to use
-    sc.pl.pca_variance_ratio(adata, log=True)
+        pipeLog('Performing initial PCA, number of PCs: %d' % firstPcCount)
+        sc.tl.pca(adata, n_comps=firstPcCount)
+        #Multiply by -1 to compare with Seurat
+        #adata.obsm['X_pca'] *= -1
+        #Plot of pca variance ratio to see if formula matches visual determination of pc_nb to use
+        sc.pl.pca_variance_ratio(adata, log=True)
 
-    #Computing number of PCs to be used in clustering
-    if pcCount == "auto":
-        pipeLog("Estimating number of useful PCs based on Shekar et al, Cell 2016")
-        pipeLog("PC weight cutoff used is (sqrt(# of Genes/# of cells) + 1)^2")
-        pipeLog("See http://www.cell.com/cell/fulltext/S0092-8674(16)31007-8, STAR methods")
-        pc_cutoff = ( np.sqrt(float(len(adata.var))/len(adata.obs)) +1 ) **2
-        pc_nb = 0
-        for i in adata.uns['pca']['variance']:
-            if i > pc_cutoff:
-                pc_nb+=1
-        pipeLog('%d PCs will be used for tSNE and clustering' % pc_nb)
-        if pc_nb <= 2:
-            errAbort("Number of useful PCs is too small. The formula from Shekar et all did not work (not gene expression data?). Please set the "
-                    "number of PCs manually via the pcCount variable in scanpy.conf")
+        #Computing number of PCs to be used in clustering
+        if pcCount == "auto":
+            pipeLog("Estimating number of useful PCs based on Shekar et al, Cell 2016")
+            pipeLog("PC weight cutoff used is (sqrt(# of Genes/# of cells) + 1)^2")
+            pipeLog("See http://www.cell.com/cell/fulltext/S0092-8674(16)31007-8, STAR methods")
+            pc_cutoff = ( np.sqrt(float(len(adata.var))/len(adata.obs)) +1 ) **2
+            pc_nb = 0
+            for i in adata.uns['pca']['variance']:
+                if i > pc_cutoff:
+                    pc_nb+=1
+            pipeLog('%d PCs will be used for tSNE and clustering' % pc_nb)
+            if pc_nb <= 2:
+                errAbort("Number of useful PCs is too small. The formula from Shekar et all did not work (not gene expression data?). Please set the "
+                        "number of PCs manually via the pcCount variable in scanpy.conf")
 
-    else:
-        pc_nb = int(pcCount)
-        pipeLog("Using %d PCs as configured in config" % pcCount)
+        else:
+            pc_nb = int(pcCount)
+            pipeLog("Using %d PCs as configured in config" % pcCount)
 
-    if "tsne" in doLayouts:
+    if conf["doPca"] and "tsne" in doLayouts:
         pipeLog('Performing tSNE')
         sc.tl.tsne(adata, n_pcs=int(pc_nb), random_state=2, n_jobs=8)
 
-    if not inCluster or "umap" in doLayouts or conf["doLouvain"]:
+    if conf["doPca"] and (not inCluster or "umap" in doLayouts or conf["doLouvain"]):
         neighbors = conf["louvainNeighbors"]
         res = conf["louvainRes"]
         pipeLog('Running knn, using %d PCs and %d neighbors' % (pc_nb, neighbors))
         sc.pp.neighbors(adata, n_pcs=int(pc_nb), n_neighbors=neighbors)
 
-    if not inCluster or conf["doLouvain"]:
+    if not inCluster or (conf["doPca"] and conf["doLouvain"]):
         pipeLog('Performing Louvain Clustering, resolution %f' % (res))
         sc.tl.louvain(adata, resolution=res)
         pipeLog("Found %d louvain clusters" % len(adata.obs['louvain'].unique()))
@@ -6725,13 +6855,6 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname, skipMa
             sc.pl.tsne(adata, color=clusterField)
         except:
             logging.error("Error while plotting with Scanpy, ignoring the error")
-
-    #Clustering. Default Resolution: 1
-    #res = 1.0
-    #pipeLog('Performing Louvain Clustering, resolution = %f' % res)
-    #sc.pp.neighbors(adata, n_pcs=int(pc_nb))
-    #sc.tl.louvain(adata, resolution=res)
-    #sc.pl.tsne(adata, color='louvain')
 
     if "umap" in doLayouts:
         pipeLog("Performing UMAP")
@@ -6999,7 +7122,8 @@ def cbScanpyCli():
     if "_raw" in dir(adata) and "_var" in dir(adata.raw) and "_index" in list(adata.raw.var.columns):
         adata._raw._var.rename(columns={'_index': 'features'}, inplace=True)
 
-    adata.write(adFname)
+    if params.get("doH5ad", True):
+        adata.write(adFname)
 
     scanpyToCellbrowser(adata, outDir, datasetName=datasetName, skipMarkers=skipMarkers,
             clusterField=inCluster, skipMatrix=(copyMatrix or skipMatrix), matrixFormat=matrixFormat,
@@ -7013,14 +7137,20 @@ def cbScanpyCli():
     copyFileIfDiffSize(matrixFname, join(outDir, basename(matrixFname)))
 
 def readGenesBarcodes(geneFname, barcodeFname):
-    " return two lists "
+    " read the features.tsv or barcodes.tsv file, return two lists "
     genes = []
     sep = sepForFile(geneFname)
     for l in openFile(geneFname):
         row = l.rstrip("\r\n").split(sep) # field 3 is "Gene Expression" in cr3
         if len(row)>1:
             geneId, sym = row[:2]
-            genes.append(geneId+"|"+sym)
+            # we have seen features.tsv files where geneId==sym which switched off gene ID resolution
+            # e.g. the t004 dataset 
+            if (geneId!=sym):
+                genes.append(geneId+"|"+sym)
+            else:
+                genes.append(geneId)
+
         else:
             geneId = row[0]
             genes.append(geneId)

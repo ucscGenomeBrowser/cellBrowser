@@ -1,4 +1,4 @@
-#!/usr/bin/env python2.7
+#!/usr/bin/env python3
 
 from sys import *
 from optparse import OptionParser
@@ -45,7 +45,7 @@ if options.colNames!=None:
         line1 = stdin.readline().rstrip("\n")
     else:
         line1 = open(filenames[0]).readline().rstrip("\n")
-    print line1
+
     headers = line1.split("\t")
     nameToCol = {}
     for i, name in enumerate(headers):
@@ -99,4 +99,4 @@ for key, count in values:
 
     if (options.maxCount==None or count < options.maxCount) \
         and (options.minCount==None or count > options.minCount):
-        print "\t".join(row)
+        print("\t".join(row))
