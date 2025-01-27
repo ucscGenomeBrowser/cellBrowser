@@ -7471,7 +7471,7 @@ var cellbrowser = function() {
                 position: 'auto'
               },
               {
-                element: document.querySelector('#tpLeftSidebar'),
+                element: document.querySelector('#tpGeneTab'),
                 intro: "Color by gene: Click a gene from the list of pre-selected dataset genes or search for a gene in the dropdown to color by it.<br>",
                 position: 'auto'
               },

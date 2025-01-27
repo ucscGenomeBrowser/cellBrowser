@@ -549,14 +549,15 @@ function MaxPlot(div, top, left, width, height, args) {
         var sliderDiv = document.createElement('span');
         //sliderDiv.style.top = fromTop+"px";
         //sliderDiv.style.left = fromLeft+"px";
-        sliderDiv.style.bottom = "50px";
+        sliderDiv.style.bottom = "28px";
         sliderDiv.style.right = "200px";
-        sliderDiv.style.position = "relative";
+        sliderDiv.style.position = "absolute";
         sliderDiv.style.zIndex = "10";
         sliderDiv.id = "mpSliderDiv";
         sliderDiv.appendChild(radiusCont);
         sliderDiv.appendChild(alphaCont);
         self.div.appendChild(sliderDiv);
+        //self.canvasDiv.appendChild(sliderDiv);
         self.sliderDiv = sliderDiv; // for quickResize()
     }
 
@@ -670,10 +671,11 @@ function MaxPlot(div, top, left, width, height, args) {
     function addCanvasToDiv(div, top, left, width, height) {
         /* add a canvas element to the body element of the current page and keep left/top/width/eight in self */
         var canv = document.createElement('canvas');
+        self.canvasDiv = canv;
         canv.id = 'mpCanvas';
         //canv.style.border = "1px solid #AAAAAA";
         canv.style.backgroundColor = "white";
-        canv.style.position = "absolute";
+        canv.style.position = "relative";
         canv.style.display = "block";
         canv.style.width = width+"px";
         canv.style.height = height+"px";
