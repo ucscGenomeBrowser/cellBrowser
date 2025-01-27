@@ -3035,6 +3035,14 @@ var cellbrowser = function() {
             fieldName = db.getDefaultColorField();
         return fieldName;
     }
+
+    function getActiveLabelField() {
+        /* return default label field or from URL */
+        let fieldName = getVar("label");
+        if (fieldName===undefined)
+            fieldName = db.conf.labelField;
+        return fieldName;
+    }
     
     function colorByMetaField(fieldName, doneLoad) {
         /* load the meta data for a field, setup the colors, send it all to the renderer and call doneLoad. if doneLoad is undefined, redraw everything  */
@@ -3378,6 +3386,14 @@ var cellbrowser = function() {
         var sel = getById(elId).selectize;
         sel.addOption({id: name, text: name});
         sel.setValue(name, 1); // 1 = do not fire change
+    }
+
+    function selectizeClear(elId) {
+        /* clear a selectize Dropdown */
+        if (name===undefined)
+            return;
+        var sel = getById(elId).selectize;
+        sel.clear();
     }
 
     function colorByNothing() {
@@ -3788,7 +3804,7 @@ var cellbrowser = function() {
                buildLegendBar();
 
                if (db.conf.labelField)
-                   setLabelField(db.conf.labelField);
+                   setLabelField(getActiveLabelField());
 
                if (forcePalName!==null) {
                    legendChangePaletteAndRebuild(forcePalName);
@@ -5246,12 +5262,15 @@ var cellbrowser = function() {
     function onLabelComboChange(ev, choice) {
         /* called when user changes the label field combo box */
         var fieldLabel = choice.selected.split("_")[1];
-        if (fieldLabel==="none")
+        if (fieldLabel==="none") {
             setLabelField(null); // = switch off labels
+            changeUrl({"label":null});
+        }
         else {
             var fieldIdx = parseInt(fieldLabel);
             var fieldName = db.getMetaFields()[fieldIdx].name;
             setLabelField(fieldName);
+            changeUrl({"label":fieldName});
         }
         renderer.drawDots();
     }
@@ -5321,7 +5340,7 @@ var cellbrowser = function() {
 
             // start the tutorial after a while
             var introShownBefore = localStorage.getItem("introShown");
-            if (introShownBefore===undefined)
+            if (introShownBefore===undefined || introShownBefore===null)
                setTimeout(function(){ showIntro(true); }, 3000); // shown after 5 secs
         }
 
@@ -6538,7 +6557,8 @@ var cellbrowser = function() {
             var geneSym = ev.target.getAttribute("data-gene");
             exprDataRemoveGene(geneSym);
             buildExprDotplot("tpExprViewPlot", exprData); 
-            selectizeSetValue("tpGeneExprGeneCombo", ""); // clear the dropdown box
+            //selectizeSetValue("tpGeneExprGeneCombo", geneSym); // clear the dropdown box
+            selectizeClear("tpGeneExprGeneCombo"); // clear the dropdown box
         }
 
         $(".tpExprColLabel").on("click", onExprColLabelClick);
@@ -7441,13 +7461,23 @@ var cellbrowser = function() {
         intro.addSteps(
             [
               {
-                intro: "In the middle of the screen, each circle represents a "+gSampleDesc+". You can click the cluster label text to show the marker gene lists of the cluster.",
+                intro: "In the center of the window, highlighted here, each circle represents a "+gSampleDesc+". You can click the cluster label text to show the marker gene lists of the cluster.",
                 element: document.querySelector('#mpCanvas'),
                 position: 'auto'
               },
               {
                 element: document.querySelector('#tpLeftSidebar'),
-                intro: "Info and color control: move the mouse over a circle to show its annotation data.<br>Select an annotation field from the dropdown or simply click it, to color by the field. Click a gene from the list of pre-selected genes or search for a gene in the dropdown to color by it.<br>",
+                intro: "Cell annotations: move the mouse over a circle to show its annotations.<br>Select an annotation field from the dropdown or simply click it, to color by the field. ",
+                position: 'auto'
+              },
+              {
+                element: document.querySelector('#tpLeftSidebar'),
+                intro: "Color by gene: Click a gene from the list of pre-selected dataset genes or search for a gene in the dropdown to color by it.<br>",
+                position: 'auto'
+              },
+              {
+                element: document.querySelector('#tpOpenExprButton'),
+                intro: "Click 'Gene Expression Plots' to make Dotplots.",
                 position: 'auto'
               },
               //{
@@ -7459,6 +7489,11 @@ var cellbrowser = function() {
                 element: document.querySelector('#tpLegendBar'),
                 intro: "Click into the legend to select "+gSampleDesc+"s.<br>Click a color to change it or select a palette from the 'Colors' menu.<br>If you need a dataset, send us a link to it. If you have a new dataset in your lab, send it to cells@ucsc.edu so we can add it (hidden until publication).<br>To setup your own cell browser on your own webserver, see 'Help - Setup your own'.",
                 position: 'left'
+              },
+              {
+                element: document.querySelector('#tpLegendBar'),
+                intro: "Select cells with the checkboxes, with the 'select' tool in the toolbar or via Edit > Find Cells. Once cells are selected and you are coloring by a gene, a violin plot is shown in the bottom right.",
+                position: 'auto'
               },
             ]);
         intro.start();
@@ -8645,8 +8680,8 @@ var cellbrowser = function() {
             showTooltip(ev.clientX+15, ev.clientY, lineLabel);
     }
 
-    function fattenCluster(clusterName, valIdx) {
-    /* highlight one of the clusters */
+    function drawAndFattenCluster(clusterName, valIdx) {
+    /* highlight one of the clusters and redraw */
         renderer.fatIdx = valIdx;
         renderer.drawDots();
 
@@ -8705,7 +8740,7 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
         // XX currently, switch off fattening if there is a difference between label/color fields
         if (db.conf.activeLabelField==db.conf.activeColorField) {
             var valIdx = findMetaValIndex(metaInfo, clusterName);
-            fattenCluster(clusterName, valIdx);
+            drawAndFattenCluster(clusterName, valIdx);
         }
     }
 

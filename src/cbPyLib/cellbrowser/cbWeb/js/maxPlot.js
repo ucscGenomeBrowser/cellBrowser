@@ -73,7 +73,8 @@ function MaxPlot(div, top, left, width, height, args) {
     const gCloseButtonFromRight = 60; // distance of "close" button from right edge
 
     const nonFatColor = "F9F9F9"; // color used in fattening mode for all non-fat cells
-    const nonFatColorCircles = "BBBBBB"; // color used in fattening mode for all non-fat cells
+    const nonFatColorRect = "DDDDDD"; // rectangle mode: color used in fattening mode for all non-fat cells
+    const nonFatColorCircles = "BBBBBB"; // color used in fattening mode for all non-fat cell circles
 
     // the rest of the initialization is done at the end of this file,
     // because the init involves many functions that are not defined yet here
@@ -136,7 +137,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         addProgressBars(top+Math.round(height*0.3), left+30);
         if (!args || args.showSliders===undefined || args.showSliders===true)
-            addSliders(height-gStatusHeight-gSliderFromBottom, width);
+            addSliders();
 
         // timer that is reset on every mouse move
         self.timer = null;
@@ -146,6 +147,31 @@ function MaxPlot(div, top, left, width, height, args) {
         /* special coords are used for circles that are off-screen or otherwise not visible */
        return ((x===HIDCOORD && y===HIDCOORD)) // not shown (e.g. no coordinate or off-screen)
     }
+
+    function hexToGrey(hexColors) {
+        let greyArray = []
+        for (let i = 0; i < hexColors.length; i++) {
+            // Extract red, green, and blue components
+            let hexColor = hexColors[i];
+            const maxCol = 200;
+            const addCol = 20;
+            const red = Math.max(maxCol, addCol+parseInt(hexColor.slice(1, 3), 16));
+            const green = Math.max(maxCol, addCol+parseInt(hexColor.slice(3, 5), 16));
+            const blue = Math.max(maxCol, addCol+parseInt(hexColor.slice(5, 7), 16));
+
+            // Calculate the grayscale value using the luminosity method
+            const gray = Math.round(0.2126 * red + 0.7152 * green + 0.0722 * blue);
+
+            // Convert the grayscale value to a two-character hex string
+            const grayHex = gray.toString(16).padStart(2, '0');
+
+            // Return the grayscale hex color
+            const greySixHex = `${grayHex}${grayHex}${grayHex}`;
+            greyArray.push(greySixHex);
+        }
+        return greyArray;
+    }
+
 
     this.initPort = function(args) {
         /* init all viewport related state (zoom, radius, alpha) */
@@ -444,11 +470,11 @@ function MaxPlot(div, top, left, width, height, args) {
         self.drawDots();
     }
 
-    function addSliders(fromTop, canvWidth) {
+    function addSliders() {
         /* add sliders for transparency and radius */
         // alpha reset slider: a label, a slider + a reset button
         var sliderWidth = 90;
-        var fromLeft = canvWidth - sliderWidth - 2*45 - 50;
+        //var fromLeft = canvWidth - sliderWidth - 2*45 - 50;
 
         var alphaSlider = createSliderSpan("mpAlphaSlider", sliderWidth, 10, 35);
         self.alphaSlider = alphaSlider; // see activateSliders() for the jquery UI part of the code, executed later
@@ -460,7 +486,7 @@ function MaxPlot(div, top, left, width, height, args) {
         alphaCont.id = "mpAlphaCont";
         //alphaCont.style.left = "150px"; // cellbrowser.css defines grid widths: 45
         alphaCont.className = "sliderContainer";
-        alphaCont.style.top = "15px"; // (fromTop-14)+"px";
+        alphaCont.style.top = "15px"; 
         alphaCont.style.left = "0px";
 
         var alphaLabel = document.createElement('div'); // contains the slider and the reset button, floats right
@@ -502,8 +528,8 @@ function MaxPlot(div, top, left, width, height, args) {
         var radiusCont = document.createElement('span');
         radiusCont.className = "sliderContainer";
         radiusCont.id = "mpRadiusDiv";
-        radiusCont.style.left = "0px"; //fromLeft+"px";
-        radiusCont.style.top = "0px"; //fromTop+"px";
+        radiusCont.style.left = "0px"; 
+        radiusCont.style.top = "0px";
         radiusCont.appendChild(radiusSlider)
 
 
@@ -521,8 +547,10 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // add both to the big container div that holds all three slider elements
         var sliderDiv = document.createElement('span');
-        sliderDiv.style.top = fromTop+"px";
-        sliderDiv.style.left = fromLeft+"px";
+        //sliderDiv.style.top = fromTop+"px";
+        //sliderDiv.style.left = fromLeft+"px";
+        sliderDiv.style.bottom = "50px";
+        sliderDiv.style.right = "200px";
         sliderDiv.style.position = "relative";
         sliderDiv.style.zIndex = "10";
         sliderDiv.id = "mpSliderDiv";
@@ -827,8 +855,11 @@ function MaxPlot(div, top, left, width, height, args) {
        var dblSize = 2*radius;
        var count = 0;
 
-       if (selCells.size!==0)
-           colors = makeAllGreyHex(colors.length);
+       if (selCells.size!==0 || fatIdx!==null)
+           //colors = makeAllGreyHex(colors.length);
+           colors = hexToGrey(colors);
+
+       var fatCells = [];
 
        for (var i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
@@ -838,11 +869,17 @@ function MaxPlot(div, top, left, width, height, args) {
 
            var valIdx = coordColors[i];
            var col = colors[valIdx];
-           if (fatIdx!==null)
-               if (valIdx===fatIdx)
-                   col = "000000";
-               else
-                   col = "DDDDDD";
+           if (fatIdx!==null) {
+               if (valIdx===fatIdx) {
+                   // fattened cells must be overdrawn later, so just save their coords now
+                   fatCells.push(pxX);
+                   fatCells.push(pxY);
+                   continue
+               }
+               //else
+                   //col = "DDDDDD";
+                   //col = nonFatColorRect;
+           }
 
            ctx.fillStyle="#"+col;
            ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
@@ -850,7 +887,7 @@ function MaxPlot(div, top, left, width, height, args) {
        }
 
        // overdraw the selection as black rectangles on top
-       if (fatIdx===null) {
+       //if (fatIdx===null) {
            ctx.globalAlpha = 0.7;
            ctx.fillStyle="black";
             selCells.forEach(function(cellId) {
@@ -859,8 +896,19 @@ function MaxPlot(div, top, left, width, height, args) {
                ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
                count += 1;
             })
+       //}
+       // overdraw the fattened cells as blue rectangles on top
+       if (fatCells.length!==0) {
+           ctx.globalAlpha = 0.7;
+           ctx.fillStyle="blue";
+           for (var i = 0; i < fatCells.length/2; i++) {
+               var pxX = fatCells[2*i];
+               var pxY = fatCells[2*i+1];
+               ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
+               count++;
+           }
        }
-       debug(count+" rectangles drawn (including selection)");
+       debug(count+" rectangles drawn (including selection+fattening)");
        ctx.restore();
        return count;
     }
@@ -1122,11 +1170,11 @@ function MaxPlot(div, top, left, width, height, args) {
     /* create an off-screen-canvas with the circle-templates that will be stamped later onto the bigger canvas 
      * Returns the canvas. This feels very much like sprites on the AMIGA in the 1980s.
      *
-     * Add up to three circles at the end: 
-     * optional, only when fatIdx != null: 
-     *    at index colors.length - circle with nonFatColor for non-fattened circles
-     * at index colors.length - circle with a black outline, for the selection later.
-     * at index colors.length+1 - grey circle, for the case when there is a selection active and everything else is grey
+     * returns an object with these attributes:
+     *   .off       = off-screen canvas
+     *   .selImgIdx = index on off with circle with a black outline only, for the selection
+     *   .greyImgIdx= index on off with grey circle for the non-selected cells
+     *   .nonFatImgIdx (only when fatIdx is != null) = index on off with grey circle(?) for the non-fattened cells
      */
        var off = document.createElement('canvas'); // not added to DOM, will be gc'ed at some point
 
