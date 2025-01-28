@@ -51,7 +51,7 @@ def get_config() -> VersioneerConfig:
     cfg = VersioneerConfig()
     cfg.VCS = "git"
     cfg.style = "pep440-pre"
-    cfg.tag_prefix = "cellbrowser-"
+    cfg.tag_prefix = ""
     cfg.parentdir_prefix = "cellbrowser-"
     cfg.versionfile_source = "src/cbPyLib/cellbrowser/_version.py"
     cfg.verbose = False
