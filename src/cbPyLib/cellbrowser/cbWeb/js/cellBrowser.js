@@ -7890,6 +7890,15 @@ var cellbrowser = function() {
         renderer.setLabels(newRendLabels);
     }
 
+    function onLegendHover(ev) {
+        /* mouse hovers over legend */
+        var legendId = parseInt(ev.target.id.split("_")[1]);
+        var colorIndex = gLegend.rows[legendId].intKey;
+        var legendLabel = ev.target.innerText;
+        //$("#tpLegendCheckbox_" + colorIndex).click();
+        onClusterNameHover(legendLabel, legendId, ev);
+    }
+
     function onLegendLabelClick(ev) {
     /* called when user clicks on legend entry. */
 
@@ -8290,6 +8299,7 @@ var cellbrowser = function() {
         $("#tpLegendNotNull").click( function() { legendSetCheckboxes("notNull"); } );
 
         $('.tpLegendLabel').click( onLegendLabelClick ); // clicking the legend should have the same effect as clicking the checkbox
+        $('.tpLegendLabel').on("mouseover", onLegendHover ); // hovering over the legend should have the same effect hovering over the label
         //$('.tpLegendLabel').attr( "title", "Click to select samples with this value. Shift click to select multiple values.");
         activateTooltip(".tpLegendLabel");
         activateTooltip(".tpLegendCount");
