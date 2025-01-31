@@ -3524,9 +3524,6 @@ var cellbrowser = function() {
         // label text can be overriden by the user cart
         var labelField = db.conf.labelField;
 
-        if (! db.gLabelCoordCache )
-            db.gLabelCoordCache = {};
-
         if (clusterInfo) {
             var origLabels = [];
             var clusterMids = clusterInfo.labels;
@@ -3535,7 +3532,6 @@ var cellbrowser = function() {
                 clusterMids = clusterInfo;
             }
 
-            db.gLabelCoordCache[labelField] = clusterMids;
             for (var i = 0; i < clusterMids.length; i++) {
                 origLabels.push(clusterMids[i][2]);
             }
@@ -3555,30 +3551,27 @@ var cellbrowser = function() {
     function computeAndSetLabels(values, metaInfo) {
         /* recompute the label positions and redraw everything. Uses a cache for the label positions */
         var labelCoords;
-        if (db.gLabelCoordCache[metaInfo.label] !== undefined) {
-            labelCoords = db.gLabelCoordCache[metaInfo.label];
-        } else {
-            var coords = renderer.coords.orig;
-            var names = null;
-            if (metaInfo.type !== "float" && metaInfo.type !== "int") {
-                var names = metaInfo.ui.shortLabels;
-            }
 
-            // console.log(metaInfo);
-
-            console.time("cluster centers");
-            var calc = renderer.calcMedian(coords, values, names, metaInfo.origVals);
-
-            labelCoords = [];
-            for (var label in calc) {
-                var labelInfo = calc[label];
-                var midX = selectMedian(labelInfo[0]);
-                var midY = selectMedian(labelInfo[1]);
-                labelCoords.push([midX, midY, label]);
-            }
-            console.timeEnd("cluster centers");
-            db.gLabelCoordCache[metaInfo.label] = labelCoords;
+        var coords = renderer.coords.orig;
+        var names = null;
+        if (metaInfo.type !== "float" && metaInfo.type !== "int") {
+            var names = metaInfo.ui.shortLabels;
         }
+
+        // console.log(metaInfo);
+
+        console.time("cluster centers");
+        var calc = renderer.calcMedian(coords, values, names, metaInfo.origVals);
+
+        labelCoords = [];
+        for (var label in calc) {
+            var labelInfo = calc[label];
+            var midX = selectMedian(labelInfo[0]);
+            var midY = selectMedian(labelInfo[1]);
+            labelCoords.push([midX, midY, label]);
+        }
+        console.timeEnd("cluster centers");
+
         renderer.setLabelCoords(labelCoords);
         setLabelDropdown(metaInfo.name);
     }
