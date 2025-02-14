@@ -1270,7 +1270,7 @@ function MaxPlot(div, top, left, width, height, args) {
        //return count;
     //}
 
-    function blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, selCells, greyIdx, fatIdx) {
+    function blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, selCells, greyIdx, fatIdx, colors) {
    /* blit the circles onto the main canvas, using all colors */
        var count = 0;
        var hasSelection = false;
@@ -1299,6 +1299,11 @@ function MaxPlot(div, top, left, width, height, args) {
        }
 
        if (fatIdx!==null) {
+           // do not fatten
+           //radius = radius * 2;
+           //let templates = makeCircleTemplates(radius, tileWidth, tileHeight, colors, fatIdx);
+           //let off = templates.off;
+
            for (let i = 0; i < pxCoords.length/2; i++) {
                col = coordColors[i];
                if (fatIdx!==col)
@@ -1355,7 +1360,7 @@ function MaxPlot(div, top, left, width, height, args) {
            coordColors = copyColorsOnly(origCoordColors, fatIdx, templates.nonFatImgIdx);
        }
        
-       count = blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, selCells, templates.greyImgIdx, fatIdx);
+       count = blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, selCells, templates.greyImgIdx, fatIdx, colors);
        if (origCoordColors)
             coordColors = origCoordColors;
 
@@ -1501,17 +1506,22 @@ function MaxPlot(div, top, left, width, height, args) {
            var valIdx = coordColors[i];
 
            if (fatIdx!==null) {
-               // fattening mode: fat cluster is black, all the rest is grey
+               // fattening mode: fat cluster is black, all the rest is blue
                let grey;
-               if (valIdx!==fatIdx)
+               if (valIdx!==fatIdx) {
                    grey = 0xDD;
-               else
-                   grey = 0;
-
-               cData[p] = grey;
-               cData[p+1] = grey;
-               cData[p+2] = grey;
+                   cData[p] = grey;
+                   cData[p+1] = grey;
+                   cData[p+2] = grey;
+               }
+               else {
+                   // stop all transparency, just overdraw fat blue here
+                   cData[p] = 0;
+                   cData[p+1] = 0;
+                   cData[p+2] = 255;
+               }
                cData[p+3] = 255; // no transparency... ever?
+
            } else {
                // normal colors
                var oldR = cData[p];
