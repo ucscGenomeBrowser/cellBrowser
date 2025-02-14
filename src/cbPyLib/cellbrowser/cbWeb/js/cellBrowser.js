@@ -106,6 +106,7 @@ var cellbrowser = function() {
 
     // maximum number of distinct values that one can color on
     const MAXCOLORCOUNT = 1500;
+    const MAXLABELCOUNT = 500;
 
     // histograms show only the top X values and summarize the rest into "other"
     var HISTOCOUNT = 12;
@@ -3225,10 +3226,23 @@ var cellbrowser = function() {
         return [sel, unsel];
     }
 
+    function log2All(arr) {
+	/* take log2(x+1 of all subarrays */
+	return arr.map(subArr => 
+	    subArr.map(num => Math.log2(num + 1))
+	);
+    }
+
     function buildViolinFromValues(labelList, dataList) {
         /* make a violin plot given the labels and the values for them */
         if ("violinChart" in window)
             window.violinChart.destroy();
+
+        let log2Done = false;
+        if (db.conf.matrixArrType.includes("int")) {
+	    dataList = log2All(dataList);
+            log2Done = true;
+        }
 
         var labelLines = [];
         labelLines[0] = labelList[0].split("\n");
@@ -3261,10 +3275,14 @@ var cellbrowser = function() {
         };
 
         var yLabel = null;
-        if (db.conf.unit===undefined && db.conf.matrixArrType==="Uint32")
+        if (db.conf.unit===undefined && db.conf.matrixArrType==="Uint32") {
             yLabel = "read/UMI count";
+        }
         if (db.conf.unit!==undefined)
             yLabel = db.conf.unit;
+
+        if (log2Done)
+            yLabel = "log2("+yLabel+" + 1)";
 
         if (yLabel!==null)
             optDict.scales = {
@@ -3313,7 +3331,7 @@ var cellbrowser = function() {
     //}
 
     function buildViolinPlot() {
-        /* create the violin plot, depending on the current selection and the violinField config */
+        /* create the violin plot at the bottom right, depending on the current selection and the violinField config */
         var exprVec = gLegend.exprVec;
         if (exprVec===undefined)
             return;
@@ -3583,8 +3601,16 @@ var cellbrowser = function() {
             renderer.setShowLabels(false);
         }
         else {
-            renderer.setShowLabels(true);
             var metaInfo = db.findMetaInfo(labelField);
+            if (metaInfo.valCounts.length > MAXLABELCOUNT) {
+                let valCount = metaInfo.valCounts.length;
+                alert("Error: This field contains "+valCount+" different values. "+
+                    "The limit is "+MAXLABELCOUNT+". Too many labels overload the screen.");
+                db.conf.activeLabelField = null;
+                renderer.setShowLabels(false);
+                return;
+            }
+            renderer.setShowLabels(true);
             db.conf.activeLabelField = metaInfo.name;
 
             if (metaInfo.arr) // preloaded
@@ -6002,8 +6028,8 @@ var cellbrowser = function() {
         /* gene expression viewer: called when user changes the meta field combo box */
         var fieldId = parseInt(choice.selected.split("_")[1]);
         var metaName = db.getMetaFields()[fieldId].name;
-        debug("changed meta on gene expr view", ev);
-        buildGeneExprPlotsAddGenes([], metaName);
+        debug("changed meta on gene expr view to "+metaName, ev);
+        buildGeneExprPlotsAddGenes(null, metaName);
     }
 
     function onGeneExprGeneComboChange(ev) {
@@ -6014,7 +6040,7 @@ var cellbrowser = function() {
         buildGeneExprPlotsAddGenes([geneId], null);
     }
 
-    function promiseGene(locusStr, onProgress, metaArr, metaCount) {
+    function promiseGeneSplitByMeta(locusStr, onProgress, metaArr, metaCount) {
         /* A promise for loading the gene data and calculation average expression per meta data value.
            Resolves with a geneData object with gene-related attributes, exprMin, exprMax and dotRows.  */
         /* dotRows is an array of [cellCount, zeroPerc, avg] */
@@ -6680,7 +6706,7 @@ var cellbrowser = function() {
         for (let geneId of geneIds) {
             geneId = geneId.split("|")[0]; // internal genes sometimes can be in format ENSG-ID|geneSymbol
             if (exprData.geneIds.indexOf(geneId)===-1)
-                promises.push( promiseGene(geneId, geneExprOnProgress, exprData.metaData.arr, exprData.metaData.valCounts.length ));
+                promises.push( promiseGeneSplitByMeta(geneId, geneExprOnProgress, exprData.metaData.arr, exprData.metaData.valCounts.length ));
             else
                 alert("This gene is already on the plot");
         }
@@ -6731,7 +6757,7 @@ var cellbrowser = function() {
     function buildGeneExprPlotsAddGenes(geneIds, metaName, plotType) {
         /* build the plots for the gene expression viewer */
         // get meta field from function call or dropdown
-        if (metaName==null) {
+        if (metaName===null) {
             let metaIdx = document.getElementById("tpGeneExprMetaCombo").value.split("_")[1]; // e.g. tpMetaVal_1
             metaName = db.conf.metaFields[metaIdx].name;
         } else {
@@ -6739,17 +6765,13 @@ var cellbrowser = function() {
             chosenSetValue("tpGeneExprMetaCombo", "tpMetaVal_"+metaIdx);
         }
 
-        //if (geneIds===null) {
-            //geneIds = getById("tpGeneExprGeneCombo").value;
-        //} //else {
-           // geneIds = geneIds[0].split("+");
-        //}
-
-        //let geneIdStr = geneIds.join("|");
+        if (geneIds===null) {
+            geneIds = exprData.geneIds;
+            exprData = null;
+        }
 
         if (geneIds.length>0)
             selectizeSetValue("tpGeneExprGeneCombo", geneIds[0].split("|")[0]);
-
 
         function buildProgressBar(domId) {
             var progressDiv = $( "#"+domId );
@@ -6798,7 +6820,7 @@ var cellbrowser = function() {
 
         });
 
-        //Promise.all([promiseGene(geneId, geneExprOnProgress), promiseMeta(metaName, geneExprOnProgress)]).then( function(resArr) {
+        //Promise.all([promiseGeneSplitByMeta(geneId, geneExprOnProgress), promiseMeta(metaName, geneExprOnProgress)]).then( function(resArr) {
         //    //console.log("promises are all loaded", resArr);
         //    $( '#progressBarMeta').progressbar( "value", 100); // make sure that the progress bars show "complete"
         //    $( '#progressBarExpr').progressbar( "value", 100);
@@ -8741,7 +8763,7 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
         showTooltip(ev.clientX+15, ev.clientY, labelLines.join("<br>"));
 
         // XX currently, switch off fattening if there is a difference between label/color fields
-        if (db.conf.activeLabelField==db.conf.activeColorField) {
+        if (db.conf.activeLabelField==db.conf.activeColorField && gLegend.type!=="expr") {
             var valIdx = findMetaValIndex(metaInfo, clusterName);
             drawAndFattenCluster(clusterName, valIdx);
         }
