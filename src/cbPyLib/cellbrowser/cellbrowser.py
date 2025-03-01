@@ -5895,7 +5895,7 @@ def cbBuildCli():
                 filtConf.append(cf)
             confFnames = filtConf
 
-            logging.debug("recursive config filenames without anything that contains old/tmp/temp/not-used/orig/ignore/skip/marker-recalc/marker_recalc/re-export: %s" % confFnames)
+            logging.debug("recursive config filenames without anything that contains old/tmp/temp/not-used/orig/ignore/skip/marker-recalc/marker_recalc/re-export/: %s" % confFnames)
             for cf in confFnames:
                 logging.info("Recursive mode: processing %s" % cf)
                 build(cf, outDir, redo=options.redo)
