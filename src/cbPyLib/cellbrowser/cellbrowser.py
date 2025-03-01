@@ -5884,7 +5884,7 @@ def cbBuildCli():
 
             filtConf = []
             for cf in confFnames:
-                if "old/" in cf or "tmp/" in cf or "not-used/" in cf or "temp/" in cf or "orig/" in cf or "ignore/" in cf or "skip/" in cf or "marker-recalc" in cf:
+                if "old/" in cf or "tmp/" in cf or "not-used/" in cf or "temp/" in cf or "orig/" in cf or "ignore/" in cf or "skip/" in cf or "marker-recalc/" in cf or "marker_recalc/" in cf or "re-export/" in cf:
                     logging.debug("Skipping %s, name suggests that it should be skipped" % cf)
                     continue
                 cfDepth = cf.count("/")
@@ -5895,7 +5895,7 @@ def cbBuildCli():
                 filtConf.append(cf)
             confFnames = filtConf
 
-            logging.debug("recursive config filenames without anything that contains old/tmp/temp/not-used/orig/ignore/skip/marker-recalc: %s" % confFnames)
+            logging.debug("recursive config filenames without anything that contains old/tmp/temp/not-used/orig/ignore/skip/marker-recalc/marker_recalc/re-export: %s" % confFnames)
             for cf in confFnames:
                 logging.info("Recursive mode: processing %s" % cf)
                 build(cf, outDir, redo=options.redo)
