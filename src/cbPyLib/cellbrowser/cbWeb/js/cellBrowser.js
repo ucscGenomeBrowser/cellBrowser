@@ -4203,13 +4203,13 @@ var cellbrowser = function() {
         }
     }
 
-    function legendLabelGetIdx(legend, findLabel) {
+    function legendLabelGetIntKey(legend, findLabel) {
          /* given a label, find the index in the legend */
         let rows = legend.rows;
         for (let i = 0; i < rows.length; i++) {
             let row = rows[i];
             if (row.label === findLabel)
-                return i;
+                return row.intKey;
         }
         return null;
      }
@@ -4450,7 +4450,7 @@ var cellbrowser = function() {
 
         gLegend.titleHover = mouseOver;
         gLegend.geneSym = geneSym;
-        gLegend.subTitle = mouseOver;
+        gLegend.subTitle = subTitle;
         gLegend.rowType = "range";
         gLegend.exprVec = exprVec; // raw expression values, e.g. floats
         gLegend.decExprVec = decExprVec; // expression values as deciles, array of bytes
@@ -6976,16 +6976,16 @@ var cellbrowser = function() {
         //});
         
         // use the current gene
-        let geneSym = getVar("gene", null);
+        let geneId = getVar("gene", null);
         
         // if there is none, pick a reasonable default gene and meta var
-        if (geneSym===null && db.conf.quickGenes)
-            geneSym = db.conf.quickGenes[0][0];
-        if (geneSym==null)
-            geneSym = db.getRandomLocus();
+        if (geneId===null && db.conf.quickGenes)
+            geneId = db.conf.quickGenes[0][0];
+        if (geneId==null)
+            geneId = db.getRandomLocus();
 
         // URL variables can override the defaults
-        let geneIds = getVar("exprGene", geneSym).split(" ");
+        let geneIds = getVar("exprGene", geneId).split(" ");
 
         buildGeneExprPlotsAddGenes(geneIds, metaName); 
     }
@@ -7918,7 +7918,8 @@ var cellbrowser = function() {
         var colorIndex = gLegend.rows[legendId].intKey;
         var legendLabel = ev.target.innerText;
         //$("#tpLegendCheckbox_" + colorIndex).click();
-        onClusterNameHover(legendLabel, legendId, ev);
+        // we cannot highlight cluster if colors != label
+        onClusterNameHover(legendLabel, legendId, ev, true);
     }
 
     function onLegendLabelClick(ev) {
@@ -8069,6 +8070,17 @@ var cellbrowser = function() {
         renderer.drawDots();
     }
 
+    function legendHideUnchecked(ev) {
+        let els = document.getElementsByClassName("tpLegendCheckbox");
+
+        for (let i=0; i<els.length; i++) {
+            let el = els[i];
+            var valIdx = parseInt(el.getAttribute("data-value-index"));
+            var valStr = null;
+        }
+
+    }
+
     function onLegendClearClick(ev) {
         /* unselect all checkboxes in the legend and clear the selection */
         if (gLegend.selectionDirection == "all") {
@@ -8211,6 +8223,7 @@ var cellbrowser = function() {
         htmls.push("<button id='tpLegendNone'>None</button>");
         htmls.push("<button id='tpLegendInvert'>Invert</button></small>");
         htmls.push("<button id='tpLegendNotNull'>&gt; 0</button></small>");
+        htmls.push("<button id='tpLegendOnlyChecked'>Only checked</button></small>");
         htmls.push("</div>"); // title
         htmls.push('<div id="tpLegendHeader"><span id="tpLegendCol1"></span><span id="tpLegendCol2"></span></div>');
         htmls.push('<div id="tpLegendRows">');
@@ -8319,6 +8332,7 @@ var cellbrowser = function() {
         $("#tpLegendAll").click( function() { legendSetCheckboxes("all"); } );
         $("#tpLegendInvert").click( function() { legendSetCheckboxes("invert"); } );
         $("#tpLegendNotNull").click( function() { legendSetCheckboxes("notNull"); } );
+        $("#tpLegendOnlyChecked").click( function() { legendHideUnchecked(); } );
 
         $('.tpLegendLabel').click( onLegendLabelClick ); // clicking the legend should have the same effect as clicking the checkbox
         $('.tpLegendLabel').on("mouseover", onLegendHover ); // hovering over the legend should have the same effect hovering over the label
@@ -8705,13 +8719,15 @@ var cellbrowser = function() {
             showTooltip(ev.clientX+15, ev.clientY, lineLabel);
     }
 
-    function drawAndFattenCluster(clusterName, valIdx) {
+    function drawAndFattenCluster(clusterName) {
     /* highlight one of the clusters and redraw */
-        renderer.fatIdx = valIdx;
+
+        let legendRowIdx = legendLabelGetIntKey(gLegend, clusterName);
+
+        renderer.fatIdx = legendRowIdx;
         renderer.drawDots();
 
         // also highlight the legend
-        let legendRowIdx = legendLabelGetIdx(gLegend, clusterName);
         let legQuery = "#tpLegend_"+legendRowIdx;
         $(".tpLegendHl").removeClass("tpLegendHl");
         $(legQuery).addClass("tpLegendHl");
@@ -8726,8 +8742,9 @@ var cellbrowser = function() {
         }
     }
 
-function onClusterNameHover(clusterName, nameIdx, ev) {
+function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
         /* user hovers over cluster label */
+        /* doHighlight can be undefined, which means true = called from onHoverLabel */
         var labelLines = [clusterName];
 
         var labelField = db.conf.activeLabelField;
@@ -8763,9 +8780,12 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
         showTooltip(ev.clientX+15, ev.clientY, labelLines.join("<br>"));
 
         // XX currently, switch off fattening if there is a difference between label/color fields
-        if (db.conf.activeLabelField==db.conf.activeColorField && gLegend.type!=="expr") {
-            var valIdx = findMetaValIndex(metaInfo, clusterName);
-            drawAndFattenCluster(clusterName, valIdx);
+        let highIdx = null;
+        if (isLegend===undefined && (getActiveColorField()!==getActiveLabelField())) {
+            // XX cannot do anything when not coloring on the meta field that we are coloring on
+        } else {
+            //var valIdx = findMetaValIndex(metaInfo, clusterName);
+            drawAndFattenCluster(clusterName);
         }
     }
 
