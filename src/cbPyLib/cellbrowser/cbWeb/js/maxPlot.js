@@ -155,9 +155,9 @@ function MaxPlot(div, top, left, width, height, args) {
             let hexColor = hexColors[i];
             const maxCol = 200;
             const addCol = 20;
-            const red = Math.max(maxCol, addCol+parseInt(hexColor.slice(1, 3), 16));
-            const green = Math.max(maxCol, addCol+parseInt(hexColor.slice(3, 5), 16));
-            const blue = Math.max(maxCol, addCol+parseInt(hexColor.slice(5, 7), 16));
+            const red = Math.min(maxCol, addCol+parseInt(hexColor.slice(1, 3), 16));
+            const green = Math.min(maxCol, addCol+parseInt(hexColor.slice(3, 5), 16));
+            const blue = Math.min(maxCol, addCol+parseInt(hexColor.slice(5, 7), 16));
 
             // Calculate the grayscale value using the luminosity method
             const gray = Math.round(0.2126 * red + 0.7152 * green + 0.0722 * blue);
@@ -1303,7 +1303,7 @@ function MaxPlot(div, top, left, width, height, args) {
            //radius = radius * 2;
            //let templates = makeCircleTemplates(radius, tileWidth, tileHeight, colors, fatIdx);
            //let off = templates.off;
-
+           radius *= 1.5;
            for (let i = 0; i < pxCoords.length/2; i++) {
                col = coordColors[i];
                if (fatIdx!==col)
@@ -1364,7 +1364,7 @@ function MaxPlot(div, top, left, width, height, args) {
        if (origCoordColors)
             coordColors = origCoordColors;
 
-       // overdraw the selection as circles with black outlines
+       // overdraw the selection on top: as circles with black outlines
        ctx.globalAlpha = 0.7;
        var selImgIdx = templates.selImgIdx; // second-to last template is the black outline, see makeCircleTemplates()
        selCells.forEach(function(cellId) {

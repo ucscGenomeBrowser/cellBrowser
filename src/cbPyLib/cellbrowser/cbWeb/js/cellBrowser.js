@@ -4203,13 +4203,13 @@ var cellbrowser = function() {
         }
     }
 
-    function legendLabelGetIdx(legend, findLabel) {
+    function legendLabelGetIntKey(legend, findLabel) {
          /* given a label, find the index in the legend */
         let rows = legend.rows;
         for (let i = 0; i < rows.length; i++) {
             let row = rows[i];
             if (row.label === findLabel)
-                return i;
+                return row.intKey;
         }
         return null;
      }
@@ -4262,7 +4262,7 @@ var cellbrowser = function() {
                 colorVal = colors[i];
 
             var legendRow = rows[i];
-            if (legendRow.label == "0" && legend.type=="expr")
+            if ((legendRow.label == "0" && legend.type=="expr") || (likeEmptyString(legendRow.label) && legend.type=="meta"))
                 colorVal = cNullColor;
             legendRow[keyName] = colorVal;
         }
@@ -4450,7 +4450,7 @@ var cellbrowser = function() {
 
         gLegend.titleHover = mouseOver;
         gLegend.geneSym = geneSym;
-        gLegend.subTitle = mouseOver;
+        gLegend.subTitle = subTitle;
         gLegend.rowType = "range";
         gLegend.exprVec = exprVec; // raw expression values, e.g. floats
         gLegend.decExprVec = decExprVec; // expression values as deciles, array of bytes
@@ -4945,14 +4945,13 @@ var cellbrowser = function() {
         var countListSorted = sortResult.list;
 
         var useGradient = (metaInfo.type==="float" || metaInfo.type==="int");
-        //var defaultColors = makeColorPalette(countListSorted.length, useGradient);
 
         var rows = [];
         var shortLabels = metaInfo.ui.shortLabels;
         var longLabels = metaInfo.ui.longLabels;
         for (var legRowIdx = 0; legRowIdx < countListSorted.length; legRowIdx++) {
             var legRowInfo = countListSorted[legRowIdx];
-            let valIdx = legRowInfo[2]; // index of the original field in fieldInfo
+            let valIdx = legRowInfo[2]; // index of the original value in metaInfo.valCounts, before we sorted
             var label = shortLabels[valIdx];
 
             var desc  = null;
@@ -4971,7 +4970,7 @@ var cellbrowser = function() {
                 color = cNullColor;
             // override any color with the color specified in the current URL
             var savKey = COL_PREFIX+uniqueKey;
-            color = getFromUrl(savKey, null);
+            color = getFromUrl(savKey, color);
 
             rows.push( {
                 "color": color,
@@ -6976,16 +6975,16 @@ var cellbrowser = function() {
         //});
         
         // use the current gene
-        let geneSym = getVar("gene", null);
+        let geneId = getVar("gene", null);
         
         // if there is none, pick a reasonable default gene and meta var
-        if (geneSym===null && db.conf.quickGenes)
-            geneSym = db.conf.quickGenes[0][0];
-        if (geneSym==null)
-            geneSym = db.getRandomLocus();
+        if (geneId===null && db.conf.quickGenes)
+            geneId = db.conf.quickGenes[0][0];
+        if (geneId==null)
+            geneId = db.getRandomLocus();
 
         // URL variables can override the defaults
-        let geneIds = getVar("exprGene", geneSym).split(" ");
+        let geneIds = getVar("exprGene", geneId).split(" ");
 
         buildGeneExprPlotsAddGenes(geneIds, metaName); 
     }
@@ -7638,7 +7637,7 @@ var cellbrowser = function() {
             pal = makeTatarizePalette(n);
         else {
             if (n===2)
-                pal = ["ADD8E6","FF0000"];
+                pal = ["0000FF","FF0000"];
             else {
                 var realPalName = palName.replace("tol-sq-blue", "tol-sq");
                 pal = palette(realPalName, n);
@@ -7915,18 +7914,16 @@ var cellbrowser = function() {
     function onLegendHover(ev) {
         /* mouse hovers over legend */
         var legendId = parseInt(ev.target.id.split("_")[1]);
-        var colorIndex = gLegend.rows[legendId].intKey;
         var legendLabel = ev.target.innerText;
-        //$("#tpLegendCheckbox_" + colorIndex).click();
-        onClusterNameHover(legendLabel, legendId, ev);
+        onClusterNameHover(legendLabel, legendId, ev, true);
     }
 
     function onLegendLabelClick(ev) {
     /* called when user clicks on legend entry. */
 
         var legendId = parseInt(ev.target.id.split("_")[1]);
-        var colorIndex = gLegend.rows[legendId].intKey;
-        $("#tpLegendCheckbox_" + colorIndex).click();
+        //var colorIndex = gLegend.rows[legendId].intKey;
+        $("#tpLegendCheckbox_" + legendId).click();
     }
 
     function onSortByClick (ev) {
@@ -8026,10 +8023,11 @@ var cellbrowser = function() {
         /* set the legend checkboxes, status can be "none", "invert" or "all". Update the selection and redraw. */
         let els = document.getElementsByClassName("tpLegendCheckbox");
 
-        //for (let el of els) {
+        let rows = gLegend.rows;
         for (let i=0; i<els.length; i++) {
             let el = els[i];
             var valIdx = parseInt(el.getAttribute("data-value-index"));
+            let row = rows[valIdx];
             var valStr = null;
 
             if (gLegend.type==="meta")
@@ -8039,34 +8037,87 @@ var cellbrowser = function() {
                 if (el.checked)
                     renderer.unselectByColor(valIdx);
                 el.checked = false;
+                row.isChecked = false;
             }
             else if (status==="all") {
                 if (!el.checked)
                     renderer.selectByColor(valIdx);
                 el.checked = true;
+                row.isChecked = true;
             }
             else if (status==="invert") {
                 if (!el.checked) {
                     el.checked = true;
                     renderer.selectByColor(valIdx);
+                    row.isChecked = true;
                 }
                 else {
                     el.checked = false;
+                    row.isChecked = false;
                     renderer.unselectByColor(valIdx);
                 }
             }
             else if (status==="notNull") {
                 if ((i===0 && valStr===null) || (valStr!==null && likeEmptyString(valStr))) {
                     el.checked = false;
+                    row.isChecked = false;
                     renderer.unselectByColor(valIdx);
                 }
                 else {
                     el.checked = true;
+                    row.isChecked = true;
                     renderer.selectByColor(valIdx);
                 }
             }
         }
         renderer.drawDots();
+    }
+
+    function legendColorOnlyChecked(ev) {
+        /* re-assign colors from palette, for only checked rows. Or reset all colors. */
+
+        if (gLegend.isColorOnlyChecked===undefined || gLegend.isColorOnlyChecked===false) {
+            // make a new palette and assign to checked legend rows, otherwise grey
+            let rows = gLegend.rows;
+            let checkedCount = 0;
+            for (let rowIdx=0; rowIdx<rows.length; rowIdx++) {
+                let row = rows[rowIdx];
+                if (row.isChecked)
+                    checkedCount++;
+            }
+
+            if (checkedCount===0) {
+                alert("No entries selected. Select a few entries in the legend with the checkboxes, then click this button again.");
+                return;
+            }
+                
+            let pal = makeColorPalette(gLegend.palName, checkedCount);
+
+            let palIdx = 0;
+            for (let rowIdx=0; rowIdx<rows.length; rowIdx++) {
+                let row = rows[rowIdx];
+                if (row.isChecked) {
+                    row.color = pal[palIdx];
+                    palIdx++;
+                }
+                else
+                    row.color = cNullColor;
+            }
+            gLegend.isColorOnlyChecked = true;
+
+        } else {
+            // reset the colors and uncheck all checkboxes
+            legendRemoveManualColors(gLegend);
+            //legendSetPalette(gLegend, gLegend.palName);
+            legendSetCheckboxes("none");
+            gLegend.isColorOnlyChecked = false;
+        }
+
+        let colors = legendGetColors(gLegend.rows);
+        renderer.setColors(colors);
+        renderer.drawDots();
+
+        buildLegendBar();
     }
 
     function onLegendClearClick(ev) {
@@ -8123,19 +8174,20 @@ var cellbrowser = function() {
 
     function onLegendCheckboxClick(ev) {
         /* user clicked the small checkboxes in the legend */
-        console.log(ev);
-        console.log(ev.target);
-        console.log(ev.target.checked);
-        var valIdx = parseInt(ev.target.getAttribute("data-value-index"));
+        var valIdx = parseInt(ev.target.getAttribute("data-value-index")); // index of this value in original array (before sort)
+        var rowIdx = parseInt(ev.target.id.split("_")[1]); // index of this row in the current legend (after sorting)
+
+        let isChecked = null
         if (ev.target.checked) {
-            //ev.target.checked = true;
             renderer.selectByColor(valIdx);
-            ev.target.checked = true;
+            isChecked = true;
         } else {
             //ev.target.checked = false; // why is this necessary?
             renderer.unselectByColor(valIdx);
-            ev.target.checked = false;
+            isChecked = false;
         }
+        ev.target.checked = isChecked;
+        gLegend.rows[rowIdx].isChecked = isChecked;
         renderer.drawDots();
     }
 
@@ -8211,6 +8263,14 @@ var cellbrowser = function() {
         htmls.push("<button id='tpLegendNone'>None</button>");
         htmls.push("<button id='tpLegendInvert'>Invert</button></small>");
         htmls.push("<button id='tpLegendNotNull'>&gt; 0</button></small>");
+
+        let buttonText = "Color only checked";
+        if (gLegend.isColorOnlyChecked===true) {
+            buttonText = "Reset colors";
+        } 
+
+        htmls.push("<button id='tpLegendColorChecked'>"+buttonText+"</button></small>");
+
         htmls.push("</div>"); // title
         htmls.push('<div id="tpLegendHeader"><span id="tpLegendCol1"></span><span id="tpLegendCol2"></span></div>');
         htmls.push('<div id="tpLegendRows">');
@@ -8264,8 +8324,13 @@ var cellbrowser = function() {
             var classStr = "tpLegend";
             var line = "<div id='tpLegend_" +valueIndex+ "' class='" +classStr+ "'>";
             htmls.push(line);
+
+            let checkedStr = "";
+            if (row.isChecked)
+                checkedStr = " checked";
+
             htmls.push("<input class='tpLegendCheckbox' data-value-index='"+valueIndex+"' "+
-                "id='tpLegendCheckbox_"+valueIndex+"' type='checkbox'>");
+                "id='tpLegendCheckbox_"+i+"' type='checkbox'"+checkedStr+">");
             htmls.push("<input class='tpColorPicker' id='tpLegendColorPicker_"+i+"' />");
 
             htmls.push("<span class='"+labelClass+"' id='tpLegendLabel_"+i+"' data-placement='auto top' title='"+mouseOver+"'>");
@@ -8319,6 +8384,7 @@ var cellbrowser = function() {
         $("#tpLegendAll").click( function() { legendSetCheckboxes("all"); } );
         $("#tpLegendInvert").click( function() { legendSetCheckboxes("invert"); } );
         $("#tpLegendNotNull").click( function() { legendSetCheckboxes("notNull"); } );
+        $("#tpLegendColorChecked").click( function(ev) { legendColorOnlyChecked(ev); } );
 
         $('.tpLegendLabel').click( onLegendLabelClick ); // clicking the legend should have the same effect as clicking the checkbox
         $('.tpLegendLabel').on("mouseover", onLegendHover ); // hovering over the legend should have the same effect hovering over the label
@@ -8705,13 +8771,15 @@ var cellbrowser = function() {
             showTooltip(ev.clientX+15, ev.clientY, lineLabel);
     }
 
-    function drawAndFattenCluster(clusterName, valIdx) {
+    function drawAndFattenCluster(clusterName) {
     /* highlight one of the clusters and redraw */
-        renderer.fatIdx = valIdx;
+
+        let legendRowIdx = legendLabelGetIntKey(gLegend, clusterName);
+
+        renderer.fatIdx = legendRowIdx;
         renderer.drawDots();
 
         // also highlight the legend
-        let legendRowIdx = legendLabelGetIdx(gLegend, clusterName);
         let legQuery = "#tpLegend_"+legendRowIdx;
         $(".tpLegendHl").removeClass("tpLegendHl");
         $(legQuery).addClass("tpLegendHl");
@@ -8726,8 +8794,9 @@ var cellbrowser = function() {
         }
     }
 
-function onClusterNameHover(clusterName, nameIdx, ev) {
+function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
         /* user hovers over cluster label */
+        /* doHighlight can be undefined, which means true = called from onHoverLabel */
         var labelLines = [clusterName];
 
         var labelField = db.conf.activeLabelField;
@@ -8750,7 +8819,7 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
             }
             labelLines.push("");
 
-            if (db.conf.markers!==undefined)
+            if (db.conf.markers!==undefined && !isLegend)
                 labelLines.push("Click to show full marker gene list.");
 
             if (db.conf.clusterPngDir!==undefined) {
@@ -8759,13 +8828,17 @@ function onClusterNameHover(clusterName, nameIdx, ev) {
             }
         }
 
-        labelLines.push("Alt/Option-Click to select cells in cluster; Shift-Click to add cluster to selection");
+        if (!isLegend)
+            labelLines.push("Alt/Option-Click to select cells in cluster; Shift-Click to add cluster to selection");
         showTooltip(ev.clientX+15, ev.clientY, labelLines.join("<br>"));
 
         // XX currently, switch off fattening if there is a difference between label/color fields
-        if (db.conf.activeLabelField==db.conf.activeColorField && gLegend.type!=="expr") {
-            var valIdx = findMetaValIndex(metaInfo, clusterName);
-            drawAndFattenCluster(clusterName, valIdx);
+        let highIdx = null;
+        if (isLegend===undefined && (getActiveColorField()!==getActiveLabelField())) {
+            // XX cannot do anything when not coloring on the meta field that we are coloring on
+        } else {
+            //var valIdx = findMetaValIndex(metaInfo, clusterName);
+            drawAndFattenCluster(clusterName);
         }
     }
 
