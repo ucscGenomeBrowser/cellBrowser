@@ -96,7 +96,7 @@ MD5LEN = 10
 
 # list of tags that are required:
 # for cellbrowser.conf of a dataset
-reqTagsDataset =['coords', 'meta', 'exprMatrix']
+reqTagsDataset =['coords', 'meta']
 # for cellbrowser.conf of a collection
 reqTagsColl =['shortLabel']
 
@@ -3746,7 +3746,7 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
 
     # step1: copy expression matrix, so people can download it. If needed,
     # remove sample data from the matrix that are not in the meta data
-    matrixFname = getAbsPath(inConf, "exprMatrix")
+    matrixFname = getExprMatrixFname(inConf)
     try:
         matType = copyMatrixTrim(matrixFname, outMatrixFname, metaSampleNames, needFilterMatrix, geneToSym, outConf, matType)
     except ValueError:
@@ -4121,7 +4121,7 @@ def convertMeta(inDir, inConf, outConf, outDir, finalMetaFname):
     makeDir(metaDir)
     metaIdxFname = join(outDir, "meta.index")
 
-    matrixFname = getAbsPath(inConf, "exprMatrix")
+    matrixFname = getExprMatrixFname(inConf)
 
     keepFields = []
     for fieldName in ["labelField", "defColorField"]:
@@ -4492,6 +4492,10 @@ def checkConfig(inConf, isTopLevel):
             if tag in inConf and inConf[tag] not in ["hide", "show"]:
                 errAbort("Error in cellbrowser.conf: '%s' can only have values: 'hide' or 'show'" % (tag))
 
+    if "exprMatrix" not in inConf and "matrices" not in inConf:
+            errAbort("The tag 'matrices' must be defined in cellbrowser.conf, with multiple matrices, or alternatively "
+                "the tag 'exprMatrix', with a single expression matrix file")
+
     if "name" in inConf and " " in inConf["name"] or "/" in inConf["name"]:
         errAbort("whitespace or slashes in the dataset 'name' in cellbrowser.conf are not allowed")
 
@@ -4571,7 +4575,14 @@ def convertTraces(inConf, sampleNames, datasetDir, outConf):
     logging.info("Wrote %s" % traceOutFn)
 
     outConf["fileVersions"]["traces"] = getFileVersion(traceOutFn)
-    
+
+def getExprMatrixFname(inConf):
+    if "exprMatrix" in inConf:
+        inMatrixFname = getAbsPath(inConf, "exprMatrix")
+    else:
+        inMatrixFname = abspath(join(inConf["inDir"], inConf["matrices"][0]["fileName"]))
+    return inMatrixFname
+
 def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     """ convert everything needed for a dataset to datasetDir, write config to outConf.
     If the expression matrix has not changed since the last run, and the sampleNames are the same,
@@ -4579,7 +4590,8 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     """
     checkConfig(inConf, isTopLevel)
 
-    inMatrixFname = getAbsPath(inConf, "exprMatrix")
+    inMatrixFname = getExprMatrixFname(inConf)
+
     # outMetaFname/outMatrixFname are reordered & trimmed tsv versions of the matrix/meta data
     if isMtx(inMatrixFname):
         baseName = basename(inMatrixFname)
