@@ -4013,10 +4013,10 @@ def areProbablyGeneIds(ids):
 
     cutoff = 0.8* len(ids)
     if counts.most_common()[0][1] >= cutoff or numCount >= cutoff:
-        logging.debug("GeneIds in matrix are identifiers, not symbols")
+        logging.info("GeneIds in matrix are identifiers, not symbols")
         return True
     else:
-        logging.debug("GeneIds in matrix are symbols, not identifiers")
+        logging.info("GeneIds in matrix are symbols, not identifiers")
         return False
 
 def readValidGenes(outDir, inConf):
@@ -4035,6 +4035,7 @@ def readValidGenes(outDir, inConf):
     geneIds = []
     geneToSym = {}
     hasBoth = False
+    symsOrGeneIds = []
     for g in validGenes:
         if "|" in g:
             parts = g.split("|")
@@ -4045,12 +4046,19 @@ def readValidGenes(outDir, inConf):
             hasBoth = True
             geneToSym[geneId] = sym
         else:
-            syms.append( g )
+            symsOrGeneIds.append( g )
 
-
-    if not hasBoth and areProbablyGeneIds(syms):
-        geneIds = syms
-        syms = []
+    if hasBoth:
+        logging.debug("Matrix has both geneIds and symbols")
+        syms.extend(symsOrGeneIds)
+    else:
+        if areProbablyGeneIds(syms):
+            logging("Using only the identifiers from the matrix")
+            geneIds = symsOrGeneIds
+            syms = geneToSym.values()
+        else:
+            geneIds = symsOrGeneIds
+            syms = []
 
     if len(geneToSym)==0:
         geneToSym = None
