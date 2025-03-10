@@ -3584,10 +3584,12 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
             if not geneToSym:
                 logging.info("quick gene %s has a geneId but we have no geneId/symbol table. You can use "
                         "the format geneId|symbol in the quick genes file to manually assign a label" % repr(geneId))
-                sym = geneId
+                geneStr = geneId
             else:
-                sym = geneToSym[geneId]
-            geneStr = geneId+"|"+sym
+                if geneId in geneToSym:
+                    geneStr = geneId+"|"+sym
+                else:
+                    geneStr = geneId
 
         # case 4: matrix has geneIds and user provides geneId or symbol. Store both.
         elif geneToSym:
@@ -4050,17 +4052,20 @@ def readValidGenes(outDir, inConf):
 
     if hasBoth:
         logging.debug("Matrix has both geneIds and symbols")
-        syms.extend(symsOrGeneIds)
+        geneIds.extend(symsOrGeneIds)
     else:
+        logging.debug("Matrix does not have both geneIds and symbols, it contains either geneIds only or symbols only")
         if areProbablyGeneIds(syms):
-            logging("Using only the identifiers from the matrix")
+            logging("80% look like geneIds: Using only the identifiers from the matrix")
             geneIds = symsOrGeneIds
             syms = geneToSym.values()
         else:
+            logging("matrix identifiers do not look like geneIds: assume they are all symbols")
             geneIds = symsOrGeneIds
             syms = []
 
     if len(geneToSym)==0:
+        logging.info("There are no gene/symbol pairs in the matrix")
         geneToSym = None
 
     symSet = set(syms)
@@ -4082,6 +4087,7 @@ def readQuickGenes(inConf, geneToSym, outDir, outConf):
 
     # prefer the symbols from the matrix over our own symbol tables
     if geneToSymFromMatrix is not None:
+        logging.info("Matrix has gene symbols, these are used for quick gene file parsing")
         geneToSym = geneToSymFromMatrix
 
     fname = getAbsPath(inConf, "quickGenesFile")
