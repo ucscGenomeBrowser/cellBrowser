@@ -4003,7 +4003,7 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, outDir):
     outConf["markers"] = newMarkers
 
 def areProbablyGeneIds(ids):
-    " if 90% of the identifiers start with the same letter, they are probably gene IDs, not symbols "
+    " if 80% of 'ids' start with the same letter, they are probably gene IDs, not symbols "
     counts = Counter()
     numCount = 0
     for s in ids:
@@ -4011,7 +4011,7 @@ def areProbablyGeneIds(ids):
         if s.isnumeric():
             numCount += 1
 
-    cutoff = 0.9* len(ids)
+    cutoff = 0.8* len(ids)
     if counts.most_common()[0][1] >= cutoff or numCount >= cutoff:
         logging.debug("GeneIds in matrix are identifiers, not symbols")
         return True
