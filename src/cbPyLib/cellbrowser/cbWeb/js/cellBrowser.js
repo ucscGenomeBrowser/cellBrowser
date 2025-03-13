@@ -3054,6 +3054,7 @@ var cellbrowser = function() {
             var renderColors = legendGetColors(gLegend.rows);
             renderer.setColors(renderColors);
             renderer.setColorArr(metaArr);
+            buildWatermark(); // if we're in split mode
             metaInfo.arr = metaArr;
             doneLoad();
         }
@@ -3115,7 +3116,6 @@ var cellbrowser = function() {
        changeUrl({"pal":null});
        // clear the gene search box
        var select = $('#tpGeneCombo')[0].selectize.clear();
-       //buildWatermark();
     }
 
     function activateTab(name) {
@@ -3430,7 +3430,7 @@ var cellbrowser = function() {
     }
 
     function buildWatermark(myRend) {
-        /* update the watermark behind ghe image */
+        /* update the watermark behind the image */
         if (myRend===undefined)
             myRend = renderer;
 
@@ -3439,20 +3439,21 @@ var cellbrowser = function() {
             return;
         }
 
+        let prefix = "";
+        if (db.conf.coords.length!==1)
+            prefix = renderer.coords.coordInfo.shortLabel+": ";
+
         let labelStr;
         if (gLegend.type==="expr")
-            labelStr = gLegend.geneSym;
+            labelStr = prefix+gLegend.geneSym;
         else
-            labelStr = gLegend.metaInfo.label;
+            labelStr = prefix+gLegend.metaInfo.label;
 
         let waterLabel;
         if (db.isAtacMode())
-            //waterLabel = shortenRange(locusStr);
             waterLabel= labelStr.split("|").length + " peak(s)";
         else
             waterLabel = labelStr;
-        //else
-            //waterLabel = geneDesc
         myRend.setWatermark(waterLabel);
     }
 
@@ -3481,7 +3482,7 @@ var cellbrowser = function() {
             renderer.setColors(legendGetColors(gLegend.rows));
             renderer.setColorArr(decArr);
 
-            buildWatermark();
+            buildWatermark(renderer);
             buildLegendBar();
             onDone();
 
@@ -3850,9 +3851,15 @@ var cellbrowser = function() {
                //if (db.conf.multiModal && db.conf.multiModal.splitPrefix)
                    //renderer.split();
                if (db.conf.split) {
+                   let splitOpts = db.conf.split;
+                   //configureRenderer(splitOpts[0]);
+                   //renderer.drawDots();
+                   //buildWatermark();
                    activateSplit();
-                   let coordIdx = db.findCoordIdx(db.conf.split);
-                   changeLayout(coordIdx);
+                   configureRenderer(splitOpts);
+                   //buildWatermark();
+                   //renderer.drawDots();
+                   changeUrl({"layout":null, "meta":null, "gene":null});
                }
            }
        }
@@ -5224,7 +5231,8 @@ var cellbrowser = function() {
                 onProgress);
     }
 
-    function changeLayout(coordIdx) {
+    function changeLayout(coordIdx, doNotUpdateUrl) {
+        /* activate a set of coordinates, given the index of a coordinate set */
         var labelFieldName = null;
         var labelFieldVal = $("#tpLabelCombo").val();
         if (labelFieldVal!==null) {
@@ -5238,7 +5246,27 @@ var cellbrowser = function() {
         loadCoordSet(coordIdx, labelFieldName);
 
         changeUrl({"layout":coordIdx, "zoom":null});
-        renderer.coordIdx = coordIdx;
+    }
+
+    function changeLayoutByName(coordName) {
+        /* activate a set of coordinates, given the shortLabel of a coordinate set */
+        if (coordName===undefined)
+            return;
+       let coordIdx = db.findCoordIdx(coordName);
+       if (coordIdx===undefined)
+           alert("Coordinateset with name "+coordName+" does not exist");
+        else
+           changeLayout(coordIdx);
+    }
+
+    function configureRenderer(opts) {
+       /* given an obj with .coords, .meta or .gene, configure the current renderer */
+       if (opts.coords)
+           changeLayoutByName(opts.coords);
+       if (opts.gene)
+           colorByLocus(opts.gene);
+       if (opts.meta)
+           colorByMetaField(opts.meta);
     }
 
     function onLayoutChange(ev, params) {
@@ -5375,7 +5403,7 @@ var cellbrowser = function() {
 
         if (db!==null && db.heatmap)
             removeHeatmap();
-        removeSplit();
+        removeSplit(renderer);
 
         db = new CbDbFile(datasetName);
         cellbrowser.db = db; // easier debugging
@@ -7356,8 +7384,8 @@ var cellbrowser = function() {
 
         buildGeneCombo(htmls, "tpGeneCombo", 0, metaBarWidth-10);
 
-        if (db.conf.multiModal && db.conf.multiModal.splitPrefix)
-            htmls.push('<input type="checkbox" id="splitJoinBox" name="splitJoin" value="splitJoin" /> <label for="subscribeNews">Show on both screens</label>');
+        if (db.conf.split)
+            htmls.push('<input type="checkbox" id="splitJoinBox" name="splitJoin" value="splitJoin" /> <label for="splitJoinBox">Show on both screens</label>');
         // var myGenes = loadMyGenes();
 
         if (db.conf.atacSearch)
@@ -7468,20 +7496,20 @@ var cellbrowser = function() {
             intro.setOption("skipLabel", "I know. Close this window.");
             intro.addStep({
                 element: document.querySelector('#tpHelpButton'),
-                intro: "Are you here for the first time and wondering what this is?<br>The tutorial takes only 1 minute. To skip the tutorial now, click 'I know' below or press Esc.<br>You can always show it again by clicking 'Help > Tutorial'.",
+                intro: "Are you here for the first time and wondering what this is?<br>The tutorial takes only 2 minutes. To skip the tutorial now, click 'I know' below or press Esc.<br>You can always show it again by clicking 'Help > Tutorial'.",
               });
         }
 
         intro.addSteps(
             [
               {
-                intro: "In the center of the window, highlighted here, each circle represents a "+gSampleDesc+". You can click the cluster label text to show the marker gene lists of the cluster.",
+                intro: "In the center of the window, highlighted here, each circle represents a "+gSampleDesc+". Try to move the mouse over a cell type label of this dataset, it will highlight the cells of this type. You can click the cell type label to show the marker gene lists of the cluster.",
                 element: document.querySelector('#mpCanvas'),
                 position: 'auto'
               },
               {
                 element: document.querySelector('#tpLeftSidebar'),
-                intro: "Cell annotations: move the mouse over a circle to show its annotations.<br>Select an annotation field from the dropdown or simply click it, to color by the field. ",
+                intro: "To color the cells by an annotation that is not a cell type, select an annotation field from the 'Color by annotation' dropdown or simply click it. You cannot color by fields with hundreds of values, as there are not enough distinct colors.",
                 position: 'auto'
               },
               {
@@ -7681,6 +7709,7 @@ var cellbrowser = function() {
 
     var req = new XMLHttpRequest();
     req.addEventListener("load", onTsvLoadDone);
+    req.addEventListener("error", function() { alert("error")});
     req.open('GET', fullUrl, true);
     req.responseType = "arraybuffer";
     req.send();
@@ -8757,6 +8786,7 @@ var cellbrowser = function() {
         "display":"block",
         "left" : x,
         "top" : y,
+        "z-index" : "10000019!important", // because intro-js sets it to 9999999!important
        }).html(labelStr);
     }
 
@@ -8865,8 +8895,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
         renderer.legend = gLegend;
         renderer = otherRend;
         gLegend = otherRend.legend;
-        //$("#tpLayoutCombo").val( otherRend.coordIdx ).trigger('chosen:updated');
-        chosenSetValue("tpLayoutCombo", otherRend.coordIdx);
+        let coordIdx = db.findCoordIdx(otherRend.coords.coordInfo.shortLabel);
+        chosenSetValue("tpLayoutCombo", coordIdx);
         buildLegendBar();
     }
 
@@ -8894,17 +8924,12 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
 
         var currCoordIdx = $("#tpLayoutCombo").val();
         renderer.legend = gLegend;
-        renderer.coordIdx = currCoordIdx; // keep for onActRendChange
         renderer.isMain = true;
 
         let rend2 = renderer.split();
         buildWatermark(rend2);
 
-        //if (gLegend.type==="expr")
-            //renderer.childPlot.setWatermark(gLegend.geneSym);
-
         renderer.childPlot.legend = gLegend;
-        renderer.childPlot.coordIdx = currCoordIdx; // keep for onActRendChange
 
         $("#tpSplitMenuEntry").text("Unsplit Screen");
         $("#mpCloseButton").click( function() { removeSplit(renderer);} );

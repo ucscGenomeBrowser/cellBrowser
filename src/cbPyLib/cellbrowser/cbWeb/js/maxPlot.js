@@ -1080,7 +1080,7 @@ function MaxPlot(div, top, left, width, height, args) {
         // cannot draw violin plots in SVG - no library for it
     };
 
-    function drawLabels(ctx, labelCoords, winWidth, winHeight, zoomFact) {
+    function drawLabels(ctx, labelCoords, winWidth, winHeight, zoomFact, doGrey) {
         /* given an array of [x, y, text], draw the text. returns bounding
          * boxes as array of [x1, y1, x2, y2]  */
 
@@ -1089,15 +1089,25 @@ function MaxPlot(div, top, left, width, height, args) {
         ctx.font = "bold "+gTextSize+"px Sans-serif"
         ctx.globalAlpha = 1.0;
 
-        ctx.strokeStyle = '#EEEEEE';
-        ctx.lineWidth = 5;
-        ctx.miterLimit =2;
-        ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+        //ctx.strokeStyle = '#EEEEEE';
+        if (doGrey===undefined) {
+            ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+            ctx.lineWidth = 5;
+            ctx.miterLimit =2;
+        }
+        //else
+            //ctx.strokeStyle = "rgba(20, 20, 20, 0.3)";
+
         ctx.textBaseline = "top";
 
-        ctx.shadowBlur=6;
-        ctx.shadowColor="white";
-        ctx.fillStyle = "rgba(0,0,0,0.8)";
+        if (doGrey===undefined) {
+            ctx.fillStyle = "rgba(0,0,0,0.8)";
+            ctx.shadowBlur=6;
+            ctx.shadowColor="white";
+        }
+        else
+            ctx.fillStyle = "rgba(0,0,0,1.0)";
+
         ctx.textAlign = "left";
 
         var addMargin = 1; // how many pixels to extend the bbox around the text, make clicking easier
@@ -1857,6 +1867,7 @@ function MaxPlot(div, top, left, width, height, args) {
        copyObj(newZr, self.port.zoomRange);
 
        self.coords.orig = coords;
+       self.coords.coordInfo = coordInfo; // we need to find out the label of the coords
        self.coords.labels = clusterLabels;
        if (coordInfo.aspectRatio)
            self.coords.aspectRatio = coordInfo.aspectRatio;
@@ -2049,6 +2060,16 @@ function MaxPlot(div, top, left, width, height, args) {
             self.canvas.height,
             self.port.zoomFact
         );
+
+        // draw annotations - look like labels, but cannot be clicked
+        self.coords.pxAnnots = scaleLabels(
+            self.coords.coordInfo.annots,
+            self.port.zoomRange,
+            self.port.radius,
+            self.canvas.width,
+            self.canvas.height
+        );
+        drawLabels(self.ctx, self.coords.pxAnnots, self.canvas.width, self.canvas.height, self.port.zoomFact, true);
     };
 
     this.cellsAtPixel = function(x, y) {
@@ -2950,12 +2971,19 @@ function MaxPlot(div, top, left, width, height, args) {
         for (var i = 0; i<newLabels.length; i++)
             self.coords.labels[i][2] = newLabels[i];
 
-       self.coords.pxLabels = scaleLabels(self.coords.labels, self.port.zoomRange, self.port.radius,
+        self.coords.pxLabels = scaleLabels(self.coords.labels, self.port.zoomRange, self.port.radius,
                                            self.canvas.width, self.canvas.height);
+
+        if (self.coords.annots) {
+            let pxAnnots = scaleLabels(self.coords.annots, self.port.zoomRange, self.port.radius,
+                                           self.canvas.width, self.canvas.height);
+            for (let pxa of pxAnnots)
+                self.coords.labels.push(pxa);
+        }
 
         // a special case for connected plots that are not sharing our pixel coordinates
         if (self.childPlot && self.coords!==self.childPlot.coords) {
-            self.childPlot.setLabels(newLabels);
+           self.childPlot.setLabels(newLabels);
         }
     };
 

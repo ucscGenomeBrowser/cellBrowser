@@ -3884,6 +3884,8 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
         coordInfo["shortLabel"] = coordLabel
         if "radius" in inCoordInfo:
             coordInfo["radius"] = inCoordInfo["radius"]
+        if "annots" in inCoordInfo:
+            coordInfo["annots"] = inCoordInfo["annots"]
         if "colorOnMeta" in inCoordInfo:
             coordInfo["colorOnMeta"] = inCoordInfo["colorOnMeta"]
 
@@ -4661,7 +4663,9 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         "binStrategy", "split",
         "lineAlpha", "lineWidth", "lineColor",
         # the following are there only for old datasets, they are now nested under "facets"
-        "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays", # these are just here for backwards-compatibility and will eventually get removed
+        # they are just here for backwards-compatibility and will eventually get removed
+        "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays", 
+        # facets are taking their place now
         "facets", "multiModal"]:
         copyConf(inConf, outConf, tag)
 
