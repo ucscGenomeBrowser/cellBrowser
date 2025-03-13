@@ -4054,15 +4054,16 @@ def readValidGenes(outDir, inConf):
         logging.debug("Matrix has both geneIds and symbols")
         geneIds.extend(symsOrGeneIds)
     else:
-        logging.debug("Matrix does not have both geneIds and symbols, it contains either geneIds only or symbols only")
-        if areProbablyGeneIds(syms):
-            logging("80% look like geneIds: Using only the identifiers from the matrix")
-            geneIds = symsOrGeneIds
-            syms = geneToSym.values()
-        else:
-            logging("matrix identifiers do not look like geneIds: assume they are all symbols")
-            geneIds = symsOrGeneIds
-            syms = []
+        #logging.debug("Matrix does not have both geneIds and symbols, it contains either geneIds only or symbols only")
+        #if areProbablyGeneIds(syms):
+            #logging("80% look like geneIds: Using only the identifiers from the matrix")
+            #geneIds = symsOrGeneIds
+            #syms = geneToSym.values()
+        #else:
+            #logging("matrix identifiers do not look like geneIds: assume they are all symbols")
+        logging.debug("Matrix does not have both geneIds and symbols, assuming it contains only geneIds")
+        geneIds = symsOrGeneIds
+        syms = []
 
     if len(geneToSym)==0:
         logging.info("There are no gene/symbol pairs in the matrix")
