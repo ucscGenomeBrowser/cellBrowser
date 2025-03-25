@@ -3860,6 +3860,7 @@ var cellbrowser = function() {
                    //buildWatermark();
                    //renderer.drawDots();
                    changeUrl({"layout":null, "meta":null, "gene":null});
+                   renderer.drawDots();
                }
            }
        }
