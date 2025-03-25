@@ -3584,10 +3584,12 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
             if not geneToSym:
                 logging.info("quick gene %s has a geneId but we have no geneId/symbol table. You can use "
                         "the format geneId|symbol in the quick genes file to manually assign a label" % repr(geneId))
-                sym = geneId
+                geneStr = geneId
             else:
-                sym = geneToSym[geneId]
-            geneStr = geneId+"|"+sym
+                if geneId in geneToSym:
+                    geneStr = geneId+"|"+sym
+                else:
+                    geneStr = geneId
 
         # case 4: matrix has geneIds and user provides geneId or symbol. Store both.
         elif geneToSym:
@@ -4005,7 +4007,7 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, outDir):
     outConf["markers"] = newMarkers
 
 def areProbablyGeneIds(ids):
-    " if 90% of the identifiers start with the same letter, they are probably gene IDs, not symbols "
+    " if 80% of 'ids' start with the same letter, they are probably gene IDs, not symbols "
     counts = Counter()
     numCount = 0
     for s in ids:
@@ -4013,12 +4015,12 @@ def areProbablyGeneIds(ids):
         if s.isnumeric():
             numCount += 1
 
-    cutoff = 0.9* len(ids)
+    cutoff = 0.8* len(ids)
     if counts.most_common()[0][1] >= cutoff or numCount >= cutoff:
-        logging.debug("GeneIds in matrix are identifiers, not symbols")
+        logging.info("GeneIds in matrix are identifiers, not symbols")
         return True
     else:
-        logging.debug("GeneIds in matrix are symbols, not identifiers")
+        logging.info("GeneIds in matrix are symbols, not identifiers")
         return False
 
 def readValidGenes(outDir, inConf):
@@ -4037,6 +4039,7 @@ def readValidGenes(outDir, inConf):
     geneIds = []
     geneToSym = {}
     hasBoth = False
+    symsOrGeneIds = []
     for g in validGenes:
         if "|" in g:
             parts = g.split("|")
@@ -4047,14 +4050,25 @@ def readValidGenes(outDir, inConf):
             hasBoth = True
             geneToSym[geneId] = sym
         else:
-            syms.append( g )
+            symsOrGeneIds.append( g )
 
-
-    if not hasBoth and areProbablyGeneIds(syms):
-        geneIds = syms
+    if hasBoth:
+        logging.debug("Matrix has both geneIds and symbols")
+        geneIds.extend(symsOrGeneIds)
+    else:
+        #logging.debug("Matrix does not have both geneIds and symbols, it contains either geneIds only or symbols only")
+        #if areProbablyGeneIds(syms):
+            #logging("80% look like geneIds: Using only the identifiers from the matrix")
+            #geneIds = symsOrGeneIds
+            #syms = geneToSym.values()
+        #else:
+            #logging("matrix identifiers do not look like geneIds: assume they are all symbols")
+        logging.debug("Matrix does not have both geneIds and symbols, assuming it contains only geneIds")
+        geneIds = symsOrGeneIds
         syms = []
 
     if len(geneToSym)==0:
+        logging.info("There are no gene/symbol pairs in the matrix")
         geneToSym = None
 
     symSet = set(syms)
@@ -4076,6 +4090,7 @@ def readQuickGenes(inConf, geneToSym, outDir, outConf):
 
     # prefer the symbols from the matrix over our own symbol tables
     if geneToSymFromMatrix is not None:
+        logging.info("Matrix has gene symbols, these are used for quick gene file parsing")
         geneToSym = geneToSymFromMatrix
 
     fname = getAbsPath(inConf, "quickGenesFile")
