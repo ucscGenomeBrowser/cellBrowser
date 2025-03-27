@@ -3041,6 +3041,8 @@ var cellbrowser = function() {
         /* return default label field or from URL */
         let fieldName = getVar("label");
         if (fieldName===undefined)
+            fieldName = renderer.getLabelField();
+        if (fieldName===undefined)
             fieldName = db.conf.labelField;
         return fieldName;
     }
@@ -3568,7 +3570,7 @@ var cellbrowser = function() {
     }
 
     function computeAndSetLabels(values, metaInfo) {
-        /* recompute the label positions and redraw everything. Uses a cache for the label positions */
+        /* recompute the label positions and redraw everything. Updates the dropdown. */
         var labelCoords;
 
         var coords = renderer.coords.orig;
@@ -3576,8 +3578,6 @@ var cellbrowser = function() {
         if (metaInfo.type !== "float" && metaInfo.type !== "int") {
             var names = metaInfo.ui.shortLabels;
         }
-
-        // console.log(metaInfo);
 
         console.time("cluster centers");
         var calc = renderer.calcMedian(coords, values, names, metaInfo.origVals);
@@ -3592,14 +3592,16 @@ var cellbrowser = function() {
         console.timeEnd("cluster centers");
 
         renderer.setLabelCoords(labelCoords);
+        renderer.setLabelField(metaInfo.name);
+
         setLabelDropdown(metaInfo.name);
     }
 
     function setLabelField(labelField) {
-        /* change the field that is used for drawing the labels. 'null' means hide labels. Do not redraw. */
+        /* updates the UI: change the field that is used for drawing the labels. 'null' means hide labels. Do not redraw. */
         if (labelField===null) {
-            db.conf.activeLabelField = null;
-            renderer.setShowLabels(false);
+            renderer.setLabelField(null);
+            setLabelDropdown(null);
         }
         else {
             var metaInfo = db.findMetaInfo(labelField);
@@ -3607,13 +3609,10 @@ var cellbrowser = function() {
                 let valCount = metaInfo.valCounts.length;
                 alert("Error: This field contains "+valCount+" different values. "+
                     "The limit is "+MAXLABELCOUNT+". Too many labels overload the screen.");
-                db.conf.activeLabelField = null;
-                renderer.setShowLabels(false);
+                renderer.setLabelField(null);
+                setLabelDropdown(null);
                 return;
             }
-            renderer.setShowLabels(true);
-            db.conf.activeLabelField = metaInfo.name;
-
             if (metaInfo.arr) // preloaded
                 computeAndSetLabels(metaInfo.arr, metaInfo);
             else
@@ -3625,13 +3624,14 @@ var cellbrowser = function() {
        /* set the meta 'color by' dropdown to a given value. The value is the meta field name, or its label, or its index */
        var fieldIdx  = db.fieldNameToIndex(fieldName);
        chosenSetValue("tpMetaCombo", "tpMetaVal_"+fieldIdx);
-       //$('#tpMetaCombo').val("tpMetaVal_"+fieldIdx).trigger('chosen:updated');
    }
 
    function setLabelDropdown(fieldName) {
-       /* set the meta 'label by' dropdown to a given value. The value is the meta field name, or its short label, or its index */
-       var fieldIdx  = db.fieldNameToIndex(fieldName);
-       //$('#tpLabelCombo').val("tpMetaVal_"+fieldIdx).trigger('chosen:updated');
+       /* set the meta 'label by' dropdown to a given value. The value is the meta field name, or its short label, or its index 
+          The special value null means "No Label" */
+       var fieldIdx = "none";
+       if (fieldName!==null)
+           fieldIdx  = db.fieldNameToIndex(fieldName);
        chosenSetValue("tpLabelCombo", "tpMetaVal_"+fieldIdx);
    }
 
@@ -3916,8 +3916,9 @@ var cellbrowser = function() {
        var rendConf = makeRendConf(db.conf, db.conf.sampleCount);
        renderer.initPlot(rendConf);
 
-       if (db.conf.showLabels===false || db.conf.labelField===undefined || db.conf.labelField===null)
-           renderer.setShowLabels(false);
+       if (db.conf.showLabels===false || db.conf.labelField===undefined || db.conf.labelField===null) {
+           renderer.setLabelField(null);
+        }
 
        buildLeftSidebar();
        buildToolBar(db.conf.coords, db.conf, metaBarWidth+metaBarMargin, menuBarHeight);
@@ -5218,7 +5219,6 @@ var cellbrowser = function() {
                     gotCoords(coords,info,clusterMids, newRadius);
 
                     setLabelField(labelFieldName);
-                    setLabelDropdown(labelFieldName);
 
                     if (colorOnMetaField!==undefined) {
                         setColorByDropdown(colorOnMetaField);
@@ -5267,6 +5267,8 @@ var cellbrowser = function() {
            colorByLocus(opts.gene);
        if (opts.meta)
            colorByMetaField(opts.meta);
+       if (opts.labelField)
+           setLabelField(opts.labelField);
     }
 
     function onLayoutChange(ev, params) {
@@ -7913,8 +7915,8 @@ var cellbrowser = function() {
     }
 
     function getClusterFieldInfo() {
-        var clusterField = db.conf.activeLabelField;
-        var clusterMetaInfo = db.findMetaInfo(clusterField);
+        var clusterFieldName = renderer.getLabelField();
+        var clusterMetaInfo = db.findMetaInfo(clusterFieldName);
         return clusterMetaInfo;
     }
 
@@ -8829,7 +8831,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
         /* doHighlight can be undefined, which means true = called from onHoverLabel */
         var labelLines = [clusterName];
 
-        var labelField = db.conf.activeLabelField;
+        var labelField = renderer.getLabelField();
         var metaInfo = db.findMetaInfo(labelField);
         var longLabels = metaInfo.ui.longLabels;
         if (longLabels) {
@@ -9138,7 +9140,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
         }
 
         // if current label field does not have markers, do nothing else
-        if (metaInfo.name != db.conf.activeLabelField) {
+        if (metaInfo.name != renderer.getLabelField()) {
             alert("There are no markers for this field");
             return;
         }
