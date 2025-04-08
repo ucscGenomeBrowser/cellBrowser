@@ -1245,6 +1245,10 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
                 if val in fieldColors:
                     colArr.append(fieldColors[val])
                     foundColors +=1
+                elif val in ["", "NA", "undef", "None", "null", " "]:
+                    logging.warn("No color defined for value %s, using light grey" % repr(val))
+                    colArr.append("#d3d3d3")
+                    foundColors +=1
                 else:
                     notFound.add(val)
                     colArr.append(None)
