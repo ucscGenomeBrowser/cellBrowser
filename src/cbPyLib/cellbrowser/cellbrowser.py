@@ -3582,7 +3582,7 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
             geneStr = geneOrSym
 
         # case 3: matrix has geneIds and user provides a geneId. add the symbol from our mapping
-        # that's a data inference that should not be wrong
+        # that's data inference, but that should be OK
         elif geneOrSym in matrixGeneIds:
             geneId = geneOrSym
             if not geneToSym:
@@ -3591,7 +3591,7 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
                 geneStr = geneId
             else:
                 if geneId in geneToSym:
-                    geneStr = geneId+"|"+sym
+                    geneStr = geneId+"|"+geneToSym[geneId]
                 else:
                     geneStr = geneId
 
