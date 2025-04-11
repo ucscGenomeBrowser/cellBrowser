@@ -2956,8 +2956,20 @@ function MaxPlot(div, top, left, width, height, args) {
        self.canvas.addEventListener("wheel", self.onWheel);
     };
 
-    this.setShowLabels = function(doShow) {
-        self.doDrawLabels = doShow;
+    this.setShowLabels = function(trueOrFalse) {
+        /* this is separate from setLabelField, so you can switch it off and on quickly */
+        self.doDrawLabels = trueOrFalse;
+    }
+        
+    this.setLabelField = function(fieldName) {
+        /* this is only to keep track of what the current label field is. 
+           Switches off label drawing if fieldName is null */
+        self.activeLabelField = fieldName;
+        self.setShowLabels( fieldName!==null )
+    };
+
+    this.getLabelField = function(fieldName) {
+        return self.activeLabelField;
     };
 
     this.getLabels = function() {
