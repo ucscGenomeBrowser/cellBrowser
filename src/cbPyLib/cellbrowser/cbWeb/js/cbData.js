@@ -482,9 +482,9 @@ function CbDbFile(url) {
 
     this.findCoordIdx = function(name) {
         /* given coord label return its index */
-        coords = self.conf.coords;
+        let coords = self.conf.coords;
         for (let i=0; i<coords.length; i++) {
-            if (coords[i].name===coordLabel)
+            if (coords[i].shortLabel===name)
                 return i;
         }
     }
@@ -986,8 +986,14 @@ function CbDbFile(url) {
             let arrs = [];
             for (let r of loadedRanges) {
                 arrs.push(r.arr);
-                if (r.desc!=="")
-                    geneDescs.push(r.name);
+                if (r.desc!=="") {
+                    let desc = r.name;
+                    if (r.desc===r.name) {
+                        // try to get the symbol for a geneId
+                        desc = self.getGeneInfo(desc).sym;
+                    }
+                    geneDescs.push(desc);
+                }
             }
 
             // set gene description to an ;-separated list for multi-gene mode and

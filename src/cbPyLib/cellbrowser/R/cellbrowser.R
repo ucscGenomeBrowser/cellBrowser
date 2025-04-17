@@ -88,6 +88,10 @@ exportImages <- function(obj, outDir, embeddings.conf) {
     for (name in names(obj@images)) { 
         message(name); 
         img = GetImage(obj, mode="raw", image=name); 
+        if (is.null(img)) {
+            message("The image is not a bitmap image, cannot export yet.")
+            return(embeddings.conf)
+        }
         imgPath <- file.path(outDir, paste0(name, ".jpg"))
         message("Writing image ", imgPath)
         #writePNG(img, imgPath);  # JPEG seems like a better choice here, 4x smaller at default quality settings.

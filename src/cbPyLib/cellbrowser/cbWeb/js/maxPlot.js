@@ -155,9 +155,9 @@ function MaxPlot(div, top, left, width, height, args) {
             let hexColor = hexColors[i];
             const maxCol = 200;
             const addCol = 20;
-            const red = Math.max(maxCol, addCol+parseInt(hexColor.slice(1, 3), 16));
-            const green = Math.max(maxCol, addCol+parseInt(hexColor.slice(3, 5), 16));
-            const blue = Math.max(maxCol, addCol+parseInt(hexColor.slice(5, 7), 16));
+            const red = Math.min(maxCol, addCol+parseInt(hexColor.slice(1, 3), 16));
+            const green = Math.min(maxCol, addCol+parseInt(hexColor.slice(3, 5), 16));
+            const blue = Math.min(maxCol, addCol+parseInt(hexColor.slice(5, 7), 16));
 
             // Calculate the grayscale value using the luminosity method
             const gray = Math.round(0.2126 * red + 0.7152 * green + 0.0722 * blue);
@@ -704,6 +704,9 @@ function MaxPlot(div, top, left, width, height, args) {
 
     function scaleLabels(labels, zoomRange, borderSize, winWidth, winHeight) {
         /* scale cluster label position to pixel coordinates */
+        if (labels===undefined)
+            return undefined;
+
         winWidth = winWidth-(2*borderSize);
         winHeight = winHeight-(2*borderSize);
 
@@ -981,6 +984,9 @@ function MaxPlot(div, top, left, width, height, args) {
         /* given an array of [x, y, text], draw the text. returns bounding
          * boxes as array of [x1, y1, x2, y2]  */
 
+        if (labelCoords===undefined)
+            return undefined;
+
         for (var i=0; i < labelCoords.length; i++) {
             var coord = labelCoords[i];
             if (coord===null) { // outside of view range, push a null to avoid messing up the order of bboxArr
@@ -1080,24 +1086,36 @@ function MaxPlot(div, top, left, width, height, args) {
         // cannot draw violin plots in SVG - no library for it
     };
 
-    function drawLabels(ctx, labelCoords, winWidth, winHeight, zoomFact) {
+    function drawLabels(ctx, labelCoords, winWidth, winHeight, zoomFact, doGrey) {
         /* given an array of [x, y, text], draw the text. returns bounding
          * boxes as array of [x1, y1, x2, y2]  */
+        if (labelCoords===undefined)
+            return undefined;
 
         console.time("labels");
         ctx.save();
         ctx.font = "bold "+gTextSize+"px Sans-serif"
         ctx.globalAlpha = 1.0;
 
-        ctx.strokeStyle = '#EEEEEE';
-        ctx.lineWidth = 5;
-        ctx.miterLimit =2;
-        ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+        //ctx.strokeStyle = '#EEEEEE';
+        if (doGrey===undefined) {
+            ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+            ctx.lineWidth = 5;
+            ctx.miterLimit =2;
+        }
+        //else
+            //ctx.strokeStyle = "rgba(20, 20, 20, 0.3)";
+
         ctx.textBaseline = "top";
 
-        ctx.shadowBlur=6;
-        ctx.shadowColor="white";
-        ctx.fillStyle = "rgba(0,0,0,0.8)";
+        if (doGrey===undefined) {
+            ctx.fillStyle = "rgba(0,0,0,0.8)";
+            ctx.shadowBlur=6;
+            ctx.shadowColor="white";
+        }
+        else
+            ctx.fillStyle = "rgba(0,0,0,1.0)";
+
         ctx.textAlign = "left";
 
         var addMargin = 1; // how many pixels to extend the bbox around the text, make clicking easier
@@ -1303,7 +1321,7 @@ function MaxPlot(div, top, left, width, height, args) {
            //radius = radius * 2;
            //let templates = makeCircleTemplates(radius, tileWidth, tileHeight, colors, fatIdx);
            //let off = templates.off;
-
+           radius *= 1.5;
            for (let i = 0; i < pxCoords.length/2; i++) {
                col = coordColors[i];
                if (fatIdx!==col)
@@ -1364,7 +1382,7 @@ function MaxPlot(div, top, left, width, height, args) {
        if (origCoordColors)
             coordColors = origCoordColors;
 
-       // overdraw the selection as circles with black outlines
+       // overdraw the selection on top: as circles with black outlines
        ctx.globalAlpha = 0.7;
        var selImgIdx = templates.selImgIdx; // second-to last template is the black outline, see makeCircleTemplates()
        selCells.forEach(function(cellId) {
@@ -1857,6 +1875,7 @@ function MaxPlot(div, top, left, width, height, args) {
        copyObj(newZr, self.port.zoomRange);
 
        self.coords.orig = coords;
+       self.coords.coordInfo = coordInfo; // we need to find out the label of the coords
        self.coords.labels = clusterLabels;
        if (coordInfo.aspectRatio)
            self.coords.aspectRatio = coordInfo.aspectRatio;
@@ -2049,6 +2068,16 @@ function MaxPlot(div, top, left, width, height, args) {
             self.canvas.height,
             self.port.zoomFact
         );
+
+        // draw annotations - look like labels, but cannot be clicked
+        self.coords.pxAnnots = scaleLabels(
+            self.coords.coordInfo.annots,
+            self.port.zoomRange,
+            self.port.radius,
+            self.canvas.width,
+            self.canvas.height
+        );
+        drawLabels(self.ctx, self.coords.pxAnnots, self.canvas.width, self.canvas.height, self.port.zoomFact, true);
     };
 
     this.cellsAtPixel = function(x, y) {
@@ -2927,8 +2956,20 @@ function MaxPlot(div, top, left, width, height, args) {
        self.canvas.addEventListener("wheel", self.onWheel);
     };
 
-    this.setShowLabels = function(doShow) {
-        self.doDrawLabels = doShow;
+    this.setShowLabels = function(trueOrFalse) {
+        /* this is separate from setLabelField, so you can switch it off and on quickly */
+        self.doDrawLabels = trueOrFalse;
+    }
+        
+    this.setLabelField = function(fieldName) {
+        /* this is only to keep track of what the current label field is. 
+           Switches off label drawing if fieldName is null */
+        self.activeLabelField = fieldName;
+        self.setShowLabels( fieldName!==null )
+    };
+
+    this.getLabelField = function(fieldName) {
+        return self.activeLabelField;
     };
 
     this.getLabels = function() {
@@ -2950,12 +2991,19 @@ function MaxPlot(div, top, left, width, height, args) {
         for (var i = 0; i<newLabels.length; i++)
             self.coords.labels[i][2] = newLabels[i];
 
-       self.coords.pxLabels = scaleLabels(self.coords.labels, self.port.zoomRange, self.port.radius,
+        self.coords.pxLabels = scaleLabels(self.coords.labels, self.port.zoomRange, self.port.radius,
                                            self.canvas.width, self.canvas.height);
+
+        if (self.coords.annots) {
+            let pxAnnots = scaleLabels(self.coords.annots, self.port.zoomRange, self.port.radius,
+                                           self.canvas.width, self.canvas.height);
+            for (let pxa of pxAnnots)
+                self.coords.labels.push(pxa);
+        }
 
         // a special case for connected plots that are not sharing our pixel coordinates
         if (self.childPlot && self.coords!==self.childPlot.coords) {
-            self.childPlot.setLabels(newLabels);
+           self.childPlot.setLabels(newLabels);
         }
     };
 
