@@ -96,7 +96,7 @@ MD5LEN = 10
 
 # list of tags that are required:
 # for cellbrowser.conf of a dataset
-reqTagsDataset =['coords', 'meta', 'exprMatrix']
+reqTagsDataset =['coords', 'meta']
 # for cellbrowser.conf of a collection
 reqTagsColl =['shortLabel']
 
@@ -1244,6 +1244,10 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
             for val, _ in valCounts:
                 if val in fieldColors:
                     colArr.append(fieldColors[val])
+                    foundColors +=1
+                elif val in ["", "NA", "undef", "None", "null", " "]:
+                    logging.warn("No color defined for value %s, using light grey" % repr(val))
+                    colArr.append("#d3d3d3")
                     foundColors +=1
                 else:
                     notFound.add(val)
@@ -3578,16 +3582,18 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
             geneStr = geneOrSym
 
         # case 3: matrix has geneIds and user provides a geneId. add the symbol from our mapping
-        # that's a data inference that should not be wrong
+        # that's data inference, but that should be OK
         elif geneOrSym in matrixGeneIds:
             geneId = geneOrSym
             if not geneToSym:
                 logging.info("quick gene %s has a geneId but we have no geneId/symbol table. You can use "
                         "the format geneId|symbol in the quick genes file to manually assign a label" % repr(geneId))
-                sym = geneId
+                geneStr = geneId
             else:
-                sym = geneToSym[geneId]
-            geneStr = geneId+"|"+sym
+                if geneId in geneToSym:
+                    geneStr = geneId+"|"+geneToSym[geneId]
+                else:
+                    geneStr = geneId
 
         # case 4: matrix has geneIds and user provides geneId or symbol. Store both.
         elif geneToSym:
@@ -3746,7 +3752,7 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
 
     # step1: copy expression matrix, so people can download it. If needed,
     # remove sample data from the matrix that are not in the meta data
-    matrixFname = getAbsPath(inConf, "exprMatrix")
+    matrixFname = getExprMatrixFname(inConf)
     try:
         matType = copyMatrixTrim(matrixFname, outMatrixFname, metaSampleNames, needFilterMatrix, geneToSym, outConf, matType)
     except ValueError:
@@ -3884,6 +3890,8 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
         coordInfo["shortLabel"] = coordLabel
         if "radius" in inCoordInfo:
             coordInfo["radius"] = inCoordInfo["radius"]
+        if "annots" in inCoordInfo:
+            coordInfo["annots"] = inCoordInfo["annots"]
         if "colorOnMeta" in inCoordInfo:
             coordInfo["colorOnMeta"] = inCoordInfo["colorOnMeta"]
 
@@ -4003,7 +4011,7 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, outDir):
     outConf["markers"] = newMarkers
 
 def areProbablyGeneIds(ids):
-    " if 90% of the identifiers start with the same letter, they are probably gene IDs, not symbols "
+    " if 80% of 'ids' start with the same letter, they are probably gene IDs, not symbols "
     counts = Counter()
     numCount = 0
     for s in ids:
@@ -4011,12 +4019,12 @@ def areProbablyGeneIds(ids):
         if s.isnumeric():
             numCount += 1
 
-    cutoff = 0.9* len(ids)
+    cutoff = 0.8* len(ids)
     if counts.most_common()[0][1] >= cutoff or numCount >= cutoff:
-        logging.debug("GeneIds in matrix are identifiers, not symbols")
+        logging.info("GeneIds in matrix are identifiers, not symbols")
         return True
     else:
-        logging.debug("GeneIds in matrix are symbols, not identifiers")
+        logging.info("GeneIds in matrix are symbols, not identifiers")
         return False
 
 def readValidGenes(outDir, inConf):
@@ -4035,6 +4043,7 @@ def readValidGenes(outDir, inConf):
     geneIds = []
     geneToSym = {}
     hasBoth = False
+    symsOrGeneIds = []
     for g in validGenes:
         if "|" in g:
             parts = g.split("|")
@@ -4045,14 +4054,25 @@ def readValidGenes(outDir, inConf):
             hasBoth = True
             geneToSym[geneId] = sym
         else:
-            syms.append( g )
+            symsOrGeneIds.append( g )
 
-
-    if not hasBoth and areProbablyGeneIds(syms):
-        geneIds = syms
+    if hasBoth:
+        logging.debug("Matrix has both geneIds and symbols")
+        geneIds.extend(symsOrGeneIds)
+    else:
+        #logging.debug("Matrix does not have both geneIds and symbols, it contains either geneIds only or symbols only")
+        #if areProbablyGeneIds(syms):
+            #logging("80% look like geneIds: Using only the identifiers from the matrix")
+            #geneIds = symsOrGeneIds
+            #syms = geneToSym.values()
+        #else:
+            #logging("matrix identifiers do not look like geneIds: assume they are all symbols")
+        logging.debug("Matrix does not have both geneIds and symbols, assuming it contains only geneIds")
+        geneIds = symsOrGeneIds
         syms = []
 
     if len(geneToSym)==0:
+        logging.info("There are no gene/symbol pairs in the matrix")
         geneToSym = None
 
     symSet = set(syms)
@@ -4074,6 +4094,7 @@ def readQuickGenes(inConf, geneToSym, outDir, outConf):
 
     # prefer the symbols from the matrix over our own symbol tables
     if geneToSymFromMatrix is not None:
+        logging.info("Matrix has gene symbols, these are used for quick gene file parsing")
         geneToSym = geneToSymFromMatrix
 
     fname = getAbsPath(inConf, "quickGenesFile")
@@ -4121,7 +4142,7 @@ def convertMeta(inDir, inConf, outConf, outDir, finalMetaFname):
     makeDir(metaDir)
     metaIdxFname = join(outDir, "meta.index")
 
-    matrixFname = getAbsPath(inConf, "exprMatrix")
+    matrixFname = getExprMatrixFname(inConf)
 
     keepFields = []
     for fieldName in ["labelField", "defColorField"]:
@@ -4492,6 +4513,10 @@ def checkConfig(inConf, isTopLevel):
             if tag in inConf and inConf[tag] not in ["hide", "show"]:
                 errAbort("Error in cellbrowser.conf: '%s' can only have values: 'hide' or 'show'" % (tag))
 
+    if "exprMatrix" not in inConf and "matrices" not in inConf:
+            errAbort("The tag 'matrices' must be defined in cellbrowser.conf, with multiple matrices, or alternatively "
+                "the tag 'exprMatrix', with a single expression matrix file")
+
     if "name" in inConf and " " in inConf["name"] or "/" in inConf["name"]:
         errAbort("whitespace or slashes in the dataset 'name' in cellbrowser.conf are not allowed")
 
@@ -4571,7 +4596,14 @@ def convertTraces(inConf, sampleNames, datasetDir, outConf):
     logging.info("Wrote %s" % traceOutFn)
 
     outConf["fileVersions"]["traces"] = getFileVersion(traceOutFn)
-    
+
+def getExprMatrixFname(inConf):
+    if "exprMatrix" in inConf:
+        inMatrixFname = getAbsPath(inConf, "exprMatrix")
+    else:
+        inMatrixFname = abspath(join(inConf["inDir"], inConf["matrices"][0]["fileName"]))
+    return inMatrixFname
+
 def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     """ convert everything needed for a dataset to datasetDir, write config to outConf.
     If the expression matrix has not changed since the last run, and the sampleNames are the same,
@@ -4579,7 +4611,8 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     """
     checkConfig(inConf, isTopLevel)
 
-    inMatrixFname = getAbsPath(inConf, "exprMatrix")
+    inMatrixFname = getExprMatrixFname(inConf)
+
     # outMetaFname/outMatrixFname are reordered & trimmed tsv versions of the matrix/meta data
     if isMtx(inMatrixFname):
         baseName = basename(inMatrixFname)
@@ -4649,7 +4682,9 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         "binStrategy", "split",
         "lineAlpha", "lineWidth", "lineColor",
         # the following are there only for old datasets, they are now nested under "facets"
-        "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays", # these are just here for backwards-compatibility and will eventually get removed
+        # they are just here for backwards-compatibility and will eventually get removed
+        "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays", 
+        # facets are taking their place now
         "facets", "multiModal"]:
         copyConf(inConf, outConf, tag)
 
@@ -5884,7 +5919,7 @@ def cbBuildCli():
 
             filtConf = []
             for cf in confFnames:
-                if "old/" in cf or "tmp/" in cf or "not-used/" in cf or "temp/" in cf or "orig/" in cf or "ignore/" in cf or "skip/" in cf or "marker-recalc" in cf:
+                if "old/" in cf or "tmp/" in cf or "not-used/" in cf or "temp/" in cf or "orig/" in cf or "ignore/" in cf or "skip/" in cf or "marker-recalc/" in cf or "marker_recalc/" in cf or "re-export/" in cf:
                     logging.debug("Skipping %s, name suggests that it should be skipped" % cf)
                     continue
                 cfDepth = cf.count("/")
@@ -5895,7 +5930,7 @@ def cbBuildCli():
                 filtConf.append(cf)
             confFnames = filtConf
 
-            logging.debug("recursive config filenames without anything that contains old/tmp/temp/not-used/orig/ignore/skip/marker-recalc: %s" % confFnames)
+            logging.debug("recursive config filenames without anything that contains old/tmp/temp/not-used/orig/ignore/skip/marker-recalc/marker_recalc/re-export/: %s" % confFnames)
             for cf in confFnames:
                 logging.info("Recursive mode: processing %s" % cf)
                 build(cf, outDir, redo=options.redo)
