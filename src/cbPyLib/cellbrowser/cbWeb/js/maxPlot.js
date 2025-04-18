@@ -1897,7 +1897,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.setLabelCoords = function(labelCoords) {
         /* set the label coords and return true if there were any labels before */
-        var hadLabelsBefore = self.coords.labels.length > 0;
+        var hadLabelsBefore = (self.coords.labels && self.coords.labels.length > 0);
         self.coords.labels = labelCoords;
         return hadLabelsBefore;
     };
@@ -2036,8 +2036,9 @@ function MaxPlot(div, top, left, width, height, args) {
             console.timeEnd("draw lines");
         }
 
-        if (self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined) {
-            self.redrawLabels();
+        if ((self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined)
+            || self.coords.coordInfo.annots!==undefined) {
+            self.drawLabels();
         }
 
         if (self.childPlot)
@@ -2052,7 +2053,7 @@ function MaxPlot(div, top, left, width, height, args) {
         return svgLines;
     }
 
-    this.redrawLabels = function() {
+    this.drawLabels = function() {
         /* draw only the labels */
         self.coords.pxLabels = scaleLabels(
             self.coords.labels,

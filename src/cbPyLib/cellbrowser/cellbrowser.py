@@ -6299,6 +6299,7 @@ def summarizeDatasets(datasets):
 
         dsList.append(summDs)
 
+    dsList = list(sorted(dsList, key=operator.itemgetter('shortLabel')))
     return dsList
 
 def mergeJsFiles(extJsFnames, baseDir, libFname):
