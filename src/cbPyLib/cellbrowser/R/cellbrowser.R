@@ -404,7 +404,7 @@ ExportToCellbrowser <- function(
         markers <- object@misc["markers"]$markers
       } else {
         message("Running FindAllMarkers(), using wilcox test, min logfc diff 0.25")
-        PrepSCTFindMarkers(object = obj)
+        PrepSCTFindMarkers(object = object)
         markers <- FindAllMarkers(
           object,
           do.print = TRUE,
