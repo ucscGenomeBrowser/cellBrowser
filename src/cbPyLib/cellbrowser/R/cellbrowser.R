@@ -405,7 +405,7 @@ ExportToCellbrowser <- function(
       } else {
         message("Running FindAllMarkers(), using wilcox test, min logfc diff 0.25")
         if ("SCT" %in% names(object@assays)) {
-            messages("Looks like an SCT object, so running PrepSCTFindMarkers()")
+            message("Looks like an SCT object, so running PrepSCTFindMarkers()")
             PrepSCTFindMarkers(object = object)
         }
         markers <- FindAllMarkers(
