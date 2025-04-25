@@ -404,7 +404,7 @@ ExportToCellbrowser <- function(
         markers <- object@misc["markers"]$markers
       } else {
         message("Running FindAllMarkers(), using wilcox test, min logfc diff 0.25")
-        if ("SCT" %in% names(d2@assays)) {
+        if ("SCT" %in% names(object@assays)) {
             messages("Looks like an SCT object, so running PrepSCTFindMarkers()")
             PrepSCTFindMarkers(object = object)
         }
