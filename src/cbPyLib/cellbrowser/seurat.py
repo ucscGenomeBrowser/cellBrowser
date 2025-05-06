@@ -330,6 +330,7 @@ def cbSeuratCli():
     coords = [{'shortLabel':'t-SNE', 'file':'tsne.coords.tsv'}]
 
     generateQuickGenes(outDir)
+
     confArgs['quickGenesFile'] = "quickGenes.tsv"
 
     writeCellbrowserConf(datasetName, coords, cbConfPath, args=confArgs)
@@ -536,7 +537,13 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
         objectVersion = findObjectVersion(outDir)
         descDict = {"supplFiles": [{"label":"Seurat %s RDS" % objectVersion, "file":basename(inFname)}]}
 
+    generateQuickGenes(outDir)
+
+    # append one single line to cellbrowser.conf
     cbConfPath = join(outDir, "cellbrowser.conf")
+    fh = open(cbConfPath, "a")
+    fh.write("\nquickGenesFile = 'quickGenes.tsv'\n")
+    fh.close()
 
     generateHtmls(datasetName, outDir, desc = descDict)
 
