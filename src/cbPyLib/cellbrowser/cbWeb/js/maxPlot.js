@@ -273,7 +273,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         var elem = document.createElement('div');
         elem.id = "tpWatermark";
-        elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.5; top: 10px; left: 45px; text-align: left; vertical-align: top; color: black; font-size: 20px; font-weight:bold; font-style:oblique';
+        elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.8; top: 10px; left: 45px; text-align: left; vertical-align: top; color: black; font-size: 20px; font-weight:bold; font-style:oblique';
         elem.textContent = text;
         self.div.appendChild(elem);
         self.watermark = elem;
@@ -2271,7 +2271,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.scaleData();
 
         // a special case for connected plots that are not sharing our pixel coordinates
-        if (self.childPlot && self.coords!==self.childPlot.coords) {
+        if (self.childPlot && self.coords===self.childPlot.coords) {
             self.childPlot.zoomBy(zoomFact, xPx, yPx);
         }
 
@@ -2561,7 +2561,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.scaleData();
 
         // a special case for connected plots that are not sharing our pixel coordinates
-        if (self.childPlot && self.coords!==self.childPlot.coords) {
+        if (self.childPlot && self.coords===self.childPlot.coords) {
             self.childPlot.moveBy(xDiff, yDiff);
         }
     };

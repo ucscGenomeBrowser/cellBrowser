@@ -3431,19 +3431,19 @@ var cellbrowser = function() {
         buildLegendBar();
     }
 
-    function buildWatermark(myRend) {
+    function buildWatermark(myRend, showWatermark) {
         /* update the watermark behind the image */
         if (myRend===undefined)
             myRend = renderer;
 
-        if (!myRend.isSplit()) {
+        if (!myRend.isSplit() && !showWatermark) {
             myRend.setWatermark("");
             return;
         }
 
         let prefix = "";
         if (db.conf.coords.length!==1)
-            prefix = renderer.coords.coordInfo.shortLabel+": ";
+            prefix = myRend.coords.coordInfo.shortLabel+": ";
 
         let labelStr;
         if (gLegend.type==="expr")
@@ -3460,7 +3460,7 @@ var cellbrowser = function() {
     }
 
     function colorByLocus(locusStr, onDone, locusLabel) {
-        /* color by a gene or peak, load the array into the renderer and call onDone or just redraw 
+        /* colorByGene: color by a gene or peak, load the array into the renderer and call onDone or just redraw 
          * peak can be in format: +chr1:1-1000
          * gene can be in format: geneSym or geneSym=geneId
          * */
@@ -3483,6 +3483,11 @@ var cellbrowser = function() {
             makeLegendExpr(locusStr, geneDesc, binInfo, exprArr, decArr);
             renderer.setColors(legendGetColors(gLegend.rows));
             renderer.setColorArr(decArr);
+            if (renderer.childPlot && document.getElementById("splitJoinBox").checked) {
+                renderer.childPlot.setColors(legendGetColors(gLegend.rows));
+                renderer.childPlot.setColorArr(decArr);
+                buildWatermark(renderer.childPlot);
+            }
 
             buildWatermark(renderer);
             buildLegendBar();
@@ -3567,6 +3572,7 @@ var cellbrowser = function() {
         }
 
         renderer.setCoords(coords, clusterMids, info, opts);
+        buildWatermark(renderer);
     }
 
     function computeAndSetLabels(values, metaInfo) {
@@ -3855,12 +3861,17 @@ var cellbrowser = function() {
                    //configureRenderer(splitOpts[0]);
                    //renderer.drawDots();
                    //buildWatermark();
+                   //buildWatermark();
                    activateSplit();
                    configureRenderer(splitOpts);
+                   $("#splitJoinDiv").show();
+                   $("#splitJoinBox").prop("checked", true);
                    //buildWatermark();
                    //renderer.drawDots();
                    changeUrl({"layout":null, "meta":null, "gene":null});
                    renderer.drawDots();
+               } else {
+                    $("#splitJoinDiv").hide();
                }
            }
        }
@@ -4734,7 +4745,7 @@ var cellbrowser = function() {
         htmls.push("<div id='"+divId+"'>");
 
         if (geneInfos===undefined || geneInfos===null || geneInfos.length===0) {
-            if (noteStr!==undefined)
+            if (noteStr!==undefined && noteStr!==null)
                 htmls.push("<div style='font-style:80%'>"+noteStr+"</div>");
             htmls.push("</div>");
             return;
@@ -5523,7 +5534,7 @@ var cellbrowser = function() {
             }
         }
 
-        buildComboBox(htmls, id, entries, selIdx, "select a field...", metaBarWidth+50);
+        buildComboBox(htmls, id, entries, selIdx, "select a field...", 50);
         htmls.push('</div>');
     }
 
@@ -7387,9 +7398,7 @@ var cellbrowser = function() {
 
         buildGeneCombo(htmls, "tpGeneCombo", 0, metaBarWidth-10);
 
-        if (db.conf.split)
-            htmls.push('<input type="checkbox" id="splitJoinBox" name="splitJoin" value="splitJoin" /> <label for="splitJoinBox">Show on both screens</label>');
-        // var myGenes = loadMyGenes();
+        htmls.push('<div id="splitJoinDiv"><input class="form-check-input" type="checkbox" id="splitJoinBox" name="splitJoin" value="splitJoin" /> <label for="splitJoinBox">Show on both sides</label></div>');
 
         if (db.conf.atacSearch)
             buildPeakList(htmls);
@@ -7400,9 +7409,7 @@ var cellbrowser = function() {
         buildGeneTable(htmls, "tpRecentGenes", "Recent "+geneLabel+"s",
             "Hover or select cells to update colors here<br>Click to color by gene", gRecentGenes, null, recentHelp);
 
-
-        var noteStr = "No genes or peaks defined. Use the setting quickGenesFile in "
-            "cellbrowser.conf to add a file with gene symbols or peaks that will be shown here";
+        var noteStr = "No genes or peaks defined: Use quickGenesFile in cellbrowser.conf.";
         var geneHelp = "The dataset genes were defined by the dataset submitter, publication author or data wrangler at UCSC. " +
             "Click any of them to color the plot on the right hand side by the gene.";
         buildGeneTable(htmls, "tpGenes", "Dataset "+geneLabel+"s", null, db.conf.quickGenes, noteStr, geneHelp);
@@ -7426,6 +7433,12 @@ var cellbrowser = function() {
             removeSplit(renderer);
             colorByDefaultField(undefined, true) 
             activateTab();
+        });
+
+        $("#splitJoinBox").on("change", function() {
+            renderer.childPlot.activatePlot();
+            var colorBy = getVar("gene");
+            colorByLocus(colorBy);
         });
 
         $("#tpSplitOnGene").click ( function() { 
@@ -8296,7 +8309,7 @@ var cellbrowser = function() {
         htmls.push("<button id='tpLegendInvert'>Invert</button></small>");
         htmls.push("<button id='tpLegendNotNull'>&gt; 0</button></small>");
 
-        let buttonText = "Color only checked";
+        let buttonText = "Recolor only checked";
         if (gLegend.isColorOnlyChecked===true) {
             buttonText = "Reset colors";
         } 
@@ -8922,7 +8935,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
 
     function activateSplit() {
         // nothing is split yet -> start the split
-        buildWatermark(renderer);
+        $("#splitJoinDiv").show();
+        buildWatermark(renderer, true);
         renderer.onActiveChange = onActRendChange;
 
         var currCoordIdx = $("#tpLayoutCombo").val();
@@ -8930,7 +8944,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
         renderer.isMain = true;
 
         let rend2 = renderer.split();
-        buildWatermark(rend2);
+        buildWatermark(rend2, true);
 
         renderer.childPlot.legend = gLegend;
 
