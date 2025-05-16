@@ -2993,7 +2993,7 @@ def parseMarkerTable(filename, geneToSym):
 
     return data, newHeaders
 
-def splitMarkerTable(filename, geneToSym, outDir):
+def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir):
     """ split .tsv on first field and create many files in outDir with columns 2-end.
         Returns the names of the clusters and a dict topMarkers with clusterName -> list of five top marker genes.
     """
@@ -3019,10 +3019,20 @@ def splitMarkerTable(filename, geneToSym, outDir):
         ofh = open(outFname, "w")
         ofh.write("\t".join(newHeaders))
         ofh.write("\n")
+        missGeneIds = set()
         for row in rows:
             row[2] = "%0.5E" % row[2] # limit score to 5 digits
+            geneId = row[1]
+            if geneId not in matrixGeneIds:
+                missGeneIds.add(geneId)
+                continue
+
             ofh.write("\t".join(row))
             ofh.write("\n")
+
+        if len(missGeneIds)!=0:
+            logging.error("Marker table contains these genes, they were skipped, they are not in the matrix: %s" % (",".join(missGeneIds)))
+            #logging.error("Use --force to accept this.")
 
         topSyms = [row[1] for row in rows[:topMarkerCount]]
         topMarkers[clusterName] = topSyms
@@ -3572,14 +3582,18 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
         if "|" in geneOrSym:
             geneId, sym = geneOrSym.split("|")
             if geneId not in matrixGeneIds:
-                errAbort("geneId %s in quickgenes file is not in expression matrix" % repr(geneId))
+                logging.info("case 1: geneId %s in quickgenes file is not in expression matrix" % repr(geneId))
+                continue
             geneStr = geneOrSym
 
         # case 2: matrix has only symbols and user provides symbol. This is our legacy format for old datasets.
         # store only the symbol. We could look up the geneId but that's data inference, 
         # which we try not to do. The lookup could be wrong.
-        elif matrixSyms is not None and geneOrSym in matrixSyms and len(matrixGeneIds)==0:
+        elif matrixSyms is not None and geneOrSym in matrixSyms:
             geneStr = geneOrSym
+            if geneStr not in matrixGeneIds:
+                logging.info("case 2: geneId %s in quickgenes file is not in expression matrix" % repr(geneStr))
+                continue
 
         # case 3: matrix has geneIds and user provides a geneId. add the symbol from our mapping
         # that's data inference, but that should be OK
@@ -3621,8 +3635,9 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
                 continue
 
         else:
-            errAbort("Gene '%s' in quickgenes file is not in expr matrix and there is no geneId<->symbol mapping "
+            logging.info("Gene %s in quickgenes file is not in expr matrix and there is no geneId<->symbol mapping "
                 "to resolve it to a geneId in the expression matrix and it is not an ATAC range" % repr(geneOrSym))
+            continue
 
         # if we had no geneToSym, we'll check the symbol later if it's valid
 
@@ -3970,7 +3985,7 @@ def checkClusterNames(markerFname, clusterNames, clusterLabels, doAbort):
                 "Users may not notice the problem, but it may indicate an erroneous meta data file.") % \
                 (markerFname, notInLabels))
 
-def convertMarkers(inConf, outConf, geneToSym, clusterLabels, outDir):
+def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, outDir):
     """ split the marker tables into one file per cluster and add filenames as 'markers' in outConf
     also add the 'topMarkers' to outConf, the top five markers for every cluster.
     """
@@ -3994,7 +4009,7 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, outDir):
         markerDir = join(outDir, "markers", clusterName)
         makeDir(markerDir)
 
-        clusterNames, topMarkers = splitMarkerTable(markerFname, geneToSym, markerDir)
+        clusterNames, topMarkers = splitMarkerTable(markerFname, geneToSym, matrixGeneIds, markerDir)
         # only use the top markers of the first marker file
         if not topMarkersDone:
             outConf["topMarkers"] = topMarkers
@@ -4060,13 +4075,6 @@ def readValidGenes(outDir, inConf):
         logging.debug("Matrix has both geneIds and symbols")
         geneIds.extend(symsOrGeneIds)
     else:
-        #logging.debug("Matrix does not have both geneIds and symbols, it contains either geneIds only or symbols only")
-        #if areProbablyGeneIds(syms):
-            #logging("80% look like geneIds: Using only the identifiers from the matrix")
-            #geneIds = symsOrGeneIds
-            #syms = geneToSym.values()
-        #else:
-            #logging("matrix identifiers do not look like geneIds: assume they are all symbols")
         logging.debug("Matrix does not have both geneIds and symbols, assuming it contains only geneIds")
         geneIds = symsOrGeneIds
         syms = []
@@ -4084,13 +4092,11 @@ def readValidGenes(outDir, inConf):
 
     return symSet, set(geneIds), geneToSym
 
-def readQuickGenes(inConf, geneToSym, outDir, outConf):
+def readQuickGenes(inConf, geneToSym, matrixSyms, matrixGeneIds, geneToSymFromMatrix, outDir, outConf):
     " read quick genes file and make sure that the genes in it are in the matrix "
     quickGeneFname = inConf.get("quickGenesFile")
     if not quickGeneFname:
         return
-
-    matrixSyms, matrixGeneIds, geneToSymFromMatrix = readValidGenes(outDir, inConf)
 
     # prefer the symbols from the matrix over our own symbol tables
     if geneToSymFromMatrix is not None:
@@ -4668,9 +4674,11 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     if geneToSym==-1:
         geneToSym = readGeneSymbols(inConf.get("geneIdType"), inMatrixFname)
 
-    convertMarkers(inConf, outConf, geneToSym, clusterLabels, datasetDir)
+    matrixSyms, matrixGeneIds, geneToSymFromMatrix = readValidGenes(datasetDir, inConf)
 
-    readQuickGenes(inConf, geneToSym, datasetDir, outConf)
+    convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, datasetDir)
+
+    readQuickGenes(inConf, geneToSym, matrixSyms, matrixGeneIds, geneToSymFromMatrix, datasetDir, outConf)
 
     copyBackgroundImages(inDir, inConf, outConf, datasetDir)
 
