@@ -9402,8 +9402,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
             // old marker tables do not contain the geneIds. For these we need to resolve the symbol to an ID
             if (!db.isAtacMode() && db.geneOffsets[geneIdOrSym]===undefined) {
                 var geneIds = db.findGenesExact(geneIdOrSym);
+                if (geneIds.length===0)
+                    alert("Symbol "+geneIdOrSym+" is not in the expression matrix. This can happen when markers were calculated before the matrix was filtered or if the authors added invalid markers. Internal error. Please contact us at cells@ucsc.edu");
                 if (geneIds.length!==1)
-                    alert("symbol "+geneIdOrSym+" resolves to more than one geneId. Internal error? Please contact us at cells@ucsc.edu");
+                    alert("Symbol "+geneIdOrSym+" resolves to more than one geneId. Internal error? Please contact us at cells@ucsc.edu");
                 geneIdOrSym = geneIds[0];
             }
 
