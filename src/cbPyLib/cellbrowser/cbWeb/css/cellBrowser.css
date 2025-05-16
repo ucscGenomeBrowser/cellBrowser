@@ -69,6 +69,10 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         height:100%;
 }
 
+.legendButton {
+        width: 40px;
+}
+
 .tpDatasetPane { 
         padding: 5px !important; 
         padding-left: 10px !important; 

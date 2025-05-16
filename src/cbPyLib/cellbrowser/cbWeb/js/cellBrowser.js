@@ -8079,14 +8079,14 @@ var cellbrowser = function() {
                 valStr = gLegend.rows[valIdx].label;
 
             if (status==="none") {
-                if (el.checked)
-                    renderer.unselectByColor(valIdx);
+                //if (el.checked)
+                    //renderer.unselectByColor(valIdx);
                 el.checked = false;
                 row.isChecked = false;
             }
             else if (status==="all") {
-                if (!el.checked)
-                    renderer.selectByColor(valIdx);
+                //if (!el.checked)
+                    //renderer.selectByColor(valIdx);
                 el.checked = true;
                 row.isChecked = true;
             }
@@ -8115,6 +8115,12 @@ var cellbrowser = function() {
                 }
             }
         }
+        // MUCH faster this way: do not operate on clusters, operate on all cells
+        if (status==="all")
+            renderer.selectVisible();
+        if (status==="none")
+            renderer.selectClear();
+
         renderer.drawDots();
     }
 
@@ -8304,10 +8310,10 @@ var cellbrowser = function() {
             htmls.push('<div id="tpLegendSubTitle" >'+subTitle+"</div>");
 
         htmls.push('<div class="tpHint">Click buttons to select '+gSampleDesc+'s</small></div>');
-        htmls.push("<small><button id='tpLegendAll'>All</button>");
-        htmls.push("<button id='tpLegendNone'>None</button>");
-        htmls.push("<button id='tpLegendInvert'>Invert</button></small>");
-        htmls.push("<button id='tpLegendNotNull'>&gt; 0</button></small>");
+        htmls.push("<small><button id='tpLegendAll' class='legendButton'>All</button>");
+        htmls.push("<button id='tpLegendNone' class='legendButton'>None</button>");
+        htmls.push("<button id='tpLegendInvert' class='legendButton'>Invert</button>");
+        htmls.push("<button id='tpLegendNotNull' class='legendButton'>&gt; 0</button></small>");
 
         let buttonText = "Recolor only checked";
         if (gLegend.isColorOnlyChecked===true) {
