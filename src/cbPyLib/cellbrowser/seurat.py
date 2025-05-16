@@ -378,7 +378,8 @@ def cbImportSeurat_parseArgs(showHelp=False):
 
     parser.add_option("-m", "--skipMarkers", dest="skipMarkers", action="store_true",
             default = False,
-        help="do not calculate cluster-specific markers with FindAllMarkers(), saves a lot of time")
+        help="do not calculate cluster-specific markers with FindAllMarkers(), saves a lot of time. Also use "
+        "this option if the dataset includes markers in obj@misc and you do not want to use them.")
 
     parser.add_option("-c", "--clusterField", dest="clusterField", action="store",
         help="Cluster field to color on, by default this is the @ident slot of the Seurat object but it can also be any other meta data field of the @meta.data slot")

@@ -399,9 +399,20 @@ ExportToCellbrowser <- function(
         #res <- c(res[1:markers.n], rep(NA, naCount))
         #return(res)
       #}
-      if (.hasSlot(object, "misc") && !is.null(x = object@misc["markers"][[1]])) {
+      hasMarkers = FALSE
+      if (.hasSlot(object, "misc") && !is.null(x = object@misc["markers"][[1]]) ) {
+        hasMarkers = TRUE
         message("Found precomputed markers in obj@misc['markers']")
-        markers <- object@misc["markers"]$markers
+      }
+
+      if (skip.markers) {
+        message("Not using precomputed markers, as --skipMarkers was set")
+        hasMarkers = FALSE
+      }
+    
+      if (hasMarkers) {
+            message("Using precomputed markers")
+            markers <- object@misc["markers"]$markers
       } else {
         message("Running FindAllMarkers(), using wilcox test, min logfc diff 0.25")
         if ("SCT" %in% names(object@assays)) {
