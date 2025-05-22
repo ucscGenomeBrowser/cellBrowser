@@ -5,6 +5,8 @@ from os.path import join, basename, dirname, isfile, isdir, relpath, abspath, ge
 
 from .cellbrowser import copyPkgFile, writeCellbrowserConf, pipeLog, makeDir, maybeLoadConfig, errAbort, popen
 from .cellbrowser import setDebug, build, isDebugMode, generateHtmls, runCommand, copyFileIfDiffSize
+from .cellbrowser import generateQuickGenes
+
 
 def parseArgs():
     " setup logging, parse command line arguments and options. -h shows auto-generated help page "
@@ -53,15 +55,7 @@ def runRscript(scriptFname, logFname):
 
     # removed subprocess. Multiprocessing is notoriously tricky to get right.
     cmd = "time Rscript %s 2>&1 | tee %s" % (scriptFname, logFname)
-    #cmd = ["time","Rscript", scriptFname, "&"]
-    #proc, stdout = popen(cmd, shell=True)
-    #for line in stdout:
-        #print(line),
-        #ofh.write(line)
     err = os.system(cmd)
-    #proc.stdout.close()
-    #stat = os.waitpid(proc.pid, 0)
-    #err = stat[1]
     assert(err==0)
     logging.info("Wrote logfile of R run to %s" % logFname)
 
@@ -335,6 +329,9 @@ def cbSeuratCli():
 
     coords = [{'shortLabel':'t-SNE', 'file':'tsne.coords.tsv'}]
 
+    generateQuickGenes(outDir)
+
+    confArgs['quickGenesFile'] = "quickGenes.tsv"
 
     writeCellbrowserConf(datasetName, coords, cbConfPath, args=confArgs)
 
@@ -381,7 +378,8 @@ def cbImportSeurat_parseArgs(showHelp=False):
 
     parser.add_option("-m", "--skipMarkers", dest="skipMarkers", action="store_true",
             default = False,
-        help="do not calculate cluster-specific markers with FindAllMarkers(), saves a lot of time")
+        help="do not calculate cluster-specific markers with FindAllMarkers(), saves a lot of time. Also use "
+        "this option if the dataset includes markers in obj@misc and you do not want to use them.")
 
     parser.add_option("-c", "--clusterField", dest="clusterField", action="store",
         help="Cluster field to color on, by default this is the @ident slot of the Seurat object but it can also be any other meta data field of the @meta.data slot")
@@ -540,7 +538,13 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
         objectVersion = findObjectVersion(outDir)
         descDict = {"supplFiles": [{"label":"Seurat %s RDS" % objectVersion, "file":basename(inFname)}]}
 
+    generateQuickGenes(outDir)
+
+    # append one single line to cellbrowser.conf
     cbConfPath = join(outDir, "cellbrowser.conf")
+    fh = open(cbConfPath, "a")
+    fh.write("\nquickGenesFile = 'quickGenes.tsv'\n")
+    fh.close()
 
     generateHtmls(datasetName, outDir, desc = descDict)
 

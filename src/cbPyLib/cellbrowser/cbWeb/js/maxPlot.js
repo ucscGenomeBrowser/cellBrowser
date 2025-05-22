@@ -273,7 +273,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         var elem = document.createElement('div');
         elem.id = "tpWatermark";
-        elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.5; top: 10px; left: 45px; text-align: left; vertical-align: top; color: black; font-size: 20px; font-weight:bold; font-style:oblique';
+        elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.8; top: 10px; left: 45px; text-align: left; vertical-align: top; color: black; font-size: 20px; font-weight:bold; font-style:oblique';
         elem.textContent = text;
         self.div.appendChild(elem);
         self.watermark = elem;
@@ -866,6 +866,8 @@ function MaxPlot(div, top, left, width, height, args) {
 
        var fatCells = [];
 
+       // first draw all the cells with value 0. Poor mans approximation of a z index. 
+       // (Should be faster than sorting by z and drawing afterwards.)
        for (var i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
            var pxY = pxCoords[2*i+1];
@@ -873,6 +875,36 @@ function MaxPlot(div, top, left, width, height, args) {
                continue;
 
            var valIdx = coordColors[i];
+           // only plot color 0
+           if (valIdx!==0)
+               continue;
+
+           var col = colors[valIdx];
+           if (fatIdx!==null) {
+               if (valIdx===fatIdx) {
+                   // fattened cells must be overdrawn later, so just save their coords now
+                   fatCells.push(pxX);
+                   fatCells.push(pxY);
+                   continue
+               }
+           }
+           ctx.fillStyle="#"+col;
+           ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
+           count++;
+       }
+
+       // then draw all the cells with value <> 0. 
+       for (var i = 0; i < pxCoords.length/2; i++) {
+           var pxX = pxCoords[2*i];
+           var pxY = pxCoords[2*i+1];
+           if (isHidden(pxX, pxY))
+               continue;
+
+           var valIdx = coordColors[i];
+           // only plot color != 0
+           if (valIdx===0)
+               continue;
+
            var col = colors[valIdx];
            if (fatIdx!==null) {
                if (valIdx===fatIdx) {
@@ -1296,6 +1328,7 @@ function MaxPlot(div, top, left, width, height, args) {
            hasSelection = true;
 
        var col = 0;
+       // first draw all the cells of the color 0
        for (let i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
            var pxY = pxCoords[2*i+1];
@@ -1305,6 +1338,12 @@ function MaxPlot(div, top, left, width, height, args) {
            // when a selection is active, draw everything in grey. This only works because the selection is overdrawn afterwards
            // (The selection must be overdrawn later, because otherwise circles shine through the selection)
            col = coordColors[i];
+           count++;
+           // only draw the cells of entry 0 of the palette first.
+           // This is a poor approximation of a z-index, but a real z-index would take way too long.
+           // So we're just drawing twice.
+           if (col!==0)
+               continue
            if (fatIdx===null) {
                if (hasSelection)
                    col = greyIdx;
@@ -1312,7 +1351,26 @@ function MaxPlot(div, top, left, width, height, args) {
             else if (!hasSelection && !(fatIdx!=null && fatIdx===col))
                    col = greyIdx;
 
-           count++;
+           ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
+       }
+
+       // then draw all the cells with the colors != 0
+       for (let i = 0; i < pxCoords.length/2; i++) {
+           var pxX = pxCoords[2*i];
+           var pxY = pxCoords[2*i+1];
+           if (isHidden(pxX, pxY))
+               continue;
+
+           col = coordColors[i];
+           if (col===0)
+               continue
+           if (fatIdx===null) {
+               if (hasSelection)
+                   col = greyIdx;
+            }
+            else if (!hasSelection && !(fatIdx!=null && fatIdx===col))
+                   col = greyIdx;
+
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
        }
 
@@ -2213,7 +2271,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.scaleData();
 
         // a special case for connected plots that are not sharing our pixel coordinates
-        if (self.childPlot && self.coords!==self.childPlot.coords) {
+        if (self.childPlot && self.coords===self.childPlot.coords) {
             self.childPlot.zoomBy(zoomFact, xPx, yPx);
         }
 
@@ -2503,7 +2561,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.scaleData();
 
         // a special case for connected plots that are not sharing our pixel coordinates
-        if (self.childPlot && self.coords!==self.childPlot.coords) {
+        if (self.childPlot && self.coords===self.childPlot.coords) {
             self.childPlot.moveBy(xDiff, yDiff);
         }
     };
