@@ -8865,7 +8865,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
             }
         }
 
-        if (labelField == db.conf.labelField) {
+        if (labelField === db.conf.labelField) {
             if (db.conf.topMarkers!==undefined) {
                 labelLines.push("Top enriched/depleted markers: "+db.conf.topMarkers[clusterName].join(", "));
             }
