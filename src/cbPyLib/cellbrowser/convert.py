@@ -9,6 +9,7 @@ from .cellbrowser import mtxToTsvGz, writeCellbrowserConf, getAllFields, readMat
 from .cellbrowser import anndataMatrixToTsv, loadConfig, sanitizeName, lineFileNextRow, scanpyToCellbrowser, build
 from .cellbrowser import generateHtmls, getObsKeys, renameFile, getMatrixFormat, generateDataDesc
 from .cellbrowser import copyFileIfDiffSize
+from .cellbrowser import generateQuickGenes
 
 from os.path import join, basename, dirname, isfile, isdir, relpath, abspath, getsize, getmtime, expanduser
 
@@ -29,6 +30,7 @@ Command is one of:
         This command adds more genes. Adds genes to the end of the matrix.
     metaCat - concat/join meta tables on the first (cell ID) field or reorder their fields
     reorder - reorder the meta fields
+    quickgenes - make quickgenes.tsv from markers.tsv in current directory
 
 Examples:
     - %prog mtx2tsv matrix.mtx genes.tsv barcodes.tsv exprMatrix.tsv.gz - convert .mtx to .tsv.gz file
@@ -64,13 +66,13 @@ def cbToolCli():
     " run various tools from the command line "
     args, options = cbToolCli_parseArgs()
 
-    if len(args)<=1:
+    if len(args)<=1 and args[0] != "quickgenes":
         cbToolCli_parseArgs(showHelp=True)
         sys.exit(1)
 
     cmd = args[0]
 
-    cmds = ["mtx2tsv", "matCatCells", "matCatGenes" "metaCat", "reorder", "cxg"]
+    cmds = ["mtx2tsv", "matCatCells", "matCatGenes" "metaCat", "reorder", "cxg", "quickgenes"]
 
     if cmd=="mtx2tsv":
         mtxFname = args[1]
@@ -123,6 +125,10 @@ def cbToolCli():
             inFnames.pop()
 
         metaCat(inFnames, outFname, options)
+
+    elif cmd=="quickgenes":
+        generateQuickGenes(".")
+
     else:
         errAbort("Command %s is not a valid command. Valid commands are: %s" % (cmd, ", ".join(cmds)))
 
