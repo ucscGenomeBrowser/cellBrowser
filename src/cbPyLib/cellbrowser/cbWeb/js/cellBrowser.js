@@ -5484,7 +5484,7 @@ var cellbrowser = function() {
         htmls.push('&nbsp;<input id="tpAlphaInput" type="text" size="6"></input>');
         htmls.push('</div>'); // tpLeftSideItem
 
-        htmls.push('<input type="submit" value="Apply" style="float:right" id="tpSetRadiusAlphaButton"></input><br>');
+        htmls.push('<input type="submit" value="Apply" style="float: right; margin-right:4px" id="tpSetRadiusAlphaButton"></input><br>');
         htmls.push('<small>You can also change size and transparency with the sliders at the bottom right of the image</small>');
         htmls.push('</form>');
     }
