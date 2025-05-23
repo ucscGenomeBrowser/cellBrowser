@@ -69,8 +69,14 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         height:100%;
 }
 
-.legendButton {
-        width: 40px;
+#tpLegendColorChecked,
+#tpLegendAll,
+#tpLegendNone,
+#tpLegendInvert,
+#tpLegendNotNull {
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 4px 8px;
 }
 
 .tpDatasetPane { 
