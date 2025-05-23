@@ -107,12 +107,12 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 
 .tpLegend { font-size:13px; /* border: 2px solid transparent; */ cursor:default; word-wrap: break-word; clear:both}
 .tpLegendHl { background-color: #ccc; color: black; }
-.tpHint { font-weight:normal; line-height:1.4; font-size: 80%}
-#tpLegendHeader { background-color:#eee; color: #777 }
+.tpHint { font-weight:normal; line-height:1.4; font-size: 80%; margin-top:4px}
+#tpLegendHeader { background-color:#eee; color: #777; margin-top: 2px}
 #tpLegendTitle { font-weight: bold }
 #tpLegendSubTitle { font-size: 80%; font-style: italic }
-#tpLegendCol1 { padding-left: 1px}
-#tpLegendCol2 { float: right; padding-right: 2px}
+#tpLegendCol1 { padding-left: 1px; vertical-align: middle}
+#tpLegendCol2 { float: right; padding-right: 2px; padding-top:2px}
 .tpLegendSelect { outline: 2px solid black }
 .tpLegendLabel { display:inline; user-select: none; }
 /*.tpLegendCount { display:inline-block; position: absolute; right: 4px; color: #888} */
