@@ -66,7 +66,7 @@ def cbToolCli():
     " run various tools from the command line "
     args, options = cbToolCli_parseArgs()
 
-    if len(args)<=1 and (len(args)!=0) and args[0]!="quickgenes"):
+    if len(args)<=1 and (len(args)!=0 and args[0]!="quickgenes"):
         cbToolCli_parseArgs(showHelp=True)
         sys.exit(1)
 
