@@ -5597,6 +5597,11 @@ def rebuildCollections(dataRoot, webRoot, collList):
         # the collections summary comes from the JSON files
         datasets = subdirDatasetJsonData(webCollDir)
         collSumm = summarizeDatasets(datasets)
+
+        # sort the top level datasets alphabetically
+        if collInfo["name"]=="":
+            collSumm = list(sorted(collSumm, key=operator.itemgetter('shortLabel')))
+
         collInfo["datasets"] = collSumm
 
         parentFnames, fullPath, parentInfos = findParentConfigs(collFname, dataRoot, collInfo["name"])
@@ -6310,7 +6315,6 @@ def summarizeDatasets(datasets):
 
         dsList.append(summDs)
 
-    dsList = list(sorted(dsList, key=operator.itemgetter('shortLabel')))
     return dsList
 
 def mergeJsFiles(extJsFnames, baseDir, libFname):
