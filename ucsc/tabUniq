@@ -78,7 +78,7 @@ for filename in filenames:
             values[valueTuple]+=1
             #values[valueTuple].append(line)
 
-values = values.items()
+values = list(values.items())
 
 if options.sort or options.ratio:
     values.sort(key=operator.itemgetter(-1))

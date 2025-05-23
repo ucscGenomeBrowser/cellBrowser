@@ -3577,8 +3577,11 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
         row = line.split(sep)
         geneOrSym = row[0]
 
-        # case 1: user provides both geneId and symbol. Rare.
-        # Necessary when symbol <-> geneId is not unique
+        # The following looks overly complicated but that's due to the complexity of combinations
+        # the we allow and because datasets come in different shapes
+
+        # case 1: user provides both geneId and symbol in the quickgenes file. Rare.
+        # Necessary when symbol <-> geneId is not unique and wrangler wants a particular gene
         if "|" in geneOrSym:
             geneId, sym = geneOrSym.split("|")
             if geneId not in matrixGeneIds:
