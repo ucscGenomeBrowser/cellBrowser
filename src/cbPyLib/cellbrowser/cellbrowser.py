@@ -3298,7 +3298,7 @@ def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=No
     if "unit" in outConf and not "unitDesc" in summInfo:
         summInfo["unitDesc"] = outConf["unit"]
 
-    # import the atachSearch attribute from cellbrowser.conf
+    # import the atacSearch attribute from cellbrowser.conf
     if "atacSearch" in outConf and not "atacSearch" in summInfo:
         summInfo["atacSearch"] = outConf["atacSearch"]
 
