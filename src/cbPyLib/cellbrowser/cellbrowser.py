@@ -3022,7 +3022,7 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir):
         missGeneIds = set()
         for row in rows:
             row[2] = "%0.5E" % row[2] # limit score to 5 digits
-            geneId = row[1]
+            geneId = row[0]
             if geneId not in matrixGeneIds:
                 missGeneIds.add(geneId)
                 continue
