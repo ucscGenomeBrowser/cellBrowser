@@ -415,7 +415,8 @@ ExportToCellbrowser <- function(
             markers <- object@misc["markers"]$markers
       } else {
         message("Running FindAllMarkers(), using wilcox test, min logfc diff 0.25")
-        if ("SCT" %in% names(object@assays)) {
+        # Only run this block if the Active assay is SCT
+        if ("SCT" %in% DefaultAssay(object = object)) {
             message("Looks like an SCT object, so running PrepSCTFindMarkers()")
             PrepSCTFindMarkers(object = object)
         }

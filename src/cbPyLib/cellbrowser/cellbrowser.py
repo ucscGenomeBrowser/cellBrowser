@@ -3298,7 +3298,7 @@ def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=No
     if "unit" in outConf and not "unitDesc" in summInfo:
         summInfo["unitDesc"] = outConf["unit"]
 
-    # import the atachSearch attribute from cellbrowser.conf
+    # import the atacSearch attribute from cellbrowser.conf
     if "atacSearch" in outConf and not "atacSearch" in summInfo:
         summInfo["atacSearch"] = outConf["atacSearch"]
 
@@ -4799,7 +4799,6 @@ labelField='%(clusterField)s'
 enumFields=['%(clusterField)s']
 coords=%(coordStr)s
 #alpha=0.3
-#body_parts=["embryo", "heart", "brain"]
 #radius=2
 """ % locals()
 
@@ -5395,14 +5394,17 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     ##Save metadata
     if metaFields is None:
         metaFields = list(adata.obs.columns.values)
-    else:
-        # check that field names exist
-        for name in metaFields:
-            if name not in adata.obs.keys():
-                logging.warn('There is no annotation field with the name `%s`.' % name)
-                if name not in ["percent_mito", "n_genes", "n_counts"]:
-                    # tolerate missing default fields
-                    raise ValueError()
+
+    # Filter out any metadata fields that end with 'ontology_term_id'
+    metaFields = [f for f in metaFields if not f.endswith("ontology_term_id")]
+
+    # check that field names exist
+    for name in metaFields:
+        if name not in adata.obs.keys():
+            logging.warn('There is no annotation field with the name `%s`.' % name)
+            if name not in ["percent_mito", "n_genes", "n_counts"]:
+                # tolerate missing default fields
+                raise ValueError()
 
     metaFields = makeDictDefaults(metaFields, metaLabels)
 

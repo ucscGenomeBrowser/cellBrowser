@@ -5484,7 +5484,7 @@ var cellbrowser = function() {
         htmls.push('&nbsp;<input id="tpAlphaInput" type="text" size="6"></input>');
         htmls.push('</div>'); // tpLeftSideItem
 
-        htmls.push('<input type="submit" value="Apply" style="float:right" id="tpSetRadiusAlphaButton"></input><br>');
+        htmls.push('<input type="submit" value="Apply" style="float: right; margin-right:4px" id="tpSetRadiusAlphaButton"></input><br>');
         htmls.push('<small>You can also change size and transparency with the sliders at the bottom right of the image</small>');
         htmls.push('</form>');
     }
@@ -8025,7 +8025,7 @@ var cellbrowser = function() {
     function setLegendHeaders(type) {
     /* set the headers of the right-hand legend */
         if (type==="category") {
-            $('#tpLegendCol1').html('<span title="select all checkboxes below" id="tpLegendClear" style="font-size: 20px; vertical-align:top">&#9745;</span><span class="tpLegendHover" title="click to sort by name"> Name<span class="caret"></span></span>');
+            $('#tpLegendCol1').html('<span title="select all checkboxes below" id="tpLegendClear" style="font-size: 20px; vertical-align: middle">&#9745;</span><span class="tpLegendHover" title="click to sort by name" style="position: relative; top: 1px"> Name<span class="caret"></span></span>');
             $('#tpLegendCol2').html('<span class="tpLegendHover" title="click to sort by frequency"> Frequency<span class="caret"></span></span>');
         }
         else {
@@ -8315,7 +8315,7 @@ var cellbrowser = function() {
         htmls.push("<button id='tpLegendInvert'>Invert</button>");
         htmls.push("<button id='tpLegendNotNull'>&gt; 0</button></small>");
 
-        let buttonText = "Recolor only checked";
+        let buttonText = "Recolor checked fields";
         if (gLegend.isColorOnlyChecked===true) {
             buttonText = "Reset colors";
         } 
