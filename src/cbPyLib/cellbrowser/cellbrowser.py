@@ -5290,6 +5290,10 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
 
     import numpy as np
     import pandas as pd
+
+    from warnings import simplefilter
+    simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
+
     import anndata
 
     configData = {} # dict that can override the default arguments in the generated cellbrowser.conf file
