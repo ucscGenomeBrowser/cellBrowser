@@ -636,12 +636,13 @@ var cellbrowser = function() {
         "pmcid" : "PubMed Fulltext",
         "sra_study" : "NCBI Short-Read Archive",
         "ega_study" : "European Genotype-Phenot. Archive Study",
-	    "ega_dataset" : "European Genotype-Phenot. Archive Dataset",
+        "ega_dataset" : "European Genotype-Phenot. Archive Dataset",
         "bioproject" : "NCBI Bioproject",
         "dbgap" : "NCBI DbGaP",
         "biorxiv_url" : "BioRxiv preprint",
         "doi" : "Publication Fulltext",
         "cbDoi" : "Data Citation DOI",
+        "cap_project" : "Cell Annotation Platform",
         "arrayexpress" : "ArrayExpress",
         "ena_project" : "European Nucleotide Archive",
         "hca_dcp" : "Human Cell Atlas Data Portal",
@@ -659,6 +660,7 @@ var cellbrowser = function() {
         "dbgap" : "https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=",
         "doi" : "http://dx.doi.org/",
         "cbDoi" : "http://dx.doi.org/",
+        "cap_project" : "https://celltype.info/project/",
         "ena_project" : "https://www.ebi.ac.uk/ena/data/view/",
         "cirm_dataset" : "https://cirm.ucsc.edu/d/",
         "arrayexpress" : "https://www.ebi.ac.uk/arrayexpress/experiments/",
@@ -1013,6 +1015,7 @@ var cellbrowser = function() {
         htmlAddLink(htmls, desc, "bioproject");
         htmlAddLink(htmls, desc, "sra");
         htmlAddLink(htmls, desc, "doi");
+        htmlAddLink(htmls, desc, "cap_project");
         htmlAddLink(htmls, desc, "arrayexpress");
         htmlAddLink(htmls, desc, "cirm_dataset");
         htmlAddLink(htmls, desc, "ega_study");
