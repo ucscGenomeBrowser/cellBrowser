@@ -3610,6 +3610,7 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
                 if geneId in geneToSym:
                     geneStr = geneId+"|"+geneToSym[geneId]
                 else:
+                    logging.info("GeneId %s from marker file was not found in gene symbol table." % geneId)
                     geneStr = geneId
 
         # case 4: matrix has geneIds and user provides geneId or symbol. Store both.
