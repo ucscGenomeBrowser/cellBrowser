@@ -145,6 +145,16 @@ def parseBetaDatasets():
 
     return betaInfo
 
+def combineNews():
+    # From https://stackoverflow.com/questions/3207219/how-do-i-list-all-files-of-a-directory
+    newsFiles = sorted(glob.glob("/hive/data/inside/cells/news/perDate/*.html"), reverse=True)
+    # Basically, we're gathering up all of the individual news files to combine them into one
+    filenames = ['/hive/data/inside/cells/news/basic.html'] + newsFiles
+    with open('/hive/data/inside/cells/news/combined.html','w') as outfile:
+        for fname in filenames:
+            with open(fname) as infile:
+                outfile.write(infile.read())
+
 def writeNewsHtml(toPrint, dateDir):
     """Takes a list of datasets and writes out an html file per day that lists
        all datasets released that day."""
@@ -171,14 +181,6 @@ def writeNewsHtml(toPrint, dateDir):
             htmlOut.write(line)
         htmlOut.write("</ul>\n")
         htmlOut.close()
-    # From https://stackoverflow.com/questions/3207219/how-do-i-list-all-files-of-a-directory
-    newsFiles = sorted(glob.glob("/hive/data/inside/cells/news/perDate/*.html"), reverse=True)
-    # Basically, we're gathering up all of the individual news files to combine them into one
-    filenames = ['/hive/data/inside/cells/news/basic.html'] + newsFiles
-    with open('/hive/data/inside/cells/news/combined.html','w') as outfile:
-        for fname in filenames:
-            with open(fname) as infile:
-                outfile.write(infile.read())
 
 def main():
     if args.run == True:
@@ -219,6 +221,7 @@ def main():
                         toPrint[day].append(outLine)
 
             writeNewsHtml(toPrint, dateDir)
+            combineNews()
 
         else: # This is the main part of the function that prints out the html for a news update
             betaInfo = parseBetaDatasets()
@@ -262,6 +265,7 @@ def main():
 
                 # Print out HTML for new datasets to be put into /hive/data/inside/cells/datasets/desc.conf
                 writeNewsHtml(toPrint, dateDir)
+            combineNews()
     else:
         parser.print_help(sys.stderr)
         sys.exit(1)
