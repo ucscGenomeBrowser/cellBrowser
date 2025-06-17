@@ -5210,9 +5210,9 @@ def check_nonnegative_integers(X):
 
 def exportScanpyOneFieldColor(fieldName, fieldValues, colors, outDir, configData):
     "write a single color file, for one field"
-    outFname = join(outDir, fieldName+"_colors.tsv")
+    outFname = join(outDir, fieldName + "_colors.tsv")
     logging.info("Writing colors of field %s to %s" % (fieldName, outFname))
-    
+
     # Debugging: print lengths and contents
     #print(f"Field name: {fieldName}")
     #print(f"Field values (length {len(fieldValues)}): {fieldValues}")
@@ -5224,28 +5224,24 @@ def exportScanpyOneFieldColor(fieldName, fieldValues, colors, outDir, configData
         # Handle mismatch: you can either raise an exception or handle it gracefully
         return
 
-    ofh = open(outFname, "w")
-    ofh.write("#val	color\n")
-    for val, color in zip(fieldValues, colors):
-        ofh.write("%s\t%s\n" % (val, color))
-    ofh.close()
+    with open(outFname, "w") as ofh:
+        ofh.write("#val\tcolor\n")
+        for val, color in zip(fieldValues, colors):
+            ofh.write("%s\t%s\n" % (val, color))
+
     if "colors" not in configData:
         configData["colors"] = {}
-    configData["colors"][fieldName] = outFname
+    configData["colors"][fieldName] = fieldName + "_colors.tsv"
 
 def exportScanpyColors(adata, outDir, configData):
     " create one tsv with the colors per color definition in adata "
     for fieldName in adata.obs.keys():
-        colorKey = fieldName+"_colors"
-        #if colorKey in adata.uns:
-            #outFname = exportScanpyOneFieldColor(fieldName, adata.obs[fieldName].values.categories, adata.uns[colorKey], outDir, configData)
+        colorKey = fieldName + "_colors"
         if colorKey in adata.uns and adata.uns[colorKey] is not None and len(adata.uns[colorKey]) > 0:
             fieldValues = adata.obs[fieldName].values.categories
-            colors = adata.uns[colorKey]    
-            # Check if colors is a list/array and has a non-zero length
+            colors = adata.uns[colorKey]
             if colors is not None and len(colors) > 0:
-                fieldValues = adata.obs[fieldName].values.categories
-                outFname = exportScanpyOneFieldColor(fieldName, fieldValues, colors, outDir, configData)
+                exportScanpyOneFieldColor(fieldName, fieldValues, colors, outDir, configData)
             else:
                 logging.warning("Skipping %s because colors are not available or empty." % fieldName)
     return configData
@@ -5339,7 +5335,7 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
         logging.warn("No valid embeddings were found in anndata.obsm but at least one array of coordinates is usually required. Keys obsm: %s" % (coordFields))
 
     ##Check for cluster markers
-    if (markerField not in adata.uns or clusterField is not None) and not skipMarkers:
+    if markerField not in adata.uns and not skipMarkers:
         logging.warn("Couldnt find list of cluster marker genes in the h5ad file in adata.uns with the key '%s'. "
             "In the future, from Python, try running sc.tl.rank_genes_groups(adata) to "
             "create the cluster annotation and write the h5ad file then." % markerField)
