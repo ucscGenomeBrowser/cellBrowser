@@ -5335,7 +5335,7 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
         logging.warn("No valid embeddings were found in anndata.obsm but at least one array of coordinates is usually required. Keys obsm: %s" % (coordFields))
 
     ##Check for cluster markers
-    if (markerField not in adata.uns or clusterField is not None) and not skipMarkers:
+    if markerField not in adata.uns and not skipMarkers:
         logging.warn("Couldnt find list of cluster marker genes in the h5ad file in adata.uns with the key '%s'. "
             "In the future, from Python, try running sc.tl.rank_genes_groups(adata) to "
             "create the cluster annotation and write the h5ad file then." % markerField)
