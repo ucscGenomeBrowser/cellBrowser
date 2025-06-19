@@ -1578,6 +1578,7 @@ class MatrixMtxReader:
             if i%1000==0:
                 logging.info("%d genes written..." % i)
             arr = mat.getrow(i).toarray()
+            #arr = arr[arr==numpy.nan]=numpy.nan
             if arr.ndim==2:
                 # scipy sparse arrays have changed their entire data model and now all operations
                 # return 2D matrices. So need to unpack it to get the array. Grrr.
@@ -3539,8 +3540,26 @@ def findOverlappingRanges(atacByChrom, posStr):
     foundRanges = []
     for rangeStart, rangeEnd, offset, dataLen in chromRanges:
         if start <= rangeStart  and rangeEnd <= end:
-            foundRanges.append( "|".join( [chrom, str(rangeStart), str(rangeEnd)] ) )
-    return "+".join(foundRanges)
+            foundRanges.append( (chrom, rangeStart, rangeEnd) )
+
+    # if we have one exact match, get rid of all the others
+    # this was added for cortex-dev-splincing/psi, where quick ranges can include others
+    # since ranges overlap each other, but the quick ranges should only be one exact matching range
+    exactRanges = []
+    for ft in foundRanges:
+        chrom, rangeStart, rangeEnd = ft
+        if start == rangeStart and rangeEnd == end:
+            exactRanges.append( (chrom, rangeStart, rangeEnd) )
+
+    if len(exactRanges)==1:
+        foundRanges = exactRanges
+
+    foundStrRanges = []
+    for ft in foundRanges:
+        chrom, rangeStart, rangeEnd = ft
+        foundStrRanges.append( "|".join( [chrom, str(rangeStart), str(rangeEnd)] ) )
+
+    return "+".join(foundStrRanges)
 
 def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
     """ parse quick genes file with three columns: symbol or geneId, desc (optional), pmid (optional).
@@ -4687,7 +4706,7 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     copyBackgroundImages(inDir, inConf, outConf, datasetDir)
 
     # a few settings are passed through to the Javascript as they are
-    for tag in ["shortLabel", "radius", "alpha", "priority", "tags", "sampleDesc", "geneLabel",
+    for tag in ["shortLabel", "radius", "alpha", "priority", "tags", "sampleDesc", "featDesc", "geneLabel",
         "clusterField", "defColorField", "xenaPhenoId", "xenaId", "hubUrl", "showLabels", "ucscDb",
         "unit", "violinField", "visibility", "coordLabel", "lineWidth", "hideDataset", "hideDownload",
         "metaBarWidth", "supplFiles", "defQuantPal", "defCatPal", "clusterPngDir", "wrangler", "shepherd",
@@ -4784,11 +4803,16 @@ def writeCellbrowserConf(name, coordsList, fname, addMarkers=True, args={}):
     coordStr = json.dumps(coordsList, indent=4)
     matrixFname = args.get("exprMatrix", "exprMatrix.tsv.gz")
 
+    cmdLine = " ".join(sys.argv)
+    dateStr = datetime.now().isoformat()
+
     conf = """
 # This is a bare-bones, auto-generated Cell Browser config file.
 # Look at https://github.com/maximilianh/cellBrowser/blob/master/src/cbPyLib/cellbrowser/sampleConfig/cellbrowser.conf
 # for a list of possible options
 # You can also write a default template into the current directory with cbBuild --init
+# Command was: %(cmdLine)s
+# Time: %(dateStr)s
 name='%(name)s'
 shortLabel='%(name)s'
 exprMatrix='%(matrixFname)s'
