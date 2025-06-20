@@ -1023,8 +1023,12 @@ function CbDbFile(url) {
                         newArr = cbUtil.arrAddMult(self.currExprArr, arrs);
                     else
                         newArr = cbUtil.arrSubMult(self.currExprArr, arrs);
-            } else
-                newArr = sumAllArrs(ArrType, arrs);
+            } else {
+                if (arrs.length===1)
+                    newArr = arrs[0];
+                else
+                    newArr = sumAllArrs(ArrType, arrs);
+            }
 
             var discFunc = null;
             if (strategy==="range")
