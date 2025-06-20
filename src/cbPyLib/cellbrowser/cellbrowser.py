@@ -4804,7 +4804,7 @@ def writeCellbrowserConf(name, coordsList, fname, addMarkers=True, args={}):
     matrixFname = args.get("exprMatrix", "exprMatrix.tsv.gz")
 
     cmdLine = " ".join(sys.argv)
-    dateStr = datetime.now().isoformat()
+    dateStr = datetime.datetime.now().isoformat()
 
     conf = """
 # This is a bare-bones, auto-generated Cell Browser config file.
