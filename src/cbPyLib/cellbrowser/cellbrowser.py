@@ -84,8 +84,11 @@ CBHOMEURL_TEST = "https://cells-test.gi.ucsc.edu/downloads/cellbrowserData/"
 HIDDENCOORD = 12345
 
 # special value representing NaN in floating point arrays
+# sorting is used everywhere in the code, and sorting is fast, so we replace all NaNs with -inf
+# This means that all arrays can be sorted with the normal, fast javascript functions
 # must match the same value in cellBrowser.js
-FLOATNAN = float('-inf') # NaN and sorting does not work. we want NaN always to be first, so encode as -inf
+FLOATNAN = float('-inf')
+
 # special value representing NaN in integer arrays, again, we want this to be first after sorting
 # must match the same value in cellBrowser.js
 INTNAN = -2**16
@@ -988,7 +991,7 @@ def findBins(numVals, breakVals, hasNan):
 
     if hasNan:
         for x in numVals:
-            # we use -inf for the NaN value everywhere, sorting is undefined in lists that contain NaN
+            # we use -inf for the NaN value everywhere, because sorting is undefined in lists that contain NaN
             if math.isinf(x):
                 binIdx = 0
             else:
