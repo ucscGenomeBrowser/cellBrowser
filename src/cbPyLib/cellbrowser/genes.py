@@ -216,7 +216,7 @@ def iterGencodePairs(release, doTransGene=False):
             db='mm39'
     if release in ["7", "14", "17", "19"] or "lift" in release:
         db = "hg19"
-    url = "https://hgdownload.cse.ucsc.edu/goldenPath/%s/database/wgEncodeGencodeAttrsV%s.txt.gz" %  (db, release)
+    url = "https://hgdownload.gi.ucsc.edu/goldenPath/%s/database/wgEncodeGencodeAttrsV%s.txt.gz" %  (db, release)
     logging.info("Downloading %s" % url)
     doneIds = set()
 
@@ -243,7 +243,7 @@ def iterGencodeBed(db, release):
     " generator, yields a BED12+1 with a 'canonical' transcript for every gencode comprehensive gene "
     transToGene = dict(iterGencodePairs(release, doTransGene=True))
 
-    url = "http://hgdownload.cse.ucsc.edu/goldenPath/%s/database/wgEncodeGencodeCompV%s.txt.gz" % (db, release)
+    url = "http://hgdownload.gi.ucsc.edu/goldenPath/%s/database/wgEncodeGencodeCompV%s.txt.gz" % (db, release)
     logging.info("Downloading %s" % url)
     geneToTransList = defaultdict(list)
     for line in downloadUrlLines(url):
@@ -374,10 +374,10 @@ def listModelRemoteFetch():
 
 def listModelRemoteBuild():
     sep = "\n"
-    urls = [("hg38", "https://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/"),
-            ("mm10", "https://hgdownload.cse.ucsc.edu/goldenPath/mm10/database/"),
-            ("mm39", "https://hgdownload.cse.ucsc.edu/goldenPath/mm39/database/"),
-            ("hg19", "https://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/")
+    urls = [("hg38", "https://hgdownload.gi.ucsc.edu/goldenPath/hg38/database/"),
+            ("mm10", "https://hgdownload.gi.ucsc.edu/goldenPath/mm10/database/"),
+            ("mm39", "https://hgdownload.gi.ucsc.edu/goldenPath/mm39/database/"),
+            ("hg19", "https://hgdownload.gi.ucsc.edu/goldenPath/hg19/database/")
             ]
 
     allNames = defaultdict(list)
