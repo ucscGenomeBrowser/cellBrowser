@@ -3625,8 +3625,10 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
         elif geneOrSym in matrixGeneIds:
             geneId = geneOrSym
             if not geneToSym:
-                logging.info("quick gene %s has a geneId but we have no geneId/symbol table. You can use "
-                        "the format geneId|symbol in the quick genes file to manually assign a label" % repr(geneId))
+                #logging.info("Quick gene %s but we have no geneId/symbol table. You can use "
+                        #"the format geneId|symbol in the quick genes file to manually assign a label" % repr(geneId))
+                # when geneToSym is None, that means that we have symbols in the matrix. So just pass through the
+                # symbol. example dataset: ams-supercluster
                 geneStr = geneId
             else:
                 if geneId in geneToSym:
