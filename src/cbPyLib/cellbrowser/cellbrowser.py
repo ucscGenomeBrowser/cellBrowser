@@ -1581,7 +1581,6 @@ class MatrixMtxReader:
             if i%1000==0:
                 logging.info("%d genes written..." % i)
             arr = mat.getrow(i).toarray()
-            #arr = arr[arr==numpy.nan]=numpy.nan
             if arr.ndim==2:
                 # scipy sparse arrays have changed their entire data model and now all operations
                 # return 2D matrices. So need to unpack it to get the array. Grrr.
@@ -2073,7 +2072,10 @@ def exprEncode(geneDesc, exprArr, matType):
         else:
             assert(False) # internal error
         exprStr = exprArr.tobytes()
+        #minVal = np.amin(exprArr[~np.isneginf(exprArr)])
+        exprArr[np.isnan(exprArr)] = FLOATNAN
         minVal = np.amin(exprArr)
+        # cortex-dev-splicing/psi has NAN values in the mtx file
     else:
         if matType=="float":
             arrType = "f"
@@ -2087,12 +2089,14 @@ def exprEncode(geneDesc, exprArr, matType):
         if str(type(exprArr))=="<type 'numpy.ndarray'>":
             exprArr = exprArr.tolist()[0]
 
+        exprArr = [FLOATNAN if math.isnan(x) else x for x in exprArr]
         # Python 3.9 removed tostring()
         if sys.version_info >= (3, 2):
             exprStr = array.array(arrType, exprArr).tobytes()
         else:
             exprStr = array.array(arrType, exprArr).tostring()
 
+        #minVal = min([x for x in exprArr if not (math.isinf(x) and x < 0)]) # this is super slow...
         minVal = min(exprArr)
 
     if isPy3:
@@ -2254,7 +2258,7 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     # keep a flag so the client later can figure out if the expression matrix contains any negative values
     # this is important for handling the 0-value
-    exprIndex["_range"] = (int(allMin),0)
+    exprIndex["_range"] = (float(allMin),0) # float() in case it is -inf as a np.float32, must be native Python float, not numpy
     logging.info("Global minimum in matrix is: %f" % allMin)
 
     jsonOfh = open(jsonFname, "w")
@@ -5748,11 +5752,10 @@ def rebuildFlatIndex(outDir):
 
 def checkDsCase(inConfFname, relPath, inConfig):
     """ relPath should not be uppercase for top-level datasets at UCSC, as we use the hostname part """
-    if not inConfFname.endswith(".cellbrowser.conf") and not inConfFname.endswith(".cellbrowser"):
-        if not "/" in relPath and getConfig("onlyLower", False) and \
-                "name" in inConfig and inConfig["name"].isupper():
-            errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
-                    "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
+    if not "/" in relPath and getConfig("onlyLower", False) and \
+            "name" in inConfig and inConfig["name"].isupper():
+        errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
+                "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
 
 def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None):
     " build browser from config files confFnames into directory outDir and serve on port "
