@@ -157,10 +157,10 @@ def main():
         p = Popen(cmd, shell=False, stdout=PIPE, stderr=PIPE)
         cmdout, cmderr = p.communicate()
         rr_files = set(cmdout.decode().rstrip().split('\n'))
-        with tempfile.NamedTemporaryFile(prefix='cb_', delete=False) as tmp:
-            tmp.write(cmdout)
-        #tmp = open("/data/tmp/filesForRsync.txt", "wb")
+        tmp = tempfile.NamedTemporaryFile(prefix='cb_', delete=False):
         tmp.write(cmdout)
+        #tmp = open("/data/tmp/filesForRsync.txt", "wb")
+        #tmp.write(cmdout)
         tmp.flush()
 
         # Wanted to use TemporaryDirectory here but couldn't get it to work
