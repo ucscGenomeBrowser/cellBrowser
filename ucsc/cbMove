@@ -9,7 +9,7 @@ import csv
 from datetime import datetime, timedelta
 
 def parse_timestamp(s):
-    for fmt in ("%H:%M", "%Y-%m-%d"):
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
             return datetime.strptime(s, fmt)
         except ValueError:
@@ -33,9 +33,9 @@ def is_file_in_time_range(path, start_time=None, end_time=None):
         return False
     return True
 
-def cb_push_to_orig(file, dir, subdir="orig"):
+def cb_push_to_orig(file, cb_dir, subdir="orig"):
     file_ext = os.path.splitext(file)[1].lstrip(".")
-    target_dir = os.path.join("/hive/data/inside/cells/datasets", dir, subdir)
+    target_dir = os.path.join("/hive/data/inside/cells/datasets", cb_dir, subdir)
     actual_file = None
     file_path = None
 
@@ -55,32 +55,51 @@ def cb_push_to_orig(file, dir, subdir="orig"):
 
     dest_path = os.path.join(target_dir, actual_file)
 
-    print(f"[INFO] Copying from: {os.path.abspath(file_path)}")
-    #print(f"[INFO] Copying to:   {os.path.basename(dest_path)}")
-
     os.makedirs(target_dir, exist_ok=True)
     try:
+        print(f"Copying {actual_file} to {cb_dir}/{subdir} directory...")
         shutil.copy(file_path, dest_path)
-        print(f"Copied {actual_file} to {dest_path}")
+        print("Successfully copied!")
         return 0
     except Exception as e:
         print(f"[ERROR] Copy failed: {e}", file=sys.stderr)
         return 1
 
 def main():
-    parser = argparse.ArgumentParser(description="Move uploaded files to Cell Browser dataset 'orig' directory.")
-    parser.add_argument("-d","--dir", required=True, help="Input dataset directory name (e.g. cortex-dev).")
+    parser = argparse.ArgumentParser(
+        description="Move uploaded files to Cell Browser dataset 'orig' directory.",
+        formatter_class=argparse.HelpFormatter)
+    parser.add_argument("-d", "--dir", required=True, help="Input dataset directory name (e.g. cortex-dev).")
+    parser.add_argument("-l", "--list", help="Input file list containing .info files (one per line) to move over.")
+    parser.add_argument("-f", "--file", help="Path to a single .info file to move over.")
     parser.add_argument("-o", "--subdir", default="orig", help="Subdirectory to move files to (default: orig). Helpful if you need to version or add updated files (e.g. orig/update-MM-DD-YY or orig/v1_MM-DD-YY)")
-    parser.add_argument("-f","--file", help="Input file list containing .info files (one per line) to move over.")
     parser.add_argument("--date", type=parse_timestamp, help="Only move files modified after this date (e.g., 2025-06-23)")
     parser.add_argument("--time", type=parse_timestamp, help="Only move files modified after this time (e.g., 12:00)")
     parser.add_argument("--min", type=int, help="Limit to last N minutes")
-    
-    if len(sys.argv) == 1:
-        parser.print_help()
-        sys.exit(0)
+    parser.add_argument("-a", "--all", action="store_true", help="List all .info files in the current directory matching the dataset name")
 
     args = parser.parse_args()
+
+    if args.all:
+        results = []
+        for f in os.listdir('.'):
+            if f.endswith('.info'):
+                try:
+                    with open(f) as info_f:
+                        metadata = json.load(info_f)
+                    dataset_name = metadata.get("MetaData", {}).get("dataset", "")
+                    actual_file = metadata.get("MetaData", {}).get("filename", "")
+                    if dataset_name == args.dir:
+                        mtime = os.path.getmtime(f)
+                        results.append((f, actual_file, mtime))
+                except Exception as e:
+                    print(f"[SKIP] Failed to parse {f}: {e}")
+
+        for f, actual_file, mtime in sorted(results, key=lambda x: x[2]):
+            time_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+            print(f"{time_str}  {f} → {actual_file}") 
+
+        sys.exit(0)
 
     now = datetime.now()
     start_time = end_time = None
@@ -89,18 +108,16 @@ def main():
         start_time = now - timedelta(minutes=args.min)
         end_time = now
     elif args.time:
-        try:
-            start_time = now.replace(hour=int(args.time.split(":")[0]), minute=int(args.time.split(":")[1]), second=0, microsecond=0)
-        except Exception as e:
-            print(f"[ERROR] Invalid --time format: {args.time}. Use HH:MM", file=sys.stderr)
-            sys.exit(1)
+        start_time = args.time
     elif args.date:
         start_time = args.date
 
-    if args.file:
-        file_list = get_file_list_from_table(args.file)
+    file_list = []
+    if args.list:
+        file_list = get_file_list_from_table(args.list)
+    elif args.file:
+        file_list = [args.file]
     else:
-        file_list = []
         for f in os.listdir('.'):
             if f.endswith('.info'):
                 try:
@@ -122,4 +139,19 @@ def main():
             print(f"[SKIP] {f} outside time range.")
 
 if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        parser = argparse.ArgumentParser(
+            description="Move uploaded files to Cell Browser dataset 'orig' directory.",
+            formatter_class=argparse.HelpFormatter)
+        parser.add_argument("-d", "--dir", required=True, help="Input dataset directory name (e.g. cortex-dev).")
+        parser.add_argument("-l", "--list", help="Input file list containing .info files (one per line) to move over.")
+        parser.add_argument("-f", "--file", help="Path to a single .info file to move over.")
+        parser.add_argument("-o", "--subdir", default="orig", help="Subdirectory to move files to (default: orig). Helpful if you need to version or add updated files (e.g. orig/update-MM-DD-YY or orig/v1_MM-DD-YY)")
+        parser.add_argument("--date", type=parse_timestamp, help="Only move files modified after this date (e.g., 2025-06-23)")
+        parser.add_argument("--time", type=parse_timestamp, help="Only move files modified after this time (e.g., 12:00)")
+        parser.add_argument("--min", type=int, help="Limit to last N minutes")
+        parser.add_argument("-a", "--all", action="store_true", help="List all .info files in the current directory matching the dataset name")
+        parser.print_help()
+        sys.exit(0)
+
     main()
