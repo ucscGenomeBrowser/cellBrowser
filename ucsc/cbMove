@@ -9,7 +9,7 @@ import csv
 from datetime import datetime, timedelta
 
 def parse_timestamp(s):
-    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+    for fmt in ("%H:%M", "%Y-%m-%d"):
         try:
             return datetime.strptime(s, fmt)
         except ValueError:
@@ -73,8 +73,8 @@ def main():
     parser.add_argument("-l", "--list", help="Input file list containing .info files (one per line) to move over.")
     parser.add_argument("-f", "--file", help="Path to a single .info file to move over.")
     parser.add_argument("-o", "--subdir", default="orig", help="Subdirectory to move files to (default: orig). Helpful if you need to version or add updated files (e.g. orig/update-MM-DD-YY or orig/v1_MM-DD-YY)")
-    parser.add_argument("--date", type=parse_timestamp, help="Only move files modified after this date (e.g., 2025-06-23)")
-    parser.add_argument("--time", type=parse_timestamp, help="Only move files modified after this time (e.g., 12:00)")
+    parser.add_argument("--date", type=parse_timestamp, help="Only move files modified on/after this date (e.g., 2025-06-23)")
+    parser.add_argument("--time", type=parse_timestamp, help="Only move files modified on/after this time (e.g., 12:00)")
     parser.add_argument("--min", type=int, help="Limit to last N minutes")
     parser.add_argument("-a", "--all", action="store_true", help="List all .info files in the current directory matching the dataset name")
 
@@ -136,7 +136,13 @@ def main():
         if is_file_in_time_range(f, start_time, end_time):
             cb_push_to_orig(f, args.dir, subdir=args.subdir)
         else:
-            print(f"[SKIP] {f} outside time range.")
+            try:
+                with open(f) as info_f:
+                    metadata = json.load(info_f)
+                actual_file = metadata.get("MetaData", {}).get("filename", "")
+                print(f"[SKIP] {f} → {actual_file} outside time range.")
+            except Exception:
+                print(f"[SKIP] {f} outside time range.")
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
@@ -147,8 +153,8 @@ if __name__ == "__main__":
         parser.add_argument("-l", "--list", help="Input file list containing .info files (one per line) to move over.")
         parser.add_argument("-f", "--file", help="Path to a single .info file to move over.")
         parser.add_argument("-o", "--subdir", default="orig", help="Subdirectory to move files to (default: orig). Helpful if you need to version or add updated files (e.g. orig/update-MM-DD-YY or orig/v1_MM-DD-YY)")
-        parser.add_argument("--date", type=parse_timestamp, help="Only move files modified after this date (e.g., 2025-06-23)")
-        parser.add_argument("--time", type=parse_timestamp, help="Only move files modified after this time (e.g., 12:00)")
+        parser.add_argument("--date", type=parse_timestamp, help="Only move files modified on/after this date (e.g., 2025-06-23)")
+        parser.add_argument("--time", type=parse_timestamp, help="Only move files modified on/after this time (e.g., 12:00)")
         parser.add_argument("--min", type=int, help="Limit to last N minutes")
         parser.add_argument("-a", "--all", action="store_true", help="List all .info files in the current directory matching the dataset name")
         parser.print_help()
