@@ -86,9 +86,8 @@ HIDDENCOORD = 12345
 # special value representing NaN in floating point arrays
 # sorting is used everywhere in the code, and sorting is fast, so we replace all NaNs with -inf
 # This means that all arrays can be sorted with the normal, fast javascript functions
-# must match the same value in cellBrowser.js
+# This must match the same value in cellBrowser.js
 FLOATNAN = float('-inf')
-
 # special value representing NaN in integer arrays, again, we want this to be first after sorting
 # must match the same value in cellBrowser.js
 INTNAN = -2**16
@@ -930,9 +929,9 @@ def readGeneToSym(fname):
     logging.debug("Found symbols for %d genes" % len(d))
     return d
 
-def getDecilesList_np(values):
-    deciles = np.percentile( values, [0,10,20,30,40,50,60,70,80,90,100] )
-    return deciles
+#def getDecilesList_np(values):
+    #deciles = np.percentile( values, [0,10,20,30,40,50,60,70,80,90,100] )
+    #return deciles
 
 def bytesAndFmt(x):
     """ how many bytes do we need to store x values and what is the sprintf
@@ -970,137 +969,137 @@ def bytesAndFmt(x):
 #    decCounts.insert(0, zeroCount)
 #    return deciles, decCounts, newVals
 
-def findBins(numVals, breakVals, hasNan):
-    """
-    find the right bin index defined by breakVals for every value in numVals.
-    Special handling for the last value. The comparison uses "<=". The first
-    break is assumed to be the minimum of numVals and is therefore ignored.
-    Also returns an array with the count for every bin. hasNan triggers a special
-    mode where the first bin is reserved for NaNs (encoded as -inf)
-    >>> findBins([1,1,1,2,2,2,3,3,4,4,5,5,6,6], [1, 2,3,5,6])
-    ([0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3], [6, 2, 4, 2])
-    """
-    bArr = []
-    binCounts = [0]*(len(breakVals)-1)
+#def findBins(numVals, breakVals, hasNan):
+    #"""
+    #find the right bin index defined by breakVals for every value in numVals.
+    #Special handling for the last value. The comparison uses "<=". The first
+    #break is assumed to be the minimum of numVals and is therefore ignored.
+    #Also returns an array with the count for every bin. hasNan triggers a special
+    #mode where the first bin is reserved for NaNs (encoded as -inf)
+    #>>> findBins([1,1,1,2,2,2,3,3,4,4,5,5,6,6], [1, 2,3,5,6])
+    #([0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3], [6, 2, 4, 2])
+    #"""
+    #bArr = []
+    #binCounts = [0]*(len(breakVals)-1)
+#
+    ## NaNs mean that the non-NaN bins are all +1
+    #if hasNan:
+        #breaks = breakVals[2:]
+    #else:
+        #breaks = breakVals[1:]
+#
+    #if hasNan:
+        #for x in numVals:
+            ## we use -inf for the NaN value everywhere, because sorting is undefined in lists that contain NaN
+            #if math.isinf(x):
+                #binIdx = 0
+            #else:
+                #binIdx = bisect.bisect_left(breaks, x)+1
+            #bArr.append(binIdx)
+            #binCounts[binIdx]+=1
+    #else:
+        #for x in numVals:
+            #binIdx = bisect.bisect_left(breaks, x) # comparison operator is <=
+            #bArr.append(binIdx)
+            #binCounts[binIdx]+=1
+#
+    #return bArr, binCounts
 
-    # NaNs mean that the non-NaN bins are all +1
-    if hasNan:
-        breaks = breakVals[2:]
-    else:
-        breaks = breakVals[1:]
+#def countBinsBetweenBreaks(numVals, breakVals):
+    #""" count how many numVals fall into the bins defined by breakVals.
+    #Special handling for the last value. Comparison uses "<=". The first
+    #break is assumed to be the minimum of numVals.
+    #Also returns an array with the bin for every element in numVals
+    #>>> countBinsBetweenBreaks([1,1,1,2,2,2,3,3,4,4,5,5,6,6], [1,2,3,5,6])
+    #([6, 2, 4, 2], [0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3])
+    #"""
+#
+    #binCounts = []
+    #binCount = 0
+    #i = 1
+    #dArr = []
+    #for x in numVals:
+        #if x <= breakVals[i]:
+            #binCount+=1
+        #else:
+            #binCounts.append(binCount)
+            #binCount = 1
+            #i += 1
+        #dArr.append(i-1)
+#
+    #binCounts.append(binCount)
+#
+    #assert(len(dArr)==len(numVals))
+    #assert(len(binCounts)==len(breakVals)-1)
+    #return binCounts, dArr
 
-    if hasNan:
-        for x in numVals:
-            # we use -inf for the NaN value everywhere, because sorting is undefined in lists that contain NaN
-            if math.isinf(x):
-                binIdx = 0
-            else:
-                binIdx = bisect.bisect_left(breaks, x)+1
-            bArr.append(binIdx)
-            binCounts[binIdx]+=1
-    else:
-        for x in numVals:
-            binIdx = bisect.bisect_left(breaks, x) # comparison operator is <=
-            bArr.append(binIdx)
-            binCounts[binIdx]+=1
-
-    return bArr, binCounts
-
-def countBinsBetweenBreaks(numVals, breakVals):
-    """ count how many numVals fall into the bins defined by breakVals.
-    Special handling for the last value. Comparison uses "<=". The first
-    break is assumed to be the minimum of numVals.
-    Also returns an array with the bin for every element in numVals
-    >>> countBinsBetweenBreaks([1,1,1,2,2,2,3,3,4,4,5,5,6,6], [1,2,3,5,6])
-    ([6, 2, 4, 2], [0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3])
-    """
-
-    binCounts = []
-    binCount = 0
-    i = 1
-    dArr = []
-    for x in numVals:
-        if x <= breakVals[i]:
-            binCount+=1
-        else:
-            binCounts.append(binCount)
-            binCount = 1
-            i += 1
-        dArr.append(i-1)
-
-    binCounts.append(binCount)
-
-    assert(len(dArr)==len(numVals))
-    assert(len(binCounts)==len(breakVals)-1)
-    return binCounts, dArr
-
-def discretizeArray(numVals, fieldMeta):
-    """
-    discretize numeric values based on quantiles.
-    """
-    maxBinCount = 10
-    counts = Counter(numVals).most_common()
-    counts.sort() # sort by value, not count
-
-    if len(counts) < maxBinCount:
-        # if we have just a few values, do not do any binning
-        binCounts = [y for x,y in counts]
-        values = [x for x,y in counts]
-
-        valToBin = {}
-        for i, x in enumerate(values):
-            valToBin[x] = i
-
-        dArr = [valToBin[x] for x in numVals]
-
-        fieldMeta["binMethod"] = "raw"
-        fieldMeta["values"] = values
-        fieldMeta["binCounts"] = binCounts
-        return dArr, fieldMeta
+#def discretizeArray(numVals, fieldMeta):
+    #"""
+    #discretize numeric values based on quantiles.
+    #"""
+    #maxBinCount = 10
+    #counts = Counter(numVals).most_common()
+    #counts.sort() # sort by value, not count
+#
+    #if len(counts) < maxBinCount:
+        ## if we have just a few values, do not do any binning
+        #binCounts = [y for x,y in counts]
+        #values = [x for x,y in counts]
+#
+        #valToBin = {}
+        #for i, x in enumerate(values):
+            #valToBin[x] = i
+#
+        #dArr = [valToBin[x] for x in numVals]
+#
+        #fieldMeta["binMethod"] = "raw"
+        #fieldMeta["values"] = values
+        #fieldMeta["binCounts"] = binCounts
+        #return dArr, fieldMeta
 
     # ten breaks
-    breakPercs = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-    countLen = len(counts)
-    breakIndices = [int(round(bp*countLen)) for bp in breakPercs]
-    # as with all histograms, the last break is always a special case (0-based array)
-    breakIndices.append(countLen-1)
-    breakVals = [counts[idx][0] for idx in breakIndices]
-
+    #breakPercs = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    #countLen = len(counts)
+    #breakIndices = [int(round(bp*countLen)) for bp in breakPercs]
+    ## as with all histograms, the last break is always a special case (0-based array)
+    #breakIndices.append(countLen-1)
+    #breakVals = [counts[idx][0] for idx in breakIndices]
+#
     # NaNs are encoded as -inf so they always are the first break
     # The first non-NaN value is at index 1
     # If we have NaNs, we need one more bin, with the first non-Nan value
-    hasNan = False
-    if math.isinf(breakVals[0]):
-        hasNan = True
-        breakVals.insert(1, counts[1][0])
-        logging.info("Field has NaN/Unknown values")
-    logging.debug("Breaks are: %s" % breakVals)
+    #hasNan = False
+    #if math.isinf(breakVals[0]):
+        #hasNan = True
+        #breakVals.insert(1, counts[1][0])
+        #logging.info("Field has NaN/Unknown values")
+    #logging.debug("Breaks are: %s" % breakVals)
 
-    dArr, binCounts = findBins(numVals, breakVals, hasNan)
-    logging.info("Number of values per decile-bin: %s" % binCounts)
+    #dArr, binCounts = findBins(numVals, breakVals, hasNan)
+    #logging.info("Number of values per decile-bin: %s" % binCounts)
 
     # we should have 11 breaks/10 bins, or 12 breaks/11bins if we have NaN elements
-    assert((not hasNan and len(breakVals)==11) or (hasNan and len(breakVals)==12))
-    assert((not hasNan and len(binCounts)==10) or (hasNan and len(binCounts)==11))
-    assert((len(binCounts)+1 == len(breakVals)))
+    #assert((not hasNan and len(breakVals)==11) or (hasNan and len(breakVals)==12))
+    #assert((not hasNan and len(binCounts)==10) or (hasNan and len(binCounts)==11))
+    #assert((len(binCounts)+1 == len(breakVals)))
+#
+    #fieldMeta["binMethod"] = "quantiles"
+    #fieldMeta["binCounts"] = binCounts
+    #if math.isinf(breakVals[0]): # -infinity is not valid in JSON
+        #breakVals[0] = "Unknown"
+    #fieldMeta["breaks"] = breakVals
 
-    fieldMeta["binMethod"] = "quantiles"
-    fieldMeta["binCounts"] = binCounts
-    if math.isinf(breakVals[0]): # -infinity is not valid in JSON
-        breakVals[0] = "Unknown"
-    fieldMeta["breaks"] = breakVals
+    #return dArr, fieldMeta
 
-    return dArr, fieldMeta
-
-def discretizeNumField(numVals, fieldMeta, numType):
-    " given a list of numbers, add attributes to fieldMeta that describe the binning scheme "
-    digArr, fieldMeta = discretizeArray(numVals, fieldMeta)
-
-    #deciles, binCounts, newVals = getDecilesWithZeros(numVals)
-
-    fieldMeta["arrType"] = "uint8"
-    fieldMeta["_fmt"] = "<B"
-    return digArr, fieldMeta
+#def discretizeNumField(numVals, fieldMeta, numType):
+    #" given a list of numbers, add attributes to fieldMeta that describe the binning scheme "
+    #digArr, fieldMeta = discretizeArray(numVals, fieldMeta)
+#
+    ##deciles, binCounts, newVals = getDecilesWithZeros(numVals)
+#
+    #fieldMeta["arrType"] = "uint8"
+    #fieldMeta["_fmt"] = "<B"
+    #return digArr, fieldMeta
 
 def typeForStrings(strings):
     """ given a list of strings, determine if they're all ints or floats or strings
@@ -1816,30 +1815,30 @@ def findBin(ranges, val):
     # if doesn't fit in anywhere, return beyond last possible index
     return i+1
 
-def discretizeArr_uniform(arr, fieldMeta):
-    """ given an array of numbers, get min/max, create 10 bins between min and max then
-    translate the array to bins and return the list of bins
-    """
-    arrMin = min(arr)
-    arrMax = max(arr)
-    stepSize = (arrMax-arrMin)/10.0
-
-    dArr = [0]*len(arr)
-    binCounts = [0]*10
-    for i, x in enumerate(arr):
-        binIdx = int(round((x - arrMin)/stepSize))
-        if x == arrMax:
-            binIdx = 9
-        assert(binIdx <= 9)
-        dArr[i] = binIdx
-        binCounts[binIdx]+=1
-
-    fieldMeta["binMethod"] = "uniform"
-    fieldMeta["minVal"] = arrMin
-    fieldMeta["maxVal"] = arrMax
-    fieldMeta["stepSize"] = stepSize
-    fieldMeta["binCounts"] = binCounts
-    return dArr, fieldMeta
+#def discretizeArr_uniform(arr, fieldMeta):
+    #""" given an array of numbers, get min/max, create 10 bins between min and max then
+    #translate the array to bins and return the list of bins
+    #"""
+    #arrMin = min(arr)
+    #arrMax = max(arr)
+    #stepSize = (arrMax-arrMin)/10.0
+#
+    #dArr = [0]*len(arr)
+    #binCounts = [0]*10
+    #for i, x in enumerate(arr):
+        #binIdx = int(round((x - arrMin)/stepSize))
+        #if x == arrMax:
+            #binIdx = 9
+        #assert(binIdx <= 9)
+        #dArr[i] = binIdx
+        #binCounts[binIdx]+=1
+#
+    #fieldMeta["binMethod"] = "uniform"
+    #fieldMeta["minVal"] = arrMin
+    #fieldMeta["maxVal"] = arrMax
+    #fieldMeta["stepSize"] = stepSize
+    #fieldMeta["binCounts"] = binCounts
+    #return dArr, fieldMeta
 
 def digitize_py(arr, matType):
     """ calculate deciles ignoring 0s from arr, use these deciles to digitize the whole arr,
@@ -2063,6 +2062,11 @@ def exprEncode(geneDesc, exprArr, matType):
     geneDesc = str(geneDesc) # make sure no unicode
     geneIdLen = struct.pack("<H", len(geneDesc))
 
+    if matType=="float":
+        nanValue = FLOATNAN
+    else:
+        nanValue = INTNAN
+
     # on cortex-dev, numpy was around 30% faster. Not a huge difference.
     if numpyLoaded:
         if matType=="float":
@@ -2072,10 +2076,9 @@ def exprEncode(geneDesc, exprArr, matType):
         else:
             assert(False) # internal error
         exprStr = exprArr.tobytes()
-        #minVal = np.amin(exprArr[~np.isneginf(exprArr)])
-        exprArr[np.isnan(exprArr)] = FLOATNAN
+        exprArr[np.isnan(exprArr)] = nanValue
         minVal = np.amin(exprArr)
-        # cortex-dev-splicing/psi has NAN values in the mtx file
+        # e.g. cortex-dev-splicing/psi has NAN values in the mtx file
     else:
         if matType=="float":
             arrType = "f"
@@ -2089,7 +2092,7 @@ def exprEncode(geneDesc, exprArr, matType):
         if str(type(exprArr))=="<type 'numpy.ndarray'>":
             exprArr = exprArr.tolist()[0]
 
-        exprArr = [FLOATNAN if math.isnan(x) else x for x in exprArr]
+        exprArr = [nanValue if math.isnan(x) else x for x in exprArr]
         # Python 3.9 removed tostring()
         if sys.version_info >= (3, 2):
             exprStr = array.array(arrType, exprArr).tobytes()
