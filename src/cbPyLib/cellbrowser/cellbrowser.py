@@ -3618,14 +3618,18 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
                 continue
             geneStr = geneOrSym
 
-        # case 2: matrix has only symbols and user provides symbol. This is our legacy format for old datasets.
+        # case 2: matrix has geneId+symbol or just symbols and user provides symbol in quickgenes. 
+        # (symbol-only is is our legacy format for old datasets.)
         # store only the symbol. We could look up the geneId but that's data inference, 
         # which we try not to do. The lookup could be wrong.
         elif matrixSyms is not None and geneOrSym in matrixSyms:
             geneStr = geneOrSym
-            if geneStr not in matrixGeneIds:
-                logging.info("case 2: geneId %s in quickgenes file is not in expression matrix" % repr(geneStr))
-                continue
+            if symToGene:
+                geneStr = symToGene[geneStr]+"|"+geneStr
+            else:
+                if geneStr not in matrixGeneIds:
+                    logging.info("case 2: geneId %s in quickgenes file is not in expression matrix" % repr(geneStr))
+                    continue
 
         # case 3: matrix has geneIds and user provides a geneId. add the symbol from our mapping
         # that's data inference, but that should be OK
