@@ -232,8 +232,20 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
             headers.append("_hprdClass")
             headers.append("_expr")
             headers.append("_geneLists")
+
+            # lineFileNextRow makes some changes to seurat headers that we need to undo
+            if headers[0] == "rowName":
+                headers[0] = ''
+            if headers[3] == "pct_1":
+                headers[3] = "pct.1"
+            if headers[4] == "pct_2":
+                headers[4] = "pct.2"
             yield headers
         sym = row[1]
+        isSeurat = False
+        if sym.isnumeric(): # if column 2 is only a number, it's probably a seurat file
+            sym = row[0] # gene symbol is in column 1
+            isSeurat = True
         if "|" in sym: # marker gene lists can carry geneId|symbol, strip the symbol in this case and re-convert below
             sym = sym.split("|")[0]
         if "." in sym: # remove Ensembl version identifier
@@ -302,7 +314,10 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
                     exprParts.append("BrainSpMouseDev|"+mouseEntrezToBrainspanMouseDev[mouseEntrez])
 
         row = list(row)
-        row[1] = sym # in case the original ID was a geneID, not a symbol
+        if isSeurat:
+            row[0] = sym # for seurat files, column 1 is the gene
+        else:
+            row[1] = sym # in case the original ID was a geneID, not a symbol
 
         row.append(hprdClass)
         row.append(";".join(exprParts))
