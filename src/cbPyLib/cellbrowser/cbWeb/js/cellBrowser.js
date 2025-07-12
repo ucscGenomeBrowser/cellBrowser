@@ -52,6 +52,7 @@ var cellbrowser = function() {
     // depending on the type of data, single cell or bulk RNA-seq, we call a circle a
     // "sample" or a "cell". This will adapt help menus, menus, etc.
     var gSampleDesc = "cell";
+    var gFeatDesc = "gene";
 
     // width of left meta bar in pixels
     var metaBarWidth = 250;
@@ -87,6 +88,7 @@ var cellbrowser = function() {
     //const cNullColor = "95DFFF"; //= light blue, also tried e1f6ff
     //const cNullColor = "e1f6ff"; //= light blue
     const cNullColor = "AFEFFF"; //= light blue
+    const nanColor = "DDDDDD"; // light grey
 
     const cDefGradPalette = "magma";  // default legend gradient palette for gene expression
     // this is a special palette, tol-sq with the first entry being a light blue, so 0 stands out a bit more
@@ -330,7 +332,7 @@ var cellbrowser = function() {
     /* send an event to google analytics */
         if (typeof gtag !== 'function')
             return;
-        gtag('event', eventName, eventLabel);
+        gtag('event', eventName, {"name": eventLabel});
     }
 
     function trackEventObj(eventName, obj) {
@@ -3483,8 +3485,8 @@ var cellbrowser = function() {
             } else
                 changeUrl({"gene":locusStr, "meta":null});
 
-            makeLegendExpr(locusStr, geneDesc, binInfo, exprArr, decArr);
-            renderer.setColors(legendGetColors(gLegend.rows));
+            var colors = makeLegendExpr(locusStr, geneDesc, binInfo, exprArr, decArr);
+            renderer.setColors(colors);
             renderer.setColorArr(decArr);
             if (renderer.childPlot && document.getElementById("splitJoinBox").checked) {
                 renderer.childPlot.setColors(legendGetColors(gLegend.rows));
@@ -3499,7 +3501,10 @@ var cellbrowser = function() {
             // update the "recent genes" div
             for (var i = 0; i < gRecentGenes.length; i++) {
                 // remove previous gene entry with the same symbol
-                if (gRecentGenes[i][0]===locusStr || gRecentGenes[i][1]===locusStr) { // match symbol or ID
+                var recIntId = gRecentGenes[i][0];
+                if (!db.isAtacMode())
+                    recIntId = recIntId.split("|")[0]; // only keep geneId for comparisons
+                if (recIntId===locusStr || gRecentGenes[i][1]===locusStr) { // match symbol or ID
                     gRecentGenes.splice(i, 1);
                     break;
                 }
@@ -3508,7 +3513,7 @@ var cellbrowser = function() {
             // make sure that recent genes table has symbol and Id
             var locusWithSym = locusStr;
             if (db.isAtacMode()) {
-                locusWithSym = shortenRange(locusStr);
+                //locusWithSym = shortenRange(locusStr);
             } else {
                 if (locusStr.indexOf("+")===-1) {
                     let geneInfo = db.getGeneInfo(locusStr);
@@ -4279,14 +4284,23 @@ var cellbrowser = function() {
         if (!keyName)
             keyName = "color";
         var rows = legend.rows;
+        var palIdx = 0;
+        var hasNan = false;
         for (let i = 0; i < rows.length; i++) {
             var colorVal = null;
-            if (colors)
-                colorVal = colors[i];
-
             var legendRow = rows[i];
-            if ((legendRow.label == "0" && legend.type=="expr") || (likeEmptyString(legendRow.label) && legend.type=="meta"))
+            if ((i==0 && legendRow.label == "0" && legend.type=="expr" && !hasNan) || 
+                (likeEmptyString(legendRow.label) && legend.type=="meta")) {
                 colorVal = cNullColor;
+            } else if ((legendRow.label == "-12345.00" && legend.type=="expr")) {
+                legendRow.label = "NaN";
+                colorVal = cNullColor;
+                hasNan = true;
+            } else if (colors) {
+                colorVal = colors[palIdx];
+                palIdx++;
+            }
+
             legendRow[keyName] = colorVal;
         }
     }
@@ -4305,15 +4319,35 @@ var cellbrowser = function() {
         }
 
         var rows = legend.rows;
-        var n = rows.length;
+
+        // the number of colors needed is not the number of legend rows, because some values
+        // do not get a color from the palette, e.g. "Unknown" and "0" rows
+        //var n = rows.length;
+        var n = legend.rows.length;
+        var hasNan = false;
+        var hasZero = false;
+        for (var row of rows) {
+            if (row.strKey==="noExpr")
+                hasZero = true;
+            if (row.strKey=="nan")
+                hasNan=true;
+        }
+
+        if (hasZero)
+            n--;
+        if (hasNan)
+            n--;
+        if (hasZero && hasNan)
+            n++;
+
         var pal = null;
         var usePredefined = false;
 
-        pal = makeColorPalette(palName, n);
         // if this is a field for which colors were defined manually during the cbBuild, use them
         if (legend.metaInfo!==undefined && legend.metaInfo.colors!==undefined && origPalName==="default") {
             // the order of the color values in the metaInfo object is the same as the order of the order of the values in the
             // JSON file. But the legend has been sorted now, so we cannot just copy over the array as it is
+            pal = makeColorPalette(palName, rows.length);
             var rows = legend.rows;
             var predefColors = legend.metaInfo.colors;
             for (var i=0; i < rows.length; i++) {
@@ -4419,11 +4453,11 @@ var cellbrowser = function() {
 
             if (binMin===0 && binMax===0) {
                 uniqueKey = "noExpr";
-                legColor = cNullColor;
+                //legColor = cNullColor;
             }
-            else if (binMin==="Unknown" && binMax==="Unknown") {
-                uniqueKey = "noExpr";
-                legColor = cNullColor;
+            else if (binMin==="Unknown" && binMax==="Unknown" || (binMin===-12345 && binMax==-12345)) {
+                uniqueKey = "nan";
+                //legColor = cNullColor;
             }
             else
                 colIdx++;
@@ -4440,6 +4474,18 @@ var cellbrowser = function() {
         return legendRows;
     }
 
+    function prettifyPeaks(pipePeaks) {
+        /* transform chrom|start|end+chrom2|start2|end2 to chrom:start-end<spc>chrom2:start2-end2 */
+        var outParts = [];
+        var peaks = pipePeaks.split("+");
+        for (var pipePeak of peaks) {
+            var p = pipePeak.split("|");
+            var s = p[0]+":"+p[1]+"-"+p[2];
+            outParts.push(s);
+        }
+        return outParts.join(" ");
+    }
+
     function makeLegendExpr(geneSym, mouseOver, binInfo, exprVec, decExprVec) {
         /* build gLegend object for coloring by expression
          * return the colors as an array of hex codes */
@@ -4454,10 +4500,13 @@ var cellbrowser = function() {
         var subTitle = null;
         if (db.isAtacMode()) {
             let peakCount = geneSym.split("+").length;
-            if (peakCount===1)
-                gLegend.title = "One ATAC peak";
-            else
-                gLegend.title = ("Sum of "+geneSym.split("+").length) + " ATAC peaks";
+            subTitle = prettifyPeaks(geneSym);
+            if (peakCount===1) {
+                gLegend.title = "One "+gFeatDesc;
+            }
+            else {
+                gLegend.title = ("Sum of "+geneSym.split("+").length) + " "+gFeatDesc+"s";
+            }
         }
         else {
             //  make a best effort to find the gene sym and gene ID
@@ -4530,7 +4579,6 @@ var cellbrowser = function() {
             addStr = "max-width:"+options.width+"px;";
         var maxHeight = $(window).height()-200;
         // unshift = insert at pos 0
-        //htmlLines.unshift("<div style='display:none;"+addStr+"max-height:"+maxHeight+"px' id='tpDialog' title='"+title+"'>");
         htmlLines.unshift("<div style='display:none;"+addStr+"' id='tpDialog' title='"+title+"'>");
         htmlLines.push("</div>");
         $(document.body).append(htmlLines.join(""));
@@ -4702,6 +4750,12 @@ var cellbrowser = function() {
         return parts[0]+":"+prettyNumber(parts[1]);
     }
 
+    function humanizeRange(s) {
+        /* reformat atac range chr1|start|end to chr1:xxx-yyy */
+        var parts = s.split("|");
+        return parts[0]+":"+parts[1]+"-"+parts[2];
+    }
+
     function htmlAddInfoIcon(htmls, helpText, placement) {
         /* add an info icon with some text to htmls */
         var iconHtml = '<svg style="width:0.9em" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Pro 6.1.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2022 Fonticons, Inc. --><path d="M256 0C114.6 0 0 114.6 0 256s114.6 256 256 256s256-114.6 256-256S397.4 0 256 0zM256 128c17.67 0 32 14.33 32 32c0 17.67-14.33 32-32 32S224 177.7 224 160C224 142.3 238.3 128 256 128zM296 384h-80C202.8 384 192 373.3 192 360s10.75-24 24-24h16v-64H224c-13.25 0-24-10.75-24-24S210.8 224 224 224h32c13.25 0 24 10.75 24 24v88h16c13.25 0 24 10.75 24 24S309.3 384 296 384z"/></svg>';
@@ -4767,14 +4821,9 @@ var cellbrowser = function() {
                 if (db.isAtacMode()) {
                     label = shortenRange(geneIdOrSym);
                     internalId = geneIdOrSym;
-                    //if (mouseOver!==undefined) {
-                        //label = mouseOver.split()[0];
-                        //internalId = geneIdOrSym;
-                    //} else {
-                        // quickGene is a range in format chr|123123|125443
-                        //label = shortenRange(geneIdOrSym);
-                        //internalId = geneIdOrSym;
-                    //}
+                    if (!mouseOver)
+                        mouseOver = humanizeRange(geneIdOrSym);
+                        
                 } else {
                     var parts = geneIdOrSym.split("|");
                     internalId = parts[0];
@@ -5350,6 +5399,14 @@ var cellbrowser = function() {
             gSampleDesc = db.conf.sampleDesc;
         else
             gSampleDesc = "cell";
+        if (db.conf.featDesc)
+            gFeatDesc = db.conf.featDesc;
+        else
+            if (db.isAtacMode())
+                gFeatDesc = "ATAC peak";
+            else
+                gFeatDesc = "gene";
+
 
         // allow config to override the default palettes
         datasetGradPalette = cDefGradPalette;
@@ -5546,18 +5603,16 @@ var cellbrowser = function() {
          * define a label for the rows in the expression matrix */
         var geneLabel = "Gene";
         if (db.conf.atacSearch)
-            geneLabel = "Range";
+            geneLabel = "peak";
         if (db.conf.geneLabel)
             geneLabel = db.conf.geneLabel;
         return geneLabel;
     }
 
     function splitButtonLabel(state) {
-        let dataType = "gene";
-        if (db.isAtacMode())
-            dataType = "peak";
+        let dataType = getGeneLabel();
         if (state)
-            return "Split on this "+dataType;
+            return "Split on this "+dataType[0].toLowerCase() + dataType.slice(1);
         else
             return "Remove split screen";
     }
@@ -5567,7 +5622,7 @@ var cellbrowser = function() {
         htmls.push('<div class="tpLeftSideItem" style="padding-left: 3px">');
         var title = "Color by "+getGeneLabel();
         if (db.conf.atacSearch)
-            title = "Find peaks at or close to:"
+            title = "Find "+gFeatDesc+" at or close to:"
         htmls.push('<label style="display:block; margin-bottom:8px; padding-top: 8px;" for="'+id+'">'+title+'</label>');
         var geneLabel = getGeneLabel().toLowerCase();
         var boxLabel = 'search for '+geneLabel+'...';
@@ -5611,7 +5666,7 @@ var cellbrowser = function() {
 
     function buildPeakList(htmls) {
         /* add a container for the list of peaks to htmls */
-        htmls.push("<div id='tpPeakListTitle'>Peaks found</div>");
+        htmls.push("<div id='tpPeakListTitle'>"+gFeatDesc+" found</div>");
 
         htmls.push("<div id='tpPeakList' style='height: 30%'>");
             htmls.push("<span id='noPeaks'>No genes or ranges found</span>");
@@ -5994,6 +6049,7 @@ var cellbrowser = function() {
         let actSym = null;
         if (gLegend.type==="expr")
             actSym = gLegend.geneSym;
+
         var fullUrl = makeHubUrl(actSym);
         db.gbWin = window.open(fullUrl, 'gbTab');
         return false;
@@ -7415,7 +7471,7 @@ var cellbrowser = function() {
         var noteStr = "No genes or peaks defined: Use quickGenesFile in cellbrowser.conf.";
         var geneHelp = "The dataset genes were defined by the dataset submitter, publication author or data wrangler at UCSC. " +
             "Click any of them to color the plot on the right hand side by the gene.";
-        buildGeneTable(htmls, "tpGenes", "Dataset "+geneLabel+"s", null, db.conf.quickGenes, noteStr, geneHelp);
+        buildGeneTable(htmls, "tpQuickGenes", "Dataset "+geneLabel+"s", null, db.conf.quickGenes, noteStr, geneHelp);
 
         htmls.push("</div>"); // tpGeneTab
 
@@ -7428,7 +7484,7 @@ var cellbrowser = function() {
         $(document.body).append(htmls.join(""));
 
         resizeGeneTableDivs("tpRecentGenes");
-        resizeGeneTableDivs("tpGenes");
+        resizeGeneTableDivs("tpQuickGenes");
 
         activateTooltip('.hasTooltip');
 
@@ -7672,7 +7728,9 @@ var cellbrowser = function() {
      * This code understands our special palette, tol-sq-blue
     */
         var pal = [];
-        if (palName==="blues")
+        if (n===2)
+            pal = ["0000FF","FF0000"];
+        else if (palName==="blues")
             pal = makeHslPalette(0.6, n);
         else if (palName==="magma" || palName==="viridis" || palName==="inferno" || palName=="plasma")
             pal = makePercPalette(palName, n);
@@ -7683,14 +7741,10 @@ var cellbrowser = function() {
         else if (palName==="tatarize")
             pal = makeTatarizePalette(n);
         else {
-            if (n===2)
-                pal = ["0000FF","FF0000"];
-            else {
-                var realPalName = palName.replace("tol-sq-blue", "tol-sq");
-                pal = palette(realPalName, n);
-                if (palName==="tol-sq-blue")
-                    pal[0]='f4f7ff';
-            }
+            var realPalName = palName.replace("tol-sq-blue", "tol-sq");
+            pal = palette(realPalName, n);
+            if (palName==="tol-sq-blue")
+                pal[0]='f4f7ff';
         }
 
         return pal;
@@ -8440,7 +8494,7 @@ var cellbrowser = function() {
         $("#tpLegendNotNull").click( function() { legendSetCheckboxes("notNull"); } );
         $("#tpLegendColorChecked").click( function(ev) { legendColorOnlyChecked(ev); } );
 
-        $('.tpLegendLabel').click( onLegendLabelClick ); // clicking the legend should have the same effect as clicking the checkbox
+        $('.tpLegendLabel').on("mouseup", onLegendLabelClick ); // clicking the legend should have the same effect as clicking the checkbox
         $('.tpLegendLabel').on("mouseover", onLegendHover ); // hovering over the legend should have the same effect hovering over the label
         //$('.tpLegendLabel').attr( "title", "Click to select samples with this value. Shift click to select multiple values.");
         activateTooltip(".tpLegendLabel");

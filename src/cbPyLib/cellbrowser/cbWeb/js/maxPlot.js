@@ -875,7 +875,7 @@ function MaxPlot(div, top, left, width, height, args) {
                continue;
 
            var valIdx = coordColors[i];
-           // only plot color 0
+           // only plot color 0 (or -12345 (=NaN))
            if (valIdx!==0)
                continue;
 
