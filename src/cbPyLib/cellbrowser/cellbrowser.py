@@ -7100,6 +7100,11 @@ def generateQuickGenes(outDir):
     " make a quickGenes.tsv in outDir from markers.tsv "
     outFname = join(outDir, "quickGenes.tsv")
     markerFname = join(outDir, "markers.tsv")
+
+    if not isfile(markerFname):
+        logging.warning("Cannot find marker file %s, so not generating quick genes file" % markerFname)
+        return
+
     logging.info("Generating %s from %s" % (outFname, markerFname))
 
     clusters = parseMarkerTable(markerFname, None)[0]
