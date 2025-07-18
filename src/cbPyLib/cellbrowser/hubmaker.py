@@ -671,12 +671,10 @@ def toHex(rgb):
 
 def writeBarChartTdb(tfh, bbFname, clusterNames, unitName, stat, percentile):
     " write the barChart tdb stanza "
-    stepSize = 1.0 / len(clusterNames)
     colorCodes = []
-    x = 0
-    while x < 1.0:
+    for i in range(len(clusterNames)):
+        x = i / len(clusterNames)
         colorCodes.append(colorsys.hsv_to_rgb(x, 1.0, 1.0))
-        x+=stepSize
 
     hexCodes = [toHex(x) for x in colorCodes]
 
