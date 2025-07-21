@@ -2062,6 +2062,7 @@ def exprEncode(geneDesc, exprArr, matType):
     geneDesc = str(geneDesc) # make sure no unicode
     geneIdLen = struct.pack("<H", len(geneDesc))
 
+    nanValue = None
     if matType=="float":
         nanValue = FLOATNAN
     else:
@@ -2261,7 +2262,12 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     # keep a flag so the client later can figure out if the expression matrix contains any negative values
     # this is important for handling the 0-value
-    exprIndex["_range"] = (float(allMin),0) # float() in case it is -inf as a np.float32, must be native Python float, not numpy
+    matrixMin = float(allMin) # float() in case it is -inf as a np.float32, must be native Python float, not numpy
+    if matrixMin==float('-inf'): # JSON cannot encode -inf nor NaN, so we use "None" for that which will become null in JSON
+        matrixMin = None
+
+    exprIndex["_range"] = (matrixMin, 0)
+
     logging.info("Global minimum in matrix is: %f" % allMin)
 
     jsonOfh = open(jsonFname, "w")
@@ -2354,7 +2360,15 @@ def parseOneColorFile(fname):
         if invColumns:
             color, metaVal = row
 
-        color = color.strip().strip("#") # hbeale had a file with trailing spaces
+        color = color.strip() # hbeale had a 6-digit file with trailing spaces
+
+        if color.startswith("#") and len(color)==9:
+            # we got these a few times now: #abababff
+            logging.warn("Color %s looks like a hex color with alpha value, stripping last two characters"
+                    % color)
+            color = color[1:7]
+
+        color = color.strip("#") # hbeale had a 6-digit file with trailing spaces
 
         isHex = True
         if len(color)!=6: # colors can be no more than six hex digits
