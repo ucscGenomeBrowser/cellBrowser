@@ -6754,7 +6754,7 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname, skipMa
     conf["inCluster"] = conf.get("inCluster", inCluster)
 
     if conf["inMeta"]:
-        adata = addMetaToAnnData(adata, inMeta)
+        adata = addMetaToAnnData(adata, conf["inMeta"])
 
     sampleCount = len(adata.obs)
 
