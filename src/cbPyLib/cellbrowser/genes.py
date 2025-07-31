@@ -46,6 +46,7 @@ def cbGenes_parseArgs():
     %prog build mm10 gencode-M25
     %prog index # used at UCSC to prepare the files for 'guess'
     %prog allSyms human # build big geneId -> symbol table from all 
+    %prog json ce11 wormbase235 # build JSON file from a .bed.gz file - only needed for model organisms
     """)
 
     parser.add_option("-d", "--debug", dest="debug", action="store_true", help="show debug messages")
@@ -512,21 +513,25 @@ def bedToJson(db, geneIdType, jsonFname):
     # index transcripts by gene
     bySym = defaultdict(dict)
     for row in iterBedRows(db, geneIdType):
-        chrom, start, end, geneId, score, strand = row[:6]
-        sym = geneToSym[geneId]
+        chrom, start, end, transId, score, strand = row[:6]
+        if not transId in geneToSym:
+            logging.warn("%s does not have a gene symbol" % transId)
+            sym = transId
+        else:
+            sym = geneToSym[transId]
         start = int(start)
         end = int(end)
         transLen = end-start
-        rawGeneId = geneId.split(".")[0] # for lookups, we hopefully will never need the version ID...
-        fullGeneId = rawGeneId+"|"+sym
-        bySym[fullGeneId].setdefault(chrom, []).append( (transLen, start, end, strand, geneId) )
+        rawTransId = transId.split(".")[0] # for lookups, we hopefully will never need the version ID...
+        fullTransId = rawTransId+"|"+sym
+        bySym[fullTransId].setdefault(chrom, []).append( (transLen, start, end, strand, transId) )
 
     symLocs = defaultdict(list)
-    for geneId, chromDict in bySym.items():
+    for transId, chromDict in bySym.items():
         for chrom, transList in chromDict.items():
             transList.sort(reverse=True) # take longest transcript per chrom
             _, start, end, strand, transId = transList[0]
-            symLocs[chrom].append( (start, end, strand, geneId) )
+            symLocs[chrom].append( (start, end, strand, transId) )
 
     sortedLocs = {}
     for chrom, geneList in symLocs.items():
@@ -615,9 +620,10 @@ def cbGenesCli():
     elif command=="push":
         pushLocal()
 
-    elif command=="json": # undocumented
-        db, geneType, outFname = args[1:]
-        bedToJson(db, geneType, outFname)
+    elif command=="json":
+        db, geneType = args[1:]
+        jsonFname = getStaticPath(getGeneJsonPath(db, geneType))
+        bedToJson(db, geneType, jsonFname)
     else:
         errAbort("Unrecognized command: %s" % command)
 
