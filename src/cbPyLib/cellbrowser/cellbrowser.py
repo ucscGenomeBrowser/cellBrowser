@@ -2383,12 +2383,16 @@ def parseOneColorFile(fname):
             logging.debug("Not a six-digit hex color code. Trying to map '%s' to a hex color" % color)
             import webcolors # error? -> pip install webcolors
             try:
-                color = webcolors.name_to_hex(color, spec='css3').lstrip("#")
+                color = webcolors.name_to_hex(color).lstrip("#")
             except ValueError:
-                # R knows more colors, like deeppink4. We simply map to deeppink for now
-                # there does not seem to be a good table with R colors in Python yet
-                color = "".join([c for c in color if not c.isdigit()])
-                color = webcolors.name_to_hex(color, spec='css3').lstrip("#")
+                import matplotlib.colors as mcolors
+                try:
+                    color = mcolors.CSS4_COLORS[color].lstrip("#")
+                except ValueError:
+                    # R knows more colors, like deeppink4. We simply map to deeppink for now
+                    # there does not seem to be a good table with R colors in Python yet
+                    color = "".join([c for c in color if not c.isdigit()])
+                    color = webcolors.name_to_hex(color, spec='css3').lstrip("#")
 
         newDict[metaVal] = color
     return newDict
