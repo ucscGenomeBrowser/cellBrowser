@@ -508,26 +508,29 @@ def uniqueIds(org):
 
 def bedToJson(db, geneIdType, jsonFname):
     " convert BED file to more compact json file: chrom -> list of (start, end, strand, gene) "
-    geneToSym = readGeneSymbols(geneIdType)
+    transToSym = readGeneSymbols(geneIdType)
 
     # index transcripts by gene
     bySym = defaultdict(dict)
     for row in iterBedRows(db, geneIdType):
         chrom, start, end, transId, score, strand = row[:6]
-        if not transId in geneToSym:
+        if not transId in transToSym:
             logging.warn("%s does not have a gene symbol" % transId)
             sym = transId
         else:
-            sym = geneToSym[transId]
+            sym = transToSym[transId]
+            logging.debug("Mapping %s to symbol %s" % (transId, sym))
         start = int(start)
         end = int(end)
         transLen = end-start
-        rawTransId = transId.split(".")[0] # for lookups, we hopefully will never need the version ID...
+        rawTransId = transId
+        if rawTransId.startswith("EN") or rawTransId.startswith("NM_"):
+            rawTransId = transId.split(".")[0] # for lookups, we hopefully will never need the version ID...
         fullTransId = rawTransId+"|"+sym
-        bySym[fullTransId].setdefault(chrom, []).append( (transLen, start, end, strand, transId) )
+        bySym[sym].setdefault(chrom, []).append( (transLen, start, end, strand, fullTransId) )
 
     symLocs = defaultdict(list)
-    for transId, chromDict in bySym.items():
+    for sym, chromDict in bySym.items():
         for chrom, transList in chromDict.items():
             transList.sort(reverse=True) # take longest transcript per chrom
             _, start, end, strand, transId = transList[0]
