@@ -440,7 +440,9 @@ ExportToCellbrowser <- function(
         # Only run this block if the Active assay is SCT
         if ("SCT" %in% DefaultAssay(object = object)) {
             message("Looks like an SCT object, so running PrepSCTFindMarkers()")
-            PrepSCTFindMarkers(object = object)
+            # The results from this command need to be written back to the object prior to
+            # running FindAllMarkers
+            object <- PrepSCTFindMarkers(object = object)
         }
         markers <- FindAllMarkers(
           object,
