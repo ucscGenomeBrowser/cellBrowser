@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # converter from cellranger to cellbrowser format
 # uses scanpy to parse hdf5, so that part works only on python3

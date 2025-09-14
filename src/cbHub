@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # create a track hub from an expression matrix
 import sys
 from os.path import join, dirname
