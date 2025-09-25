@@ -12,6 +12,7 @@ use warnings;
 use JSON;
 use utf8;
 use open qw(:std :utf8);
+use Encode qw(decode_utf8 encode_utf8);
 binmode(STDOUT, ':utf8');
 binmode(STDERR, ':utf8');
 
@@ -90,6 +91,9 @@ while ( <$FH> ) {
 
 # A method from the JSON.pm Perl module that converts the input JSON
 # into a Perl data structure, and produces a reference to a Perl hash
+# Get rid of extremely annoying 'wide character' warnings and errors
+# According to Claude AI after 40 min of it making stuff up (?)
+$json = encode_utf8($json);  # Convert Unicode back to UTF-8 bytes
 my $data = decode_json( $json );
 
 # These Global data structures get populated with data
