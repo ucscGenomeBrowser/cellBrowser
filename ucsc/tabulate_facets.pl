@@ -11,6 +11,7 @@ use strict;
 use warnings;
 use JSON;
 use utf8;
+use open qw(:std :utf8);
 binmode(STDOUT, ':utf8');
 binmode(STDERR, ':utf8');
 
