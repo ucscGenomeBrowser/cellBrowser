@@ -5,11 +5,14 @@
 # 
 # 
 #
-# Last Updated: 2024-06-13, Status: working as advertised
+# Last Updated: 2025-09-25, Status: working as advertised
 
 use strict;
 use warnings;
 use JSON;
+use utf8;
+binmode(STDOUT, ':utf8');
+binmode(STDERR, ':utf8');
 
 =head1 NAME
 
