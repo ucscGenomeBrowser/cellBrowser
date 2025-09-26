@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+
+import argparse, pathlib, json, csv
+from collections import Counter, defaultdict
+
+def dumpToJson(data, outputFile):
+    """output data to named outputFile"""
+    jsonOut = open(outputFile, "w")
+    json.dump(data, jsonOut)
+    jsonOut.close()
+
+def main():
+    # Set up script arguments
+    parser = argparse.ArgumentParser(
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    description="Get all values for a list of datasets for specified cellbrowser.conf tag")
+    parser.add_argument('-c', '--cm', type=str, help='marker file from CellMarker2.0')
+    parser.add_argument('-p', '--pdb', type=str, help='marker file from PanglaoDB')
+    parser.add_argument('-s', '--scb', type=str, help='marker file from singleCellBase')
+    parser.add_argument('-t', '--sct', type=str, help='marker file from scType')
+    args = parser.parse_args()
+
+    if args.pdb:
+        # Builds a dictionary structured in the way we want the data stored
+        # Ex markerDb struct: {"species":{"tissue/organ":{"cell type":{"gene symbol":{"PMID":pubmed_id, etc}}}}}
+        panglaoMarkersHuman = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict()))))
+        panglaoMarkersMouse = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict()))))
+        with open(args.pdb) as f:
+            for line in f:
+                splitLine = line.rstrip().split("\t")
+                # They store species info together in a single column
+                speciesList = splitLine[0].split()
+                geneSymbol = splitLine[1]
+                cellType = splitLine[2]
+                organ = splitLine[9]
+                # Various info about the markers
+                ubiqIndex = splitLine[4]
+                sensitivity_human = splitLine[10]
+                sensitivity_mouse = splitLine[11]
+                specificity_human = splitLine[12]
+                specificity_mouse = splitLine[13]
+                # for here to translate their short names into Human/Mouse
+                for species in speciesList:
+                    if species == "Mm":
+                        species = "Mouse"
+                        # Marker evidence stored as a dict to be added to panglaoMarkers dict later
+                        evidence = {"source":"PanglaoDB",\
+                        "ubiquitousness index":ubiqIndex, "sensitivity": sensitivity_mouse,\
+                        "specificity":specificity_mouse}
+
+                        #panglaoMarkers[species][cellType][geneSymbol] = evidence
+                        panglaoMarkersMouse[species][organ][cellType][geneSymbol] = evidence
+
+                    elif species == "Hs":
+                        species = "Homo sapiens"
+                        evidence = {"source":"PanglaoDB",\
+                        "ubiquitousness index":ubiqIndex, "sensitivity": sensitivity_human,\
+                        "specificity":specificity_human}
+
+                        panglaoMarkersHuman[species][cellType][geneSymbol] = evidence
+
+        dumpToJson(panglaoMarkersHuman, 'panglaoDb_human.json')
+        dumpToJson(panglaoMarkersMouse, 'panglaoDb_mouse.json')
+
+    if args.scb:
+        scbMarkersHuman = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict()))))
+        scbMarkersMouse = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict()))))
+        with open(args.scb, 'rb') as f:
+            for line in f:
+                # File is encoded in latin-1 for some reason, meaning default utf-8 decoding fails on certain chars
+                splitLine = line.decode('latin-1').rstrip().split("\t")
+                species = splitLine[7]
+                geneSymbol = splitLine[9]
+                # If there are several markers for a gene, they store them all in a single comma-sep list
+                if '"' in geneSymbol:
+                    geneSymbol = geneSymbol.replace('"',"")
+                    geneSymbol = geneSymbol.replace(',',"")
+                    geneSymbol = geneSymbol.split()
+                cellType = splitLine[8]
+                tissue = splitLine[12]
+                pubmed_id = splitLine[13]
+                geo_id = splitLine[16]
+                evidence = {"source":"singleCellBase", "PMID":pubmed_id, "GEO Accession":geo_id}
+                if species == "Homo sapiens" or species == "Mouse":
+                    if species == "Homo sapiens":
+                        # Change "Homo sapiens" to "Human" so that we're consistent across all markers files
+                        species = "Human"
+                        if type(geneSymbol) is list:
+                            for gene in geneSymbol:
+                                scbMarkersHuman[species][tissue][cellType][gene] = evidence
+                        else:
+                            scbMarkersHuman[species][tissue][cellType][geneSymbol] = evidence
+                    if species == "Mouse":
+                        if type(geneSymbol) is list:
+                            for gene in geneSymbol:
+                                scbMarkersMouse[species][tissue][cellType][gene] = evidence
+                        else:
+                            scbMarkersMouse[species][tissue][cellType][geneSymbol] = evidence
+
+        dumpToJson(scbMarkersHuman, 'singleCellBase_human.json')
+        dumpToJson(scbMarkersMouse, 'singleCellBase_mouse.json')
+
+    if args.cm:
+        cmMarkersHuman = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict()))))
+        cmMarkersMouse = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict()))))
+        with open(args.cm, 'r') as f:
+            for line in f:
+                splitLine = line.rstrip().split("\t")
+                # For some reason, we ended up with empty lines while processing this file, so make sure we have a line long enough
+                if len(splitLine)>1:
+                    species = splitLine[0]
+                    geneSymbol = splitLine[9]
+                    cellType = splitLine[6]
+                    tissue = splitLine[2]
+                    pubmed_id = splitLine[15]
+                    technology_seq = splitLine[13]
+                    marker_source = splitLine[15]
+                    cellontology_id = splitLine[7]
+
+                    evidence = {"source":"CellMarker2.0", "PMID":pubmed_id,\
+                    "Marker Source":marker_source, "Sequencing Technology":technology_seq,\
+                    "CellOntology ID":cellontology_id}
+                    if species == "Human":
+                        cmMarkersHuman[species][tissue][cellType][geneSymbol] = evidence
+                    if species == "Mouse":
+                        cmMarkersMouse[species][tissue][cellType][geneSymbol] = evidence
+    
+        dumpToJson(cmMarkersHuman, 'cellMarker2.0_human.json')
+        dumpToJson(cmMarkersMouse, 'cellMarker2.0_mouse.json')
+
+if __name__ == "__main__":
+    main()

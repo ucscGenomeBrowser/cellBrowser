@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # converter from scanpy to cellbrowser format
 # scanpy requires py3 but anndata runs on py2
