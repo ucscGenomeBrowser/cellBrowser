@@ -88,9 +88,6 @@ HIDDENCOORD = 12345
 # This means that all arrays can be sorted with the normal, fast javascript functions
 # This must match the same value in cellBrowser.js
 FLOATNAN = float('-inf')
-# special value representing NaN in integer arrays, again, we want this to be first after sorting
-# must match the same value in cellBrowser.js
-INTNAN = -2**16
 
 # how many md5 characters to keep in version identifiers. We load all files using their md5 to get around
 # internet browser caching
