@@ -2072,13 +2072,17 @@ def exprEncode(geneDesc, exprArr, matType):
     if numpyLoaded:
         if matType=="float":
             exprArr = exprArr.astype("float32")
+            exprArr[np.isnan(exprArr)] = nanValue
         elif matType=="int":
+            has_nan = np.any(np.isnan(exprArr))
+            if has_nan:
+                assert(False) # integer matrices with Nans are not supported right now. Email the programmer.
             exprArr = exprArr.astype("uint32")
         else:
             assert(False) # internal error
-        exprStr = exprArr.tobytes()
-        exprArr[np.isnan(exprArr)] = nanValue
+
         minVal = np.amin(exprArr)
+        exprStr = exprArr.tobytes()
         # e.g. cortex-dev-splicing/psi has NAN values in the mtx file
     else:
         if matType=="float":
@@ -3685,7 +3689,6 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
 
         # case 5: it is an ATAC dataset and the quickgenes file has ranges
         elif ":" in geneOrSym and "-" in geneOrSym:
-            #geneStr = geneOrSym.replace(":", "|").replace("-", "|")
             geneStr = findOverlappingRanges(matrixGeneIds, geneOrSym)
             if geneStr=="":
                 logging.error("quickGene ATAC range %s does not contain any peak in the matrix, skipping it" % geneOrSym)
@@ -6919,8 +6922,30 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname, skipMa
         else:
             firstPcCount = pcCount
 
+        X = adata.X.A if hasattr(adata.X, "A") else adata.X  # handle sparse matrices
+
         pipeLog('Performing initial PCA, number of PCs: %d' % firstPcCount)
+        pipeLog("Has NaN:"+str(np.isnan(X).any()))
+        pipeLog("Has +inf:"+str(np.isposinf(X).any()))
+        pipeLog("Has -inf:"+ str(np.isneginf(X).any()))
+        pipeLog("Max value:"+ str(np.nanmax(X)))
+        if np.isposinf(X).any():
+            logging.warn("Matrix has +inf values, replacing with 2^32")
+            X[np.isinf(X)] = np.nan  # turn inf into NaN
+            X = np.nan_to_num(X, nan=2**32)  # replace NaN with 2E6
+            adata.X = X
+
         sc.tl.pca(adata, n_comps=firstPcCount)
+        # X[np.isinf(X)] = np.nan  # turn inf into NaN
+        #X = np.nan_to_num(X, nan=0.0)  # replace NaN with 0
+        #adata.X = X
+
+        # suggestion - Check after normalization:
+        # sc.pp.normalize_total(adata, target_sum=1e4)
+        # print(np.isnan(adata.X).any())
+        # suggestion2 - Before scaling, clip extreme values:
+        # sc.pp.scale(adata, max_value=10)
+
         #Multiply by -1 to compare with Seurat
         #adata.obsm['X_pca'] *= -1
         #Plot of pca variance ratio to see if formula matches visual determination of pc_nb to use
