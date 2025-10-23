@@ -88,7 +88,7 @@ var cellbrowser = function() {
     //const cNullColor = "95DFFF"; //= light blue, also tried e1f6ff
     //const cNullColor = "e1f6ff"; //= light blue
     const cNullColor = "AFEFFF"; //= light blue
-    const nanColor = "DDDDDD"; // light grey
+    //const nanColor = "DDDDDD"; // light grey
 
     const cDefGradPalette = "magma";  // default legend gradient palette for gene expression
     // this is a special palette, tol-sq with the first entry being a light blue, so 0 stands out a bit more
@@ -107,8 +107,11 @@ var cellbrowser = function() {
     var METABOXTITLE   = "By Annotation";
 
     // maximum number of distinct values that one can color on
-    const MAXCOLORCOUNT = 1500;
+    const MAXCOLORCOUNT = 7000;
     const MAXLABELCOUNT = 500;
+
+    // after this number of rows in the legend, no more color pickers are shown
+    const MAXCOLPICK = 300;
 
     // histograms show only the top X values and summarize the rest into "other"
     var HISTOCOUNT = 12;
@@ -632,6 +635,7 @@ var cellbrowser = function() {
     let descLabels = {
         "paper_url":"Publication",
         "other_url" : "Website",
+        "hubUrl" : "UCSC Genome Browser",
         "geo_series" : "NCBI GEO Series", // = CIRM tagsV5
         "sra" : "NCBI Short Read Archive",
         "pmid" : "PubMed Abstract",
@@ -698,6 +702,11 @@ var cellbrowser = function() {
             if (spcPos!==-1) {
                 urlLabel = url.slice(spcPos+1);
                 url = url.slice(0,spcPos);
+            }
+
+            if (key==="hubUrl") {
+                url = makeHubUrl(null);
+                urlLabel = "Connect Track Hub";
             }
 
             if (!url.startsWith("http"))
@@ -1010,6 +1019,7 @@ var cellbrowser = function() {
         htmlAddLink(htmls, desc, "biorxiv_url");
         htmlAddLink(htmls, desc, "paper_url");
         htmlAddLink(htmls, desc, "other_url");
+        htmlAddLink(htmls, db.conf, "hubUrl");
         htmlAddLink(htmls, desc, "geo_series");
         htmlAddLink(htmls, desc, "pmid");
         htmlAddLink(htmls, desc, "dbgap");
@@ -1089,6 +1099,7 @@ var cellbrowser = function() {
             buildClassification(htmls, datasetInfo, "life_stages", "Life Stage", true);
             buildClassification(htmls, datasetInfo, "domains", "Scientific Domain", true);
             buildClassification(htmls, datasetInfo, "sources", "Source Database", false);
+            buildClassification(htmls, datasetInfo, "assay", "Assay", false);
 
             htmls.push("<p style='padding-top: 8px'>If you use the Cell Browser of this dataset, please cite the " +
                     "original publication and " +
@@ -1159,6 +1170,7 @@ var cellbrowser = function() {
             let projStr = getFacetString(dataset, "projects");
             let domStr = getFacetString(dataset, "domains");
             let lifeStr = getFacetString(dataset, "life_stages");
+            let assayStr = getFacetString(dataset, "assays");
             let sourceStr = getFacetString(dataset, "sources");
 
             var line = "<a id='tpDatasetButton_"+i+"' "+
@@ -1169,6 +1181,7 @@ var cellbrowser = function() {
                 "data-dom='"+domStr+"' "+
                 "data-source='"+sourceStr+"' "+
                 "data-stage='"+lifeStr+"' "+
+                "data-assay='"+assayStr+"' "+
                 "role='button' class='tpListItem list-group-item "+clickClass+"' data-datasetid='"+i+"'>"; // bootstrap seems to remove the id
             htmls.push(line);
 
@@ -1390,6 +1403,8 @@ var cellbrowser = function() {
                 param = "proj";
             else if (this.id=="tpDomCombo")
                 param = "dom";
+            else if (this.id=="tpAssayCombo")
+                param = "assay";
             else if (this.id=="tpStageCombo")
                 param = "stage";
 
@@ -1434,6 +1449,7 @@ var cellbrowser = function() {
         let projects = null;
         let lifeStages = null;
         let domains = null;
+        let assays = null;
         let sources = null;
 
         if (openDsInfo.parents === undefined && openDsInfo.datasets !== undefined) {
@@ -1442,6 +1458,7 @@ var cellbrowser = function() {
             organisms = getDatasetAttrs(openDsInfo.datasets, "organisms");
             projects = getDatasetAttrs(openDsInfo.datasets, "projects");
             lifeStages = getDatasetAttrs(openDsInfo.datasets, "life_stages");
+            assays = getDatasetAttrs(openDsInfo.datasets, "assays");
             domains = getDatasetAttrs(openDsInfo.datasets, "domains");
             sources = getDatasetAttrs(openDsInfo.datasets, "sources");
 
@@ -1459,6 +1476,7 @@ var cellbrowser = function() {
                 noteLines.push("<div style='height:4px'></div>");
                 buildFilter(noteLines, lifeStages, "Life Stages", "stage", "tpStageCombo", "select stage...");
                 buildFilter(noteLines, domains, "Scient. Domain", "dom", "tpDomCombo", "select domain...");
+                buildFilter(noteLines, assays, "Assay", "assay", "tpAssayCombo", "select assay...");
                 buildFilter(noteLines, sources, "Source DB", "source", "tpSourceCombo", "select db...");
             }
         }
@@ -1589,6 +1607,7 @@ var cellbrowser = function() {
             activateFilterCombo(projects, "tpProjCombo");
             activateFilterCombo(lifeStages, "tpStageCombo");
             activateFilterCombo(domains, "tpDomCombo");
+            activateFilterCombo(domains, "tpAssayCombo");
             activateFilterCombo(sources, "tpSourceCombo");
         }
 
@@ -3106,7 +3125,6 @@ var cellbrowser = function() {
            return null;
        }
 
-
         if (fieldName===defaultMetaField)
            changeUrl({"meta":null, "gene":null});
         else
@@ -3513,6 +3531,15 @@ var cellbrowser = function() {
             // make sure that recent genes table has symbol and Id
             var locusWithSym = locusStr;
             if (db.isAtacMode()) {
+                for (let qg of db.conf.quickGenes) {
+                    if (qg[0]===locusStr) {
+                        geneDesc = qg[1];
+                        //selectizeSetValue(geneDesc);
+                        let geneId = db.mustFindOneGeneExact(geneDesc);
+                        updatePeakListWithGene(geneId);
+                        updatePeakListCheckboxes(locusStr);
+                    }
+                }
                 //locusWithSym = shortenRange(locusStr);
             } else {
                 if (locusStr.indexOf("+")===-1) {
@@ -3525,6 +3552,9 @@ var cellbrowser = function() {
                 }
             }
 
+            if (db.isAtacMode()) {
+                selectizeSetValue(geneDesc)
+            }
             gRecentGenes.unshift([locusWithSym, geneDesc]); // insert at position 0
             gRecentGenes = gRecentGenes.slice(0, 9); // keep only nine last
             buildGeneTable(null, "tpRecentGenes", null, null, gRecentGenes);
@@ -3994,16 +4024,17 @@ var cellbrowser = function() {
     }
 
     function legendSort(sortBy) {
-        /* sort the legend by "name" or "count" */
+        /* sort the legend by "name" or "count" or "orderKey"*/
         var rows = gLegend.rows;
 
         if (sortBy==="name") {
             // index 2 is the label
             rows.sort(function(a, b) { return naturalSort(a.label, b.label); });
-        }
-        else {
+        } else if (sortBy==="count") {
             // sort this list by count = index 3
             rows.sort(function(a, b) { return b.count - a.count; }); // reverse-sort by count
+        } else {
+            rows.sort(function(a, b) { return a.orderKey - b.orderKey; }); // sort by order key
         }
         buildLegendBar();
     }
@@ -4289,11 +4320,13 @@ var cellbrowser = function() {
         for (let i = 0; i < rows.length; i++) {
             var colorVal = null;
             var legendRow = rows[i];
+            // any meta legend with a "special" value, so 0 or empty gets grey
             if ((i==0 && legendRow.label == "0" && legend.type=="expr" && !hasNan) || 
                 (likeEmptyString(legendRow.label) && legend.type=="meta")) {
                 colorVal = cNullColor;
-            } else if ((legendRow.label == "-12345.00" && legend.type=="expr")) {
-                legendRow.label = "NaN";
+            // gene expression diagrams: grey if NA
+            } else if ((legendRow.label == "NaN" && legend.type=="expr")) {
+                //legendRow.label = "NaN";
                 colorVal = cNullColor;
                 hasNan = true;
             } else if (colors) {
@@ -4323,22 +4356,15 @@ var cellbrowser = function() {
         // the number of colors needed is not the number of legend rows, because some values
         // do not get a color from the palette, e.g. "Unknown" and "0" rows
         //var n = rows.length;
-        var n = legend.rows.length;
-        var hasNan = false;
-        var hasZero = false;
+        var n = rows.length;
+        var hasSpecialBin = false;
         for (var row of rows) {
-            if (row.strKey==="noExpr")
-                hasZero = true;
-            if (row.strKey=="nan")
-                hasNan=true;
+            if (row.strKey==="noExpr" || row.strKey=="NaN")
+                hasSpecialBin = true;
         }
 
-        if (hasZero)
+        if (hasSpecialBin)
             n--;
-        if (hasNan)
-            n--;
-        if (hasZero && hasNan)
-            n++;
 
         var pal = null;
         var usePredefined = false;
@@ -4399,6 +4425,8 @@ var cellbrowser = function() {
             legLabel = "0";
         else if (binMin==="Unknown")
             legLabel = "Unknown";
+        else if (binMin==="NaN")
+            legLabel = "NaN";
         else if (binMin!==binMax) {
             if (Math.abs(binMin) > 1000000)
                 binMin = binMin.toPrecision(4);
@@ -4752,8 +4780,13 @@ var cellbrowser = function() {
 
     function humanizeRange(s) {
         /* reformat atac range chr1|start|end to chr1:xxx-yyy */
-        var parts = s.split("|");
-        return parts[0]+":"+parts[1]+"-"+parts[2];
+        let ranges = s.split("+");
+        let humanRanges = [];
+        for (let oneRange of ranges) {
+            var parts = oneRange.split("|");
+            humanRanges.push( parts[0]+":"+parts[1]+"-"+parts[2] );
+        }
+        return humanRanges.join(" and ");
     }
 
     function htmlAddInfoIcon(htmls, helpText, placement) {
@@ -4821,9 +4854,11 @@ var cellbrowser = function() {
                 if (db.isAtacMode()) {
                     label = shortenRange(geneIdOrSym);
                     internalId = geneIdOrSym;
-                    if (!mouseOver)
-                        mouseOver = humanizeRange(geneIdOrSym);
-                        
+                    if (mouseOver) {
+                        // inverse label <> mouseover for ATAC, much easier to read
+                        label = mouseOver;
+                    }
+                    mouseOver = humanizeRange(geneIdOrSym);
                 } else {
                     var parts = geneIdOrSym.split("|");
                     internalId = parts[0];
@@ -5052,6 +5087,7 @@ var cellbrowser = function() {
                 "intKey":valIdx,
                 "strKey":uniqueKey,
                 "longLabel" : desc,
+                "orderKey" : 0,
             } );
         }
 
@@ -5423,6 +5459,9 @@ var cellbrowser = function() {
 
         renderer.setPos(null, metaBarWidth+metaBarMargin);
 
+        var hubUrl = makeHubUrl(null);
+        $('#tpOpenGenome').attr("href", hubUrl);
+
         if (!db.conf.metaFields) {
             // pablo often has single-dataset installations, there is no need to open the
             // dataset selection box then.
@@ -5786,7 +5825,7 @@ var cellbrowser = function() {
                     label += ", "+(foundEnd-foundStart)+" bp long";
                 let checkBoxId = "range:"+chrom+":"+foundStart+":"+foundEnd+":"+dist;
                 htmls.push("<div class='tpPeak'>");
-                htmls.push("<input style='margin-right: 4px' id='"+checkBoxId+"' type='checkbox'>");
+                htmls.push("<input class='tpPeakCheckbox' style='margin-right: 4px' id='"+checkBoxId+"' type='checkbox'>");
                 htmls.push("<label for='"+checkBoxId+"'>"+label+"</label>");
                 htmls.push("</div>");
                 i++;
@@ -5898,6 +5937,25 @@ var cellbrowser = function() {
         peakListShowTitle(gene.sym, gene.chrom, gene.chromStart);
         peakListShowRanges(gene.chrom, peaksInView.ranges, gene.chromStart);
         changeUrl({"locusGene":geneId});
+    }
+
+    function updatePeakListCheckboxes(rangeStr) {
+        /* check all the boxes of peaks for rangeStr, which has format chr7|115585018|115585471+chr7|115596153|115596958 */
+
+        let checkRanges = rangeStr.split("+");
+        for (let el of document.getElementsByClassName("tpPeakCheckbox")) {
+            // id is something like "range:chr7:115193275:115194105:-404621"
+            let idStr = el.id;
+            let parts = idStr.split(":");
+            let chrom = parts[1];
+            let start = parts[2];
+            let end = parts[3];
+            let range = chrom+"|"+start+"|"+end;
+            console.log(range, checkRanges);
+            if (checkRanges.includes(range)) {
+                el.checked=true;
+            }
+        }
     }
 
     function comboLoadAtac(query, callback) {
@@ -7141,6 +7199,7 @@ var cellbrowser = function() {
         $(document.body).append(htmls.join(""));
 
         $('#tpOpenXena').click(onXenaButtonClick);
+
         $('#tpOpenGenome').click(onGenomeButtonClick);
 
         activateTooltip('.tpIconButton');
@@ -7466,11 +7525,13 @@ var cellbrowser = function() {
         var recentHelp = "Shown below are the 10 most recently searched genes. Click any gene to color the plot on the right-hand side by the gene.";
 
         buildGeneTable(htmls, "tpRecentGenes", "Recent "+geneLabel+"s",
-            "Hover or select cells to update colors here<br>Click to color by gene", gRecentGenes, null, recentHelp);
+            "Hover or select cells to update colors here<br>Click to color by "+gFeatDesc, gRecentGenes, null, recentHelp);
 
         var noteStr = "No genes or peaks defined: Use quickGenesFile in cellbrowser.conf.";
         var geneHelp = "The dataset genes were defined by the dataset submitter, publication author or data wrangler at UCSC. " +
             "Click any of them to color the plot on the right hand side by the gene.";
+        if (db.conf.atacSearch)
+            geneHelp = "Predefined dataset ranges were defined by the dataset submitter. Click any to color by a list of loci, so a sum of the peaks contained in the range. The exact peaks are listed on mouse over.";
         buildGeneTable(htmls, "tpQuickGenes", "Dataset "+geneLabel+"s", null, db.conf.quickGenes, noteStr, geneHelp);
 
         htmls.push("</div>"); // tpGeneTab
@@ -8190,8 +8251,10 @@ var cellbrowser = function() {
             let checkedCount = 0;
             for (let rowIdx=0; rowIdx<rows.length; rowIdx++) {
                 let row = rows[rowIdx];
-                if (row.isChecked)
+                if (row.isChecked) {
                     checkedCount++;
+                    row.orderKey = -1;
+                }
             }
 
             if (checkedCount===0) {
@@ -8212,6 +8275,7 @@ var cellbrowser = function() {
                     row.color = cNullColor;
             }
             gLegend.isColorOnlyChecked = true;
+            legendSort("orderKey");
 
         } else {
             // reset the colors and uncheck all checkboxes
@@ -8289,6 +8353,8 @@ var cellbrowser = function() {
         if (ev.target.checked) {
             renderer.selectByColor(valIdx);
             isChecked = true;
+            gLegend.isColorOnlyChecked=false;
+            $("#tpLegendColorChecked").text("Recolor checked values");
         } else {
             //ev.target.checked = false; // why is this necessary?
             renderer.unselectByColor(valIdx);
@@ -8372,7 +8438,7 @@ var cellbrowser = function() {
         htmls.push("<button id='tpLegendInvert'>Invert</button>");
         htmls.push("<button id='tpLegendNotNull'>&gt; 0</button></small>");
 
-        let buttonText = "Recolor checked fields";
+        let buttonText = "Recolor checked values";
         if (gLegend.isColorOnlyChecked===true) {
             buttonText = "Reset colors";
         } 
@@ -8439,7 +8505,11 @@ var cellbrowser = function() {
 
             htmls.push("<input class='tpLegendCheckbox' data-value-index='"+valueIndex+"' "+
                 "id='tpLegendCheckbox_"+i+"' type='checkbox'"+checkedStr+">");
-            htmls.push("<input class='tpColorPicker' id='tpLegendColorPicker_"+i+"' />");
+
+            if (gLegend.rows.length < MAXCOLPICK)
+                htmls.push("<input class='tpColorPicker' id='tpLegendColorPicker_"+i+"' />");
+            else
+                htmls.push("<div title='Cannot change color manually - too many legend entries' style='display: inline-block; background-color: #"+colorHex+"; width:14px; height:14px; margin-right: 3px' class='' id='tpLegendColor"+i+"'>&nbsp;</div>");
 
             htmls.push("<span class='"+labelClass+"' id='tpLegendLabel_"+i+"' data-placement='auto top' title='"+mouseOver+"'>");
             htmls.push(label);
@@ -8525,7 +8595,8 @@ var cellbrowser = function() {
                 preferredFormat: "hex",
                 change: onColorPickerChange
                 }
-            $("#tpLegendColorPicker_"+rowIdx).spectrum(opt);
+            if (gLegend.rows.length < MAXCOLPICK)
+                $("#tpLegendColorPicker_"+rowIdx).spectrum(opt);
         }
 
         buildViolinPlot();
@@ -9775,7 +9846,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
 
     // only export these functions
     return {
-        "main":main
+        "main":main,
+        "selectizeClear" : selectizeClear,
+        "selectizeSetValue" : selectizeSetValue
     }
 
 }();
