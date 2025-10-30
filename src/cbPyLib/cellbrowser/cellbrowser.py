@@ -2062,8 +2062,6 @@ def exprEncode(geneDesc, exprArr, matType):
     nanValue = None
     if matType=="float":
         nanValue = FLOATNAN
-    else:
-        nanValue = INTNAN
 
     # on cortex-dev, numpy was around 30% faster. Not a huge difference.
     if numpyLoaded:
