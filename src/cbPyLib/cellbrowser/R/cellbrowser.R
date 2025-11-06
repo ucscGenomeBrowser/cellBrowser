@@ -124,9 +124,16 @@ exportImages <- function(obj, outDir, embeddings.conf) {
         message("Writing coords for image to ", coordsPath)
         #coords <- GetTissueCoordinates(object = obj[[img]])
 
-        coords <- GetTissueCoordinates(object = obj[[name]])
-        coordsRev <- coords[, c("imagecol", "imagerow")]  # Grrrr... Seurat stores coordinates as (y,x) in this particular case. reverse the order now.
-        colnames(coordsRev) <- c("x", "y")
+        if (all(c("imagecol", "imagerow") %in% colnames(coords))) {
+        # Seurat-style naming: reverse order
+          coordsRev <- coords[, c("imagecol", "imagerow")]
+          colnames(coordsRev) <- c("x", "y")
+        } else if (all(c("x", "y") %in% colnames(coords))) {
+          # Already in standard x/y format
+          coordsRev <- coords[, c("x", "y")]
+        } else {
+          stop("Error: coordinates must have either (imagecol, imagerow) or (x, y) columns.")
+        }
 
         write.table(coordsRev, coordsPath, sep="\t", row.names=T, quote=F, col.names=NA)
         conf <- sprintf(
