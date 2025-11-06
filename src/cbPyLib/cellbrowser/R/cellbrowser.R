@@ -122,7 +122,7 @@ exportImages <- function(obj, outDir, embeddings.conf) {
         xMax = dim(img)[2]; # there is a difference of 3 pixels on height when comparing "identify file.jpeg" with this. NO IDEA WHY!
         coordsPath <- file.path(outDir, paste0(name, ".coords.tsv")) 
         message("Writing coords for image to ", coordsPath)
-        coords <- GetTissueCoordinates(object = obj[[img]])
+        coords <- GetTissueCoordinates(object = obj[[name]])
 
         if (all(c("imagecol", "imagerow") %in% colnames(coords))) {
         # Seurat-style naming: reverse order
