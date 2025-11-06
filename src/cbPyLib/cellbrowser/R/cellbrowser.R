@@ -130,7 +130,7 @@ exportImages <- function(obj, outDir, embeddings.conf) {
           colnames(coordsRev) <- c("x", "y")
         } else if (all(c("x", "y") %in% colnames(coords))) {
           # Already in standard x/y format
-          coordsRev <- coords[, c("x", "y")]
+          coordsRev <- coords[, c("y", "x")]
         } else {
           stop("Error: coordinates must have either (imagecol, imagerow) or (x, y) columns.")
         }
