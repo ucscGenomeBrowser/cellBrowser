@@ -3064,8 +3064,8 @@ var cellbrowser = function() {
     function getActiveLabelField() {
         /* return default label field or from URL */
         let fieldName = getVar("label");
-        if (fieldName===undefined)
-            fieldName = renderer.getLabelField();
+        //if (fieldName===undefined)
+            //fieldName = renderer.getLabelField();
         if (fieldName===undefined)
             fieldName = db.conf.labelField;
         return fieldName;
