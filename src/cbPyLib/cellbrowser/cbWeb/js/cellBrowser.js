@@ -3068,6 +3068,8 @@ var cellbrowser = function() {
             //fieldName = renderer.getLabelField();
         if (fieldName===undefined)
             fieldName = db.conf.labelField;
+        if (fieldName===undefined)
+            fieldName = null;
         return fieldName;
     }
     
@@ -3682,6 +3684,9 @@ var cellbrowser = function() {
    function colorByDefaultField(onDone, ignoreUrl) {
        /* get the default color field from the config or the URL and start coloring by it.
         * Call onDone() when done. */
+       let defLabelField = getActiveLabelField();
+       setLabelDropdown(defLabelField);
+
        var colorType = "meta";
        var colorBy = db.getDefaultColorField();
 
@@ -3924,7 +3929,7 @@ var cellbrowser = function() {
                return [3, 0.5];
            if (dotCount<35000)
                return [2, 0.3];
-           if (dotCount<80000)
+           if (dotCount<90000)
                return [1, 0.5];
            // everything else
            return [0, 0.3];
@@ -3975,7 +3980,7 @@ var cellbrowser = function() {
        buildSelectActions();
 
        db.loadCoords(coordIdx, gotFirstCoords, gotSpatial, onProgress);
-
+       
        if ("traces" in db.conf.fileVersions)
            db.loadTraces(gotTraces);
 
