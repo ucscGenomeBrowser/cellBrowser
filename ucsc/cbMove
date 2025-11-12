@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+
+import argparse
+import os
+import sys
+import json
+import shutil
+import csv
+from datetime import datetime, timedelta
+
+def parse_timestamp(s):
+    for fmt in ("%H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    raise argparse.ArgumentTypeError(f"Invalid date/time format: {s}")
+
+def get_file_list_from_table(file_path):
+    file_list = []
+    with open(file_path, newline='') as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped:
+                file_list.append(stripped)
+    return file_list
+
+def is_file_in_time_range(path, start_time=None, end_time=None):
+    mtime = datetime.fromtimestamp(os.path.getmtime(path))
+    if start_time and mtime < start_time:
+        return False
+    if end_time and mtime > end_time:
+        return False
+    return True
+
+def cb_push_to_orig(file, cb_dir, subdir=None):
+    
+    if subdir:
+        output_dir = os.path.join("/hive/data/inside/cells/datasets", cb_dir, "orig", subdir)
+        display_path = f"{cb_dir}/orig/{subdir}"
+    else:
+        output_dir = os.path.join("/hive/data/inside/cells/datasets", cb_dir, "orig")
+        display_path = f"{cb_dir}/orig"
+
+    file_ext = os.path.splitext(file)[1].lstrip(".")
+    fname= None
+    file_path = None
+
+    if file_ext == "info":
+        try:
+            with open(file) as f:
+                metadata = json.load(f)
+            fname = metadata["MetaData"]["filename"]
+        except Exception as e:
+            print(f"[ERROR] Failed to read or parse {file}: {e}", file=sys.stderr)
+            return 1
+        file_base = os.path.splitext(os.path.basename(file))[0]
+        file_path = os.path.join(os.path.dirname(file), file_base)
+    else:
+        fname = os.path.basename(file)
+        file_path = os.path.abspath(file)
+
+    dest_path = os.path.join(output_dir, fname)
+
+    os.makedirs(output_dir, exist_ok=True)
+    try:
+        print(f"Copying {fname} to {display_path} directory...")
+        shutil.copy(file_path, dest_path)
+        print("Successfully copied!")
+        return 0
+    except Exception as e:
+        print(f"[ERROR] Copy failed: {e}", file=sys.stderr)
+        return 1
+
+def submit_need_to_copy(submit_dir, output_dir):
+    """
+    Return True if any file/dir under submit_dir is missing in output_dir.
+    No hashes, just existence.
+    """
+    for root, dirs, files in os.walk(submit_dir):
+        rel = os.path.relpath(root, submit_dir)
+        dst_root = os.path.join(output_dir, rel) if rel != "." else output_dir
+        # any directory missing?
+        for d in dirs:
+            if not os.path.exists(os.path.join(dst_root, d)):
+                return True
+        # any file missing?
+        for f in files:
+            if not os.path.exists(os.path.join(dst_root, f)):
+                return True
+    return False
+
+def copy_submit_dir(cb_dir, subdir=None, force=False):
+    """
+    Recursively copy all files and directories from:
+      /hive/data/inside/cells/submit/<cb_dir>/
+    into:
+      /hive/data/inside/cells/datasets/<cb_dir>/<subdir>/
+
+    Default: copy once (skip if files already copied over).
+    force=True (use with --submit): re-copy by merging/overwriting.
+    """
+    submit_dir = os.path.join("/hive/data/inside/cells/submit", cb_dir)
+
+    if subdir:
+        output_dir = os.path.join("/hive/data/inside/cells/datasets", cb_dir, "orig", subdir)
+        display_path = f"{cb_dir}/orig/{subdir}"
+    else:
+        output_dir = os.path.join("/hive/data/inside/cells/datasets", cb_dir, "orig")
+        display_path = f"{cb_dir}/orig"
+    
+    if not os.path.isdir(submit_dir):
+        print(f"[INFO] No directory found for {cb_dir} in submit directory, skipping.")
+        return 0
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Skip if destination already contains files and not forcing
+    if not force and not submit_need_to_copy(submit_dir, output_dir):
+        print(f"[SKIP] Project information files already copied over from submit directory in {output_dir}. Use --submit to refresh.")
+        return 0
+
+    try:
+        print(f"Copying submit directory contents:\n  {submit_dir}\n→ {display_path} ...")
+        shutil.copytree(submit_dir, output_dir, dirs_exist_ok=True)
+        print(f"[OK] Files for {cb_dir} successfully copied from submit directory.")
+        return 0
+    except Exception as e:
+        print(f"[ERROR] Failed to copy files from submit directory: {e}", file=sys.stderr)
+        return 1
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Move uploaded files to Cell Browser dataset 'orig' directory.",
+        formatter_class=argparse.HelpFormatter)
+    parser.add_argument("-d", "--dir", required=True, help="Input dataset directory name (e.g. cortex-dev).")
+    parser.add_argument("-l", "--list", help="Input file list containing .info files (one per line) to move over.")
+    parser.add_argument("-f", "--file", help="Path to a single .info file to move over.")
+    parser.add_argument("-o", "--subdir", default="orig", help="Subdirectory to move files to inside the 'orig' directory. Helpful if you need to version or add updated files (e.g. orig/update-MM-DD-YY or orig/v1_MM-DD-YY)")
+    parser.add_argument("--date", type=parse_timestamp, help="Only move files modified on/after this date (e.g., 2025-06-23)")
+    parser.add_argument("--time", type=parse_timestamp, help="Only move files modified on/after this time (e.g., 12:00)")
+    parser.add_argument("--min", type=int, help="Limit to last N minutes")
+    parser.add_argument("-a", "--all", action="store_true", help="List all .info files in the current directory matching the dataset name")
+    parser.add_argument("--submit", action="store_true", help="Re-copy files from submit directory")
+
+    args = parser.parse_args()
+
+    if args.all:
+        results = []
+        for f in os.listdir('.'):
+            if f.endswith('.info'):
+                try:
+                    with open(f) as info_f:
+                        metadata = json.load(info_f)
+                    dataset_name = metadata.get("MetaData", {}).get("dataset", "")
+                    actual_file = metadata.get("MetaData", {}).get("filename", "")
+                    if dataset_name == args.dir:
+                        mtime = os.path.getmtime(f)
+                        results.append((f, actual_file, mtime))
+                except Exception as e:
+                    print(f"[SKIP] Failed to parse {f}: {e}")
+
+        for f, actual_file, mtime in sorted(results, key=lambda x: x[2]):
+            time_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+            print(f"{time_str}  {f} → {actual_file}") 
+
+        sys.exit(0)
+
+    now = datetime.now()
+    start_time = end_time = None
+
+    if args.min:
+        start_time = now - timedelta(minutes=args.min)
+        end_time = now
+    elif args.time:
+        start_time = args.time
+    elif args.date:
+        start_time = args.date
+
+    file_list = []
+    if args.list:
+        file_list = get_file_list_from_table(args.list)
+    elif args.file:
+        file_list = [args.file]
+    else:
+        for f in os.listdir('.'):
+            if f.endswith('.info'):
+                try:
+                    with open(f) as info_f:
+                        metadata = json.load(info_f)
+                    dataset_name = metadata.get("MetaData", {}).get("dataset", "")
+                    if dataset_name == args.dir:
+                        file_list.append(f)
+                except Exception as e:
+                    print(f"[SKIP] Failed to parse {f}: {e}")
+    
+    orig_subdir = None if not args.subdir or args.subdir == "orig" else args.subdir 
+
+    for f in file_list:
+        if not os.path.exists(f):
+            print(f"[SKIP] File not found: {f}")
+            continue
+        if is_file_in_time_range(f, start_time, end_time):
+            cb_push_to_orig(f, args.dir, subdir=orig_subdir)
+        else:
+            try:
+                with open(f) as info_f:
+                    metadata = json.load(info_f)
+                actual_file = metadata.get("MetaData", {}).get("filename", "")
+                print(f"[SKIP] {f} → {actual_file} outside time range.")
+            except Exception:
+                print(f"[SKIP] {f} outside time range.")
+
+    copy_submit_dir(args.dir, subdir=orig_subdir, force=args.submit)
+
+if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        parser = argparse.ArgumentParser(
+            description="Move uploaded files to Cell Browser dataset 'orig' directory.",
+            formatter_class=argparse.HelpFormatter)
+        parser.add_argument("-d", "--dir", required=True, help="Input dataset directory name (e.g. cortex-dev).")
+        parser.add_argument("-l", "--list", help="Input file list containing .info files (one per line) to move over.")
+        parser.add_argument("-f", "--file", help="Path to a single .info file to move over.")
+        parser.add_argument("-o", "--subdir", default="orig", help="Subdirectory to move files to inside the 'orig' directory. Helpful if you need to version or add updated files (e.g. orig/update-MM-DD-YY or orig/v1_MM-DD-YY)")
+        parser.add_argument("--date", type=parse_timestamp, help="Only move files modified on/after this date (e.g., 2025-06-23)")
+        parser.add_argument("--time", type=parse_timestamp, help="Only move files modified on/after this time (e.g., 12:00)")
+        parser.add_argument("--min", type=int, help="Limit to last N minutes")
+        parser.add_argument("-a", "--all", action="store_true", help="List all .info files in the current directory matching the dataset name")
+        parser.add_argument("--submit", action="store_true", help="Re-copy files from submit directory")
+        parser.print_help()
+        sys.exit(0)
+
+    main()

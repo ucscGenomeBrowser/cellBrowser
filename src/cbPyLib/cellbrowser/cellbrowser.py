@@ -84,11 +84,10 @@ CBHOMEURL_TEST = "https://cells-test.gi.ucsc.edu/downloads/cellbrowserData/"
 HIDDENCOORD = 12345
 
 # special value representing NaN in floating point arrays
-# must match the same value in cellBrowser.js
-FLOATNAN = float('-inf') # NaN and sorting does not work. we want NaN always to be first, so encode as -inf
-# special value representing NaN in integer arrays, again, we want this to be first after sorting
-# must match the same value in cellBrowser.js
-INTNAN = -2**16
+# sorting is used everywhere in the code, and sorting is fast, so we replace all NaNs with -inf
+# This means that all arrays can be sorted with the normal, fast javascript functions
+# This must match the same value in cellBrowser.js
+FLOATNAN = float('-inf')
 
 # how many md5 characters to keep in version identifiers. We load all files using their md5 to get around
 # internet browser caching
@@ -927,9 +926,9 @@ def readGeneToSym(fname):
     logging.debug("Found symbols for %d genes" % len(d))
     return d
 
-def getDecilesList_np(values):
-    deciles = np.percentile( values, [0,10,20,30,40,50,60,70,80,90,100] )
-    return deciles
+#def getDecilesList_np(values):
+    #deciles = np.percentile( values, [0,10,20,30,40,50,60,70,80,90,100] )
+    #return deciles
 
 def bytesAndFmt(x):
     """ how many bytes do we need to store x values and what is the sprintf
@@ -967,137 +966,137 @@ def bytesAndFmt(x):
 #    decCounts.insert(0, zeroCount)
 #    return deciles, decCounts, newVals
 
-def findBins(numVals, breakVals, hasNan):
-    """
-    find the right bin index defined by breakVals for every value in numVals.
-    Special handling for the last value. The comparison uses "<=". The first
-    break is assumed to be the minimum of numVals and is therefore ignored.
-    Also returns an array with the count for every bin. hasNan triggers a special
-    mode where the first bin is reserved for NaNs (encoded as -inf)
-    >>> findBins([1,1,1,2,2,2,3,3,4,4,5,5,6,6], [1, 2,3,5,6])
-    ([0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3], [6, 2, 4, 2])
-    """
-    bArr = []
-    binCounts = [0]*(len(breakVals)-1)
+#def findBins(numVals, breakVals, hasNan):
+    #"""
+    #find the right bin index defined by breakVals for every value in numVals.
+    #Special handling for the last value. The comparison uses "<=". The first
+    #break is assumed to be the minimum of numVals and is therefore ignored.
+    #Also returns an array with the count for every bin. hasNan triggers a special
+    #mode where the first bin is reserved for NaNs (encoded as -inf)
+    #>>> findBins([1,1,1,2,2,2,3,3,4,4,5,5,6,6], [1, 2,3,5,6])
+    #([0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3], [6, 2, 4, 2])
+    #"""
+    #bArr = []
+    #binCounts = [0]*(len(breakVals)-1)
+#
+    ## NaNs mean that the non-NaN bins are all +1
+    #if hasNan:
+        #breaks = breakVals[2:]
+    #else:
+        #breaks = breakVals[1:]
+#
+    #if hasNan:
+        #for x in numVals:
+            ## we use -inf for the NaN value everywhere, because sorting is undefined in lists that contain NaN
+            #if math.isinf(x):
+                #binIdx = 0
+            #else:
+                #binIdx = bisect.bisect_left(breaks, x)+1
+            #bArr.append(binIdx)
+            #binCounts[binIdx]+=1
+    #else:
+        #for x in numVals:
+            #binIdx = bisect.bisect_left(breaks, x) # comparison operator is <=
+            #bArr.append(binIdx)
+            #binCounts[binIdx]+=1
+#
+    #return bArr, binCounts
 
-    # NaNs mean that the non-NaN bins are all +1
-    if hasNan:
-        breaks = breakVals[2:]
-    else:
-        breaks = breakVals[1:]
+#def countBinsBetweenBreaks(numVals, breakVals):
+    #""" count how many numVals fall into the bins defined by breakVals.
+    #Special handling for the last value. Comparison uses "<=". The first
+    #break is assumed to be the minimum of numVals.
+    #Also returns an array with the bin for every element in numVals
+    #>>> countBinsBetweenBreaks([1,1,1,2,2,2,3,3,4,4,5,5,6,6], [1,2,3,5,6])
+    #([6, 2, 4, 2], [0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3])
+    #"""
+#
+    #binCounts = []
+    #binCount = 0
+    #i = 1
+    #dArr = []
+    #for x in numVals:
+        #if x <= breakVals[i]:
+            #binCount+=1
+        #else:
+            #binCounts.append(binCount)
+            #binCount = 1
+            #i += 1
+        #dArr.append(i-1)
+#
+    #binCounts.append(binCount)
+#
+    #assert(len(dArr)==len(numVals))
+    #assert(len(binCounts)==len(breakVals)-1)
+    #return binCounts, dArr
 
-    if hasNan:
-        for x in numVals:
-            # we use -inf for the NaN value everywhere, sorting is undefined in lists that contain NaN
-            if math.isinf(x):
-                binIdx = 0
-            else:
-                binIdx = bisect.bisect_left(breaks, x)+1
-            bArr.append(binIdx)
-            binCounts[binIdx]+=1
-    else:
-        for x in numVals:
-            binIdx = bisect.bisect_left(breaks, x) # comparison operator is <=
-            bArr.append(binIdx)
-            binCounts[binIdx]+=1
-
-    return bArr, binCounts
-
-def countBinsBetweenBreaks(numVals, breakVals):
-    """ count how many numVals fall into the bins defined by breakVals.
-    Special handling for the last value. Comparison uses "<=". The first
-    break is assumed to be the minimum of numVals.
-    Also returns an array with the bin for every element in numVals
-    >>> countBinsBetweenBreaks([1,1,1,2,2,2,3,3,4,4,5,5,6,6], [1,2,3,5,6])
-    ([6, 2, 4, 2], [0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3])
-    """
-
-    binCounts = []
-    binCount = 0
-    i = 1
-    dArr = []
-    for x in numVals:
-        if x <= breakVals[i]:
-            binCount+=1
-        else:
-            binCounts.append(binCount)
-            binCount = 1
-            i += 1
-        dArr.append(i-1)
-
-    binCounts.append(binCount)
-
-    assert(len(dArr)==len(numVals))
-    assert(len(binCounts)==len(breakVals)-1)
-    return binCounts, dArr
-
-def discretizeArray(numVals, fieldMeta):
-    """
-    discretize numeric values based on quantiles.
-    """
-    maxBinCount = 10
-    counts = Counter(numVals).most_common()
-    counts.sort() # sort by value, not count
-
-    if len(counts) < maxBinCount:
-        # if we have just a few values, do not do any binning
-        binCounts = [y for x,y in counts]
-        values = [x for x,y in counts]
-
-        valToBin = {}
-        for i, x in enumerate(values):
-            valToBin[x] = i
-
-        dArr = [valToBin[x] for x in numVals]
-
-        fieldMeta["binMethod"] = "raw"
-        fieldMeta["values"] = values
-        fieldMeta["binCounts"] = binCounts
-        return dArr, fieldMeta
+#def discretizeArray(numVals, fieldMeta):
+    #"""
+    #discretize numeric values based on quantiles.
+    #"""
+    #maxBinCount = 10
+    #counts = Counter(numVals).most_common()
+    #counts.sort() # sort by value, not count
+#
+    #if len(counts) < maxBinCount:
+        ## if we have just a few values, do not do any binning
+        #binCounts = [y for x,y in counts]
+        #values = [x for x,y in counts]
+#
+        #valToBin = {}
+        #for i, x in enumerate(values):
+            #valToBin[x] = i
+#
+        #dArr = [valToBin[x] for x in numVals]
+#
+        #fieldMeta["binMethod"] = "raw"
+        #fieldMeta["values"] = values
+        #fieldMeta["binCounts"] = binCounts
+        #return dArr, fieldMeta
 
     # ten breaks
-    breakPercs = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-    countLen = len(counts)
-    breakIndices = [int(round(bp*countLen)) for bp in breakPercs]
-    # as with all histograms, the last break is always a special case (0-based array)
-    breakIndices.append(countLen-1)
-    breakVals = [counts[idx][0] for idx in breakIndices]
-
+    #breakPercs = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    #countLen = len(counts)
+    #breakIndices = [int(round(bp*countLen)) for bp in breakPercs]
+    ## as with all histograms, the last break is always a special case (0-based array)
+    #breakIndices.append(countLen-1)
+    #breakVals = [counts[idx][0] for idx in breakIndices]
+#
     # NaNs are encoded as -inf so they always are the first break
     # The first non-NaN value is at index 1
     # If we have NaNs, we need one more bin, with the first non-Nan value
-    hasNan = False
-    if math.isinf(breakVals[0]):
-        hasNan = True
-        breakVals.insert(1, counts[1][0])
-        logging.info("Field has NaN/Unknown values")
-    logging.debug("Breaks are: %s" % breakVals)
+    #hasNan = False
+    #if math.isinf(breakVals[0]):
+        #hasNan = True
+        #breakVals.insert(1, counts[1][0])
+        #logging.info("Field has NaN/Unknown values")
+    #logging.debug("Breaks are: %s" % breakVals)
 
-    dArr, binCounts = findBins(numVals, breakVals, hasNan)
-    logging.info("Number of values per decile-bin: %s" % binCounts)
+    #dArr, binCounts = findBins(numVals, breakVals, hasNan)
+    #logging.info("Number of values per decile-bin: %s" % binCounts)
 
     # we should have 11 breaks/10 bins, or 12 breaks/11bins if we have NaN elements
-    assert((not hasNan and len(breakVals)==11) or (hasNan and len(breakVals)==12))
-    assert((not hasNan and len(binCounts)==10) or (hasNan and len(binCounts)==11))
-    assert((len(binCounts)+1 == len(breakVals)))
+    #assert((not hasNan and len(breakVals)==11) or (hasNan and len(breakVals)==12))
+    #assert((not hasNan and len(binCounts)==10) or (hasNan and len(binCounts)==11))
+    #assert((len(binCounts)+1 == len(breakVals)))
+#
+    #fieldMeta["binMethod"] = "quantiles"
+    #fieldMeta["binCounts"] = binCounts
+    #if math.isinf(breakVals[0]): # -infinity is not valid in JSON
+        #breakVals[0] = "Unknown"
+    #fieldMeta["breaks"] = breakVals
 
-    fieldMeta["binMethod"] = "quantiles"
-    fieldMeta["binCounts"] = binCounts
-    if math.isinf(breakVals[0]): # -infinity is not valid in JSON
-        breakVals[0] = "Unknown"
-    fieldMeta["breaks"] = breakVals
+    #return dArr, fieldMeta
 
-    return dArr, fieldMeta
-
-def discretizeNumField(numVals, fieldMeta, numType):
-    " given a list of numbers, add attributes to fieldMeta that describe the binning scheme "
-    digArr, fieldMeta = discretizeArray(numVals, fieldMeta)
-
-    #deciles, binCounts, newVals = getDecilesWithZeros(numVals)
-
-    fieldMeta["arrType"] = "uint8"
-    fieldMeta["_fmt"] = "<B"
-    return digArr, fieldMeta
+#def discretizeNumField(numVals, fieldMeta, numType):
+    #" given a list of numbers, add attributes to fieldMeta that describe the binning scheme "
+    #digArr, fieldMeta = discretizeArray(numVals, fieldMeta)
+#
+    ##deciles, binCounts, newVals = getDecilesWithZeros(numVals)
+#
+    #fieldMeta["arrType"] = "uint8"
+    #fieldMeta["_fmt"] = "<B"
+    #return digArr, fieldMeta
 
 def typeForStrings(strings):
     """ given a list of strings, determine if they're all ints or floats or strings
@@ -1813,30 +1812,30 @@ def findBin(ranges, val):
     # if doesn't fit in anywhere, return beyond last possible index
     return i+1
 
-def discretizeArr_uniform(arr, fieldMeta):
-    """ given an array of numbers, get min/max, create 10 bins between min and max then
-    translate the array to bins and return the list of bins
-    """
-    arrMin = min(arr)
-    arrMax = max(arr)
-    stepSize = (arrMax-arrMin)/10.0
-
-    dArr = [0]*len(arr)
-    binCounts = [0]*10
-    for i, x in enumerate(arr):
-        binIdx = int(round((x - arrMin)/stepSize))
-        if x == arrMax:
-            binIdx = 9
-        assert(binIdx <= 9)
-        dArr[i] = binIdx
-        binCounts[binIdx]+=1
-
-    fieldMeta["binMethod"] = "uniform"
-    fieldMeta["minVal"] = arrMin
-    fieldMeta["maxVal"] = arrMax
-    fieldMeta["stepSize"] = stepSize
-    fieldMeta["binCounts"] = binCounts
-    return dArr, fieldMeta
+#def discretizeArr_uniform(arr, fieldMeta):
+    #""" given an array of numbers, get min/max, create 10 bins between min and max then
+    #translate the array to bins and return the list of bins
+    #"""
+    #arrMin = min(arr)
+    #arrMax = max(arr)
+    #stepSize = (arrMax-arrMin)/10.0
+#
+    #dArr = [0]*len(arr)
+    #binCounts = [0]*10
+    #for i, x in enumerate(arr):
+        #binIdx = int(round((x - arrMin)/stepSize))
+        #if x == arrMax:
+            #binIdx = 9
+        #assert(binIdx <= 9)
+        #dArr[i] = binIdx
+        #binCounts[binIdx]+=1
+#
+    #fieldMeta["binMethod"] = "uniform"
+    #fieldMeta["minVal"] = arrMin
+    #fieldMeta["maxVal"] = arrMax
+    #fieldMeta["stepSize"] = stepSize
+    #fieldMeta["binCounts"] = binCounts
+    #return dArr, fieldMeta
 
 def digitize_py(arr, matType):
     """ calculate deciles ignoring 0s from arr, use these deciles to digitize the whole arr,
@@ -2060,16 +2059,26 @@ def exprEncode(geneDesc, exprArr, matType):
     geneDesc = str(geneDesc) # make sure no unicode
     geneIdLen = struct.pack("<H", len(geneDesc))
 
+    nanValue = None
+    if matType=="float":
+        nanValue = FLOATNAN
+
     # on cortex-dev, numpy was around 30% faster. Not a huge difference.
     if numpyLoaded:
         if matType=="float":
             exprArr = exprArr.astype("float32")
+            exprArr[np.isnan(exprArr)] = nanValue
         elif matType=="int":
+            has_nan = np.any(np.isnan(exprArr))
+            if has_nan:
+                assert(False) # integer matrices with Nans are not supported right now. Email the programmer.
             exprArr = exprArr.astype("uint32")
         else:
             assert(False) # internal error
-        exprStr = exprArr.tobytes()
+
         minVal = np.amin(exprArr)
+        exprStr = exprArr.tobytes()
+        # e.g. cortex-dev-splicing/psi has NAN values in the mtx file
     else:
         if matType=="float":
             arrType = "f"
@@ -2083,12 +2092,14 @@ def exprEncode(geneDesc, exprArr, matType):
         if str(type(exprArr))=="<type 'numpy.ndarray'>":
             exprArr = exprArr.tolist()[0]
 
+        exprArr = [nanValue if math.isnan(x) else x for x in exprArr]
         # Python 3.9 removed tostring()
         if sys.version_info >= (3, 2):
             exprStr = array.array(arrType, exprArr).tobytes()
         else:
             exprStr = array.array(arrType, exprArr).tostring()
 
+        #minVal = min([x for x in exprArr if not (math.isinf(x) and x < 0)]) # this is super slow...
         minVal = min(exprArr)
 
     if isPy3:
@@ -2250,7 +2261,12 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     # keep a flag so the client later can figure out if the expression matrix contains any negative values
     # this is important for handling the 0-value
-    exprIndex["_range"] = (int(allMin),0)
+    matrixMin = float(allMin) # float() in case it is -inf as a np.float32, must be native Python float, not numpy
+    if matrixMin==float('-inf'): # JSON cannot encode -inf nor NaN, so we use "None" for that which will become null in JSON
+        matrixMin = None
+
+    exprIndex["_range"] = (matrixMin, 0)
+
     logging.info("Global minimum in matrix is: %f" % allMin)
 
     jsonOfh = open(jsonFname, "w")
@@ -2343,7 +2359,15 @@ def parseOneColorFile(fname):
         if invColumns:
             color, metaVal = row
 
-        color = color.strip().strip("#") # hbeale had a file with trailing spaces
+        color = color.strip() # hbeale had a 6-digit file with trailing spaces
+
+        if color.startswith("#") and len(color)==9:
+            # we got these a few times now: #abababff
+            logging.warn("Color %s looks like a hex color with alpha value, stripping last two characters"
+                    % color)
+            color = color[1:7]
+
+        color = color.strip("#") # hbeale had a 6-digit file with trailing spaces
 
         isHex = True
         if len(color)!=6: # colors can be no more than six hex digits
@@ -2358,12 +2382,16 @@ def parseOneColorFile(fname):
             logging.debug("Not a six-digit hex color code. Trying to map '%s' to a hex color" % color)
             import webcolors # error? -> pip install webcolors
             try:
-                color = webcolors.name_to_hex(color, spec='css3').lstrip("#")
+                color = webcolors.name_to_hex(color).lstrip("#")
             except ValueError:
-                # R knows more colors, like deeppink4. We simply map to deeppink for now
-                # there does not seem to be a good table with R colors in Python yet
-                color = "".join([c for c in color if not c.isdigit()])
-                color = webcolors.name_to_hex(color, spec='css3').lstrip("#")
+                import matplotlib.colors as mcolors
+                try:
+                    color = mcolors.CSS4_COLORS[color].lstrip("#")
+                except ValueError:
+                    # R knows more colors, like deeppink4. We simply map to deeppink for now
+                    # there does not seem to be a good table with R colors in Python yet
+                    color = "".join([c for c in color if not c.isdigit()])
+                    color = webcolors.name_to_hex(color, spec='css3').lstrip("#")
 
         newDict[metaVal] = color
     return newDict
@@ -3022,7 +3050,7 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir):
         missGeneIds = set()
         for row in rows:
             row[2] = "%0.5E" % row[2] # limit score to 5 digits
-            geneId = row[1]
+            geneId = row[0]
             if geneId not in matrixGeneIds:
                 missGeneIds.add(geneId)
                 continue
@@ -3298,7 +3326,7 @@ def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=No
     if "unit" in outConf and not "unitDesc" in summInfo:
         summInfo["unitDesc"] = outConf["unit"]
 
-    # import the atachSearch attribute from cellbrowser.conf
+    # import the atacSearch attribute from cellbrowser.conf
     if "atacSearch" in outConf and not "atacSearch" in summInfo:
         summInfo["atacSearch"] = outConf["atacSearch"]
 
@@ -3539,8 +3567,26 @@ def findOverlappingRanges(atacByChrom, posStr):
     foundRanges = []
     for rangeStart, rangeEnd, offset, dataLen in chromRanges:
         if start <= rangeStart  and rangeEnd <= end:
-            foundRanges.append( "|".join( [chrom, str(rangeStart), str(rangeEnd)] ) )
-    return "+".join(foundRanges)
+            foundRanges.append( (chrom, rangeStart, rangeEnd) )
+
+    # if we have one exact match, get rid of all the others
+    # this was added for cortex-dev-splincing/psi, where quick ranges can include others
+    # since ranges overlap each other, but the quick ranges should only be one exact matching range
+    exactRanges = []
+    for ft in foundRanges:
+        chrom, rangeStart, rangeEnd = ft
+        if start == rangeStart and rangeEnd == end:
+            exactRanges.append( (chrom, rangeStart, rangeEnd) )
+
+    if len(exactRanges)==1:
+        foundRanges = exactRanges
+
+    foundStrRanges = []
+    for ft in foundRanges:
+        chrom, rangeStart, rangeEnd = ft
+        foundStrRanges.append( "|".join( [chrom, str(rangeStart), str(rangeEnd)] ) )
+
+    return "+".join(foundStrRanges)
 
 def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
     """ parse quick genes file with three columns: symbol or geneId, desc (optional), pmid (optional).
@@ -3577,8 +3623,11 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
         row = line.split(sep)
         geneOrSym = row[0]
 
-        # case 1: user provides both geneId and symbol. Rare.
-        # Necessary when symbol <-> geneId is not unique
+        # The following looks overly complicated but that's due to the complexity of combinations
+        # the we allow and because datasets come in different shapes
+
+        # case 1: user provides both geneId and symbol in the quickgenes file. Rare.
+        # Necessary when symbol <-> geneId is not unique and wrangler wants a particular gene
         if "|" in geneOrSym:
             geneId, sym = geneOrSym.split("|")
             if geneId not in matrixGeneIds:
@@ -3586,27 +3635,34 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
                 continue
             geneStr = geneOrSym
 
-        # case 2: matrix has only symbols and user provides symbol. This is our legacy format for old datasets.
+        # case 2: matrix has geneId+symbol or just symbols and user provides symbol in quickgenes. 
+        # (symbol-only is is our legacy format for old datasets.)
         # store only the symbol. We could look up the geneId but that's data inference, 
         # which we try not to do. The lookup could be wrong.
         elif matrixSyms is not None and geneOrSym in matrixSyms:
             geneStr = geneOrSym
-            if geneStr not in matrixGeneIds:
-                logging.info("case 2: geneId %s in quickgenes file is not in expression matrix" % repr(geneStr))
-                continue
+            if symToGene:
+                geneStr = symToGene[geneStr]+"|"+geneStr
+            else:
+                if geneStr not in matrixGeneIds:
+                    logging.info("case 2: geneId %s in quickgenes file is not in expression matrix" % repr(geneStr))
+                    continue
 
         # case 3: matrix has geneIds and user provides a geneId. add the symbol from our mapping
         # that's data inference, but that should be OK
         elif geneOrSym in matrixGeneIds:
             geneId = geneOrSym
             if not geneToSym:
-                logging.info("quick gene %s has a geneId but we have no geneId/symbol table. You can use "
-                        "the format geneId|symbol in the quick genes file to manually assign a label" % repr(geneId))
+                #logging.info("Quick gene %s but we have no geneId/symbol table. You can use "
+                        #"the format geneId|symbol in the quick genes file to manually assign a label" % repr(geneId))
+                # when geneToSym is None, that means that we have symbols in the matrix. So just pass through the
+                # symbol. example dataset: ams-supercluster
                 geneStr = geneId
             else:
                 if geneId in geneToSym:
                     geneStr = geneId+"|"+geneToSym[geneId]
                 else:
+                    logging.info("GeneId %s from marker file was not found in gene symbol table." % geneId)
                     geneStr = geneId
 
         # case 4: matrix has geneIds and user provides geneId or symbol. Store both.
@@ -3628,7 +3684,6 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
 
         # case 5: it is an ATAC dataset and the quickgenes file has ranges
         elif ":" in geneOrSym and "-" in geneOrSym:
-            #geneStr = geneOrSym.replace(":", "|").replace("-", "|")
             geneStr = findOverlappingRanges(matrixGeneIds, geneOrSym)
             if geneStr=="":
                 logging.error("quickGene ATAC range %s does not contain any peak in the matrix, skipping it" % geneOrSym)
@@ -4683,7 +4738,7 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     copyBackgroundImages(inDir, inConf, outConf, datasetDir)
 
     # a few settings are passed through to the Javascript as they are
-    for tag in ["shortLabel", "radius", "alpha", "priority", "tags", "sampleDesc", "geneLabel",
+    for tag in ["shortLabel", "radius", "alpha", "priority", "tags", "sampleDesc", "featDesc", "geneLabel",
         "clusterField", "defColorField", "xenaPhenoId", "xenaId", "hubUrl", "showLabels", "ucscDb",
         "unit", "violinField", "visibility", "coordLabel", "lineWidth", "hideDataset", "hideDownload",
         "metaBarWidth", "supplFiles", "defQuantPal", "defCatPal", "clusterPngDir", "wrangler", "shepherd",
@@ -4780,11 +4835,16 @@ def writeCellbrowserConf(name, coordsList, fname, addMarkers=True, args={}):
     coordStr = json.dumps(coordsList, indent=4)
     matrixFname = args.get("exprMatrix", "exprMatrix.tsv.gz")
 
+    cmdLine = " ".join(sys.argv)
+    dateStr = datetime.datetime.now().isoformat()
+
     conf = """
 # This is a bare-bones, auto-generated Cell Browser config file.
 # Look at https://github.com/maximilianh/cellBrowser/blob/master/src/cbPyLib/cellbrowser/sampleConfig/cellbrowser.conf
 # for a list of possible options
 # You can also write a default template into the current directory with cbBuild --init
+# Command was: %(cmdLine)s
+# Time: %(dateStr)s
 name='%(name)s'
 shortLabel='%(name)s'
 exprMatrix='%(matrixFname)s'
@@ -4796,7 +4856,6 @@ labelField='%(clusterField)s'
 enumFields=['%(clusterField)s']
 coords=%(coordStr)s
 #alpha=0.3
-#body_parts=["embryo", "heart", "brain"]
 #radius=2
 """ % locals()
 
@@ -5287,6 +5346,10 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
 
     import numpy as np
     import pandas as pd
+
+    from warnings import simplefilter
+    simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
+
     import anndata
 
     configData = {} # dict that can override the default arguments in the generated cellbrowser.conf file
@@ -5388,14 +5451,17 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     ##Save metadata
     if metaFields is None:
         metaFields = list(adata.obs.columns.values)
-    else:
-        # check that field names exist
-        for name in metaFields:
-            if name not in adata.obs.keys():
-                logging.warn('There is no annotation field with the name `%s`.' % name)
-                if name not in ["percent_mito", "n_genes", "n_counts"]:
-                    # tolerate missing default fields
-                    raise ValueError()
+
+    # Filter out any metadata fields that end with 'ontology_term_id'
+    metaFields = [f for f in metaFields if not f.endswith("ontology_term_id")]
+
+    # check that field names exist
+    for name in metaFields:
+        if name not in adata.obs.keys():
+            logging.warn('There is no annotation field with the name `%s`.' % name)
+            if name not in ["percent_mito", "n_genes", "n_counts"]:
+                # tolerate missing default fields
+                raise ValueError()
 
     metaFields = makeDictDefaults(metaFields, metaLabels)
 
@@ -5709,11 +5775,10 @@ def rebuildFlatIndex(outDir):
 
 def checkDsCase(inConfFname, relPath, inConfig):
     """ relPath should not be uppercase for top-level datasets at UCSC, as we use the hostname part """
-    if not inConfFname.endswith(".cellbrowser.conf") and not inConfFname.endswith(".cellbrowser"):
-        if not "/" in relPath and getConfig("onlyLower", False) and \
-                "name" in inConfig and inConfig["name"].isupper():
-            errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
-                    "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
+    if not "/" in relPath and getConfig("onlyLower", False) and \
+            "name" in inConfig and inConfig["name"].isupper():
+        errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
+                "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
 
 def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None):
     " build browser from config files confFnames into directory outDir and serve on port "
@@ -6691,7 +6756,7 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname, skipMa
     conf["inCluster"] = conf.get("inCluster", inCluster)
 
     if conf["inMeta"]:
-        adata = addMetaToAnnData(adata, inMeta)
+        adata = addMetaToAnnData(adata, conf["inMeta"])
 
     sampleCount = len(adata.obs)
 
@@ -6852,8 +6917,30 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname, skipMa
         else:
             firstPcCount = pcCount
 
+        X = adata.X.A if hasattr(adata.X, "A") else adata.X  # handle sparse matrices
+
         pipeLog('Performing initial PCA, number of PCs: %d' % firstPcCount)
+        pipeLog("Has NaN:"+str(np.isnan(X).any()))
+        pipeLog("Has +inf:"+str(np.isposinf(X).any()))
+        pipeLog("Has -inf:"+ str(np.isneginf(X).any()))
+        pipeLog("Max value:"+ str(np.nanmax(X)))
+        if np.isposinf(X).any():
+            logging.warn("Matrix has +inf values, replacing with 2^32")
+            X[np.isinf(X)] = np.nan  # turn inf into NaN
+            X = np.nan_to_num(X, nan=2**32)  # replace NaN with 2E6
+            adata.X = X
+
         sc.tl.pca(adata, n_comps=firstPcCount)
+        # X[np.isinf(X)] = np.nan  # turn inf into NaN
+        #X = np.nan_to_num(X, nan=0.0)  # replace NaN with 0
+        #adata.X = X
+
+        # suggestion - Check after normalization:
+        # sc.pp.normalize_total(adata, target_sum=1e4)
+        # print(np.isnan(adata.X).any())
+        # suggestion2 - Before scaling, clip extreme values:
+        # sc.pp.scale(adata, max_value=10)
+
         #Multiply by -1 to compare with Seurat
         #adata.obsm['X_pca'] *= -1
         #Plot of pca variance ratio to see if formula matches visual determination of pc_nb to use
@@ -7051,6 +7138,11 @@ def generateQuickGenes(outDir):
     " make a quickGenes.tsv in outDir from markers.tsv "
     outFname = join(outDir, "quickGenes.tsv")
     markerFname = join(outDir, "markers.tsv")
+
+    if not isfile(markerFname):
+        logging.warning("Cannot find marker file %s, so not generating quick genes file" % markerFname)
+        return
+
     logging.info("Generating %s from %s" % (outFname, markerFname))
 
     clusters = parseMarkerTable(markerFname, None)[0]

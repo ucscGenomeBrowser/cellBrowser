@@ -46,6 +46,7 @@ def cbGenes_parseArgs():
     %prog build mm10 gencode-M25
     %prog index # used at UCSC to prepare the files for 'guess'
     %prog allSyms human # build big geneId -> symbol table from all 
+    %prog json ce11 wormbase235 # build JSON file from a .bed.gz file - only needed for model organisms
     """)
 
     parser.add_option("-d", "--debug", dest="debug", action="store_true", help="show debug messages")
@@ -216,7 +217,7 @@ def iterGencodePairs(release, doTransGene=False):
             db='mm39'
     if release in ["7", "14", "17", "19"] or "lift" in release:
         db = "hg19"
-    url = "https://hgdownload.cse.ucsc.edu/goldenPath/%s/database/wgEncodeGencodeAttrsV%s.txt.gz" %  (db, release)
+    url = "https://hgdownload.gi.ucsc.edu/goldenPath/%s/database/wgEncodeGencodeAttrsV%s.txt.gz" %  (db, release)
     logging.info("Downloading %s" % url)
     doneIds = set()
 
@@ -243,7 +244,7 @@ def iterGencodeBed(db, release):
     " generator, yields a BED12+1 with a 'canonical' transcript for every gencode comprehensive gene "
     transToGene = dict(iterGencodePairs(release, doTransGene=True))
 
-    url = "http://hgdownload.cse.ucsc.edu/goldenPath/%s/database/wgEncodeGencodeCompV%s.txt.gz" % (db, release)
+    url = "http://hgdownload.gi.ucsc.edu/goldenPath/%s/database/wgEncodeGencodeCompV%s.txt.gz" % (db, release)
     logging.info("Downloading %s" % url)
     geneToTransList = defaultdict(list)
     for line in downloadUrlLines(url):
@@ -374,10 +375,10 @@ def listModelRemoteFetch():
 
 def listModelRemoteBuild():
     sep = "\n"
-    urls = [("hg38", "https://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/"),
-            ("mm10", "https://hgdownload.cse.ucsc.edu/goldenPath/mm10/database/"),
-            ("mm39", "https://hgdownload.cse.ucsc.edu/goldenPath/mm39/database/"),
-            ("hg19", "https://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/")
+    urls = [("hg38", "https://hgdownload.gi.ucsc.edu/goldenPath/hg38/database/"),
+            ("mm10", "https://hgdownload.gi.ucsc.edu/goldenPath/mm10/database/"),
+            ("mm39", "https://hgdownload.gi.ucsc.edu/goldenPath/mm39/database/"),
+            ("hg19", "https://hgdownload.gi.ucsc.edu/goldenPath/hg19/database/")
             ]
 
     allNames = defaultdict(list)
@@ -507,26 +508,33 @@ def uniqueIds(org):
 
 def bedToJson(db, geneIdType, jsonFname):
     " convert BED file to more compact json file: chrom -> list of (start, end, strand, gene) "
-    geneToSym = readGeneSymbols(geneIdType)
+    transToSym = readGeneSymbols(geneIdType)
 
     # index transcripts by gene
     bySym = defaultdict(dict)
     for row in iterBedRows(db, geneIdType):
-        chrom, start, end, geneId, score, strand = row[:6]
-        sym = geneToSym[geneId]
+        chrom, start, end, transId, score, strand = row[:6]
+        if not transId in transToSym:
+            logging.warn("%s does not have a gene symbol" % transId)
+            sym = transId
+        else:
+            sym = transToSym[transId]
+            logging.debug("Mapping %s to symbol %s" % (transId, sym))
         start = int(start)
         end = int(end)
         transLen = end-start
-        rawGeneId = geneId.split(".")[0] # for lookups, we hopefully will never need the version ID...
-        fullGeneId = rawGeneId+"|"+sym
-        bySym[fullGeneId].setdefault(chrom, []).append( (transLen, start, end, strand, geneId) )
+        rawTransId = transId
+        if rawTransId.startswith("EN") or rawTransId.startswith("NM_"):
+            rawTransId = transId.split(".")[0] # for lookups, we hopefully will never need the version ID...
+        fullTransId = rawTransId+"|"+sym
+        bySym[sym].setdefault(chrom, []).append( (transLen, start, end, strand, fullTransId) )
 
     symLocs = defaultdict(list)
-    for geneId, chromDict in bySym.items():
+    for sym, chromDict in bySym.items():
         for chrom, transList in chromDict.items():
             transList.sort(reverse=True) # take longest transcript per chrom
             _, start, end, strand, transId = transList[0]
-            symLocs[chrom].append( (start, end, strand, geneId) )
+            symLocs[chrom].append( (start, end, strand, transId) )
 
     sortedLocs = {}
     for chrom, geneList in symLocs.items():
@@ -615,9 +623,10 @@ def cbGenesCli():
     elif command=="push":
         pushLocal()
 
-    elif command=="json": # undocumented
-        db, geneType, outFname = args[1:]
-        bedToJson(db, geneType, outFname)
+    elif command=="json":
+        db, geneType = args[1:]
+        jsonFname = getStaticPath(getGeneJsonPath(db, geneType))
+        bedToJson(db, geneType, jsonFname)
     else:
         errAbort("Unrecognized command: %s" % command)
 

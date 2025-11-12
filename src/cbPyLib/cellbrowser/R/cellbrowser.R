@@ -87,6 +87,28 @@ exportImages <- function(obj, outDir, embeddings.conf) {
     require(png)
     for (name in names(obj@images)) { 
         message(name); 
+        # SlideSeq-class SpatialImage objects do not contain a bitmap image
+        # They only contain a coordinates df, so test if this image is a SlideSeq
+        # And process using this code block (instead of usual steps further below)
+        if ("SlideSeq" %in% class(obj@images$image)[1]) {
+            coordsPath <- file.path(outDir, paste0(name, ".coords.tsv"))
+            message("Writing coords for image to ", coordsPath)
+            coords <- GetTissueCoordinates(object = obj[[name]])
+            # One of the columns I want to delete is currently named 'NA' for
+            # a missing value
+            colnames(coords)[3] <- "missing"
+            # Delete columns 3 and 4 by name, keeping columns 1 and 2 for printing out
+            coords = subset(coords, select = -c(missing, cells))
+
+            write.table(coords, coordsPath, sep="\t", row.names=T, quote=F, col.names=NA)
+            conf <- sprintf(
+             '  {\n    "file": "%s",\n    "shortLabel": "Spatial %s",\n   }',
+             coordsPath,
+             name
+            )
+            embeddings.conf <- c(conf, embeddings.conf)
+            return(embeddings.conf)
+        }
         img = GetImage(obj, mode="raw", image=name); 
         if (is.null(img)) {
             message("The image is not a bitmap image, cannot export yet.")
@@ -100,11 +122,18 @@ exportImages <- function(obj, outDir, embeddings.conf) {
         xMax = dim(img)[2]; # there is a difference of 3 pixels on height when comparing "identify file.jpeg" with this. NO IDEA WHY!
         coordsPath <- file.path(outDir, paste0(name, ".coords.tsv")) 
         message("Writing coords for image to ", coordsPath)
-        #coords <- GetTissueCoordinates(object = obj[[img]])
-
         coords <- GetTissueCoordinates(object = obj[[name]])
-        coordsRev <- coords[, c("imagecol", "imagerow")]  # Grrrr... Seurat stores coordinates as (y,x) in this particular case. reverse the order now.
-        colnames(coordsRev) <- c("x", "y")
+
+        if (all(c("imagecol", "imagerow") %in% colnames(coords))) {
+        # Seurat-style naming: reverse order
+          coordsRev <- coords[, c("imagecol", "imagerow")]
+          colnames(coordsRev) <- c("x", "y")
+        } else if (all(c("x", "y") %in% colnames(coords))) {
+          # Already in standard x/y format
+          coordsRev <- coords[, c("y", "x")]
+        } else {
+          stop("Error: coordinates must have either (imagecol, imagerow) or (x, y) columns.")
+        }
 
         write.table(coordsRev, coordsPath, sep="\t", row.names=T, quote=F, col.names=NA)
         conf <- sprintf(
@@ -415,9 +444,12 @@ ExportToCellbrowser <- function(
             markers <- object@misc["markers"]$markers
       } else {
         message("Running FindAllMarkers(), using wilcox test, min logfc diff 0.25")
-        if ("SCT" %in% names(object@assays)) {
+        # Only run this block if the Active assay is SCT
+        if ("SCT" %in% DefaultAssay(object = object)) {
             message("Looks like an SCT object, so running PrepSCTFindMarkers()")
-            PrepSCTFindMarkers(object = object)
+            # The results from this command need to be written back to the object prior to
+            # running FindAllMarkers
+            object <- PrepSCTFindMarkers(object = object)
         }
         markers <- FindAllMarkers(
           object,

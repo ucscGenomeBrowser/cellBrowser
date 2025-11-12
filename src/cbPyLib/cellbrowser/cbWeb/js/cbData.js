@@ -106,13 +106,14 @@ var cbUtil = (function () {
                 onSuccess(data);
             },
             error : function() {
-                if (!silent)
+                if (!silent) {
                     if (url.search("dataset.json")>-1)
                         alert("Could not find a dataset at "+url+". If you are sure that the link is correct, please "+
                             "contact the administrator of this server, "+
                             "or cells@ucsc.edu if this is running at UCSC. ");
                     else
                         alert("Could not load "+url);
+                }
                 onSuccess(null);
             }
         });
@@ -440,6 +441,11 @@ function CbDbFile(url) {
             }
         }
 
+        function gotMatrix(data) {
+            matrixIndex = data; 
+            gotOneFile();
+        }
+
         // load config and call onDone
         var dsUrl = cbUtil.joinPaths([this.url, "dataset.json"]);
         // deactivate the cache - this is a small file that users typically change often
@@ -452,7 +458,7 @@ function CbDbFile(url) {
         if (self.name!='') {
             // start loading gene offsets in the background now, because this takes a while
             var osUrl = cbUtil.joinPaths([this.url, "exprMatrix.json"]);
-            cbUtil.loadJson(osUrl, function(data) { matrixIndex = data; gotOneFile();}, true);
+            cbUtil.loadJson(osUrl, gotMatrix, true);
         } else {
             gotOneFile();
         }
@@ -765,29 +771,34 @@ function CbDbFile(url) {
         /* supports NaN special values */
         var breaks = [];
 
+	// remove the Nan values - XX REVISIT
+	for (let i = 0; i < arr.length; i++) {
+	    if (Number.isNaN(arr[i])) {
+	       arr[i] = -Infinity;
+	    }
+	}
+
         // sort expression values into a new array
         var arrSorted = arr.slice(); // slice() = "make copy"
         arrSorted.sort();
 
-        var pos = 0;
-        if (arrSorted[0] == bin0Val) { // skip all bin0Val and remember position
-            var zeros = 0;
+        var minPos = 0;
+        if (arrSorted[0] == bin0Val) { // do we have any values in bin0? -> skip them and keep their position
             for (var i = 0, I = arrSorted.length; i < I; i++) {
                 if (arrSorted[i] > bin0Val) {
-                    pos = i;
+                    minPos = i;
                     break;
                 }
-                zeros += 1;
             }
         }
-        var minVal = arrSorted[pos];
+        var minVal = arrSorted[minPos];
         // calculate optimal bin size in numbers of cells
-        var desiredBinSize = Math.floor((arrSorted.length - pos) / (maxBinCount - breaks.length));
+        var desiredBinSize = Math.floor((arrSorted.length - minPos) / (maxBinCount - breaks.length));
         var currentCount = 0;
-        var binMin = arrSorted[pos];
+        var binMin = arrSorted[minPos];
         var binMax;
         var lastValue;
-        for (var i = pos, I = arrSorted.length; i < I; i++) {
+        for (var i = minPos, I = arrSorted.length; i < I; i++) {
             // determine if current value can be used as a break
             // i.e. it is different from the previous
             var isBreak = false;
@@ -816,16 +827,19 @@ function CbDbFile(url) {
 
         var binInfo = [];
 
-        var bin0MinMax = "Unknown";
+        var bin0MinMax = "Unknown"; // meta data often has empty string = "Unknown"
         if (bin0Val === 0) {
             bin0MinMax = 0;
+        }
+        if (bin0Val === FLOATNAN) { // this can only happen for expression matrices with "NAN" values in them
+            bin0MinMax = "NaN";
         }
         binInfo.push([bin0MinMax, bin0MinMax, binCounts[0]]);
 
         var idx = binCounts[0];
         for (let i=0; i < breaks.length; i++) {
             // use sorted array of expression values
-            // to get more accurate values
+            // to get the exact break values
             var binMin = arrSorted[idx];
             var binCount = binCounts[i+1];
             idx += binCount - 1;
@@ -1008,11 +1022,13 @@ function CbDbFile(url) {
             else
                 geneDesc = geneDescs.join("; ");
 
-            // specVal is the value for a special bin, usually 0
+            // specVal is the value for the first bin, usually 0. But can also be -Infinity
             var specVal = 0;
             var matrixMin = self.getMatrixMin();
             if (matrixMin < 0)
-                specVal = null;
+                specVal = null; // null = no special bin handling at all
+            if (matrixMin === FLOATNAN)
+                specVal = FLOATNAN;
 
             let newArr = [];
             if (updateOp) {
@@ -1023,8 +1039,12 @@ function CbDbFile(url) {
                         newArr = cbUtil.arrAddMult(self.currExprArr, arrs);
                     else
                         newArr = cbUtil.arrSubMult(self.currExprArr, arrs);
-            } else
-                newArr = sumAllArrs(ArrType, arrs);
+            } else {
+                if (arrs.length===1)
+                    newArr = arrs[0];
+                else
+                    newArr = sumAllArrs(ArrType, arrs);
+            }
 
             var discFunc = null;
             if (strategy==="range")
@@ -1682,6 +1702,8 @@ function CbDbFile(url) {
        var matrixMin = 0;
        if ("_range" in validNames)
            matrixMin = validNames["_range"][0];
+       if (matrixMin === null)
+           matrixMin = FLOATNAN;
         return matrixMin;
     }
 

@@ -400,6 +400,8 @@ You will the following three files:
 * Cell annotations/metadata
 * Layout coordinats (e.g. UMAP)
 
+The peaks must be encoded in the expression matrix in the format chr:start-end, e.g. "chr1:1000-2000".
+
 Step 2: Download the gene model files
 """"
 
@@ -416,6 +418,9 @@ Examples:
  cbGenes fetch hg38.gencode-34   # gene -> chrom mapping for human gencode relase 34
 
 Both files are required for this to work.
+
+We provide a few odd gene model files, e.g. C. elegans or brine shrimp, these are documented at 
+https://cells-test.gi.ucsc.edu/downloads/cellbrowserData/genes/README.txt
 
 Step 3: Set up your cellbrowser.conf
 """"

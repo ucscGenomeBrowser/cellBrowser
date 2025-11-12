@@ -12,7 +12,17 @@ spatial gene/ATAC, multi-modal combinations of these and trajectory lines.
 It comes with one-line data exporters for all common analysis formats: Seurat, Scanpy, Cellranger, Monocle and 
 you can always use tsv/csv files to import your data. The exporters are part of Seurat 3/4 and Scanpy. 
 
-To look at a list of selected single cell datasets, see http://cells.ucsc.edu
+Here are a few datasets that demonstrate these features:
+
+- A simple gene expression dataset: https://cells.ucsc.edu/?ds=cortex-dev
+- Spatial transcriptomics support https://ms-subcortical-lesions.cells.ucsc.edu
+- Split screen mode to display both the spatial and snRNA-seq data side by side https://cells.ucsc.edu/?ds=dup15q-cortex-organoids+spatial+control
+- Cell trajectories from monocle https://cells-test.gi.ucsc.edu/?ds=pre-postnatal-cortex+ex-neu+rna
+- Cell trajectories from URD https://cells.ucsc.edu/?ds=cardiac-differentiation+trajectory+cm-combined-trajectory
+- Clone lineage tracing support: color by the field CellTag, select tags in the legend, then click "recolor checked": https://cells.ucsc.edu/?ds=gbm-nvp+nvp-celltag
+- Brain lipidomics https://cells.ucsc.edu/?ds=brain-lipids
+
+To show all our > 200 single cell datasets, see http://cells.ucsc.edu
 
 To setup your own cell browser, from Cellranger, Seurat, Scanpy or text files 
 (tsv/csv), or just a single cell expression matrix, read the documentation
