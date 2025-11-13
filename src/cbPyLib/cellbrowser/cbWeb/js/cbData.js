@@ -8,6 +8,8 @@
 var cbUtil = (function () {
     var my = {};
 
+    const DEBUG = false;
+
     // the byte range warning message will be shown only once, so we need a global flag
     my.byteRangeWarningShown = false;
 
@@ -37,7 +39,7 @@ var cbUtil = (function () {
 
     my.dumpObj = function (o) {
     /* for debugging */
-        console.log(JSON.stringify(o));
+        if(DEBUG) console.log(JSON.stringify(o));
     };
 
     my.keys = function(o, isInt) {
@@ -206,7 +208,7 @@ var cbUtil = (function () {
                         " narrow down this problem.");
 
             if (dataLen > expLength) {
-                console.log("Webserver does not support byte range requests, working around it, but this may be slow");
+                if(DEBUG) console.log("Webserver does not support byte range requests, working around it, but this may be slow");
                 if (dataLen>30000000 && !my.byteRangeWarningShown) {
                     alert("The webserver of this site does not support byte-range requests. " +
                         "While the cell browser may work to some extent, it will " +
@@ -392,6 +394,8 @@ function CbDbFile(url) {
     var self = this; // this has two conflicting meanings in javascript.
     // To make it a little more readble, we use 'self' to refer to object variables and 'this' to refer to the calling object
 
+    const DEBUG = false;
+
     self.name = url;
     self.url = url;
 
@@ -468,7 +472,7 @@ function CbDbFile(url) {
         /* load the background image from URL, then call onDone() */
         var image = new Image();
         image.onload = function() { 
-            console.log("Done loading image "+url);
+            if(DEBUG) console.log("Done loading image "+url);
             onDone(image)
             if (imgIdx==imgCount-1) {
                 var pe = new ProgressEvent("loadEnd");
@@ -477,7 +481,7 @@ function CbDbFile(url) {
             }
         };
 
-        console.log("Start loading image "+url);
+        if(DEBUG) console.log("Start loading image "+url);
         image.src = url;
         if (imgIdx==0) {
             var pe = new ProgressEvent("loadStart");
@@ -636,7 +640,7 @@ function CbDbFile(url) {
             var arr = new ArrType(buffer);
             if (metaInfo.arrType==="float32") {
                 // numeric arrays have to be binned on the client. They are always floats.
-                console.time("discretize "+metaInfo.name);
+                if(DEBUG) console.time("discretize "+metaInfo.name);
                 var discRes;
 
                 if (strategy==="range")
@@ -644,7 +648,7 @@ function CbDbFile(url) {
                 else
                     discRes = discretizeArray(arr, self.exprBinCount, FLOATNAN);
 
-                console.timeEnd("discretize "+metaInfo.name);
+                if(DEBUG) console.timeEnd("discretize "+metaInfo.name);
                 metaInfo.origVals = arr; // keep original values, so we can later query for them
                 arr = discRes.dArr;
                 metaInfo.binInfo = discRes.binInfo;
@@ -654,15 +658,15 @@ function CbDbFile(url) {
         }
 
         //var metaInfo = self.conf.metaFields[fieldIdx];
-        //console.log(metaInfo);
+        //if(DEBUG) console.log(metaInfo);
 
         if ((self.allMeta!==undefined) && (metaInfo.name in self.allMeta)) {
-            console.log("Found in uncompressed cache");
+            if(DEBUG) console.log("Found in uncompressed cache");
             onDone(self.allMeta[metaInfo.name], metaInfo, otherInfo);
             return;
         }
         else if ((self.metaCache!==undefined) && (metaInfo.name in self.metaCache)) {
-            console.log("Found in compressed cache");
+            if(DEBUG) console.log("Found in compressed cache");
             onMetaDone(self.metaCache[metaInfo.name], metaInfo);
             return;
         }
@@ -1076,7 +1080,7 @@ function CbDbFile(url) {
                 let end = range[1];
                 let name = range[2];
                 let comprData = arr.slice(start, end);
-                console.log("Got expression data, size = "+comprData.length+" bytes");
+                if(DEBUG) console.log("Got expression data, size = "+comprData.length+" bytes");
                 let exprInfo = gunzipAndConvert(comprData, ArrType, sampleCount);
                 exprInfo.name = name;
 
@@ -1114,7 +1118,7 @@ function CbDbFile(url) {
             // decompress data and run onDone when ready
             self.exprCache[geneSym] = comprData;
 
-            console.log("Got expression data, size = "+comprData.length+" bytes");
+            if(DEBUG) console.log("Got expression data, size = "+comprData.length+" bytes");
             var buf = pako.inflate(comprData);
 
             // see python code in cbAdd, function 'exprRowEncode':
@@ -1575,10 +1579,11 @@ function CbDbFile(url) {
                     sym = parts[1];
                 }
 
-                if (sym in geneToTss)
+                if (sym in geneToTss) {
                     sym = sym+"_"+chrom; // same symbol, but on two different chromosomes
-                if (sym in geneToTss)
-                    console.log(sym+" appears twice on the some chromosome. Quick search broken?");
+                    if(DEBUG) console.log(sym+" appears twice on the some chromosome. Quick search broken?");
+                }
+                    
 
                 geneToTss[geneId] = [chrom, tss, geneIdx];
 
@@ -1785,5 +1790,7 @@ if (typeof window === 'undefined') {
             [20, 30, "hi3"],
             [100, 200, "late  end"]
         ]
-    console.log( cbUtil.rangesToChunks( ranges ) );
+    
+    const DEBUG = false;
+    if(DEBUG) console.log( cbUtil.rangesToChunks( ranges ) );
 }

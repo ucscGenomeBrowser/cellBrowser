@@ -58,6 +58,8 @@ function MaxPlot(div, top, left, width, height, args) {
     // export this special value so other part of the code can use it
     this.hiddenCoord = HIDCOORD;
 
+    const DEBUG = false;
+
     var self = this; // 'this' has two conflicting meanings in javascript.
     // I use 'self' to refer to object variables, so I can use 'this' to refer to the caller context
 
@@ -436,7 +438,7 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     function onChangeAlpha(ev, ui) {
-        console.log("alpha: "+ui.value);
+        if(DEBUG) console.log("alpha: "+ui.value);
         var sliderVal = ui.value; // 1-7
         var multMap = {
             7 : 0.15,
@@ -448,13 +450,13 @@ function MaxPlot(div, top, left, width, height, args) {
             1 : 1.8
         }
         self.port.alphaMult = multMap[sliderVal];
-        console.log("alphaMult: "+self.port.alphaMult);
+        if(DEBUG) console.log("alphaMult: "+self.port.alphaMult);
         self.calcRadius();
         self.drawDots();
     }
 
     function onChangeRadius(ev, ui) {
-        //console.log("radius: "+ui.value);
+        //if(DEBUG) console.log("radius: "+ui.value);
         var sliderVal = ui.value; // 1-7
         var multMap = {
             1 : 1/3,
@@ -805,7 +807,7 @@ function MaxPlot(div, top, left, width, height, args) {
      * */
         if (coords===null)
             return;
-        console.time("scale");
+        if(DEBUG) console.time("scale");
         var minX = zoomRange.minX;
         var maxX = zoomRange.maxX;
         var minY = zoomRange.minY;
@@ -848,7 +850,7 @@ function MaxPlot(div, top, left, width, height, args) {
             }
         }
 
-        console.timeEnd("scale");
+        if(DEBUG) console.timeEnd("scale");
         return pixelCoords;
     }
 
@@ -1124,7 +1126,7 @@ function MaxPlot(div, top, left, width, height, args) {
         if (labelCoords===undefined)
             return undefined;
 
-        console.time("labels");
+        if(DEBUG) console.time("labels");
         ctx.save();
         ctx.font = "bold "+gTextSize+"px Sans-serif"
         ctx.globalAlpha = 1.0;
@@ -1186,7 +1188,7 @@ function MaxPlot(div, top, left, width, height, args) {
             bboxArr.push( [textX1-addMargin, textY1-addMargin, textX2+addMargin, textY2+addMargin] );
         }
         ctx.restore();
-        console.timeEnd("labels");
+        if(DEBUG) console.timeEnd("labels");
         return bboxArr;
     }
 
@@ -1532,7 +1534,7 @@ function MaxPlot(div, top, left, width, height, args) {
         /* draw the background image onto the canvas ctx */
         if (!back)
             return;
-        console.time("image");
+        if(DEBUG) console.time("image");
         //var ctxWidth = ctx.canvas.width; // size of the canvas on the screen in pixels
         //var ctxHeight = ctx.canvas.height;
 
@@ -1541,14 +1543,14 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // arguments are: (imgObject, x/y coord on image for clipping, width / height of clipped image, where to place the image, width/height of image)
         //var a = getSafeRect(back.image.width, back.image.height, back.clipX, back.clipY, back.image.width, back.image.height, 0, 0, ctxWidth, ctxHeight);
-        //console.log("drawing fixed coords", a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
+        //if(DEBUG) console.log("drawing fixed coords", a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
         //self.ctx.drawImage(back.image, a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
         //self.ctx.drawImage(back.image, a.sx, a.sy, back.width, back.height, a.dx, a.dy, a.dw, a.dh);
-        console.log("drawImage sx, sy, sw, sh, dx, dy, dw, dh", back.sx, back.sy, back.sw, back.sh, back.dx,back.dy, back.dw, back.dh);
+        if(DEBUG) console.log("drawImage sx, sy, sw, sh, dx, dy, dw, dh", back.sx, back.sy, back.sw, back.sh, back.dx,back.dy, back.dw, back.dh);
         //self.ctx.drawImage(back.image, back.sx, back.sy, back.width, back.height, 0, 0, ctxWidth, ctxHeight);
         self.ctx.drawImage(back.image, back.sx, back.sy, back.sw, back.sh, back.dx, back.dy, back.dw, back.dh);
 
-        console.timeEnd("image");
+        if(DEBUG) console.timeEnd("image");
     }
 
 
@@ -1668,13 +1670,13 @@ function MaxPlot(div, top, left, width, height, args) {
     function clearCanvas(ctx, width, height) {
     /* clear with a white background */
         // jsperf says this is fastest on Chrome, and still OK-ish in FF
-        //console.time("clear");
+        //if(DEBUG) console.time("clear");
         ctx.save();
         ctx.globalAlpha = 1.0;
         ctx.fillStyle = "rgb(255,255,255)";
         ctx.fillRect(0, 0, width, height);
         ctx.restore();
-        //console.timeEnd("clear");
+        //if(DEBUG) console.timeEnd("clear");
     }
 
     // -- object methods (=access the self object)
@@ -2033,7 +2035,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.drawDots = function(doSvg) {
         /* draw coordinates to canvas with current colors */
-        console.time("draw");
+        if(DEBUG) console.time("draw");
 
         self.clear();
 
@@ -2086,12 +2088,12 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.count = count;
 
-        console.timeEnd("draw");
+        if(DEBUG) console.timeEnd("draw");
 
         if (self.coords.pxLines) {
-            console.time("draw lines");
+            if(DEBUG) console.time("draw lines");
             drawLines(self.ctx, self.coords.pxLines, self.canvas.width, self.canvas.height, self.coords.lineAttrs);
-            console.timeEnd("draw lines");
+            if(DEBUG) console.timeEnd("draw lines");
         }
 
         if ((self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined)
@@ -2348,12 +2350,12 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.selectAdd = function(cellIdx) {
         /* add a single cell to the selection. If it already exists, remove it. */
-        console.time("selectAdd");
+        if(DEBUG) console.time("selectAdd");
         if (self.selCells.has(cellIdx))
             self.selCells.delete(cellIdx);
         else
             self.selCells.add(cellIdx);
-        console.time("selectAdd");
+        if(DEBUG) console.time("selectAdd");
         self._selUpdate();
     };
 
@@ -2424,7 +2426,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var minY = Math.min(y1, y2);
         var maxY = Math.max(y1, y2);
 
-        console.time("select");
+        if(DEBUG) console.time("select");
         var pxCoords = self.coords.px;
         for (var i = 0; i < pxCoords.length/2; i++) {
             var pxX = pxCoords[2*i];
@@ -2436,7 +2438,7 @@ function MaxPlot(div, top, left, width, height, args) {
             }
 
         }
-        console.timeEnd("select");
+        if(DEBUG) console.timeEnd("select");
         self._selUpdate();
     };
 
@@ -2568,7 +2570,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.labelAt = function(x, y) {
         /* return the index and the text of the label at position x,y or null if nothing there */
-        //console.time("labelCheck");
+        //if(DEBUG) console.time("labelCheck");
         var clusterLabels = self.coords.labels;
         if (clusterLabels===null || clusterLabels===undefined)
             return null;
@@ -2590,12 +2592,12 @@ function MaxPlot(div, top, left, width, height, args) {
             var x2 = box[2];
             var y2 = box[3];
             if ((x >= x1) && (x <= x2) && (y >= y1) && (y <= y2)) {
-                //console.timeEnd("labelCheck");
+                //if(DEBUG) console.timeEnd("labelCheck");
                 var labelText = clusterLabels[i][2];
                 return [labelText, i];
             }
         }
-        //console.timeEnd("labelCheck");
+        //if(DEBUG) console.timeEnd("labelCheck");
         return null;
     };
 
@@ -2618,7 +2620,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.cellsAt = function(x, y) {
         /* check which cell's bounding boxes contain (x, y), return a list of the cell IDs, sorted by distance */
-        //console.time("cellSearch");
+        //if(DEBUG) console.time("cellSearch");
         var pxCoords = self.coords.px;
         if (pxCoords===null)
             return null;
@@ -2639,7 +2641,7 @@ function MaxPlot(div, top, left, width, height, args) {
             }
         }
 
-        //console.timeEnd("cellSearch");
+        //if(DEBUG) console.timeEnd("cellSearch");
         if (possIds.length===0)
             return null;
         else {
@@ -2782,7 +2784,7 @@ function MaxPlot(div, top, left, width, height, args) {
         //var pData = (~~xCanvas + (~~yCanvas * self.width)) * 4;
 
         //if (!inputData[pData + 3]) {
-            //console.log("just white space under mouse");
+            //if(DEBUG) console.log("just white space under mouse");
             //return;
         //}
 
@@ -3140,9 +3142,9 @@ function MaxPlot(div, top, left, width, height, args) {
 	self.setColors(["FF0000", "00FF00", "0000FF", "CC00CC", "008800"]);
 	self.setColorArr(randomArray(Uint8Array, n, 4));
 
-        console.time("draw");
+        if(DEBUG) console.time("draw");
         self.drawDots();
-        console.timeEnd("draw");
+        if(DEBUG) console.timeEnd("draw");
         return self;
     };
 

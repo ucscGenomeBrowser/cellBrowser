@@ -11,8 +11,8 @@
 "use strict";
 
 var cellbrowser = function() {
-    const DEBUG = true;
-    
+    const DEBUG = false;
+
     var db = null; // the cbData object from cbData.js. Loads coords,
                    // annotations and gene expression vectors
 
@@ -134,7 +134,7 @@ var cellbrowser = function() {
 
     function _dump(o) {
     /* for debugging */
-        console.log(JSON.stringify(o));
+        if(DEBUG) console.log(JSON.stringify(o));
     }
 
     function formatString (str) {
@@ -1084,7 +1084,7 @@ var cellbrowser = function() {
                     htmls.push("<br>");
                 }
 
-            console.log(datasetInfo);
+            if(DEBUG) console.log(datasetInfo);
 
             if ( datasetInfo.atacSearch) {
                     htmls.push("<b>ATAC-seq search gene models: </b>" + datasetInfo.atacSearch);
@@ -1899,7 +1899,7 @@ var cellbrowser = function() {
         activateCombobox("tpSelectMetaCombo_"+rowIdx, comboWidth);
 
         $('#tpSelectRemove_'+rowIdx).click( function(ev) {
-            //console.log(ev);
+            //if(DEBUG) console.log(ev);
             var rowToDel = (this.id).split("_")[1];
             $("#tpSelectRow_"+rowToDel).remove();
         });
@@ -2343,7 +2343,7 @@ var cellbrowser = function() {
             uriStr = null;
         urlData[key] = uriStr;
         changeUrl(urlData);
-        console.log("Saving state: ", data);
+        if(DEBUG) console.log("Saving state: ", data);
     }
 
     function createMetaUiFields(db) {
@@ -2479,7 +2479,7 @@ var cellbrowser = function() {
         if (uriStr!==null) {
             jsonStr = LZString.decompressFromEncodedURIComponent(uriStr);
             cart = JSON.parse(jsonStr);
-            console.log("Loading cart from URL: ", cart);
+            if(DEBUG) console.log("Loading cart from URL: ", cart);
         }
         else {
             var fullKey = datasetName+"###"+key;
@@ -2487,7 +2487,7 @@ var cellbrowser = function() {
             if (comprStr) {
                 jsonStr = LZString.decompress(comprStr);
                 cart = JSON.parse(jsonStr);
-                console.log("Loading cart from local storage: ", cart);
+                if(DEBUG) console.log("Loading cart from local storage: ", cart);
             }
         }
         db.cart = cart;
@@ -2511,7 +2511,7 @@ var cellbrowser = function() {
         //xhr.open("POST", url, false);
         xhr.open("GET", url, true);
         xhr.responseType = "arraybuffer";
-        xhr.onload = function() { var buf = xhr.response; console.log(buf)};
+        xhr.onload = function() { var buf = xhr.response; if(DEBUG) console.log(buf)};
         xhr.send(null);
         //xhr.send(myArray);
     }
@@ -2991,12 +2991,12 @@ var cellbrowser = function() {
     var progressUrls = {};
 
     function onProgressConsole(ev) {
-        //console.log(ev);
+        //if(DEBUG) console.log(ev);
     }
 
     function onProgress(ev) {
         /* update progress bars. The DOM elements of these were added in maxPlot (not optimal?)  */
-        console.log(ev);
+        if(DEBUG) console.log(ev);
         if (ev.text!==undefined) {
             // image loaders just show a little watermark
             renderer.setWatermark(ev.text);
@@ -3099,7 +3099,7 @@ var cellbrowser = function() {
        }
 
        var metaInfo  = db.findMetaInfo(fieldName);
-       console.log("Color by meta field "+fieldName);
+       if(DEBUG) console.log("Color by meta field "+fieldName);
 
        // cbData always keeps the most recent expression array. Reset it now.
        if (db.lastExprArr)
@@ -3192,7 +3192,7 @@ var cellbrowser = function() {
          * if selCells is not null, restrict the splitting to just indices in selCells.
          * Returns array of the two arrays.
          * */
-        console.time("findCellsWithMeta");
+        if(DEBUG) console.time("findCellsWithMeta");
         if (exprVec.length!==splitArr.length) {
             warn("internal error - splitExprByMetaSelected: exprVec has diff length from splitArr");
         }
@@ -3222,19 +3222,19 @@ var cellbrowser = function() {
             }
 
         if (db.conf.violinDoLog2) {
-            console.time("log2");
+            if(DEBUG) console.time("log2");
             arr1 = doLog2(arr1);
             arr2 = doLog2(arr2);
-            console.timeEnd("log2");
+            if(DEBUG) console.timeEnd("log2");
         }
 
-        console.timeEnd("findCellsWithMeta");
+        if(DEBUG) console.timeEnd("findCellsWithMeta");
         return [arr1, arr2];
     }
 
     function splitExpr(exprVec, selCells) {
         /* split the expression vector into two vectors, one for selected and one for unselected cells */
-        console.time("splitExpr");
+        if(DEBUG) console.time("splitExpr");
         var selMap = {};
         for (var i = 0; i < selCells.length; i++) {
             selMap[selCells[i]] = null;
@@ -3249,7 +3249,7 @@ var cellbrowser = function() {
                 unsel.push(exprVec[i]);
         }
 
-        console.timeEnd("splitExpr");
+        if(DEBUG) console.timeEnd("splitExpr");
         return [sel, unsel];
     }
 
@@ -3322,13 +3322,13 @@ var cellbrowser = function() {
             };
 
         window.setTimeout(function() {
-            console.time("violinDraw");
+            if(DEBUG) console.time("violinDraw");
             window.violinChart = new Chart(ctx, {
                 type: 'violin',
                 data: violinData,
                 options: optDict
             });
-            console.timeEnd("violinDraw");
+            if(DEBUG) console.timeEnd("violinDraw");
         }, 10);
     }
 
@@ -3496,7 +3496,7 @@ var cellbrowser = function() {
             /* called when the expression vector has been loaded and binning is done */
             if (decArr===null)
                 return;
-            console.log("Received expression vector, for "+locusStr+", desc: "+geneDesc);
+            if(DEBUG) console.log("Received expression vector, for "+locusStr+", desc: "+geneDesc);
             // update the URL and possibly the gene combo box
             if (locusStr.indexOf("|") > -1) {
                 if (locusStr.length < 600)
@@ -3567,7 +3567,7 @@ var cellbrowser = function() {
         // clear the meta combo
         $('#tpMetaCombo').val(0).trigger('chosen:updated');
 
-        console.log("Loading gene expression vector for "+locusStr);
+        if(DEBUG) console.log("Loading gene expression vector for "+locusStr);
 
         db.loadExprAndDiscretize(locusStr, gotGeneVec, onProgress, db.conf.binStrategy);
 
@@ -3625,7 +3625,7 @@ var cellbrowser = function() {
             var names = metaInfo.ui.shortLabels;
         }
 
-        console.time("cluster centers");
+        if(DEBUG) console.time("cluster centers");
         var calc = renderer.calcMedian(coords, values, names, metaInfo.origVals);
 
         labelCoords = [];
@@ -3635,7 +3635,7 @@ var cellbrowser = function() {
             var midY = selectMedian(labelInfo[1]);
             labelCoords.push([midX, midY, label]);
         }
-        console.timeEnd("cluster centers");
+        if(DEBUG) console.timeEnd("cluster centers");
 
         renderer.setLabelCoords(labelCoords);
         renderer.setLabelField(metaInfo.name);
@@ -3755,10 +3755,11 @@ var cellbrowser = function() {
    function gotSpatial(img) {
        /* called when the spatial image has been loaded */
        renderer.setBackground(img);
-       if (renderer.readyToDraw())
-           renderer.drawDots();
-       else
-           console.log("got spatial, but cannot draw yet");
+       if (renderer.readyToDraw()) {
+        renderer.drawDots();
+       } else if(DEBUG) {
+        console.log("got spatial, but cannot draw yet");
+       }
    }
 
    function plotTrace(cellId) {
@@ -3788,7 +3789,7 @@ var cellbrowser = function() {
 
        let traceMin = 999999;
        let traceMax = -99999;
-       console.log(trace);
+       if(DEBUG) console.log(trace);
 
        // TODO: inverting the trace is that the right thing here?
        var newTrace = [];
@@ -3802,19 +3803,19 @@ var cellbrowser = function() {
            traceMin = Math.min(traceMin, val);
            traceMax = Math.max(traceMax, val);
        }
-       console.log("Min", traceMin, "Max", traceMax);
+       if(DEBUG) console.log("Min", traceMin, "Max", traceMax);
 
        let dataSpan = (traceMax-traceMin);
        let scaleFact = traceHeight / (dataSpan);
        let stepX = traceWidth / trace.length ; // number of pixels per point
-       console.log("dataSpan", dataSpan, "scaleFact", scaleFact, "stepX", stepX);
+       if(DEBUG) console.log("dataSpan", dataSpan, "scaleFact", scaleFact, "stepX", stepX);
 
        let pixYs = [];
        for (let i=0; i < trace.length; i++) {
            let val = trace[i];
            let pixY = (val-traceMin)*scaleFact;
            pixYs.push(pixY);
-           console.log(val, pixY);
+           if(DEBUG) console.log(val, pixY);
        }
 
        let htmls = [];
@@ -4668,7 +4669,7 @@ var cellbrowser = function() {
 
     function onGeneLoadComplete() {
         /* called when all gene expression vectors have been loaded */
-        console.log("All genes complete");
+        if(DEBUG) console.log("All genes complete");
         // Close the dialog box only if all genes were OK. The user needs to see the list of skipped genes
         if ( $( "#tpNotFoundGenes" ).length===0 ) {
             $("#tpDialog").dialog("close");
@@ -5406,8 +5407,11 @@ var cellbrowser = function() {
         //if (choice.selected==="_none")
         var fieldId = parseInt(choice.selected.split("_")[1]);
         var fieldName = db.getMetaFields()[fieldId].name;
-        console.log(choice);
-        console.log(ev);
+
+        if(DEBUG) {
+            console.log(choice);
+            console.log(ev);
+        }
 
         colorByMetaField(fieldName);
     }
@@ -5956,7 +5960,7 @@ var cellbrowser = function() {
             let start = parts[2];
             let end = parts[3];
             let range = chrom+"|"+start+"|"+end;
-            console.log(range, checkRanges);
+            if(DEBUG) console.log(range, checkRanges);
             if (checkRanges.includes(range)) {
                 el.checked=true;
             }
@@ -6269,7 +6273,7 @@ var cellbrowser = function() {
         ret.quart3 = arr[Math.round(arrLen*3*quartSize)];
         ret.quart4 = arr[Math.round(arrLen*4*quartSize)];
         ret.count = arr.length;
-        console.log(ret);
+        if(DEBUG) console.log(ret);
         return ret;
     }
 
@@ -6326,7 +6330,7 @@ var cellbrowser = function() {
         let x2 = labelWidth+Math.round(scaleFact*(dataSumm.quart4));
         htmls.push("<line x1='"+x1+"' y1='"+y1+"' x2='"+x2+"' y2='"+y2+"' stroke='black' stroke-width='2'/>");
 
-        console.log("<rect width='"+barWidth+"' height='"+barHeight+"' fill='#"+fillHex+"' x='"+x+"' y='"+y+"'></rect>");
+        if(DEBUG) console.log("<rect width='"+barWidth+"' height='"+barHeight+"' fill='#"+fillHex+"' x='"+x+"' y='"+y+"'></rect>");
     }
 
     function buildExprBarcharts(parentDomId, metaToExpr, metaLabels, exprMin, exprMax) {
@@ -6350,7 +6354,7 @@ var cellbrowser = function() {
         minY+=30;
 
         for (let i=0; i < metaToExpr.length; i++) {
-            console.log(metaLabels[i]);
+            if(DEBUG) console.log(metaLabels[i]);
             let exprArr = metaToExpr[i];
             let dataSumm = calcMedianQuart(exprArr);
             plotOneBarchartSvg(htmls, labelWidth, minY, minX, maxX, scaleFact, i, metaLabels[i], dataSumm);
@@ -6415,7 +6419,7 @@ var cellbrowser = function() {
             window.setTimeout(function() {
                 for (let i=0; i < metaToExpr.length; i++) {
                     const ctx = getById("tpExprViolinCanvas_"+i).getContext("2d");
-                        console.time("violinDraw_"+i);
+                        if(DEBUG) console.time("violinDraw_"+i);
                         window.violinCharts.push( new Chart(ctx, {
                             type: 'violin',
                             data: vioData[i],
@@ -6426,7 +6430,7 @@ var cellbrowser = function() {
                                 }
                             }
                         }));
-                        console.timeEnd("violinDraw_"+i);
+                        if(DEBUG) console.timeEnd("violinDraw_"+i);
                 }
             }, 5);
     }
@@ -6628,7 +6632,7 @@ var cellbrowser = function() {
 
     function onDotCircleHover(ev, minY, maxY, minX, maxX) {
         /* user hovers over the dotplot circle */
-        console.log(ev);
+        if(DEBUG) console.log(ev);
         let target = ev.currentTarget;
         let cx = parseInt(target.getAttribute("cx"));
         let cy = parseInt(target.getAttribute("cy"));
@@ -6815,7 +6819,7 @@ var cellbrowser = function() {
     }
 
     function geneExprOnProgress(ev) {
-        console.log("expression"+ev);
+        if(DEBUG) console.log("expression"+ev);
         let domId = null;
         let prefix = "";
         if (ev.target && ev.target._url) {
@@ -6984,7 +6988,7 @@ var cellbrowser = function() {
         });
 
         //Promise.all([promiseGeneSplitByMeta(geneId, geneExprOnProgress), promiseMeta(metaName, geneExprOnProgress)]).then( function(resArr) {
-        //    //console.log("promises are all loaded", resArr);
+        //    //if(DEBUG) console.log("promises are all loaded", resArr);
         //    $( '#progressBarMeta').progressbar( "value", 100); // make sure that the progress bars show "complete"
         //    $( '#progressBarExpr').progressbar( "value", 100);
 
@@ -7761,7 +7765,7 @@ var cellbrowser = function() {
             pal.push(func(x*step).substr(1));
         }
 
-        if (pal.length!==n)
+        if (pal.length!==n && DEBUG)
             console.log("palette is too small");
 
         if (doRev)
@@ -7909,7 +7913,7 @@ var cellbrowser = function() {
 
         //Mousetrap.stopCallback = function(e, element, combo) {
             //var doStop = (element.tagName == 'INPUT' || element.tagName == 'SELECT' || element.tagName == 'TEXTAREA' || (element.contentEditable && element.contentEditable == 'true'));
-            //console.log(e, element, combo);
+            //if(DEBUG) console.log(e, element, combo);
             //return doStop;
         //};
     }
@@ -8609,7 +8613,7 @@ var cellbrowser = function() {
 
     function onColorPickerChange(color, ev) {
         /* called when user manually selects a color in the legend with the color picker */
-        console.log(ev);
+        if(DEBUG) console.log(ev);
         /* jshint validthis: true */
         var valueIdx = parseInt(this.id.split("_")[1]);
         var rows = gLegend.rows;
@@ -8650,13 +8654,13 @@ var cellbrowser = function() {
         var pal = makeColorPalette(datasetGradPalette, exprBinCount);
         pal[0] = cNullColor; // this is hacky, but we don't want to color a table in beige if the values are 0
 
-        //console.time("avgCalc");
+        //if(DEBUG) console.time("avgCalc");
         for (var i=0; i<quickGenes.length; i++) {
             var sym = quickGenes[i][0];
-            //console.log("updating colors of "+sym+" for "+cellIds.length+" cells");
+            //if(DEBUG) console.log("updating colors of "+sym+" for "+cellIds.length+" cells");
             var geneExpr = db.quickExpr[sym];
             if (geneExpr===undefined) { // if any gene is not loaded yet, just quit
-                console.log(sym+" is not loaded yet, not updating expr table colors");
+                if(DEBUG) console.log(sym+" is not loaded yet, not updating expr table colors");
                 return;
             }
             var vec = geneExpr[0];
@@ -8676,7 +8680,7 @@ var cellbrowser = function() {
 		fontColor = "white";
             $("#tpGeneBarCell_"+onlyAlphaNum(sym)).css({"background-color": "#"+color, "color" : fontColor});
         }
-        //console.timeEnd("avgCalc");
+        //if(DEBUG) console.timeEnd("avgCalc");
     }
 
     function makeFieldHistogram(metaInfo, selCellIds, metaVec) {
@@ -8749,7 +8753,7 @@ var cellbrowser = function() {
             if (metaVec===undefined) {
                 var metaMsg = null;
                 if (metaInfo.type!=="uniqueString") {
-                    console.log("cellBrowser.js:updateMetaBarManyCells - could not find meta info");
+                    if(DEBUG) console.log("cellBrowser.js:updateMetaBarManyCells - could not find meta info");
                     metaMsg = "(still loading - please wait and retry)";
                 }
                 else
@@ -9301,7 +9305,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
 
         var tabInfo = db.conf.markers; // list with (label, subdirectory)
 
-        console.log("building marker genes window for "+clusterName);
+        if(DEBUG) console.log("building marker genes window for "+clusterName);
         var htmls = [];
         htmls.push("<div id='tpPaneHeader' style='padding:0.4em 1em'>");
 
@@ -9410,7 +9414,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
 
     function loadMarkersFromTsv(papaResults, url, divId, clusterName) {
         /* construct a table from a marker tsv file and write as html to the DIV with divID */
-        console.log("got coordinate TSV rows, parsing...");
+        if(DEBUG) console.log("got coordinate TSV rows, parsing...");
         var rows = papaResults.data;
 
         var headerRow = rows[0];
