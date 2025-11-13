@@ -1,6 +1,6 @@
 # functions to guess the gene model release given a list of gene IDs
 # tested on python3 and python2
-import logging, sys, optparse, string, glob, gzip, json
+import logging, sys, optparse, string, glob, gzip, json, subprocess
 from io import StringIO
 
 from collections import defaultdict
@@ -15,26 +15,38 @@ def cbGenes_parseArgs():
     " setup logging, parse command line arguments and options. -h shows auto-generated help page "
     parser = optparse.OptionParser("""usage: %prog [options] command - download gene model files and auto-detect the version.
 
-    Commands:
+    Commands for using gene models:
     fetch <geneType> - download pre-built geneId -> symbol table from UCSC
     fetch <assembly>.<geneType> - download pre-built gene models and symbol table from UCSC
+    guess <inFile> <organism> - Guess best gene type. Reads the first tab-sep field from inFile and prints genetypes sorted by % of matching unique IDs to inFile.
+    check <inFile> <geneType> - Check how well genes match given geneType
+
+    Commands for building new gene model files:
     build <assembly>.<geneType> - Download a gene model file from UCSC, pick one transcript per gene and save to ~/cellbrowserData/genes/<db>.<geneType>.bed.gz and <geneType>.symbols.tsv.gz
+    allSyms [human|mouse] - Build one big table with geneId <-> symbol, valid for all Gencode versions, always use most recent symbol
+    add fname geneType - Add a two-column .tsv file to your local directory. First column is gene ID, second column is symbol.
+                         e.g. 'cbGenes add myGenes.tsv sea-anemone'
+    index - Build the -unique index files and also run 'allSyms' for both human and mouse
+    push - Only at UCSC: copy all gene files to the export directory on hgwdev
 
     Run "fetch" or "build" without arguments to list the available files at UCSC.
 
     ls - list all available (built or downloaded)  gene models on this machine
 
-    guess <inFile> <organism> - Guess best gene type. Reads the first tab-sep field from inFile and prints genetypes sorted by % of matching unique IDs to inFile.
-
-    Examples:
-    %prog fetch                   # show the files that are available
+    Examples (common):
+    %prog fetch                   # show the files that are available for the 'build' command
     %prog fetch gencode-34        # geneId -> symbol mapping for human gencode relase 34
     %prog fetch hg38.gencode-34   # gene -> chrom mapping for human gencode relase 34
+    %prog ls
+    %prog guess genes.txt mouse   # guess the best gencode version for this file
+    %prog check features.tsv.gz gencode-40 # check if the genes match gencode-40 and which ones don't
+
+    Examples (rare - if you build your own gene models):
     %prog build                   # show the files that are available
     %prog build mm10 gencode-M25
-    %prog ls
-    %prog guess genes.txt mouse
-    %prog index # only used at UCSC to prepare the files for 'guess'
+    %prog index # used at UCSC to prepare the files for 'guess'
+    %prog allSyms human # build big geneId -> symbol table from all 
+    %prog json ce11 wormbase235 # build JSON file from a .bed.gz file - only needed for model organisms
     """)
 
     parser.add_option("-d", "--debug", dest="debug", action="store_true", help="show debug messages")
@@ -102,11 +114,16 @@ def parseGenes(fname):
     logging.info("Read %d genes" % len(fileGenes))
     return fileGenes
 
-def guessGencodeVersion(fileGenes, signGenes):
+def guessGencodeVersion(fileGenes, signGenes, stripVersion):
     logging.info("Number of genes that are only in a gene model release:")
-    #diffs = []
     infos = []
+    if stripVersion:
+        fileGenes = set([x.split(".")[0] for x in fileGenes])
+
     for version, uniqGenes in signGenes.items():
+        if stripVersion:
+            uniqGenes = set([x.split(".")[0] for x in uniqGenes])
+
         intersection = list(fileGenes.intersection(uniqGenes))
         share = 100.0 * (float(len(intersection)) / len(uniqGenes))
         intLen = len(intersection)
@@ -115,36 +132,68 @@ def guessGencodeVersion(fileGenes, signGenes):
         if len(intersection)!=0:
             expStr = ", ".join(intersection[:5])
             infoStr += (" e.g. "+ expStr)
-        #logging.info(infoStr)
         infos.append((share, version, intLen, geneCount, infoStr))
 
-        #diffs.append((len(intersection), version))
-
     infos.sort(reverse=True)
-    bestVersion = infos[0][1]
+    bestRelease = infos[0][1]
 
     for info in infos:
         share, version, intLen, geneCount, infoStr = info
         print(infoStr)
 
-    return bestVersion
+    return bestRelease
+
+def countDots(inGenes):
+    " count how many gene names have a dot in them "
+    c = 0
+    for g in inGenes:
+        if "." in g:
+            c+=1
+    return c
+
+def guessNeedsStripping(inGenes):
+    " return True if comparisons should be done without version information "
+    dotCount = countDots(inGenes)
+    if dotCount==len(inGenes):
+        logging.info("All gene names have a dot in them. Assuming that input genes have a version")
+        stripVersion  = False
+    elif dotCount==0:
+        logging.info("No gene ID has a dot in it. Stripping all version strings for the comparisons.")
+        stripVersion = True
+    else:
+        logging.info("%d input genes have a dot in them, out of %d genes in total. Assuming that genes are symbols and not stripping the part after the dot.." % (dotCount, len(inGenes)))
+        stripVersion  = True
+    return stripVersion
+
+def checkGenesAgainstRelease(inGenes, geneType, bestRelease, stripVersion):
+    " output how well a release matches the input genes "
+    allIds = readGeneSymbols(bestRelease)
+    if stripVersion:
+        inGenes = set([x.split(".")[0] for x in inGenes])
+        allIds = set([x.split(".")[0] for x in allIds])
+
+    if geneType=="syms":
+        allIds = allIds
+    notFoundIds = inGenes - set(allIds)
+    print("%d of the genes in the input are not part of %s" % (len(notFoundIds), bestRelease))
+    print("Examples: %s" % " ".join(list(notFoundIds)[:50]))
 
 def guessGencode(fname, org):
-    inGenes = set(parseGenes(fname))
+    inGenes = parseGenes(fname)
+    stripVersion = guessNeedsStripping(inGenes)
+
+    inGenes = set(inGenes)
     guessOrg, geneType = guessGeneIdType(inGenes)
     if org is None:
         org = guessOrg
-    logging.info("Looks like input gene list is from organism %s, IDs are %s" % (org, geneType))
+    else:
+        logging.info("Organism was provided on command line: %s (no need to guess organism)" % org)
+    logging.info("Assuming organism %s, IDs are %s" % (org, geneType))
     signGenes = parseSignatures(org, geneType)
-    bestVersion = guessGencodeVersion(inGenes, signGenes)
-    print("Best %s Gencode release\t%s" % (org, bestVersion))
+    bestRelease = guessGencodeVersion(inGenes, signGenes, stripVersion)
+    print("Best %s Gencode release\t%s" % (org, bestRelease))
 
-    allIds = readGeneSymbols(bestVersion)
-    if geneType=="syms":
-        allIds = allIds.values()
-    notFoundIds = inGenes - set(allIds)
-    print("%d of the genes in the input are not part of %s" % (len(notFoundIds), bestVersion))
-    print("Examples: %s" % " ".join(list(notFoundIds)[:50]))
+    checkGenesAgainstRelease(inGenes, geneType, bestRelease, stripVersion)
 
 def buildSymbolTable(geneType):
     if geneType.startswith("gencode"):
@@ -164,9 +213,11 @@ def iterGencodePairs(release, doTransGene=False):
     db = "hg38"
     if release[0]=="M":
         db = "mm10"
+        if int(release.strip("M"))>=26:
+            db='mm39'
     if release in ["7", "14", "17", "19"] or "lift" in release:
         db = "hg19"
-    url = "https://hgdownload.cse.ucsc.edu/goldenPath/%s/database/wgEncodeGencodeAttrsV%s.txt.gz" %  (db, release)
+    url = "https://hgdownload.gi.ucsc.edu/goldenPath/%s/database/wgEncodeGencodeAttrsV%s.txt.gz" %  (db, release)
     logging.info("Downloading %s" % url)
     doneIds = set()
 
@@ -193,7 +244,7 @@ def iterGencodeBed(db, release):
     " generator, yields a BED12+1 with a 'canonical' transcript for every gencode comprehensive gene "
     transToGene = dict(iterGencodePairs(release, doTransGene=True))
 
-    url = "http://hgdownload.cse.ucsc.edu/goldenPath/%s/database/wgEncodeGencodeCompV%s.txt.gz" % (db, release)
+    url = "http://hgdownload.gi.ucsc.edu/goldenPath/%s/database/wgEncodeGencodeCompV%s.txt.gz" % (db, release)
     logging.info("Downloading %s" % url)
     geneToTransList = defaultdict(list)
     for line in downloadUrlLines(url):
@@ -256,6 +307,31 @@ def listModelsLocal():
     print("Installed gene/chrom-location mappings:")
     print("\n".join(names))
 
+def addFileLocal(fname, name):
+    " add a file to the local sym table dir"
+    dataDir = join(findCbData(), "genes")
+    newFname = name+".symbols.tsv.gz"
+    newPath = join(dataDir, newFname)
+
+    lines = open(fname).readlines()
+    ofh = gzip.open(newPath, "wt")
+    for l in lines:
+        assert("\t" in l) # every line must contain at least one tab character
+        l = l.strip() # we're getting DOS and Mac line endings sometimes...
+        ofh.write(l)
+        ofh.write("\n")
+    ofh.close()
+    logging.info("Wrote %s" % newPath)
+    logging.info("You can now use the value '%s' in your cellbrowser.conf file as a value for geneIdType" % name)
+
+def pushLocal():
+    " copy all local files to export directory "
+    srcDir = join(findCbData(), "genes/")
+    targetDir = "/usr/local/apache/htdocs-cells/downloads/cellbrowserData/genes/"
+    cmd = ["rsync", "-rvzp", srcDir, targetDir]
+    subprocess.run(cmd, check=True)
+    logging.info("Updated files in %s" % targetDir)
+
 def iterBedRows(db, geneIdType):
     " yield BED rows of gene models of given type "
     fname = getStaticPath(getGeneBedPath(db, geneIdType))
@@ -299,9 +375,10 @@ def listModelRemoteFetch():
 
 def listModelRemoteBuild():
     sep = "\n"
-    urls = [("hg38", "https://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/"),
-            ("mm10", "https://hgdownload.cse.ucsc.edu/goldenPath/mm10/database/"),
-            ("hg19", "https://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/")
+    urls = [("hg38", "https://hgdownload.gi.ucsc.edu/goldenPath/hg38/database/"),
+            ("mm10", "https://hgdownload.gi.ucsc.edu/goldenPath/mm10/database/"),
+            ("mm39", "https://hgdownload.gi.ucsc.edu/goldenPath/mm39/database/"),
+            ("hg19", "https://hgdownload.gi.ucsc.edu/goldenPath/hg19/database/")
             ]
 
     allNames = defaultdict(list)
@@ -345,6 +422,41 @@ def writeUniqs(dictSet, outFname):
         for key, vals in dictSet.items():
             ofh.write("%s\t%s\n" % (key, "|".join(vals)))
 
+def bigSymTable(org):
+    """ build one big table that covers all gencode releases for an organism, org can be "mouse" or "human"
+    """
+    logging.info("Processing: %s" % org)
+    infileMask = "gencode*.symbols.tsv.gz"
+    dataDir = join(findCbData(), "genes")
+    fnames = glob.glob(join(dataDir, infileMask))
+
+    filtFnames = []
+    for fname in fnames:
+        baseName = basename(fname)
+        # skip weird hg19 files and the big existing tables
+        if ("lift" in baseName or "mouse" in baseName or "human" in baseName or "hg19" in baseName):
+            continue
+        version = baseName.split(".")[0].split("-")[1].lower()
+        if (org=="human" and not "m" in version) or \
+            (org=="mouse" and "m" in version):
+            filtFnames.append((int(version.strip("m")), fname))
+
+    filtFnames.sort()
+
+    # read in order, such that new symbols overwrite old ones
+    geneToSym = {}
+    for idx, fname in filtFnames:
+        logging.info("Reading "+fname)
+        for line in openFile(fname):
+            row = line.rstrip("\n").split("\t")
+            geneId, sym = row[:2]
+            geneId = geneId.split(".")[0]
+            geneToSym[geneId] = sym
+
+    outFname = getStaticPath(getGeneSymPath("gencode-"+org))
+
+    writeRows(geneToSym.items(), outFname)
+
 def uniqueIds(org):
     """ find unique identifiers in all symbols and geneIds of infileMask and write to
     outBase.{syms,ids}.unique.syms.tsv.gz
@@ -384,7 +496,6 @@ def uniqueIds(org):
             continue
         geneId, sym = line.rstrip("\n").split("\t")
         syms.append(sym)
-    #verToGenes["refseq"] = set(syms)
     allSyms["entrez"] = set(syms)
 
     logging.info("Finding unique values")
@@ -397,26 +508,33 @@ def uniqueIds(org):
 
 def bedToJson(db, geneIdType, jsonFname):
     " convert BED file to more compact json file: chrom -> list of (start, end, strand, gene) "
-    geneToSym = readGeneSymbols(geneIdType)
+    transToSym = readGeneSymbols(geneIdType)
 
     # index transcripts by gene
     bySym = defaultdict(dict)
     for row in iterBedRows(db, geneIdType):
-        chrom, start, end, geneId, score, strand = row[:6]
-        sym = geneToSym[geneId]
+        chrom, start, end, transId, score, strand = row[:6]
+        if not transId in transToSym:
+            logging.warn("%s does not have a gene symbol" % transId)
+            sym = transId
+        else:
+            sym = transToSym[transId]
+            logging.debug("Mapping %s to symbol %s" % (transId, sym))
         start = int(start)
         end = int(end)
         transLen = end-start
-        rawGeneId = geneId.split(".")[0] # for lookups, we hopefully will never need the version ID...
-        fullGeneId = rawGeneId+"|"+sym
-        bySym[fullGeneId].setdefault(chrom, []).append( (transLen, start, end, strand, geneId) )
+        rawTransId = transId
+        if rawTransId.startswith("EN") or rawTransId.startswith("NM_"):
+            rawTransId = transId.split(".")[0] # for lookups, we hopefully will never need the version ID...
+        fullTransId = rawTransId+"|"+sym
+        bySym[sym].setdefault(chrom, []).append( (transLen, start, end, strand, fullTransId) )
 
     symLocs = defaultdict(list)
-    for geneId, chromDict in bySym.items():
+    for sym, chromDict in bySym.items():
         for chrom, transList in chromDict.items():
             transList.sort(reverse=True) # take longest transcript per chrom
             _, start, end, strand, transId = transList[0]
-            symLocs[chrom].append( (start, end, strand, geneId) )
+            symLocs[chrom].append( (start, end, strand, transId) )
 
     sortedLocs = {}
     for chrom, geneList in symLocs.items():
@@ -438,6 +556,8 @@ def buildGuessIndex():
     dataDir = join(findCbData(), "genes")
     uniqueIds("human")
     uniqueIds("mouse")
+    bigSymTable("human")
+    bigSymTable("mouse")
 
 def fetch(fileDesc):
     " download symbol or gene files to local dir "
@@ -459,6 +579,14 @@ def cbGenesCli():
         if len(args)==3:
             org = args[2]
         guessGencode(fname, org)
+
+    elif command == "check":
+        fname = args[1]
+        release = args[2]
+        inGenes = parseGenes(fname)
+        guessOrg, geneType = guessGeneIdType(inGenes)
+        stripVersion = guessNeedsStripping(inGenes)
+        checkGenesAgainstRelease(inGenes, geneType, release, stripVersion)
 
     elif command=="fetch":
         if len(args)==1:
@@ -485,9 +613,20 @@ def cbGenesCli():
     elif command=="index":
         buildGuessIndex()
 
-    elif command=="json": # undocumented
-        db, geneType, outFname = args[1:]
-        bedToJson(db, geneType, outFname)
+    elif command=="allSyms":
+        org = args[1]
+        bigSymTable(org)
+
+    elif command=="add":
+        addFileLocal(args[1], args[2])
+
+    elif command=="push":
+        pushLocal()
+
+    elif command=="json":
+        db, geneType = args[1:]
+        jsonFname = getStaticPath(getGeneJsonPath(db, geneType))
+        bedToJson(db, geneType, jsonFname)
     else:
         errAbort("Unrecognized command: %s" % command)
 

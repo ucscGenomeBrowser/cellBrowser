@@ -1,0 +1,325 @@
+#!/usr/bin/env python3
+
+import logging, sys, optparse, glob
+from collections import defaultdict
+from os.path import join, basename, dirname, isfile, expanduser
+import base64, urllib
+import urllib.request
+import urllib.parse
+import json
+
+testShoulder = "doi:10.5072/FK2"
+
+#shoulder="doi:10.60654/CB"
+
+# ==== functions =====
+    
+def parseArgs():
+    " setup logging, parse command line arguments and options. -h shows auto-generated help page "
+    parser = optparse.OptionParser("""usage: %prog cmd [options] - make DOIs for cell browsers
+
+    Subcommands: status, get, mint, index
+
+    cbDoi status - show the status of the UC EZID server
+    cbDoi get - retrieve all meta information the EZID has about a DOI
+    cbDoi mint <dataset-name> - make a new DOI and print it out.
+    cbDoi index - create collections-index.tsv
+
+    This requires ezIdUser, ezIdPassword and ezIdShoulder in your ~/.cellbrowser config file
+
+    Examples:
+       cbDoi status
+       cbDoi get doi:10.60654/CB4W25
+       cbDoi mint cortex-atac
+       cbDoi index
+
+    """)
+
+    parser.add_option("-d", "--debug", dest="debug", action="store_true", help="show debug messages")
+    parser.add_option("-r", "--real", dest="real", action="store_true", help="Use the real server. Without this option, the mint operation only creates testing identifiers")
+    #parser.add_option("-f", "--file", dest="file", action="store", help="run on file") 
+    #parser.add_option("", "--test", dest="test", action="store_true", help="do something") 
+    (options, args) = parser.parse_args()
+
+    if args==[]:
+        parser.print_help()
+        exit(1)
+
+    if options.debug:
+        logging.basicConfig(level=logging.DEBUG)
+        logging.getLogger().setLevel(logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+        logging.getLogger().setLevel(logging.INFO)
+
+    return args, options
+
+def maybeLoadConfig(confFname):
+    if isfile(confFname):
+        conf = loadConfig(confFname)
+    else:
+        logging.debug("Could not find %s, not loading config file" % confFname)
+        conf = OrderedDict()
+    return conf
+
+cbConf = None
+def getConfig(tag, defValue=None):
+    " get a global cellbrowser config value from ~/.cellbrowser (old value ~/.cellbrowser.conf still accepted, but that filename was too confusing for people)"
+    global cbConf
+    if cbConf is None:
+        cbConf = {}
+        confPath = expanduser("~/.cellbrowser")
+        text = open(confPath).read()
+        exec(text, cbConf)
+
+    ret = cbConf.get(tag, defValue)
+    return ret
+
+class MyHTTPErrorProcessor (urllib.request.HTTPErrorProcessor):
+  def http_response (self, request, response):
+    # Bizarre that Python leaves this out.
+    if response.code == 201:
+      return response
+    else:
+      return urllib.request.HTTPErrorProcessor.http_response(self, request, response)
+  https_response = http_response
+
+def sendReq(path, data=None):
+    username = getConfig("ezIdUser")
+    password = getConfig("ezIdPassword")
+    opener = urllib.request.build_opener(MyHTTPErrorProcessor())
+    #opener = urllib.request.build_opener()
+    h = urllib.request.HTTPBasicAuthHandler()
+    h.add_password("EZID", "https://ezid.cdlib.org/", username, password)
+    opener.add_handler(h)
+
+    #h.add_header("Content-Type", "text/plain; charset=UTF-8")
+    #o = urllib.request.build_opener(h)
+    #o.open("https://ezid.cdlib.org/...")
+
+    #if data:
+        #data = urllib.parse.urlencode(data).encode()
+    request = urllib.request.Request("https://ezid.cdlib.org/%s" % (path), data=data)
+    request.add_header("Content-Type", "text/plain; charset=UTF-8")
+    #request.add_data(data.encode("UTF-8"))
+
+    connection = opener.open(request)
+    response = connection.read()
+    return response.decode("UTF-8")
+
+def getMeta(doi):
+    if not doi.startswith("doi:"):
+        doi = "doi:"+doi
+    print(sendReq("/id/%s" % doi))
+
+def mintDoi(dsName, shoulder):
+    dsPath = "/hive/data/inside/cells/datasets"
+    confPath = join(dsPath, dsName, "desc.conf")
+    conf = {}
+    text = open(confPath).read()
+    exec(text, conf)
+
+    print("* Desc.conf contains these keys:")
+    print(conf.keys())
+    print()
+
+    print("* Using these values from desc.conf:")
+    for key in ["title", "submitter", "submission_date"]:
+        print("%s=%s" % (key, conf[key]))
+    print()
+
+    title = conf["title"]
+    submitter = conf["submitter"]
+    #email = conf["email"]
+
+    doiTitle = "UCSC Cell Browser for '"+title+"'"
+    doiCreator = submitter
+    doiPublisher = "University of California Santa Cruz"
+    doiYear = conf['submission_date']
+    doiYear = doiYear.split("-")[0]
+    doiUrl = "https://%s.cells.ucsc.edu" % dsName
+
+    metaLines = []
+    metaLines.append("_target: "+doiUrl)
+    metaLines.append("datacite.title: " + doiTitle)
+    metaLines.append("datacite.publisher: " + doiPublisher)
+    metaLines.append("datacite.creator: " + doiCreator)
+    metaLines.append("datacite.publicationyear: " + doiYear)
+    metaLines.append("datacite.resourcetype: InteractiveResource")
+
+    print("* Sending these lines to UC EZID:")
+    print("\n".join(metaLines))
+    print()
+
+    metaString = ("\n".join(metaLines)).encode("utf8")
+    resp = sendReq("shoulder/"+testShoulder, data=metaString)
+    print("* Reply from EZID:")
+    print(resp)
+
+def getFacet(o, name):
+    if name in o:
+        return "|".join(o[name])
+
+    if "facets" in o:
+        if name in o["facets"]:
+            return "|".join(o["facets"][name])
+    return ""
+
+def getVal(o, name):
+    if not name in o:
+        return ""
+
+    if type(o[name]) is list:
+        return ",".join(o[name])
+    else:
+        return str(o[name])
+
+def loadSubCcs(inDir, dsName, cbo):
+    " load sub cell browser configs under parent of dsName, recursive "
+    for subO in cbo["datasets"]:
+        subDir = join(inDir, subO["name"])
+        fname = join(subDir, "dataset.json")
+
+        oo = json.load(open(fname))
+        print(oo)
+    asdf
+
+def index():
+    " create collections-index.tsv "
+    inDir = "/usr/local/apache/htdocs-cells"
+    inFnames = glob.glob(join(inDir, "*", "desc.json"))
+
+    objs = []
+    for fn in inFnames:
+        dirName = basename(dirname(fn))
+        dco = json.load(open(fn))
+
+        cbcFname = join(inDir, dirName, "dataset.json")
+        cbco = json.load(open(cbcFname))
+
+        objs.append( [dirName, dco, cbco] )
+    logging.info("Read %d desc.json files from %s" % (len(objs), inDir))
+
+    outFname = join(inDir, "collection-index.tsv")
+    ofh = open(outFname, "w")
+
+    facetFname = join(inDir, "facets.tsv")
+    facetFh = open(facetFname, "w")
+
+    datasetFname = join(inDir, "dataset-index.tsv")
+    dsFh = open(datasetFname, "w")
+
+    headers = ["#collection", "title", "lab", "institution", "submitter", "date", "doi", "pmid", "cb_doi", "ena", "paper_url", "other_url", "maxCellCount", "datasetNames", "datasetCellCounts"]
+    ofh.write("\t".join(headers))
+    ofh.write("\n")
+
+    facetHeaders = ["#collection"]
+    facets = ["body_parts", "assays", "projects", "diseases", "organisms" ]
+    for facet in facets:
+        facetHeaders.append(facet)
+
+    facetFh.write("\t".join(facetHeaders))
+    facetFh.write("\n")
+
+    # make mapping from dsName -> cell count
+    rootCbco = json.load(open(join(inDir, "dataset.json")))
+    nameToCount = {}
+    for ds in rootCbco["datasets"]:
+        if "sampleCount" in ds:
+            nameToCount[ds["name"]] = int(ds["sampleCount"])
+        else:
+            nameToCount[ds["name"]] = -1
+
+    for dsName, dco, cbco in objs:
+        #subCcs = loadSubCcs(inDir, dsName, cbco)
+
+        if "visibility" in cbco:
+            logging.info("Skipping %s, hidden" % dsName)
+            continue
+
+        childCountStr = ""
+        childStr = ""
+        maxCount = 0
+
+        print(dsName)
+        if "datasets" in cbco:
+            children = []
+            childCounts = []
+            for ds in cbco["datasets"]:
+                childCounts.append(ds.get("sampleCount", -1))
+                children.append("/".join(ds["name"].split("/")[1:]))
+
+            childCountStr = ",".join([str(x) for x in childCounts])
+            childStr = ",".join(children)
+            if len(childCounts)>0:
+                maxCount = max(childCounts)
+            else:
+                print("empty children?")
+
+        maxCount = max(maxCount, nameToCount.get(dsName, -1))
+
+        row = [
+                dsName,
+                getVal(dco, "title"),
+                getVal(dco, "lab").split("(")[0],
+                getVal(dco, "institution"),
+                getVal(dco, "submitter"),
+                getVal(dco, "submission_date"),
+                getVal(dco, "doi"),
+                getVal(dco, "pmid"),
+                getVal(dco, "cb_doi"),
+                getVal(dco, "ena"),
+                getVal(dco, "paper_url"),
+                getVal(dco, "other_url"),
+                str(maxCount),
+                childStr,
+                childCountStr,
+            ]
+        ofh.write("\t".join(row))
+        ofh.write("\n")
+        assert(len(row)==len(headers))
+
+        row = [
+            dsName,
+            getFacet(cbco, "body_parts"),
+            getFacet(cbco, "assays"),
+            getFacet(cbco, "projects"),
+            getFacet(cbco, "diseases"),
+            getFacet(cbco, "organisms"),
+        ]
+        facetFh.write("\t".join(row))
+        facetFh.write("\n")
+
+    logging.info("Wrote %s, %s" % (outFname, facetFname))
+
+
+# ----------- main --------------
+def main():
+    args, options = parseArgs()
+
+    shoulder = testShoulder
+    if options.real:
+        shoulder = getConfig("ezIdShoulder")
+
+    cmd = args[0]
+    if cmd=="get":
+        doi = args[1]
+        getMeta(doi)
+    elif cmd=="status":
+        print(sendReq("status"))
+    elif cmd=="mint":
+        dsName = args[1]
+        mintDoi(dsName, shoulder)
+    elif cmd=="index":
+        index()
+    else:
+        print("%s is not a valid command" % cmd)
+
+    #print(dsName)
+    #print(sendReq("status"))
+    #getMeta("doi:10.60654/CB4W25")
+    #if options.test:
+        #logging.debug("test is set")
+        #f = open(options.file, "r")
+
+main()

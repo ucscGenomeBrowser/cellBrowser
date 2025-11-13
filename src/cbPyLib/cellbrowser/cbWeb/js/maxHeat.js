@@ -153,7 +153,8 @@ function MaxHeat(div, args) {
         else
             rowName = self.rowLabels[self.rowOrder[rowIdx]];
         //console.log("mouse over coords:", x, y, rowIdx, colIdx);
-        return [rowName, colName];
+        //return [rowName, colName];
+        return [rowIdx, colIdx];
     }
 
     function onClick(ev) {
@@ -168,12 +169,12 @@ function MaxHeat(div, args) {
     function onMouseMove(ev) {
         /* mouse hover functionality */
         let rowAndCol = evToRowCol(ev);
-        let rowName = rowAndCol[0];
-        let colName = rowAndCol[1];
+        let rowIdx = rowAndCol[0];
+        let colIdx = rowAndCol[1];
         
         var value = null;
 
-        if (colIdx===null | rowIdx===null)
+        if (rowIdx===null || colIdx===null)
             self.selEl.style.display="none"
         else {
             var rowStart = self.rowStartsSizes[rowIdx*2];
@@ -315,7 +316,7 @@ function MaxHeat(div, args) {
         var colCount = colStartsSizes.length/2;
         
         var valToCoords = [];
-        for (var i=0; i<maxVal+1; i++) // why +1 ?
+        for (var i=0; i<maxVal+1; i++) // why +1 ? Because of float rounding edge cases. Easier like this than to understand the code. :-)
             valToCoords.push([]);
         
         // convert from rows (array of arrays) to arrays of of coords, one array per color
@@ -419,11 +420,6 @@ function MaxHeat(div, args) {
             break;
         }
         console.timeEnd("draw rects");
-
-        //var rowOrder = self.rowOrder;
-        //var rowScreenToData = [];
-        //for (var rowI=0; rowI<rowCount; rowI++)
-            //rowScreenToData
 
         ctx.restore();
 

@@ -22,6 +22,16 @@ function cloneObj(d) {
     return JSON.parse(JSON.stringify(d));
 }
 
+function isValid(x) {
+    /* x is not null nor undefined */
+    return (x!==null && x!==undefined)
+}
+
+function cloneArray(a) {
+/* returns a copy of an array */
+    return a.slice();
+}
+
 function copyObj(src, trg) {
 /* object copying: copies all values from src to trg */
     var key;
@@ -54,6 +64,7 @@ function MaxPlot(div, top, left, width, height, args) {
     const gTextSize = 16; // size of cluster labels
     const gTitleSize = 18; // size of title text
     const gStatusHeight = 14; // height of status bar
+    const gSliderFromBottom = 45; // distance from buttom to top of slider div
     const gZoomButtonSize = 30; // size of zoom buttons
     const gZoomFromLeft = 10;  // position of zoom buttons from left
     const gZoomFromBottom = 140;  // position of zoom buttons from bottom
@@ -61,10 +72,14 @@ function MaxPlot(div, top, left, width, height, args) {
     const gButtonBackgroundClicked = "rgb(180, 180, 180, 0.6)"; // grey of buttons when clicked
     const gCloseButtonFromRight = 60; // distance of "close" button from right edge
 
+    const nonFatColor = "F9F9F9"; // color used in fattening mode for all non-fat cells
+    const nonFatColorRect = "DDDDDD"; // rectangle mode: color used in fattening mode for all non-fat cells
+    const nonFatColorCircles = "BBBBBB"; // color used in fattening mode for all non-fat cell circles
+
     // the rest of the initialization is done at the end of this file,
     // because the init involves many functions that are not defined yet here
 
-    this.initCanvas = function (div, top, left, width, height) {
+    this.initCanvas = function (div, top, left, width, height, args) {
         /* initialize a new Canvas */
 
         div.style.top = top+"px";
@@ -108,6 +123,8 @@ function MaxPlot(div, top, left, width, height, args) {
             self.onSelChange = null; // called when the selection has been changed, arg: array of cell Ids
             self.onLabelHover = null; // called when mouse hovers over a label
             self.onNoLabelHover = null; // called when mouse does not hover over a label
+            self.onLineHover = null; // called when mouse over a trajectory line
+            self.onRadiusAlphaChange = null; // called when user changes radius or alpha
             // self.onZoom100Click: called when user clicks the zoom100 button. Implemented below.
             self.selectBox = selectDiv; // we need this later
             self.setupMouse();
@@ -115,9 +132,12 @@ function MaxPlot(div, top, left, width, height, args) {
             // connected plots
             self.childPlot = null;    // plot that is syncing from us, see split()
             self.parentPlot = null;   // plot that syncs to us, see split()
+
         }
 
         addProgressBars(top+Math.round(height*0.3), left+30);
+        if (!args || args.showSliders===undefined || args.showSliders===true)
+            addSliders();
 
         // timer that is reset on every mouse move
         self.timer = null;
@@ -127,6 +147,31 @@ function MaxPlot(div, top, left, width, height, args) {
         /* special coords are used for circles that are off-screen or otherwise not visible */
        return ((x===HIDCOORD && y===HIDCOORD)) // not shown (e.g. no coordinate or off-screen)
     }
+
+    function hexToGrey(hexColors) {
+        let greyArray = []
+        for (let i = 0; i < hexColors.length; i++) {
+            // Extract red, green, and blue components
+            let hexColor = hexColors[i];
+            const maxCol = 200;
+            const addCol = 20;
+            const red = Math.min(maxCol, addCol+parseInt(hexColor.slice(1, 3), 16));
+            const green = Math.min(maxCol, addCol+parseInt(hexColor.slice(3, 5), 16));
+            const blue = Math.min(maxCol, addCol+parseInt(hexColor.slice(5, 7), 16));
+
+            // Calculate the grayscale value using the luminosity method
+            const gray = Math.round(0.2126 * red + 0.7152 * green + 0.0722 * blue);
+
+            // Convert the grayscale value to a two-character hex string
+            const grayHex = gray.toString(16).padStart(2, '0');
+
+            // Return the grayscale hex color
+            const greySixHex = `${grayHex}${grayHex}${grayHex}`;
+            greyArray.push(greySixHex);
+        }
+        return greyArray;
+    }
+
 
     this.initPort = function(args) {
         /* init all viewport related state (zoom, radius, alpha) */
@@ -159,17 +204,18 @@ function MaxPlot(div, top, left, width, height, args) {
         self.coords.px   = null;   // coordinates of cells and labels as screen pixels or (HIDCOORD,HIDCOORD) if not shown
         self.coords.labelBbox = null;   // cluster label bounding boxes, array of [x1,x2,x2,y2]
 
-
         self.col = {};
         self.col.pal = null;        // list of six-digit hex codes
         self.col.arr = null;        // length is coords.px/2, one byte per cell = index into self.col.pal
 
         self.selCells = new Set();  // IDs of cells that are selected (drawn in black)
 
+        self.fatIdx = null;        // Index of value that is in "fat mode" (=cells bigger, all other cells in light-grey)
+
         self.doDrawLabels = true;  // should cluster labels be drawn?
         self.initPort(args);
 
-        // mouse drag is modal: can be "select", "move" or "zoom"
+        // mouse drag mode: can be "select", "move" or "zoom"
         self.dragMode = "select";
 
         // for zooming and panning
@@ -185,39 +231,52 @@ function MaxPlot(div, top, left, width, height, args) {
         self.background = null;
 
         self.activateMode(getAttr(args, "mode", "move"));
-    };
 
-    // call the constructor
-    //self.newObject(div, top, left, width, height, args);
+    };
 
     this.clear = function() {
         clearCanvas(self.ctx, self.canvas.width, self.canvas.height);
     };
-
-    //this.setPos = function(left, top) {
-       /* position the canvas on the page */
-       //self.div.style.left = left+"px";
-       //self.div.style.top = top+"px";
-    //};
 
     this.setTitle = function (text) {
         self.title = text;
         self.titleDiv.innerHTML = text;
     };
 
+    this.activateSliders = function () {
+        $(self.alphaSlider).slider({
+            "value": 4,
+            "min"  : 1,
+            "max"  : 7,
+            "step" : 1, 
+            "slide": onChangeAlpha
+        });
+        $(self.radiusSlider).slider({
+            "value": 4,
+            "min"  : 1,
+            "max"  : 7,
+            "step" : 1, 
+            "slide": onChangeRadius
+        });
+        
+    }
+
     this.setWatermark = function (text) {
-        if (text==="") {
-            //var elem = gebi("tpWatermark");
+        if (text==="" && self.watermark) {
             self.watermark.parentNode.removeChild(self.watermark);
             self.watermark = undefined;
-        } else {
-            var elem = document.createElement('div');
-            elem.id = "tpWatermark";
-            elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.3; z-index: 1000; top: 100px; left: 100px; text-align: left; vertical-align: top; color: black; font-size: xx-large;';
-            elem.textContent = text;
-            gebi("tpMaxPlot").appendChild(elem);
-            self.watermark = elem;
+            return;
         }
+
+        if (self.watermark)
+            self.watermark.parentNode.removeChild(self.watermark);
+
+        var elem = document.createElement('div');
+        elem.id = "tpWatermark";
+        elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.8; top: 10px; left: 45px; text-align: left; vertical-align: top; color: black; font-size: 20px; font-weight:bold; font-style:oblique';
+        elem.textContent = text;
+        self.div.appendChild(elem);
+        self.watermark = elem;
     }
 
     // -- (private) helper functions
@@ -255,7 +314,18 @@ function MaxPlot(div, top, left, width, height, args) {
             return 5;
     }
 
-    function createButton(width, height, id, title, text, imgFname, paddingTop, paddingBottom, addSep, addThickSep) {
+    function createSliderSpan(id, width, height, left) {
+        /* create div with given width and height */
+        var div = document.createElement('span');
+        div.id = id;
+        div.style.position = "relative";
+        div.style.width = width+"px";
+        div.style.height = height+"px";
+        div.style.left = left+"px";
+        return div;
+    }
+
+    function createButton(width, height, id, title, text, imgFname, paddingTop, paddingBottom, addSep, addThickSep, fontSize) {
         /* make a light-grey div that behaves like a button, with text and/or an image on it
          * Images are hard to vertically center, so padding top can be specified.
          * */
@@ -265,21 +335,26 @@ function MaxPlot(div, top, left, width, height, args) {
         div.style.backgroundColor = gButtonBackground;
         div.style.width = width+"px";
         div.style.height = height+"px";
+        div.style["z-index"]="10";
         div.style["text-align"]="center";
         div.style["vertical-align"]="middle";
         div.style["line-height"]=height+"px";
-        if (text!==null)
-            if (text.length>3)
-                div.style["font-size"]="11px";
-            else
-                div.style["font-size"]="14px";
+        if (fontSize === undefined || fontSize=== null) {
+            if (text!==null)
+                if (text.length>3)
+                    div.style["font-size"]="11px";
+                else
+                    div.style["font-size"]="14px";
+        } else {
+            div.style["font-size"]=fontSize+"px";
+        }
         div.style["font-weight"]="bold";
         div.style["font-family"]="sans-serif";
 
         if (title!==null)
             div.title = title;
         if (text!==null)
-            div.textContent = text;
+            div.innerHTML = text;
         if (imgFname!==null && imgFname!==undefined) {
             var img = document.createElement('img');
             img.src = imgFname;
@@ -358,6 +433,132 @@ function MaxPlot(div, top, left, width, height, args) {
         div.id = 'mpTitle';
         self.div.appendChild(div);
         self.titleDiv = div;
+    }
+
+    function onChangeAlpha(ev, ui) {
+        console.log("alpha: "+ui.value);
+        var sliderVal = ui.value; // 1-7
+        var multMap = {
+            7 : 0.15,
+            6 : 0.4,
+            5 : 0.8,
+            4 : 1.0,
+            3 : 1.2,
+            2 : 1.5,
+            1 : 1.8
+        }
+        self.port.alphaMult = multMap[sliderVal];
+        console.log("alphaMult: "+self.port.alphaMult);
+        self.calcRadius();
+        self.drawDots();
+    }
+
+    function onChangeRadius(ev, ui) {
+        //console.log("radius: "+ui.value);
+        var sliderVal = ui.value; // 1-7
+        var multMap = {
+            1 : 1/3,
+            2 : 1/2,
+            3 : 1/1.5,
+            4 : 1.0,
+            5 : 1.5,
+            6 : 2.0,
+            7 : 3.0
+        }
+        self.port.radiusMult = multMap[sliderVal];
+        self.calcRadius();
+        self.drawDots();
+    }
+
+    function addSliders() {
+        /* add sliders for transparency and radius */
+        // alpha reset slider: a label, a slider + a reset button
+        var sliderWidth = 90;
+        //var fromLeft = canvWidth - sliderWidth - 2*45 - 50;
+
+        var alphaSlider = createSliderSpan("mpAlphaSlider", sliderWidth, 10, 35);
+        self.alphaSlider = alphaSlider; // see activateSliders() for the jquery UI part of the code, executed later
+        alphaSlider.style.float = "left";
+        //alphaSlider.style.top = "3px";
+
+        // container for label + control elements
+        var alphaCont = document.createElement('div');
+        alphaCont.id = "mpAlphaCont";
+        //alphaCont.style.left = "150px"; // cellbrowser.css defines grid widths: 45
+        alphaCont.className = "sliderContainer";
+        alphaCont.style.top = "15px"; 
+        alphaCont.style.left = "0px";
+
+        var alphaLabel = document.createElement('div'); // contains the slider and the reset button, floats right
+        alphaLabel.id = "alphaSliderLabel";
+        alphaLabel.textContent = "Transparency";
+        alphaLabel.className = "sliderLabel";
+
+        // reset button
+        var undoSvg = '<svg xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 512 512"><!--! Font Awesome Free 6.4.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2023 Fonticons, Inc. --><path d="M212.333 224.333H12c-6.627 0-12-5.373-12-12V12C0 5.373 5.373 0 12 0h48c6.627 0 12 5.373 12 12v78.112C117.773 39.279 184.26 7.47 258.175 8.007c136.906.994 246.448 111.623 246.157 248.532C504.041 393.258 393.12 504 256.333 504c-64.089 0-122.496-24.313-166.51-64.215-5.099-4.622-5.334-12.554-.467-17.42l33.967-33.967c4.474-4.474 11.662-4.717 16.401-.525C170.76 415.336 211.58 432 256.333 432c97.268 0 176-78.716 176-176 0-97.267-78.716-176-176-176-58.496 0-110.28 28.476-142.274 72.333h98.274c6.627 0 12 5.373 12 12v48c0 6.627-5.373 12-12 12z"/></svg>';
+
+        //var alphaReset = createButton(15, 15, "mpAlphaReset", "Reset transparency", undoSvg, null, null, null, false, false, 10);
+        //alphaReset.style.float = "right";
+        //alphaReset.style.marginLeft = "2px";
+        //alphaReset.addEventListener ('click',  function() { self.resetAlpha(); self.drawDots();}, false);
+
+        var sliderReset = createButton(15, 15, "mpSliderReset", "Reset transparency and circle size", undoSvg, null, null, null, false, false, 10);
+        sliderReset.style.backgroundColor = "transparent";
+        sliderReset.style.float = "right";
+        //sliderReset.style.lineHeight = "16px";
+        sliderReset.style.marginLeft = "10px";
+        sliderReset.style.top = "0px";
+        sliderReset.style.top = "0px";
+        sliderReset.style.position = "relative";
+        sliderReset["z-index"] = "10"; // ? why ?
+        sliderReset.addEventListener ('click',  function() { self.resetAlpha(); self.resetRadius(); self.drawDots()}, false);
+
+        alphaCont.appendChild(alphaLabel);
+        alphaCont.appendChild(alphaSlider);
+        //alphaCont.appendChild(alphaReset);
+        alphaCont.appendChild(sliderReset);
+
+        // Radius reset slider: label, slider and reset button
+        var radiusSlider = createSliderSpan("mpRadiusSlider", sliderWidth, 10, 35);
+        radiusSlider.style.float = "left";
+        self.radiusSlider = radiusSlider; // see activateSliders() for the jquery UI part of the code, executed later
+
+        // container for label + slider and reset button
+
+        var radiusCont = document.createElement('span');
+        radiusCont.className = "sliderContainer";
+        radiusCont.id = "mpRadiusDiv";
+        radiusCont.style.left = "0px"; 
+        radiusCont.style.top = "0px";
+        radiusCont.appendChild(radiusSlider)
+
+
+        var radiusLabel = document.createElement('span'); // contains the slider and the reset button, floats right
+        radiusLabel.id = "radiusSliderLabel";
+        radiusLabel.textContent = "Circle Size";
+        radiusLabel.style.width = "110px";
+        radiusLabel.className = "sliderLabel";
+
+        radiusCont.appendChild(radiusLabel);
+        radiusCont.appendChild(radiusSlider);
+        //radiusCont.appendChild(sliderReset);
+        var brEl = document.createElement('br');
+        radiusCont.appendChild(brEl);
+
+        // add both to the big container div that holds all three slider elements
+        var sliderDiv = document.createElement('span');
+        //sliderDiv.style.top = fromTop+"px";
+        //sliderDiv.style.left = fromLeft+"px";
+        sliderDiv.style.bottom = "28px";
+        sliderDiv.style.right = "200px";
+        sliderDiv.style.position = "absolute";
+        sliderDiv.style.zIndex = "10";
+        sliderDiv.id = "mpSliderDiv";
+        sliderDiv.appendChild(radiusCont);
+        sliderDiv.appendChild(alphaCont);
+        self.div.appendChild(sliderDiv);
+        //self.canvasDiv.appendChild(sliderDiv);
+        self.sliderDiv = sliderDiv; // for quickResize()
     }
 
     function addCloseButton(top, left) {
@@ -459,7 +660,7 @@ function MaxPlot(div, top, left, width, height, args) {
        for (var i=0; i<3; i++) {
            htmls.push('<div id="mpProgressDiv'+i+'" style="display:none; height:17px; width:300px; background-color: rgba(180, 180, 180, 0.3)" style="">');
            htmls.push('<div id="mpProgress'+i+'" style="background-color:#666; height:17px; width:10%"></div>');
-           htmls.push('<div id="mpProgressLabel'+i+'" style="color:white; line-height:17px; position:absolute; top:'+(i*17)+'px;left:100px">Loading...</div>');
+           htmls.push('<div id="mpProgressLabel'+i+'" style="color:black; line-height:17px; position:absolute; top:'+(i*17)+'px;left:100px">Loading...</div>');
            htmls.push('</div>');
        }
 
@@ -470,10 +671,11 @@ function MaxPlot(div, top, left, width, height, args) {
     function addCanvasToDiv(div, top, left, width, height) {
         /* add a canvas element to the body element of the current page and keep left/top/width/eight in self */
         var canv = document.createElement('canvas');
+        self.canvasDiv = canv;
         canv.id = 'mpCanvas';
         //canv.style.border = "1px solid #AAAAAA";
         canv.style.backgroundColor = "white";
-        canv.style.position = "absolute";
+        canv.style.position = "relative";
         canv.style.display = "block";
         canv.style.width = width+"px";
         canv.style.height = height+"px";
@@ -502,6 +704,9 @@ function MaxPlot(div, top, left, width, height, args) {
 
     function scaleLabels(labels, zoomRange, borderSize, winWidth, winHeight) {
         /* scale cluster label position to pixel coordinates */
+        if (labels===undefined)
+            return undefined;
+
         winWidth = winWidth-(2*borderSize);
         winHeight = winHeight-(2*borderSize);
 
@@ -570,7 +775,8 @@ function MaxPlot(div, top, left, width, height, args) {
 
             // line is entirely hidden
             if (startInvis && endInvis)
-                continue
+                continue;
+
             if (startInvis) {
                 x1 = constrainVal(x1, minX, maxX);
                 y1 = constrainVal(y1, minY, maxY);
@@ -589,7 +795,7 @@ function MaxPlot(div, top, left, width, height, args) {
         return pxLines;
     }
 
-    function scaleCoords(coords, borderSize, zoomRange, winWidth, winHeight, annots) {
+    function scaleCoords(coords, borderSize, zoomRange, winWidth, winHeight, annots, aspectRatio) {
     /* scale list of [x (float),y (float)] to integer pixels on screen and
      * annots is an array with on-screen annotations in the format (x, y,
      * otherInfo) that is also scaled.  return [array of (x (int), y (int)),
@@ -605,13 +811,22 @@ function MaxPlot(div, top, left, width, height, args) {
         var minY = zoomRange.minY;
         var maxY = zoomRange.maxY;
 
+        var spanX = maxX - minX;
+        var spanY = maxY - minY;
+
+        //if (aspectRatio) {
+            //xMult = Math.min(xMult, yMult);
+            //yMult = Math.min(xMult, yMult);
+            //let ratio = spanX / spanY;
+            //spanY = spanY*0.5;
+        //}
+
         winWidth = winWidth-(2*borderSize);
         winHeight = winHeight-(2*borderSize);
 
-        var spanX = maxX - minX;
-        var spanY = maxY - minY;
         var xMult = winWidth / spanX;
         var yMult = winHeight / spanY;
+
 
         // transform from data floats to screen pixel coordinates
         var pixelCoords = new Uint16Array(coords.length);
@@ -637,40 +852,106 @@ function MaxPlot(div, top, left, width, height, args) {
         return pixelCoords;
     }
 
-    function drawRect(ctx, pxCoords, coordColors, colors, radius, alpha, selCells) {
+    function drawRect(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
         /* draw not circles but tiny rectangles. Maybe good enough for 2pixels sizes */
        debug("Drawing "+coordColors.length+" rectangles, with fillRect");
        ctx.save();
        ctx.globalAlpha = alpha;
        var dblSize = 2*radius;
        var count = 0;
+
+       if (selCells.size!==0 || fatIdx!==null)
+           //colors = makeAllGreyHex(colors.length);
+           colors = hexToGrey(colors);
+
+       var fatCells = [];
+
+       // first draw all the cells with value 0. Poor mans approximation of a z index. 
+       // (Should be faster than sorting by z and drawing afterwards.)
        for (var i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
            var pxY = pxCoords[2*i+1];
            if (isHidden(pxX, pxY))
                continue;
-           var col = colors[coordColors[i]];
+
+           var valIdx = coordColors[i];
+           // only plot color 0 (or -12345 (=NaN))
+           if (valIdx!==0)
+               continue;
+
+           var col = colors[valIdx];
+           if (fatIdx!==null) {
+               if (valIdx===fatIdx) {
+                   // fattened cells must be overdrawn later, so just save their coords now
+                   fatCells.push(pxX);
+                   fatCells.push(pxY);
+                   continue
+               }
+           }
            ctx.fillStyle="#"+col;
            ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
            count++;
        }
 
-       // draw the selection as black rectangles
-       ctx.globalAlpha = 0.7;
-       ctx.fillStyle="black";
-        selCells.forEach(function(cellId) {
-           let pxX = pxCoords[2*cellId];
-           let pxY = pxCoords[2*cellId+1];
+       // then draw all the cells with value <> 0. 
+       for (var i = 0; i < pxCoords.length/2; i++) {
+           var pxX = pxCoords[2*i];
+           var pxY = pxCoords[2*i+1];
+           if (isHidden(pxX, pxY))
+               continue;
+
+           var valIdx = coordColors[i];
+           // only plot color != 0
+           if (valIdx===0)
+               continue;
+
+           var col = colors[valIdx];
+           if (fatIdx!==null) {
+               if (valIdx===fatIdx) {
+                   // fattened cells must be overdrawn later, so just save their coords now
+                   fatCells.push(pxX);
+                   fatCells.push(pxY);
+                   continue
+               }
+               //else
+                   //col = "DDDDDD";
+                   //col = nonFatColorRect;
+           }
+
+           ctx.fillStyle="#"+col;
            ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
-           count += 1;
-        })
-       debug(count+" rectangles drawn (including selection)");
+           count++;
+       }
+
+       // overdraw the selection as black rectangles on top
+       //if (fatIdx===null) {
+           ctx.globalAlpha = 0.7;
+           ctx.fillStyle="black";
+            selCells.forEach(function(cellId) {
+               let pxX = pxCoords[2*cellId];
+               let pxY = pxCoords[2*cellId+1];
+               ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
+               count += 1;
+            })
+       //}
+       // overdraw the fattened cells as blue rectangles on top
+       if (fatCells.length!==0) {
+           ctx.globalAlpha = 0.7;
+           ctx.fillStyle="blue";
+           for (var i = 0; i < fatCells.length/2; i++) {
+               var pxX = fatCells[2*i];
+               var pxY = fatCells[2*i+1];
+               ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
+               count++;
+           }
+       }
+       debug(count+" rectangles drawn (including selection+fattening)");
        ctx.restore();
        return count;
     }
 
-    function drawCirclesStupid(ctx, pxCoords, coordColors, colors, radius, alpha, selCells) {
-    /* draw little circles onto canvas. pxCoords are the centers.  */
+    function drawCirclesStupid(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
+    /* TOO SLOW - Only used in testing/for demos. Not used anywhere else. Draw circles onto canvas with very slow functions.. */
        debug("Drawing "+coordColors.length+" circles with stupid renderer");
        ctx.globalAlpha = alpha;
        var dblSize = 2*radius;
@@ -680,9 +961,12 @@ function MaxPlot(div, top, left, width, height, args) {
            var pxY = pxCoords[2*i+1];
            if (isHidden(pxX, pxY))
                continue;
-           var col = colors[coordColors[i]];
+           var valIdx = coordColors[i];
+           var col = colors[valIdx];
+           if (fatIdx!==null && valIdx!==fatIdx)
+               col = nonFatColor;
+
            ctx.fillStyle="#"+col;
-           //ctx.fillRect(pxX-size, pxY-size, dblSize, dblSize);
            ctx.beginPath();
            ctx.arc(pxX, pxY, radius, 0, 2 * Math.PI);
            ctx.closePath();
@@ -728,24 +1012,142 @@ function MaxPlot(div, top, left, width, height, args) {
         ctx.restore();
     }
 
-    function drawLabels(ctx, labelCoords, winWidth, winHeight, zoomFact) {
+    function drawLabelsSvg(svgLines, labelCoords, winWidth, winHeight, zoomFact) {
         /* given an array of [x, y, text], draw the text. returns bounding
          * boxes as array of [x1, y1, x2, y2]  */
+
+        if (labelCoords===undefined)
+            return undefined;
+
+        for (var i=0; i < labelCoords.length; i++) {
+            var coord = labelCoords[i];
+            if (coord===null) { // outside of view range, push a null to avoid messing up the order of bboxArr
+                continue;
+            }
+
+            var x = coord[0];
+            var y = coord[1];
+            var text = coord[2];
+
+            // don't draw labels where the midpoint is off-screen
+            if (x<0 || y<0 || x>winWidth || y>winHeight) {
+                continue;
+            }
+
+            svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize+2)+"' fill='black' text-anchor='middle' x='"+x+"' y='"+y+"'>"+text+"</text>");
+        }
+
+    }
+
+    self.drawLegendSvg = function (legend) {
+        /* draw a legend onto the SVG given a legend object. */
+        var legWidth = self.svgLabelWidth;
+        var svgLines = self.svgLines;
+
+        var rows = legend.rows;
+
+        var legTitle = legend.title;
+        var subTitle = legend.subTitle;
+
+        var left = self.canvas.width; // x position where legend starts
+
+        var lineHeight = gTextSize;
+
+        var x = left + 11;
+        var y = lineHeight;
+        svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' x='"+x+"' y='"+y+"'>"+legTitle+"</text>");
+        y += lineHeight;
+
+        if (subTitle) {
+            svgLines.push("<text font-family='sans-serif' font-size='"+gTextSize+"' fill='black' text-anchor='middle' x='"+x+"' y='"+y+"'>"+subTitle+"</text>");
+            y += lineHeight;
+        }
+
+        y += lineHeight;
+
+        // get the sum of all rows, to calculate frequency
+        // this code was copied from buildLegend -> refactor one day
+        var sum = 0;
+        for (var i = 0; i < rows.length; i++) {
+            let count = rows[i].count;
+            sum += count;
+        }
+
+        for (i = 0; i < rows.length; i++) {
+            // a lot was copied from cellBrowser:buildLegend(), could use some refactoring to reduce duplication
+            var row = rows[i];
+            var colorHex = row.color; // manual color
+            if (colorHex===null)
+                colorHex = row.defColor; // default color
+
+            var label = row.label;
+            var longLabel = row.longLabel;
+
+            let count = row.count;
+            var valueIndex = row.intKey;
+            var freq  = 100*count/sum;
+
+            if (count===0) // never output categories with 0 count.
+                continue;
+
+            // this was copied from cellbrowser:buildLegend - refactor soon
+            label = label.replace(/_/g, " ").replace(/'/g, "&#39;").trim();
+            if (label==="") {
+                label = "(empty)";
+            }
+            label = label.replace("&ndash;", "-");
+
+            // draw colored rectangle first
+
+            var textSize = gTextSize-3;
+
+            svgLines.push("<rect width='15' height='15' fill='#"+colorHex+"' x='"+x+"' y='"+y+"'></rect>");
+
+            var prec = 1;
+            if (freq<1)
+                prec = 2;
+
+            //var lineCount = 0;
+            //svgLines.push("<text font-family='sans-serif' font-size='"+textSize+"' fill='black' text-anchor='start' x='"+(x+18)+"' y='"+((y-4)+lineCount*textSize)+"'>"+label+"</text>");
+            svgLines.push("<text font-family='sans-serif' font-size='"+textSize+"' fill='black' text-anchor='start' x='"+(x+18)+"' y='"+(y+8)+"'>"+label+"</text>");
+            //}
+            svgLines.push("<text font-family='sans-serif' font-size='"+textSize+"' fill='black' text-anchor='end' x='"+(left+legWidth-3)+"' y='"+(y+15)+"'>"+freq.toFixed(prec)+"%</text>");
+            y+= textSize;
+
+        }
+        // cannot draw violin plots in SVG - no library for it
+    };
+
+    function drawLabels(ctx, labelCoords, winWidth, winHeight, zoomFact, doGrey) {
+        /* given an array of [x, y, text], draw the text. returns bounding
+         * boxes as array of [x1, y1, x2, y2]  */
+        if (labelCoords===undefined)
+            return undefined;
 
         console.time("labels");
         ctx.save();
         ctx.font = "bold "+gTextSize+"px Sans-serif"
         ctx.globalAlpha = 1.0;
 
-        ctx.strokeStyle = '#EEEEEE';
-        ctx.lineWidth = 5;
-        ctx.miterLimit =2;
-        ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+        //ctx.strokeStyle = '#EEEEEE';
+        if (doGrey===undefined) {
+            ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+            ctx.lineWidth = 5;
+            ctx.miterLimit =2;
+        }
+        //else
+            //ctx.strokeStyle = "rgba(20, 20, 20, 0.3)";
+
         ctx.textBaseline = "top";
 
-        ctx.shadowBlur=6;
-        ctx.shadowColor="white";
-        ctx.fillStyle = "rgba(0,0,0,0.8)";
+        if (doGrey===undefined) {
+            ctx.fillStyle = "rgba(0,0,0,0.8)";
+            ctx.shadowBlur=6;
+            ctx.shadowColor="white";
+        }
+        else
+            ctx.fillStyle = "rgba(0,0,0,1.0)";
+
         ctx.textAlign = "left";
 
         var addMargin = 1; // how many pixels to extend the bbox around the text, make clicking easier
@@ -771,35 +1173,6 @@ function MaxPlot(div, top, left, width, height, args) {
             var textX2 = Math.round(x+textWidth);
             var textY2 = y+gTextSize;
 
-            //if (zoomFact===1.0) {
-                // at 100% zoom, make some minimal effort to keep labels on screen
-                //if (x < 0)
-                    //x = 0;
-                //if ((x + textWidth) > winWidth)
-                    //x = winWidth - textWidth;
-                //if (y+gTextSize > winHeight)
-                    //y = winHeight-gTextSize;
-
-                // also only at 100% zoom, make a minimal effort to avoid label overlaps
-                // a perfect solution would take much more time
-                //for (var j=0; j < bboxArr.length; j++) {
-                    //var bbox = bboxArr[j];
-                    //if (bbox===null) // = outside of screen
-                        //continue;
-                    //var bx1 = bbox[0];
-                    //var by1 = bbox[1];
-                    //var bx2 = bbox[2];
-                    //var by2 = bbox[3];
-                    //if (intersectRect(textX1, textX2, textY1, textY2, bx1, bx2, by1, by2)) {
-                            // push the overlapping label away a little
-                            //var diff = Math.round(0.75*gTextSize);
-                            //if (textY1 < by1)
-                                //y -= diff;
-                            //else
-                                //y += diff;
-                        //}
-                //}
-            //}
             // don't draw labels where the midpoint is off-screen
             if (x<0 || y<0 || x>winWidth || y>winHeight) {
                 bboxArr.push( null );
@@ -845,40 +1218,53 @@ function MaxPlot(div, top, left, width, height, args) {
         return (0x1000000+(Math.round((t-R)*p)+R)*0x10000+(Math.round((t-G)*p)+G)*0x100+(Math.round((t-B)*p)+B)).toString(16).slice(1);
     }
 
-    function drawCirclesDrawImage(ctx, pxCoords, coordColors, colors, radius, alpha, selCells) {
-    /* predraw and copy circles into canvas. pxCoords are the centers.  */
-       // almost copied from by https://stackoverflow.com/questions/13916066/speed-up-the-drawing-of-many-points-on-a-html5-canvas-element
-       // around 2x faster than drawing full circles
-       // create an off-screen canvas
+    function makeCircleTemplates(radius, tileWidth, tileHeight, colors, fatIdx) {
+    /* create an off-screen-canvas with the circle-templates that will be stamped later onto the bigger canvas 
+     * Returns the canvas. This feels very much like sprites on the AMIGA in the 1980s.
+     *
+     * returns an object with these attributes:
+     *   .off       = off-screen canvas
+     *   .selImgIdx = index on off with circle with a black outline only, for the selection
+     *   .greyImgIdx= index on off with grey circle for the non-selected cells
+     *   .nonFatImgIdx (only when fatIdx is != null) = index on off with grey circle(?) for the non-fattened cells
+     */
+       var off = document.createElement('canvas'); // not added to DOM, will be gc'ed at some point
 
-       ctx.save();
-       debug("Drawing "+coordColors.length+" coords with drawImg renderer, radius="+radius);
-       var off = document.createElement('canvas'); // not added to DOM, will be gc'ed
-       var diam = Math.round(2 * radius);
-       var tileWidth = diam + 2; // must add one pixel on each side, space for antialising
-       var tileHeight = tileWidth; // otherwise circles look cut off
-       off.width = (colors.length+1) * tileWidth;
+       var nonFatImgIdx = 0;
+
+       if (fatIdx!==null) {
+           //colCount = 2;
+           //colors = [colors[fatIdx], nonFatColorCircles];
+            nonFatImgIdx = colors.length;
+            colors.push(nonFatColorCircles);
+       }
+
+       var colCount = colors.length;
+
+       off.width = (colCount+2) * tileWidth; // "+2" because we have three additional circles at the end
        off.height = tileHeight;
        var ctxOff = off.getContext('2d');
 
        //pre-render circles into the off-screen canvas.
        for (var i = 0; i < colors.length; ++i) {
-           //ctxOff.lineWidth=1;
            ctxOff.fillStyle = "#"+colors[i];
            ctxOff.beginPath();
-           // arc(x, y, r, 0, 2*pi)
-           ctxOff.arc(i * tileWidth + radius +1, radius+1, radius, 0, 2 * Math.PI);
+           // parameters are: arc(x, y, r, 0, 2*pi)
+           ctxOff.arc(i * tileWidth + radius + 1, radius + 1, radius, 0, 2 * Math.PI);
            ctxOff.closePath();
            ctxOff.fill();
 
-           // only draw outline for big circles
-           ctxOff.lineWidth=1.0;
-           if (radius>5) {
+           // only draw a pretty shaded outline for very big circles, at extremely high zoom levels
+           if (radius > 6) {
+               ctxOff.lineWidth=1.0;
                var strokeCol = "#"+shadeColor(colors[i], 0.9);
+               //if (fatIdx!==null)
+                   //strokeCol = "#000000";
+               //else
                ctxOff.strokeStyle=strokeCol;
 
                ctxOff.beginPath();
-               ctxOff.arc(i * tileWidth + radius + 1, radius +1, radius, 0, 2 * Math.PI);
+               ctxOff.arc(i * tileWidth + radius + 1, radius + 1, radius, 0, 2 * Math.PI);
                ctxOff.closePath();
                ctxOff.stroke();
            }
@@ -891,40 +1277,186 @@ function MaxPlot(div, top, left, width, height, args) {
        ctxOff.strokeStyle="black";
        ctxOff.beginPath();
        // args: arc(x, y, r, 0, 2*pi)
-       ctxOff.arc((selImgId * tileWidth) + radius +1, radius+1, radius-1, 0, 2 * Math.PI);
+       ctxOff.arc((selImgId * tileWidth) + radius + 1, radius + 1, radius - 1, 0, 2 * Math.PI);
+       ctxOff.closePath();
        ctxOff.stroke();
 
-       if (alpha!==undefined)
-           ctx.globalAlpha = alpha;
+       // pre-render a grey circle for the non-selection, when something is selected, all the rest is drawn in grey
+       let greyImgId = colors.length + 1;
+       ctxOff.lineWidth = 1;
+       ctxOff.fillStyle = "#b2b2b2";
+       ctxOff.beginPath();
+       ctxOff.arc((greyImgId * tileWidth) + radius + 1, radius + 1, radius, 0, 2 * Math.PI);
+       ctxOff.closePath();
+       ctxOff.fill();
 
-       // blit the circles onto the main canvas
+    let ret = {};
+    ret.off = off;
+    ret.selImgIdx = selImgId;
+    ret.greyImgIdx = greyImgId;
+    ret.nonFatImgIdx = nonFatImgIdx;
+    return ret;
+    }
+
+    //function blitTwo(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, fatIdx, selImgId) {
+    /* blit only the fatIdx circle in color, and all the rest in grey. Also draw selection circles. */
+       //var count = 0;
+       //for (let i = 0; i < pxCoords.length/2; i++) {
+           //var pxX = pxCoords[2*i];
+           //var pxY = pxCoords[2*i+1];
+           //if (isHidden(pxX, pxY))
+               //continue;
+           //var col = coordColors[i];
+           //if (col===fatIdx)
+                //col = 0;
+           //else 
+                //col = 1;
+           //count++;
+           //ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
+//
+           //if (radius>=5)
+               //ctx.drawImage(off, selImgId * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
+       //}
+       //return count;
+    //}
+
+    function blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, selCells, greyIdx, fatIdx, colors) {
+   /* blit the circles onto the main canvas, using all colors */
        var count = 0;
+       var hasSelection = false;
+       if (selCells.size!==0)
+           hasSelection = true;
+
+       var col = 0;
+       // first draw all the cells of the color 0
        for (let i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
            var pxY = pxCoords[2*i+1];
            if (isHidden(pxX, pxY))
                continue;
-           var col = coordColors[i];
+
+           // when a selection is active, draw everything in grey. This only works because the selection is overdrawn afterwards
+           // (The selection must be overdrawn later, because otherwise circles shine through the selection)
+           col = coordColors[i];
            count++;
-           // drawImage(img,sx,sy,swidth,sheight,x,y,width,height);
+           // only draw the cells of entry 0 of the palette first.
+           // This is a poor approximation of a z-index, but a real z-index would take way too long.
+           // So we're just drawing twice.
+           if (col!==0)
+               continue
+           if (fatIdx===null) {
+               if (hasSelection)
+                   col = greyIdx;
+            }
+            else if (!hasSelection && !(fatIdx!=null && fatIdx===col))
+                   col = greyIdx;
+
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
        }
 
-       // overdraw the selection as solid black circle outlines
+       // then draw all the cells with the colors != 0
+       for (let i = 0; i < pxCoords.length/2; i++) {
+           var pxX = pxCoords[2*i];
+           var pxY = pxCoords[2*i+1];
+           if (isHidden(pxX, pxY))
+               continue;
+
+           col = coordColors[i];
+           if (col===0)
+               continue
+           if (fatIdx===null) {
+               if (hasSelection)
+                   col = greyIdx;
+            }
+            else if (!hasSelection && !(fatIdx!=null && fatIdx===col))
+                   col = greyIdx;
+
+           ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
+       }
+
+       if (fatIdx!==null) {
+           // do not fatten
+           //radius = radius * 2;
+           //let templates = makeCircleTemplates(radius, tileWidth, tileHeight, colors, fatIdx);
+           //let off = templates.off;
+           radius *= 1.5;
+           for (let i = 0; i < pxCoords.length/2; i++) {
+               col = coordColors[i];
+               if (fatIdx!==col)
+                   continue;
+               var pxX = pxCoords[2*i];
+               var pxY = pxCoords[2*i+1];
+               if (isHidden(pxX, pxY))
+                   continue;
+               count++;
+               ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius - 1, pxY - radius - 1, tileWidth, tileHeight);
+           }
+        }
+       return count;
+    }
+
+    function copyColorsOnly(coordColors, fatIdx, nonFatImgIdx)
+    /* copy numbers in coordColors array to a new array of the same size and keep only fatIdx, set, all others to nonFatImgIdx */
+    {
+        let newArr = new Array(coordColors.length);
+        for (let i=0; i<coordColors.length; i++) {
+            let colIdx = coordColors[i];
+            if (colIdx===fatIdx)
+                newArr[i] = fatIdx;
+            else
+                newArr[i] = nonFatImgIdx;
+        }
+        return newArr;
+    }
+
+
+    function drawCirclesDrawImage(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
+    /* predraw and copy circles into canvas. pxCoords are the centers.  */
+       // almost copied from by https://stackoverflow.com/questions/13916066/speed-up-the-drawing-of-many-points-on-a-html5-canvas-element
+       // around 2x faster than drawing full circles by using an off-screen canvas
+
+       debug("Drawing "+coordColors.length+" coords with drawImg renderer, radius="+radius);
+
+       var diam = Math.round(2 * radius);
+       var tileWidth = diam + 2; // must add one pixel on each side, space for antialising
+       var tileHeight = tileWidth; // otherwise circles look cut off
+
+       let templates = makeCircleTemplates(radius, tileWidth, tileHeight, colors, fatIdx);
+
+       let off = templates.off;
+
+       ctx.save();
+       if (alpha!==undefined)
+           ctx.globalAlpha = alpha;
+
+       let count = 0;
+       let origCoordColors = null;
+       if (fatIdx!==null) {
+           origCoordColors = coordColors;
+           coordColors = copyColorsOnly(origCoordColors, fatIdx, templates.nonFatImgIdx);
+       }
+       
+       count = blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, selCells, templates.greyImgIdx, fatIdx, colors);
+       if (origCoordColors)
+            coordColors = origCoordColors;
+
+       // overdraw the selection on top: as circles with black outlines
        ctx.globalAlpha = 0.7;
-        selCells.forEach(function(cellId) {
+       var selImgIdx = templates.selImgIdx; // second-to last template is the black outline, see makeCircleTemplates()
+       selCells.forEach(function(cellId) {
            let pxX = pxCoords[2*cellId];
            let pxY = pxCoords[2*cellId+1];
            if (isHidden(pxX, pxY))
                 return;
-           // make sure that old leftover overlapping black circles don't shine through
+           // make sure that old leftover overlapping black circles don't shine through and redraw the circle
+           // slow, but not sure what else I can do...
            let col = coordColors[cellId];
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
 
-           ctx.drawImage(off, selImgId * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
-        })
+           // and draw the black outline
+           ctx.drawImage(off, selImgIdx * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
+        });
 
-       debug(count +" circles drawn");
        ctx.restore();
        return count;
     }
@@ -945,12 +1477,26 @@ function MaxPlot(div, top, left, width, height, args) {
         return intList;
     }
 
+    function makeAllGreyHex(num) {
+    /* return a list of num grey hex strings */
+        var hexList = [];
+        for (var i = 0; i < num; i++) {
+            hexList.push("b2b2b2");
+        }
+        return hexList;
+    }
+
     function drawRectBuffer(ctx, width, height, pxCoords, colorArr, colors, alpha, selCells) {
         /* Draw little rectangles with size 3 using a memory buffer*/
        var canvasData = ctx.getImageData(0, 0, width, height);
        var cData = canvasData.data;
 
-       var rgbColors = hexToInt(colors);
+       var rgbColors = null;
+       if (selCells.length===0)
+           rgbColors = hexToInt(colors);
+       else
+           rgbColors = makeAllGrey(colors.length);
+
        var invAlpha = 1.0 - alpha;
 
        // alpha-blend pixels into array
@@ -959,6 +1505,7 @@ function MaxPlot(div, top, left, width, height, args) {
            var pxY = pxCoords[2*i+1];
            if (isHidden(pxX, pxY))
                continue;
+
            var p = 4 * (pxY*width+pxX); // pointer to red value of pixel at x,y
 
            var oldR = cData[p];
@@ -1005,7 +1552,7 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
 
-    function drawPixels(ctx, width, height, pxCoords, colorArr, colors, alpha, selCells) {
+    function drawPixels(ctx, width, height, pxCoords, coordColors, colors, alpha, selCells, fatIdx) {
         /* draw single pixels into a pixel buffer and copy the buffer into a canvas */
 
        // by default the canvas has black pixels
@@ -1014,7 +1561,12 @@ function MaxPlot(div, top, left, width, height, args) {
        var canvasData = ctx.getImageData(0, 0, width, height);
        var cData = canvasData.data;
 
-       var rgbColors = hexToInt(colors);
+       var rgbColors = null;
+       if (selCells.size===0)
+           rgbColors = hexToInt(colors);
+       else
+           rgbColors = hexToInt(makeAllGreyHex(colors.length)); // selection is active, all cells are grey, except the selection
+
        var invAlpha = 1.0 - alpha;
 
        var count = 0;
@@ -1027,37 +1579,61 @@ function MaxPlot(div, top, left, width, height, args) {
                continue;
            var p = 4 * (pxY*width+pxX); // pointer to red value of pixel at x,y
 
-           var oldR = cData[p];
-           var oldG = cData[p+1];
-           var oldB = cData[p+2];
+           var valIdx = coordColors[i];
 
-           var newRgb = rgbColors[colorArr[i]];
-           var newR = (newRgb >>> 16) & 0xff;
-           var newG = (newRgb >>> 8)  & 0xff;
-           var newB = (newRgb)        & 0xff;
+           if (fatIdx!==null) {
+               // fattening mode: fat cluster is black, all the rest is blue
+               let grey;
+               if (valIdx!==fatIdx) {
+                   grey = 0xDD;
+                   cData[p] = grey;
+                   cData[p+1] = grey;
+                   cData[p+2] = grey;
+               }
+               else {
+                   // stop all transparency, just overdraw fat blue here
+                   cData[p] = 0;
+                   cData[p+1] = 0;
+                   cData[p+2] = 255;
+               }
+               cData[p+3] = 255; // no transparency... ever?
 
-           var mixR = ~~(oldR * invAlpha + newR * alpha);
-           var mixG = ~~(oldG * invAlpha + newG * alpha);
-           var mixB = ~~(oldB * invAlpha + newB * alpha);
+           } else {
+               // normal colors
+               var oldR = cData[p];
+               var oldG = cData[p+1];
+               var oldB = cData[p+2];
 
-           cData[p] = mixR;
-           cData[p+1] = mixG;
-           cData[p+2] = mixB;
-           cData[p+3] = 255; // no transparency... ever?
-           count++;
+               var newRgb = rgbColors[valIdx];
+               var newR = (newRgb >>> 16) & 0xff;
+               var newG = (newRgb >>> 8)  & 0xff;
+               var newB = (newRgb)        & 0xff;
+
+               var mixR = ~~(oldR * invAlpha + newR * alpha);
+               var mixG = ~~(oldG * invAlpha + newG * alpha);
+               var mixB = ~~(oldB * invAlpha + newB * alpha);
+
+               cData[p] = mixR;
+               cData[p+1] = mixG;
+               cData[p+2] = mixB;
+               cData[p+3] = 255; // no transparency... ever?
+            }
+               count++;
        }
 
        // overdraw the selection as black pixels
-        selCells.forEach(function(cellId) {
-           let pxX = pxCoords[2*cellId];
-           let pxY = pxCoords[2*cellId+1];
-           if (isHidden(pxX, pxY))
-                return;
-           let p = 4 * (pxY*width+pxX); // pointer to red value of pixel at x,y
-           cData[p] = 0;
-           cData[p+1] = 0;
-           cData[p+2] = 0;
-        })
+        if (fatIdx===null) {
+            selCells.forEach(function(cellId) {
+               let pxX = pxCoords[2*cellId];
+               let pxY = pxCoords[2*cellId+1];
+               if (isHidden(pxX, pxY))
+                    return;
+               let p = 4 * (pxY*width+pxX); // pointer to red value of pixel at x,y
+               cData[p] = 0;
+               cData[p+1] = 0;
+               cData[p+2] = 0;
+            })
+        }
 
        self.ctx.putImageData(canvasData, 0, 0);
        return count;
@@ -1155,10 +1731,10 @@ function MaxPlot(div, top, left, width, height, args) {
         var ctxWidth  = self.canvas.width;
         var ctxHeight = self.canvas.height;
 
-        var coordHeight = dataRange.maxX-dataRange.minX;
-        var coordWidth = dataRange.maxY-dataRange.minY;
+        var coordHeight = dataRange.maxY-dataRange.minY;
+        var coordWidth = dataRange.maxX-dataRange.minX;
 
-        var scaleX = width / coordHeight; // this is px/dataUnit to convert background image pixels to canvas pixels
+        var scaleX = width / coordWidth; // this is px/dataUnit to convert background image pixels to canvas pixels
         var scaleY = height / coordHeight;
 
         var sx1 = zoomRange.minX * scaleX; // sx = x position on source image
@@ -1170,10 +1746,8 @@ function MaxPlot(div, top, left, width, height, args) {
         var sw = sx2 - sx1; // size of slice of background image that is currently shown, in source pixels
         var sh = sy2 - sy1;
 
-        var ctxWidth  = self.canvas.width;
-        var ctxHeight = self.canvas.height;
-        
-        // lame: since I wasn't able to figure out how to transform negative sx, sy to corrected dx, dy, coords - safari doesn't understand negative sx/sy - I simply use the scaleData function
+        // lame: since I wasn't able to figure out how to transform negative sx, sy to corrected dx, dy, coords - safari doesn't 
+        // understand negative sx/sy - I simply use the scaleData function
         // somehow https://gist.github.com/Kaiido/ca9c837382d89b9d0061e96181d1d862 didn't work for me
         //var coords = [0.0, 0.0, dataRange.maxX, dataRange.maxY];
         //var newCoords = scaleCoords(coords, 0, zoomRange, ctxWidth, ctxHeight, [])
@@ -1216,7 +1790,9 @@ function MaxPlot(div, top, left, width, height, args) {
        var borderMargin = self.port.radius;
        self.calcRadius();
 
-       self.coords.px = scaleCoords(self.coords.orig, borderMargin, self.port.zoomRange, self.canvas.width, self.canvas.height);
+       let w = self.canvas.width;
+       let h = self.canvas.height;
+       self.coords.px = scaleCoords(self.coords.orig, borderMargin, self.port.zoomRange, w, h, self.coords.aspectRatio);
        if (self.coords.lines)
            self.coords.pxLines = scaleLines(self.coords.lines, self.port.zoomRange, self.canvas.width, self.canvas.height);
        self.scaleBackground(self.background, self.port.initZoom, self.port.zoomRange);
@@ -1242,6 +1818,7 @@ function MaxPlot(div, top, left, width, height, args) {
        self.div.style.width = width+"px";
        self.div.style.height = height+"px";
 
+       // if in split screen mode, pass on the message to the second window
        if (self.childPlot) {
            width = width/2;
            //self.childPlot.left = self.left+width;
@@ -1267,11 +1844,15 @@ function MaxPlot(div, top, left, width, height, args) {
        self.zoomDiv.style.top = (height-gZoomFromBottom)+"px";
        self.zoomDiv.style.left = (gZoomFromLeft)+"px";
 
+       // move status line, dataset name and radius/transparency sliders
        var statusDiv = self.statusLine;
        statusDiv.style.top = (height-gStatusHeight)+"px";
        statusDiv.style.width = width+"px";
 
        self.titleDiv.style.top = (height-gStatusHeight-gTitleSize)+"px";
+
+       if (self.sliderDiv)
+           self.sliderDiv.style.top = (height-gStatusHeight-gSliderFromBottom)+"px";
 
     }
 
@@ -1321,7 +1902,7 @@ function MaxPlot(div, top, left, width, height, args) {
        copyObj(opts, coordOpts);
 
        var oldRadius = self.port.initRadius;
-       var oldAlpha = self.port.initAlpha;
+       var oldAlpha  = self.port.initAlpha;
        var oldLabels = self.coords.pxLabels;
        self.port = {};
        self.initPort(coordOpts);
@@ -1330,6 +1911,8 @@ function MaxPlot(div, top, left, width, height, args) {
        if (oldAlpha)
            self.port.initAlpha = oldAlpha;
        self.coords = {};
+
+       self.coords.origAll = undefined;
 
        var newZr = {};
        if (minX===undefined || maxX===undefined || minY===undefined || maxY===undefined)
@@ -1350,7 +1933,10 @@ function MaxPlot(div, top, left, width, height, args) {
        copyObj(newZr, self.port.zoomRange);
 
        self.coords.orig = coords;
+       self.coords.coordInfo = coordInfo; // we need to find out the label of the coords
        self.coords.labels = clusterLabels;
+       if (coordInfo.aspectRatio)
+           self.coords.aspectRatio = coordInfo.aspectRatio;
 
        var count = 0;
        for (var i = 0; i < coords.length/2; i++) {
@@ -1369,7 +1955,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.setLabelCoords = function(labelCoords) {
         /* set the label coords and return true if there were any labels before */
-        var hadLabelsBefore = self.coords.labels.length > 0;
+        var hadLabelsBefore = (self.coords.labels && self.coords.labels.length > 0);
         self.coords.labels = labelCoords;
         return hadLabelsBefore;
     };
@@ -1395,23 +1981,57 @@ function MaxPlot(div, top, left, width, height, args) {
         var currentSpan = zr.maxX-zr.minX;
         var zoomFact = initSpan/currentSpan;
 
+        // both radius and alpha can be change by a 'multiplier'
+        var alphaMult = self.port.alphaMult || 1.0;
+        var radiusMult = self.port.radiusMult || 1.0;
+
         var baseRadius = self.port.initRadius;
         if (baseRadius===0)
             baseRadius = 0.7;
-        var radius = Math.floor(baseRadius * Math.sqrt(zoomFact));
+        var radius = Math.floor(baseRadius * Math.sqrt(zoomFact) * radiusMult);
 
         // the higher the zoom factor, the higher the alpha value
         var zoomFrac = Math.min(1.0, zoomFact/100.0); // zoom as fraction, max is 1.0
         var alpha = initAlpha + 3.0*zoomFrac*(1.0 - initAlpha);
-        alpha = Math.min(0.8, alpha);
+        alpha = Math.min(0.8, alpha)*alphaMult;
         debug("Zoom factor: ", zoomFact, ", Radius: "+radius+", alpha: "+alpha);
+
+        if (self.onRadiusAlphaChange)
+            self.onRadiusAlphaChange(radiusMult, alphaMult);
 
         self.port.zoomFact = zoomFact;
         self.port.alpha = alpha;
+        self.port.alphaMult = alphaMult;
         self.port.radius = radius;
+        self.port.radiusMult = radiusMult;
     }
 
-    this.drawDots = function() {
+    this.drawSvg = function(alpha, radius, coords, colArr, pal) {
+        self.svgLines = [];
+        var plotHeight = self.canvas.height;
+        var plotWidth = self.canvas.width;
+        var width = plotWidth+self.svgLabelWidth;
+        var height = 1500; // enough space for 100 lines in the legend
+        self.svgLines.push("<svg  xmlns='http://www.w3.org/2000/svg' height='"+height+"' width='"+width+"'>\n");
+        drawCirclesSvg(self.svgLines, coords, colArr, pal, radius, alpha, self.selCells);
+        if (self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined)
+            drawLabelsSvg(self.svgLines, self.coords.pxLabels, plotWidth, plotHeight, self.port.zoomFact);
+        // axis lines
+        self.svgLines.push('<line x1="2" y1="2" x2="2" y2="'+plotHeight+'" stroke="black" stroke-width="2"/>');
+        self.svgLines.push('<line x1="2" y1="2" x2="'+plotWidth+'" y2="2" stroke="black" stroke-width="2"/>');
+
+        // draw axis labels
+        var initZoom = self.port.initZoom;
+        // x axis
+        self.svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize)+"' fill='black' text-anchor='left' x='"+10+"' y='"+(gTextSize+20)+"'>"+initZoom.minY+"</text>");
+        self.svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize)+"' fill='black' text-anchor='left' x='"+10+"' y='"+(plotHeight-gTextSize-2)+"'>"+initZoom.maxY+"</text>");
+        // y axis
+        self.svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize)+"' fill='black' text-anchor='left' x='"+10+"' y='"+(gTextSize+3)+"'>"+initZoom.minX+"</text>");
+        self.svgLines.push("<text font-family='sans-serif' font-size='"+(gTextSize)+"' fill='black' text-anchor='left' x='"+(plotWidth-40)+"' y='"+(gTextSize+3)+"'>"+initZoom.maxX+"</text>");
+        return;
+    }
+
+    this.drawDots = function(doSvg) {
         /* draw coordinates to canvas with current colors */
         console.time("draw");
 
@@ -1429,26 +2049,35 @@ function MaxPlot(div, top, left, width, height, args) {
              alert("internal error: alpha is not defined");
         if (coords===null)
              alert("internal error: cannot draw if coordinates are not set yet");
-        if (colArr.length !== (coords.length>>1))
+        if (colArr && colArr.length !== (coords.length>>1))
             alert("internal error: cbDraw.drawDots - colorArr is not 1/2 of coords array. Got "+pal.length+" color values but coordinates for "+(coords.length/2)+" cells.");
+
+        if (doSvg!==undefined) {
+            self.drawSvg(alpha, radius, coords, colArr, pal);
+            return;
+        }
 
         drawBackground(self.ctx, self.background)
 
+        // if the labels are not shown, fattening should not be active
+        if (self.fatIdx && !self.doDrawLabels)
+            self.fatIdx = null;
+
         if (radius===0) {
             count = drawPixels(self.ctx, self.canvas.width, self.canvas.height, coords,
-                colArr, pal, alpha, self.selCells);
+                colArr, pal, alpha, self.selCells, self.fatIdx);
         }
 
         else if (radius===1 || radius===2) {
-            count = drawRect(self.ctx, coords, colArr, pal, radius, alpha, self.selCells);
+            count = drawRect(self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
         }
         else {
             switch (self.mode) {
                 case 0:
-                    count = drawCirclesStupid(self.ctx, coords, colArr, pal, radius, alpha, self.selCells);
+                    count = drawCirclesStupid   (self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
                     break;
                 case 1:
-                    count = drawCirclesDrawImage(self.ctx, coords, colArr, pal, radius, alpha, self.selCells);
+                    count = drawCirclesDrawImage(self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
                     break;
                 case 2:
                     break;
@@ -1459,21 +2088,30 @@ function MaxPlot(div, top, left, width, height, args) {
 
         console.timeEnd("draw");
 
-        if (self.doDrawLabels===true && self.coords.labels!==null) {
-            self.redrawLabels();
-        }
-
         if (self.coords.pxLines) {
             console.time("draw lines");
             drawLines(self.ctx, self.coords.pxLines, self.canvas.width, self.canvas.height, self.coords.lineAttrs);
             console.timeEnd("draw lines");
         }
 
+        if ((self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined)
+            || self.coords.coordInfo.annots!==undefined) {
+            self.drawLabels();
+        }
+
         if (self.childPlot)
             self.childPlot.drawDots();
     };
 
-    this.redrawLabels = function() {
+    this.getSvgText = function() {
+        /* close and return the accumulated svg lines and clear the svg line buffer */
+        var svgLines = self.svgLines;
+        svgLines.push("</svg>\n");
+        self.svgLines = null;
+        return svgLines;
+    }
+
+    this.drawLabels = function() {
         /* draw only the labels */
         self.coords.pxLabels = scaleLabels(
             self.coords.labels,
@@ -1489,6 +2127,16 @@ function MaxPlot(div, top, left, width, height, args) {
             self.canvas.height,
             self.port.zoomFact
         );
+
+        // draw annotations - look like labels, but cannot be clicked
+        self.coords.pxAnnots = scaleLabels(
+            self.coords.coordInfo.annots,
+            self.port.zoomRange,
+            self.port.radius,
+            self.canvas.width,
+            self.canvas.height
+        );
+        drawLabels(self.ctx, self.coords.pxAnnots, self.canvas.width, self.canvas.height, self.port.zoomFact, true);
     };
 
     this.cellsAtPixel = function(x, y) {
@@ -1517,15 +2165,39 @@ function MaxPlot(div, top, left, width, height, args) {
         return res;
     };
 
+    this.resetAlpha = function() {
+       self.port.alphaMult = 1.0;
+       $('#mpAlphaSlider').slider({value:4});
+       self.calcRadius();
+    };
+
+    this.resetRadius = function() {
+       self.port.radiusMult = 1.0;
+       $('#mpRadiusSlider').slider({value:4});
+       self.calcRadius();
+    };
+
+    this.setRadiusAlpha = function(radius, alpha) {
+       self.port.radiusMult = radius;
+       self.port.alphaMult = alpha;
+       self.calcRadius();
+    };
+
     this.zoom100 = function() {
        /* zoom to 100% and redraw */
        copyObj(self.port.initZoom, self.port.zoomRange);
+       self.resetAlpha();
+       self.resetRadius();
        self.scaleData();
-       //self.drawDots();
     };
 
+    this.zoomToTest = function(x1, y1, x2, y2) {
+       self.port.zoomRange = {"minX":x1, "minY":y1, "maxX":x2, "maxY":y2};
+       self.scaleData();
+    }
+
     this.zoomTo = function(x1, y1, x2, y2) {
-       /* zoom to rectangle defined by two points */
+       /* zoom to rectangle defined by two pixel points */
        // make sure that x1<x2 and y1<y2 - can happen if mouse movement was upwards
        debug("Zooming to pixels: ", x1, y1, x2, y2);
        var pxMinX = Math.min(x1, x2);
@@ -1566,8 +2238,6 @@ function MaxPlot(div, top, left, width, height, args) {
         var zr = self.port.zoomRange;
         var iz = self.port.initZoom;
 
-        debug("old zoomfact "+self.port.zoomFact);
-
         var xRange = Math.abs(zr.maxX-zr.minX);
         var yRange = Math.abs(zr.maxY-zr.minY);
 
@@ -1601,7 +2271,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.scaleData();
 
         // a special case for connected plots that are not sharing our pixel coordinates
-        if (self.childPlot && self.coords!==self.childPlot.coords) {
+        if (self.childPlot && self.coords===self.childPlot.coords) {
             self.childPlot.zoomBy(zoomFact, xPx, yPx);
         }
 
@@ -1770,6 +2440,14 @@ function MaxPlot(div, top, left, width, height, args) {
         self._selUpdate();
     };
 
+    this.hasSelected = function() {
+        return (self.selCells.size!==0)
+    }
+
+    this.hasAllSelected = function() {
+        return (self.selCells.length===self.getCount());
+    }
+
     this.getSelection = function() {
         /* return selected cells as a list of ints */
         var cellIds = [];
@@ -1792,9 +2470,69 @@ function MaxPlot(div, top, left, width, height, args) {
         self._selUpdate();
     };
 
+    this.selectOnlyShow = function() {
+    /* the opposite of selectHide() = remove all coords that are not selected */
+        var selCells = self.selCells;
+        if (selCells.size===0)
+            return;
+
+        if (self.coords.origAll===undefined)
+            self.coords.origAll = cloneArray(self.coords.orig);
+        var coords = self.coords.orig;
+        for (var i = 0; i < coords.length/2; i++) {
+            if (!selCells.has(i)) {
+                coords[2*i] = HIDCOORD;
+                coords[2*i+1] = HIDCOORD;
+            }
+        }
+        self.scaleData();
+        self._selUpdate();
+    }
+
+
+    this.selectHide = function() {
+    /* remove all coords that are selected */
+        if (self.coords.origAll===undefined)
+            self.coords.origAll = cloneArray(self.coords.orig);
+
+        var selCells = self.selCells;
+        var coords = self.coords.orig;
+
+        for (var i = 0; i < coords.length/2; i++) {
+            if (selCells.has(i)) {
+                coords[2*i] = HIDCOORD;
+                coords[2*i+1] = HIDCOORD;
+            }
+        }
+
+        self.scaleData();
+        self.selectSet([]);
+        self._selUpdate();
+    }   
+
+    this.unhideAll = function() {
+        /* undo the hide operation */
+        if (self.coords.origAll!==undefined) {
+            self.coords.orig = self.coords.origAll;
+            self.coords.origAll = undefined;
+        }
+        self.scaleData();
+    }
+
     this.getCount = function() {
         /* return maximum number of cells in dataset, may include hidden cells, see isHidden() */
         return self.coords.orig.length / 2;
+    };
+
+    this.getVisibleCount = function() {
+        /* return number of cells that are visible */
+        let count = 0;
+        let coords = self.coords.orig;
+        for (var i = 0; i < coords.length/2; i++) {
+            if (!isHidden(coords[2*i], coords[2*i+1]))
+                count++;
+        }
+        return count;
     };
 
     // END SELECTION METHODS (could be an object?)
@@ -1823,7 +2561,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.scaleData();
 
         // a special case for connected plots that are not sharing our pixel coordinates
-        if (self.childPlot && self.coords!==self.childPlot.coords) {
+        if (self.childPlot && self.coords===self.childPlot.coords) {
             self.childPlot.moveBy(xDiff, yDiff);
         }
     };
@@ -1859,7 +2597,24 @@ function MaxPlot(div, top, left, width, height, args) {
         }
         //console.timeEnd("labelCheck");
         return null;
-    }
+    };
+
+    this.lineAt = function(x, y) {
+        /* check if there is a line at x,y and return its label if so or null if not */
+            var pxLines = self.coords.pxLines;
+            for (var i=0; i < pxLines.length; i++) {
+                var line = pxLines[i];
+                var x1 = line[0];
+                var y1 = line[1];
+                var x2 = line[2];
+                var y2 = line[3];
+                if (pDistance(x, y, x1, y1, x2, y2) <= 2) {
+                    var lineLabel = self.coords.lineLabels[i];
+                    return lineLabel;
+                }
+            }
+            return null;
+    };
 
     this.cellsAt = function(x, y) {
         /* check which cell's bounding boxes contain (x, y), return a list of the cell IDs, sorted by distance */
@@ -1959,6 +2714,48 @@ function MaxPlot(div, top, left, width, height, args) {
         return true;
     }
 
+    this.isSplit = function() {
+        /* return true if this renderer has either a parent or a child plot = is in split screen mode */
+        return (isValid(self.parentPlot) || isValid(self.childPlot))
+    }
+
+    // https://stackoverflow.com/questions/73187456/canvas-determine-if-point-is-on-line
+    //function distancePointFromLine(x0, y0, x1, y1, x2, y2) {
+          //return Math.abs((x2 - x1) * (y1 - y0) - (x1 - x0) * (y2 - y1)) / Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+    //}
+    function pDistance(x, y, x1, y1, x2, y2) {
+      /* distance of point from line segment, copied from https://stackoverflow.com/questions/849211/shortest-distance-between-a-point-and-a-line-segment */
+      var A = x - x1;
+      var B = y - y1;
+      var C = x2 - x1;
+      var D = y2 - y1;
+
+      var dot = A * C + B * D;
+      var len_sq = C * C + D * D;
+      var param = -1;
+      if (len_sq != 0) //in case of 0 length line
+          param = dot / len_sq;
+
+      var xx, yy;
+
+      if (param < 0) {
+        xx = x1;
+        yy = y1;
+      }
+      else if (param > 1) {
+        xx = x2;
+        yy = y2;
+      }
+      else {
+        xx = x1 + param * C;
+        yy = y1 + param * D;
+      }
+
+      var dx = x - xx;
+      var dy = y - yy;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
     this.onMouseMove = function(ev) {
         /* called when the mouse is moved over the Canvas */
 
@@ -1978,6 +2775,17 @@ function MaxPlot(div, top, left, width, height, args) {
         var xCanvas = clientX - canvasLeft;
         var yCanvas = clientY - canvasTop;
 
+        // is there just white space under the mouse, do nothing,
+        // from https://stackoverflow.com/questions/15325283/how-to-detect-if-a-mouse-pointer-hits-a-line-already-drawn-on-an-html-5-canvas
+        //var imageData = self.ctx.getImageData(0, 0, self.width, self.height);
+        //var inputData = imageData.data;
+        //var pData = (~~xCanvas + (~~yCanvas * self.width)) * 4;
+
+        //if (!inputData[pData + 3]) {
+            //console.log("just white space under mouse");
+            //return;
+        //}
+
         // when the cursor is over a label, change it to a hand, but only when there is no marquee
         if (self.coords.labelBbox!==null && self.mouseDownX === null) {
             var labelInfo = self.labelAt(xCanvas, yCanvas);
@@ -1990,6 +2798,12 @@ function MaxPlot(div, top, left, width, height, args) {
                     self.onLabelHover(labelInfo[0], labelInfo[1], ev);
                 }
         }
+
+        // when the cursor is over a line, trigger callback
+        if (self.onLineHover && self.coords.lineLabels) {
+            var lineLabel = self.lineAt(xCanvas, yCanvas);
+            self.onLineHover(lineLabel, ev);
+        }       
 
         if (self.mouseDownX!==null) {
             // we're panning
@@ -2152,6 +2966,23 @@ function MaxPlot(div, top, left, width, height, args) {
        self.drawDots();
     };
 
+    function drawCirclesSvg(svgLines, pxCoords, coordColors, colors, radius, alpha, selCells) {
+    /* add SVG text to the array svgLines */
+       debug("Drawing "+coordColors.length+" circles with SVG renderer");
+       var count = 0;
+       for (var i = 0; i < pxCoords.length/2; i++) {
+           var pxX = pxCoords[2*i];
+           var pxY = pxCoords[2*i+1];
+           if (isHidden(pxX, pxY))
+               continue;
+           var col = colors[coordColors[i]];
+
+           svgLines.push("<circle cx='"+pxX+"' cy='"+pxY+"' r='"+radius+"' fill-opacity='"+alpha+"' fill='#"+col+"' />");
+           count++;
+       }
+       return count;
+    }
+
     this.onWheel = function(ev) {
         /* called when the user moves the mouse wheel */
         if (self.parentPlot!==null)
@@ -2162,7 +2993,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var pxX = ev.clientX - self.left;
         var pxY = ev.clientY - self.top;
         var spinFact = 0.1;
-        if (ev.ctrlKey) // = OSX pinch and zoom gesture (and no other OS/mouse combination?)
+       if (ev.ctrlKey) // = OSX pinch and zoom gesture (and no other OS/mouse combination?)
             spinFact = 0.08;  // is too fast, so slow it down a little
         var zoomFact = 1-(spinFact*normWheel.spinY);
         debug("Wheel Zoom by "+zoomFact);
@@ -2184,8 +3015,20 @@ function MaxPlot(div, top, left, width, height, args) {
        self.canvas.addEventListener("wheel", self.onWheel);
     };
 
-    this.setShowLabels = function(doShow) {
-        self.doDrawLabels = doShow;
+    this.setShowLabels = function(trueOrFalse) {
+        /* this is separate from setLabelField, so you can switch it off and on quickly */
+        self.doDrawLabels = trueOrFalse;
+    }
+        
+    this.setLabelField = function(fieldName) {
+        /* this is only to keep track of what the current label field is. 
+           Switches off label drawing if fieldName is null */
+        self.activeLabelField = fieldName;
+        self.setShowLabels( fieldName!==null )
+    };
+
+    this.getLabelField = function(fieldName) {
+        return self.activeLabelField;
     };
 
     this.getLabels = function() {
@@ -2207,16 +3050,24 @@ function MaxPlot(div, top, left, width, height, args) {
         for (var i = 0; i<newLabels.length; i++)
             self.coords.labels[i][2] = newLabels[i];
 
-       self.coords.pxLabels = scaleLabels(self.coords.labels, self.port.zoomRange, self.port.radius,
+        self.coords.pxLabels = scaleLabels(self.coords.labels, self.port.zoomRange, self.port.radius,
                                            self.canvas.width, self.canvas.height);
+
+        if (self.coords.annots) {
+            let pxAnnots = scaleLabels(self.coords.annots, self.port.zoomRange, self.port.radius,
+                                           self.canvas.width, self.canvas.height);
+            for (let pxa of pxAnnots)
+                self.coords.labels.push(pxa);
+        }
 
         // a special case for connected plots that are not sharing our pixel coordinates
         if (self.childPlot && self.coords!==self.childPlot.coords) {
-            self.childPlot.setLabels(newLabels);
+           self.childPlot.setLabels(newLabels);
         }
     };
 
     this._setLines = function(lines, attrs) {
+        /* set the line attributes */
         if (lines===undefined)
             return;
         self.coords.lines = lines;
@@ -2225,6 +3076,15 @@ function MaxPlot(div, top, left, width, height, args) {
             self.coords.lineAttrs = {};
         else
             self.coords.lineAttrs = attrs;
+
+        // save the labels elsewhere. Labels are optional.
+        if (lines[0].length > 4) {
+            var lineLabels = []
+            for (var i=0; i<lines.length; i++) {
+                lineLabels.push(lines[i][4]);
+            }
+            self.coords.lineLabels = lineLabels;
+        }
     }
 
     this.activateMode = function(modeName) {
@@ -2304,8 +3164,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var opts = cloneObj(self.globalOpts);
         opts.showClose = true;
 
-        var plot2 = new MaxPlot(newDiv, newTop, newLeft, newWidth, newHeight, {"showClose" : true});
-        //plot2.canvas.style.borderLeft = "1px solid grey";
+        var plot2 = new MaxPlot(newDiv, newTop, newLeft, newWidth, newHeight, {"showClose" : true, "showSliders" : false});
 
         plot2.statusLine.style.display = "none";
 
@@ -2319,7 +3178,7 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.col.arr = self.col.arr;
 
         if (self.background)
-            plot2.setBackground (self.background.img);
+            plot2.setBackground (self.background.image);
 
         self.setSize(newWidth, newHeight, false); // will call scaleData(), but not redraw.
 
@@ -2355,7 +3214,6 @@ function MaxPlot(div, top, left, width, height, args) {
             self.parentPlot = undefined;
         }
         self.setSize(self.width*2, self.height, false);
-
 
         otherRend.div.remove();
         self.canvas.style["border"] = "none";
@@ -2400,7 +3258,6 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     // object constructor code
-    self.initCanvas(div, top, left, width, height);
+    self.initCanvas(div, top, left, width, height, args);
     self.initPlot(args);
-
 }

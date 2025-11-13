@@ -13,7 +13,6 @@
 import logging, sys, optparse, struct, json, os, string, shutil, gzip, re, unicodedata
 import zlib, math, operator, doctest, copy, bisect, array, glob, io, time, subprocess
 import hashlib, timeit, datetime, keyword, itertools, os.path, urllib, platform
-from distutils import spawn
 from collections import namedtuple, OrderedDict
 from os.path import join, basename, dirname, isfile, isdir, relpath, abspath, getsize, getmtime, expanduser
 from time import gmtime, strftime
@@ -85,11 +84,10 @@ CBHOMEURL_TEST = "https://cells-test.gi.ucsc.edu/downloads/cellbrowserData/"
 HIDDENCOORD = 12345
 
 # special value representing NaN in floating point arrays
-# must match the same value in cellBrowser.js
-FLOATNAN = float('-inf') # NaN and sorting does not work. we want NaN always to be first, so encode as -inf
-# special value representing NaN in integer arrays, again, we want this to be first after sorting
-# must match the same value in cellBrowser.js
-INTNAN = -2**16
+# sorting is used everywhere in the code, and sorting is fast, so we replace all NaNs with -inf
+# This means that all arrays can be sorted with the normal, fast javascript functions
+# This must match the same value in cellBrowser.js
+FLOATNAN = float('-inf')
 
 # how many md5 characters to keep in version identifiers. We load all files using their md5 to get around
 # internet browser caching
@@ -97,7 +95,7 @@ MD5LEN = 10
 
 # list of tags that are required:
 # for cellbrowser.conf of a dataset
-reqTagsDataset =['coords', 'meta', 'exprMatrix']
+reqTagsDataset =['coords', 'meta']
 # for cellbrowser.conf of a collection
 reqTagsColl =['shortLabel']
 
@@ -130,6 +128,11 @@ metaLabels = {
     "n_counts" : "UMI Count"
 }
 
+doForce = False
+
+# any meta fields with errors get collected here, so we are not stopping just for one field
+errorFields = []
+
 # ==== functions =====
 
 debugDone = False
@@ -153,6 +156,30 @@ def setDebug(doDebug):
 
 def isDebugMode():
     return debugMode
+
+def sendDebugToFile(fname):
+    return debugMode
+
+    logger = logging.getLogger('')
+    logger.setLevel(logging.DEBUG) #By default, logs all messages
+
+    # log to console
+    consLevel = logging.INFO
+    ch = logging.StreamHandler() #StreamHandler logs to console
+    ch.setLevel(consLevel)
+    ch_format = logging.Formatter('%(asctime)s - %(message)s')
+    ch.setFormatter(ch_format)
+    
+    # also always log everything to file
+    fh = logging.FileHandler(fname, "w+") # w+ means to overwrite the old file, "a" = append
+    #fh.setLevel(logging.DEBUG)
+    fh.setLevel(logging.INFO)
+    fh_format = logging.Formatter('%(asctime)s - %(lineno)d - %(levelname)-8s - %(message)s')
+    fh.setFormatter(fh_format)
+
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+    logging.info("Logging messages to %s" % fname)
 
 def makeDir(outDir):
     if not isdir(outDir):
@@ -255,7 +282,13 @@ def downloadUrlLines(url):
         errAbort("Cannot download %s" % url)
 
     if url.endswith(".gz"):
-        data = gzip.decompress(data)
+        if isPy3:
+            data = gzip.decompress(data)
+        else:
+            # weird hack, but works, from https://stackoverflow.com/questions/41432800/decompress-zip-string-in-python-2-7
+            from gzip import GzipFile
+            from StringIO import StringIO
+            data = GzipFile(fileobj=StringIO(data)).read()
     lines = data.splitlines()
     lines = [l.decode("latin1") for l in lines]
     return lines
@@ -264,6 +297,7 @@ def getDownloadsUrl():
     " return the big static file downloads URL on cells.ucsc.edu "
     cbHomeUrl = CBHOMEURL
     if getConfig("useTest"):
+        logging.debug("Using test server")
         cbHomeUrl = CBHOMEURL_TEST
     return cbHomeUrl
 
@@ -448,9 +482,6 @@ def loadConfig(fname, ignoreName=False, reqTags=[], addTo=None, addName=False):
     if "name" in conf and "/" in conf["name"]:
         errAbort("Config file %s contains a slash in the name. Slashes in names are no allowed" % fname)
 
-    if not fname.endswith(".cellbrowser.conf") and getConfig("onlyLower", False) and "name" in conf and conf["name"].isupper():
-        errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
-                "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
     return conf
 
 def maybeLoadConfig(confFname):
@@ -463,10 +494,10 @@ def maybeLoadConfig(confFname):
 
 cbConf = None
 def getConfig(tag, defValue=None):
-    " get a global cellbrowser config value from ~/.cbDefaults.conf (old value ~/.cellbrowser.conf still accepted, but that filename was too confusing for people)"
+    " get a global cellbrowser config value from ~/.cellbrowser (old value ~/.cellbrowser.conf still accepted, but that filename was too confusing for people)"
     global cbConf
     if cbConf is None:
-        confPath = expanduser("~/.cbDefaults.conf")
+        confPath = expanduser("~/.cellbrowser")
         if not isfile(confPath):
             confPath = expanduser("~/.cellbrowser.conf")
 
@@ -513,6 +544,9 @@ def cbBuild_parseArgs(showHelp=False):
     matrix will not be copied again. This means that an update of a few meta data attributes
     is quite quick.
 
+    Gene symbol/annotation files are downloaded to ~/cellbrowserData when
+    needed. Config defaults can be specified in ~/.cellbrowser. See
+    documentation at https://cellbrowser.readthedocs.io/
     """)
 
     parser.add_option("", "--init", dest="init", action="store_true",
@@ -524,7 +558,7 @@ def cbBuild_parseArgs(showHelp=False):
     parser.add_option("-i", "--inConf", dest="inConf", action="append",
         help="a cellbrowser.conf file that specifies labels and all input files, default is ./cellbrowser.conf, can be specified multiple times")
 
-    parser.add_option("-o", "--outDir", dest="outDir", action="store", help="output directory, default can be set through the env. variable CBOUT or ~/.cbDefaults.conf, current value: %default", default=defOutDir)
+    parser.add_option("-o", "--outDir", dest="outDir", action="store", help="output directory, default can be set through the env. variable CBOUT or ~/.cellbrowser, current value: %default", default=defOutDir)
 
     parser.add_option("-p", "--port", dest="port", action="store",
         help="if build is successful, start an http server on this port and serve the result via http://localhost:port", type="int")
@@ -532,8 +566,13 @@ def cbBuild_parseArgs(showHelp=False):
     parser.add_option("-r", "--recursive", dest="recursive", action="store_true",
         help="run in all subdirectories of the current directory. Useful when rebuilding a full hierarchy. Cannot be used with -p.")
 
+    parser.add_option("", "--depth", dest="depth", action="store", type="int",
+            help="when using -r: only go this many directories deep")
+
     parser.add_option("", "--redo", dest="redo", action="store", default="meta",
             help="do not use cached old data. Can be: 'meta' or 'matrix' (matrix includes meta).")
+    parser.add_option("", "--force", dest="force", action="store_true",
+            help="ignore errors that usually stop the build and go ahead anyways.")
 
     (options, args) = parser.parse_args()
 
@@ -848,8 +887,14 @@ def parseDict(fname):
     if fname.endswith(".csv"):
         sep = ","
 
+    lno = 0
     for line in fh:
-        key, val = line.rstrip("\r\n").split(sep)
+        lno+=1
+        parts = line.rstrip("\r\n").split(sep)
+        if len(parts)!=2:
+            errAbort("Error in line %d of file %s: Should contain two values, it seems to contain only a single value. " \
+                    "This can also happen if in a .tsv file a space was used instead of a tab." % (lno, fname))
+        key, val = parts
         d[key] = val
     return d
 
@@ -863,7 +908,7 @@ def readGeneToSym(fname):
     # Jim's files and CellRanger files have no headers, they are just key-value
     line1 = openFile(fname).readline().rstrip("\r\n")
     fieldCount = len(line1.split('\t'))
-    if "geneId" not in line1:
+    if "geneId" not in line1 and "symbol" not in line1:
         logging.debug("geneID,symbol file does not start with 'geneId', parsing as key,value")
         d = parseDict(fname)
     # my new files are smaller and have headers
@@ -881,9 +926,9 @@ def readGeneToSym(fname):
     logging.debug("Found symbols for %d genes" % len(d))
     return d
 
-def getDecilesList_np(values):
-    deciles = np.percentile( values, [0,10,20,30,40,50,60,70,80,90,100] )
-    return deciles
+#def getDecilesList_np(values):
+    #deciles = np.percentile( values, [0,10,20,30,40,50,60,70,80,90,100] )
+    #return deciles
 
 def bytesAndFmt(x):
     """ how many bytes do we need to store x values and what is the sprintf
@@ -921,137 +966,137 @@ def bytesAndFmt(x):
 #    decCounts.insert(0, zeroCount)
 #    return deciles, decCounts, newVals
 
-def findBins(numVals, breakVals, hasNan):
-    """
-    find the right bin index defined by breakVals for every value in numVals.
-    Special handling for the last value. The comparison uses "<=". The first
-    break is assumed to be the minimum of numVals and is therefore ignored.
-    Also returns an array with the count for every bin. hasNan triggers a special
-    mode where the first bin is reserved for NaNs (encoded as -inf)
-    >>> findBins([1,1,1,2,2,2,3,3,4,4,5,5,6,6], [1, 2,3,5,6])
-    ([0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3], [6, 2, 4, 2])
-    """
-    bArr = []
-    binCounts = [0]*(len(breakVals)-1)
+#def findBins(numVals, breakVals, hasNan):
+    #"""
+    #find the right bin index defined by breakVals for every value in numVals.
+    #Special handling for the last value. The comparison uses "<=". The first
+    #break is assumed to be the minimum of numVals and is therefore ignored.
+    #Also returns an array with the count for every bin. hasNan triggers a special
+    #mode where the first bin is reserved for NaNs (encoded as -inf)
+    #>>> findBins([1,1,1,2,2,2,3,3,4,4,5,5,6,6], [1, 2,3,5,6])
+    #([0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3], [6, 2, 4, 2])
+    #"""
+    #bArr = []
+    #binCounts = [0]*(len(breakVals)-1)
+#
+    ## NaNs mean that the non-NaN bins are all +1
+    #if hasNan:
+        #breaks = breakVals[2:]
+    #else:
+        #breaks = breakVals[1:]
+#
+    #if hasNan:
+        #for x in numVals:
+            ## we use -inf for the NaN value everywhere, because sorting is undefined in lists that contain NaN
+            #if math.isinf(x):
+                #binIdx = 0
+            #else:
+                #binIdx = bisect.bisect_left(breaks, x)+1
+            #bArr.append(binIdx)
+            #binCounts[binIdx]+=1
+    #else:
+        #for x in numVals:
+            #binIdx = bisect.bisect_left(breaks, x) # comparison operator is <=
+            #bArr.append(binIdx)
+            #binCounts[binIdx]+=1
+#
+    #return bArr, binCounts
 
-    # NaNs mean that the non-NaN bins are all +1
-    if hasNan:
-        breaks = breakVals[2:]
-    else:
-        breaks = breakVals[1:]
+#def countBinsBetweenBreaks(numVals, breakVals):
+    #""" count how many numVals fall into the bins defined by breakVals.
+    #Special handling for the last value. Comparison uses "<=". The first
+    #break is assumed to be the minimum of numVals.
+    #Also returns an array with the bin for every element in numVals
+    #>>> countBinsBetweenBreaks([1,1,1,2,2,2,3,3,4,4,5,5,6,6], [1,2,3,5,6])
+    #([6, 2, 4, 2], [0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3])
+    #"""
+#
+    #binCounts = []
+    #binCount = 0
+    #i = 1
+    #dArr = []
+    #for x in numVals:
+        #if x <= breakVals[i]:
+            #binCount+=1
+        #else:
+            #binCounts.append(binCount)
+            #binCount = 1
+            #i += 1
+        #dArr.append(i-1)
+#
+    #binCounts.append(binCount)
+#
+    #assert(len(dArr)==len(numVals))
+    #assert(len(binCounts)==len(breakVals)-1)
+    #return binCounts, dArr
 
-    if hasNan:
-        for x in numVals:
-            # we use -inf for the NaN value everywhere, sorting is undefined in lists that contain NaN
-            if math.isinf(x):
-                binIdx = 0
-            else:
-                binIdx = bisect.bisect_left(breaks, x)+1
-            bArr.append(binIdx)
-            binCounts[binIdx]+=1
-    else:
-        for x in numVals:
-            binIdx = bisect.bisect_left(breaks, x) # comparison operator is <=
-            bArr.append(binIdx)
-            binCounts[binIdx]+=1
-
-    return bArr, binCounts
-
-def countBinsBetweenBreaks(numVals, breakVals):
-    """ count how many numVals fall into the bins defined by breakVals.
-    Special handling for the last value. Comparison uses "<=". The first
-    break is assumed to be the minimum of numVals.
-    Also returns an array with the bin for every element in numVals
-    >>> countBinsBetweenBreaks([1,1,1,2,2,2,3,3,4,4,5,5,6,6], [1,2,3,5,6])
-    ([6, 2, 4, 2], [0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3])
-    """
-
-    binCounts = []
-    binCount = 0
-    i = 1
-    dArr = []
-    for x in numVals:
-        if x <= breakVals[i]:
-            binCount+=1
-        else:
-            binCounts.append(binCount)
-            binCount = 1
-            i += 1
-        dArr.append(i-1)
-
-    binCounts.append(binCount)
-
-    assert(len(dArr)==len(numVals))
-    assert(len(binCounts)==len(breakVals)-1)
-    return binCounts, dArr
-
-def discretizeArray(numVals, fieldMeta):
-    """
-    discretize numeric values based on quantiles.
-    """
-    maxBinCount = 10
-    counts = Counter(numVals).most_common()
-    counts.sort() # sort by value, not count
-
-    if len(counts) < maxBinCount:
-        # if we have just a few values, do not do any binning
-        binCounts = [y for x,y in counts]
-        values = [x for x,y in counts]
-
-        valToBin = {}
-        for i, x in enumerate(values):
-            valToBin[x] = i
-
-        dArr = [valToBin[x] for x in numVals]
-
-        fieldMeta["binMethod"] = "raw"
-        fieldMeta["values"] = values
-        fieldMeta["binCounts"] = binCounts
-        return dArr, fieldMeta
+#def discretizeArray(numVals, fieldMeta):
+    #"""
+    #discretize numeric values based on quantiles.
+    #"""
+    #maxBinCount = 10
+    #counts = Counter(numVals).most_common()
+    #counts.sort() # sort by value, not count
+#
+    #if len(counts) < maxBinCount:
+        ## if we have just a few values, do not do any binning
+        #binCounts = [y for x,y in counts]
+        #values = [x for x,y in counts]
+#
+        #valToBin = {}
+        #for i, x in enumerate(values):
+            #valToBin[x] = i
+#
+        #dArr = [valToBin[x] for x in numVals]
+#
+        #fieldMeta["binMethod"] = "raw"
+        #fieldMeta["values"] = values
+        #fieldMeta["binCounts"] = binCounts
+        #return dArr, fieldMeta
 
     # ten breaks
-    breakPercs = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-    countLen = len(counts)
-    breakIndices = [int(round(bp*countLen)) for bp in breakPercs]
-    # as with all histograms, the last break is always a special case (0-based array)
-    breakIndices.append(countLen-1)
-    breakVals = [counts[idx][0] for idx in breakIndices]
-
+    #breakPercs = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    #countLen = len(counts)
+    #breakIndices = [int(round(bp*countLen)) for bp in breakPercs]
+    ## as with all histograms, the last break is always a special case (0-based array)
+    #breakIndices.append(countLen-1)
+    #breakVals = [counts[idx][0] for idx in breakIndices]
+#
     # NaNs are encoded as -inf so they always are the first break
     # The first non-NaN value is at index 1
     # If we have NaNs, we need one more bin, with the first non-Nan value
-    hasNan = False
-    if math.isinf(breakVals[0]):
-        hasNan = True
-        breakVals.insert(1, counts[1][0])
-        logging.info("Field has NaN/Unknown values")
-    logging.debug("Breaks are: %s" % breakVals)
+    #hasNan = False
+    #if math.isinf(breakVals[0]):
+        #hasNan = True
+        #breakVals.insert(1, counts[1][0])
+        #logging.info("Field has NaN/Unknown values")
+    #logging.debug("Breaks are: %s" % breakVals)
 
-    dArr, binCounts = findBins(numVals, breakVals, hasNan)
-    logging.info("Number of values per decile-bin: %s" % binCounts)
+    #dArr, binCounts = findBins(numVals, breakVals, hasNan)
+    #logging.info("Number of values per decile-bin: %s" % binCounts)
 
     # we should have 11 breaks/10 bins, or 12 breaks/11bins if we have NaN elements
-    assert((not hasNan and len(breakVals)==11) or (hasNan and len(breakVals)==12))
-    assert((not hasNan and len(binCounts)==10) or (hasNan and len(binCounts)==11))
-    assert((len(binCounts)+1 == len(breakVals)))
+    #assert((not hasNan and len(breakVals)==11) or (hasNan and len(breakVals)==12))
+    #assert((not hasNan and len(binCounts)==10) or (hasNan and len(binCounts)==11))
+    #assert((len(binCounts)+1 == len(breakVals)))
+#
+    #fieldMeta["binMethod"] = "quantiles"
+    #fieldMeta["binCounts"] = binCounts
+    #if math.isinf(breakVals[0]): # -infinity is not valid in JSON
+        #breakVals[0] = "Unknown"
+    #fieldMeta["breaks"] = breakVals
 
-    fieldMeta["binMethod"] = "quantiles"
-    fieldMeta["binCounts"] = binCounts
-    if math.isinf(breakVals[0]): # -infinity is not valid in JSON
-        breakVals[0] = "Unknown"
-    fieldMeta["breaks"] = breakVals
+    #return dArr, fieldMeta
 
-    return dArr, fieldMeta
-
-def discretizeNumField(numVals, fieldMeta, numType):
-    " given a list of numbers, add attributes to fieldMeta that describe the binning scheme "
-    digArr, fieldMeta = discretizeArray(numVals, fieldMeta)
-
-    #deciles, binCounts, newVals = getDecilesWithZeros(numVals)
-
-    fieldMeta["arrType"] = "uint8"
-    fieldMeta["_fmt"] = "<B"
-    return digArr, fieldMeta
+#def discretizeNumField(numVals, fieldMeta, numType):
+    #" given a list of numbers, add attributes to fieldMeta that describe the binning scheme "
+    #digArr, fieldMeta = discretizeArray(numVals, fieldMeta)
+#
+    ##deciles, binCounts, newVals = getDecilesWithZeros(numVals)
+#
+    #fieldMeta["arrType"] = "uint8"
+    #fieldMeta["_fmt"] = "<B"
+    #return digArr, fieldMeta
 
 def typeForStrings(strings):
     """ given a list of strings, determine if they're all ints or floats or strings
@@ -1073,7 +1118,7 @@ def typeForStrings(strings):
         return "float"
     return "int"
 
-emptyVals = ["", "null", "none", "None", "unknown", "nd", "n.d.", "Unknown", "NaN", "NA", "undefined", "Na"]
+emptyVals = ["", "null", "none", "None", "unknown", "nd", "n.d.", "Unknown", "NaN", "NA", "undefined", "Na", "na"]
 
 def likeEmptyString(val):
     " returns true if string is a well-known synonym of 'unknown' or 'NaN'. ported from cellbrowser.js "
@@ -1102,8 +1147,10 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
     - if int or float: replace 0 or NaN with the FLOATNAN global (-inf)
     - if uniqueString: 'maxLen' is the length of the longest string
     - if enum: 'values' is a list of all possible values
-    - if colors is not None: 'colors' is a dict of value -> color
+    - if colors is not None: 'colors' is a dict of fieldName -> value -> color. The fieldname "__default__" is always tried to look up colors.
+    - arrType is the Javascript TypedArray type of the array: float32, uint8, uint16, uint32
     """
+    global errorFields
     unknownCount = 0
     intCount = 0
     floatCount = 0
@@ -1177,35 +1224,59 @@ def guessFieldMeta(valList, fieldMeta, colors, forceType, enumOrder):
             valCounts = valCounts.items()
             valCounts = list(sorted(valCounts, key=operator.itemgetter(1), reverse=True)) # = (label, count)
 
-        if colors!=None:
+        fieldColors = colors.get(fieldMeta["name"]) # this is the no-special characters name of the field
+
+        if fieldColors is None:
+            fieldColors = colors.get(fieldMeta["label"])
+
+        isDefColors = False
+        if fieldColors is None:
+            logging.debug("Using default colors for field")
+            fieldColors = colors.get("__default__")
+            isDefColors = True
+
+        if fieldColors!=None:
+            logging.debug("Collecting color values")
             colArr = []
             foundColors = 0
             notFound = set()
             for val, _ in valCounts:
-                if val in colors:
-                    colArr.append(colors[val])
+                if val in fieldColors:
+                    colArr.append(fieldColors[val])
+                    foundColors +=1
+                elif val in ["", "NA", "undef", "None", "null", " "]:
+                    logging.warn("No color defined for value %s, using light grey" % repr(val))
+                    colArr.append("#d3d3d3")
                     foundColors +=1
                 else:
                     notFound.add(val)
-                    colArr.append(None) # maybe I should fail hard here?
+                    colArr.append(None)
+
+            logging.debug("Colors: found %d colors, isDefaultColors: %s" % (foundColors, isDefColors))
 
             if foundColors > 0:
                 fieldMeta["colors"] = colArr
-                if len(notFound)!=0:
-                    logging.warn("No default color found for field values %s. They were set to defaults." % notFound)
+
+            if len(notFound)!=0:
+                msg = "No colors found for field %s, values %s." % (repr(fieldMeta), list(notFound))
+                if isDefColors:
+                    if foundColors > 0: # otherwise would print warning on every field
+                        logging.warn(msg+" These will fall back to palette default colors")
+                else:
+                    errAbort(msg)
 
         fieldMeta["valCounts"] = valCounts
         fieldMeta["arrType"], fieldMeta["_fmt"] = bytesAndFmt(len(valArr))
 
         if fieldMeta["arrType"].endswith("32"):
-            errAbort("Meta field %s has more than 32k different values and makes little sense to keep. "
-                "Please or remove the field from the meta data table or contact us, cells@ucsc.edu."% fieldMeta["name"])
+            logging.error("Meta field %s has more than 32k different values and makes little sense to keep. "
+                "Please or remove the field from the meta data table or contact us, cells@ucsc.edu."% fieldMeta["label"])
+            errorFields.append(fieldMeta["label"])
 
         valToInt = dict([(y[0],x) for (x,y) in enumerate(valCounts)]) # dict with value -> index in valCounts
         newVals = [valToInt[x] for x in valList] #
 
     fieldMeta["diffValCount"] = len(valCounts)
-    #logging.debug("Full meta info: %s" % repr(fieldMeta))
 
     return fieldMeta, newVals
 
@@ -1284,17 +1355,20 @@ def addDesc(fieldDescs, fieldMeta):
         fieldMeta["desc"] = desc
     return fieldMeta
 
-def metaToBin(inConf, outConf, fname, colorFname, outDir, enumFields):
+def metaToBin(inDir, inConf, outConf, fname, outDir):
     """ convert meta table to binary files. outputs fields.json and one binary file per field.
     adds names of metadata fields to outConf and returns outConf
     """
+    colorFname = inConf.get("colors")
+    enumFields = inConf.get("enumFields")
+
     logging.info("Converting to numbers and compressing meta data fields")
     makeDir(outDir)
 
-    colData = parseIntoColumns(fname)
+    colData = list(parseIntoColumns(fname))
 
-    colors = parseColors(colorFname)
-    acronyms = readAcronyms(inConf, outConf)
+    colors = parseColors(inDir, inConf, outConf, colData)
+    acronyms = readAcronyms(inConf, outConf) # XX no md5 yet for acronyms
     metaDescs = parseMetaDesc(inConf)
     enumOrder = inConf.get("enumOrder")
 
@@ -1302,6 +1376,8 @@ def metaToBin(inConf, outConf, fname, colorFname, outDir, enumFields):
     # we have to strip special chars so fix the user's field names to our format
     sanEnumFields = []
     if enumFields is not None:
+        if "" in enumFields:
+            errAbort("The enumFields statement in cellbrowser.conf must not contain an empty string")
         sanEnumFields = [sanitizeName(n) for n in enumFields]
 
     fieldInfo = []
@@ -1324,13 +1400,13 @@ def metaToBin(inConf, outConf, fname, colorFname, outDir, enumFields):
         # very dumb heuristic to recognize fields that should not be treated as numbers but as enums
         # res.0.6 is the default field name for Seurat clustering. Field header sanitizing changes it to
         # res_0_6 which is not optimal, but namedtuple doesn't allow dots in names
-        if "luster" in cleanFieldName or \
+        if "eiden" in cleanFieldName or \
+                "luster" in cleanFieldName or \
                 "ouvain" in cleanFieldName or (fieldName.startswith("res_") and "_" in fieldName):
             forceType="enum"
 
         if colIdx==0:
             forceType = "unique"
-
 
         fieldMeta = OrderedDict()
         fieldMeta["name"] = cleanFieldName
@@ -1391,6 +1467,15 @@ def metaToBin(inConf, outConf, fname, colorFname, outDir, enumFields):
             logging.info(("Field %(name)s: type %(type)s, %(diffValCount)d different values" % fieldMeta))
         else:
             logging.info(("Field %(name)s: type %(type)s, %(diffValCount)d different values, max size %(maxSize)d " % fieldMeta))
+
+    global errorFields
+    if len(errorFields)>0:
+        logging.error("Stopping now, since these fields were found with errors: %s. Run cbBuild with --force "
+            "to ignore these errors and build anyways OR check that number fields are not recognized as enum fields. " % ",".join(errorFields))
+        if doForce:
+            errorFields = []
+        else:
+            errAbort("build stopped")
 
     return fieldInfo, validFieldNames
 
@@ -1481,18 +1566,46 @@ class MatrixMtxReader:
         " yield (geneId, symbol, array) tuples from gene expression file. "
         mat = self.mat
         genes = self.genes
+        skipIds = 0
+        geneToSym = self.geneToSym
         for i in range(0, len(self.genes)):
+
             geneId = genes[i]
-            geneSym = geneId
-            if "|" in geneId:
-                geneId, geneSym = geneId.split("|")[:2]
-            if self.geneToSym and geneSym is not None:
-                geneSym = self.geneToSym.get(geneId)
+            geneId, geneSym, skipIds  = resolveGene(geneId, geneToSym, skipIds)
+            logging.debug("geneId %s, geneSym %s", geneId, geneSym)
 
             if i%1000==0:
                 logging.info("%d genes written..." % i)
             arr = mat.getrow(i).toarray()
+            if arr.ndim==2:
+                # scipy sparse arrays have changed their entire data model and now all operations
+                # return 2D matrices. So need to unpack it to get the array. Grrr.
+                arr = arr[0]
             yield (geneId, geneSym, arr)
+
+def resolveGene(gene, geneToSym, skipIds):
+    if "|" in gene:
+        gene, symbol = gene.split("|")
+    else:
+        if geneToSym is None:
+            symbol = gene
+        else:
+            if gene.startswith("EN"):
+                gene = gene.split(".")[0]
+
+            symbol = geneToSym.get(gene)
+            logging.debug("%s -> %s" % (gene, symbol))
+
+            if symbol is None:
+                skipIds += 1
+                logging.warn("could not find symbol for ID %s, looks like it is not a valid gene ID, check geneIdType setting in cellbrowser.conf or gene symbol mapping tables" % (gene))
+                symbol = gene
+
+            if symbol.isdigit():
+                logging.warn("in gene matrix: gene identifier %s is a number. If this is indeed a gene identifier, you can " \
+                "ignore this warning. Otherwise, your matrix may have no gene ID in the first column and you will have to fix the matrix. " \
+                "Another possibility is that your geneIds are entrez gene IDs, but this is very rare." % (symbol))
+    return gene, symbol, skipIds
 
 class MatrixTsvReader:
     " open a .tsv or .csv file and yield rows via iterRows. gz and csv OK."
@@ -1600,6 +1713,7 @@ class MatrixTsvReader:
         for (geneId, sym, arr) in self.oldRows:
             # for the integer case though we have to fix up the type now
             if self.matType=="int" or self.matType=="forceInt":
+                logging.debug("spoolback: fix up integer")
                 if numpyLoaded:
                     arr = arr.astype(int)
                 else:
@@ -1639,26 +1753,7 @@ class MatrixTsvReader:
                 errAbort("The first header line of the matrix file has %d columns. "\
                     "However, line %d has %d columns. All lines must have the same number of columns." % (len(self.headers), lineNo+1, geneCount+1))
 
-            if "|" in gene:
-                gene, symbol = gene.split("|")
-            else:
-                if geneToSym is None:
-                    symbol = gene
-                else:
-                    symbol = geneToSym.get(gene.split(".")[0])
-                    logging.debug("%s -> %s" % (gene, symbol))
-                    #if symbol is None:
-                        #symbol = geneToSym.get(gene)
-
-                    if symbol is None:
-                        skipIds += 1
-                        logging.warn("line %d: could not find symbol for ID %s, looks like it is not a valid gene ID, check geneIdType setting in cellbrowser.conf or gene symbol mapping tables" % (lineNo, gene))
-                        symbol = gene
-
-                    if symbol.isdigit():
-                        logging.warn("line %d in gene matrix: gene identifier %s is a number. If this is indeed a gene identifier, you can " \
-                        "ignore this warning. Otherwise, your matrix may have no gene ID in the first column and you will have to fix the matrix. " \
-                        "Another possibility is that your geneIds are entrez gene IDs, but this is very rare." % (lineNo, symbol))
+            gene, symbol, skipIds  = resolveGene(gene, geneToSym, skipIds)
 
             if symbol in doneGenes:
                 logging.warn("line %d: Gene %s/%s is duplicated in matrix, using only first occurrence for symbol, kept second occurrence with original geneId" % (lineNo, gene, symbol))
@@ -1717,30 +1812,30 @@ def findBin(ranges, val):
     # if doesn't fit in anywhere, return beyond last possible index
     return i+1
 
-def discretizeArr_uniform(arr, fieldMeta):
-    """ given an array of numbers, get min/max, create 10 bins between min and max then
-    translate the array to bins and return the list of bins
-    """
-    arrMin = min(arr)
-    arrMax = max(arr)
-    stepSize = (arrMax-arrMin)/10.0
-
-    dArr = [0]*len(arr)
-    binCounts = [0]*10
-    for i, x in enumerate(arr):
-        binIdx = int(round((x - arrMin)/stepSize))
-        if x == arrMax:
-            binIdx = 9
-        assert(binIdx <= 9)
-        dArr[i] = binIdx
-        binCounts[binIdx]+=1
-
-    fieldMeta["binMethod"] = "uniform"
-    fieldMeta["minVal"] = arrMin
-    fieldMeta["maxVal"] = arrMax
-    fieldMeta["stepSize"] = stepSize
-    fieldMeta["binCounts"] = binCounts
-    return dArr, fieldMeta
+#def discretizeArr_uniform(arr, fieldMeta):
+    #""" given an array of numbers, get min/max, create 10 bins between min and max then
+    #translate the array to bins and return the list of bins
+    #"""
+    #arrMin = min(arr)
+    #arrMax = max(arr)
+    #stepSize = (arrMax-arrMin)/10.0
+#
+    #dArr = [0]*len(arr)
+    #binCounts = [0]*10
+    #for i, x in enumerate(arr):
+        #binIdx = int(round((x - arrMin)/stepSize))
+        #if x == arrMax:
+            #binIdx = 9
+        #assert(binIdx <= 9)
+        #dArr[i] = binIdx
+        #binCounts[binIdx]+=1
+#
+    #fieldMeta["binMethod"] = "uniform"
+    #fieldMeta["minVal"] = arrMin
+    #fieldMeta["maxVal"] = arrMax
+    #fieldMeta["stepSize"] = stepSize
+    #fieldMeta["binCounts"] = binCounts
+    #return dArr, fieldMeta
 
 def digitize_py(arr, matType):
     """ calculate deciles ignoring 0s from arr, use these deciles to digitize the whole arr,
@@ -1910,7 +2005,8 @@ def digitize_np(arr, matType):
 def maxVal(a):
     if numpyLoaded:
         return np.amax(a)
-    # if MTX old old numpy is loaded, so isNumpy is false but var is still an ndarray - weird construct to avoid syntax error on undefined "np"
+    # if MTX old old numpy is loaded, so isNumpy is false but var is still an ndarray ->
+    # weird syntax to avoid syntax error on undefined "np"
     elif 'np' in dir():
         if isinstance(a, np.ndarray):
             return np.amax(a)
@@ -1963,16 +2059,26 @@ def exprEncode(geneDesc, exprArr, matType):
     geneDesc = str(geneDesc) # make sure no unicode
     geneIdLen = struct.pack("<H", len(geneDesc))
 
+    nanValue = None
+    if matType=="float":
+        nanValue = FLOATNAN
+
     # on cortex-dev, numpy was around 30% faster. Not a huge difference.
     if numpyLoaded:
         if matType=="float":
             exprArr = exprArr.astype("float32")
+            exprArr[np.isnan(exprArr)] = nanValue
         elif matType=="int":
+            has_nan = np.any(np.isnan(exprArr))
+            if has_nan:
+                assert(False) # integer matrices with Nans are not supported right now. Email the programmer.
             exprArr = exprArr.astype("uint32")
         else:
             assert(False) # internal error
-        exprStr = exprArr.tobytes()
+
         minVal = np.amin(exprArr)
+        exprStr = exprArr.tobytes()
+        # e.g. cortex-dev-splicing/psi has NAN values in the mtx file
     else:
         if matType=="float":
             arrType = "f"
@@ -1986,12 +2092,14 @@ def exprEncode(geneDesc, exprArr, matType):
         if str(type(exprArr))=="<type 'numpy.ndarray'>":
             exprArr = exprArr.tolist()[0]
 
+        exprArr = [nanValue if math.isnan(x) else x for x in exprArr]
         # Python 3.9 removed tostring()
         if sys.version_info >= (3, 2):
             exprStr = array.array(arrType, exprArr).tobytes()
         else:
             exprStr = array.array(arrType, exprArr).tostring()
 
+        #minVal = min([x for x in exprArr if not (math.isinf(x) and x < 0)]) # this is super slow...
         minVal = min(exprArr)
 
     if isPy3:
@@ -2005,7 +2113,7 @@ def exprEncode(geneDesc, exprArr, matType):
     logging.debug("raw - compression factor of %s: %f, before %d, after %d"% (geneDesc, fact, len(geneStr), len(geneCompr)))
     return geneCompr, minVal
 
-def indexByChrom(exprIndex):
+def indexAtacOffsetsByChrom(exprIndex):
     """ given a dict with name -> (offset, len) and name being a string of chrom:start-end,
     reformat the dict to one with chrom -> [ [start, end, offset, len], ... ] and return it.
     The positions are sorted.
@@ -2019,7 +2127,7 @@ def indexByChrom(exprIndex):
         elif "_" in chromRange:
             chrom, start, end = chromRange.split("_")
         else:
-            chrom, start, end = chromRange.split("-") # chrom names must be in format chrom:start-end or chrom_start_end or chrom-start-end. Not sure? Email cells@ucsc.edu
+            chrom, start, end = chromRange.split("-") # chrom names must be in format chrom:start-end or chrom_start_end or chrom-start-end. Broken? Email us at cells@ucsc.edu
 
         start = int(start)
         end = int(end)
@@ -2031,7 +2139,8 @@ def indexByChrom(exprIndex):
 
     return dict(byChrom)
 
-def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJsonFname, metaSampleNames, matType=None, genesAreRanges=False):
+def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJsonFname, \
+        metaSampleNames, matType=None, genesAreRanges=False):
     """ convert gene expression vectors to vectors of deciles
         and make json gene symbol -> (file offset, line length)
     """
@@ -2083,6 +2192,8 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     symCounts = defaultdict(int)
     geneCount = 0
+    atacChromCount = 0
+
     allMin = 99999999
     noSymFound = 0
     for geneId, sym, exprArr in matReader.iterRows():
@@ -2091,10 +2202,15 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
         key = sym
         if sym is None:
             noSymFound +=1
+        else:
+            symCounts[key]+=1
+
         if geneId!=sym and sym is not None:
             key = geneId+"|"+sym
 
-        symCounts[key]+=1
+        if geneId.startswith("chr"):
+            atacChromCount+=1
+
         if symCounts[key] > 1000:
             errAbort("The gene ID/symbol %s appears more than 1000 times in the expression matrix. "
                     "Are you sure that the matrix is in the right format? Each gene should be on a row. "
@@ -2129,7 +2245,11 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     if genesAreRanges:
         logging.info("ATAC-mode is one. Assuming that genes are in format chrom:start-end or chrom_start_end or chrom-start-end")
-        exprIndex = indexByChrom(exprIndex)
+        exprIndex = indexAtacOffsetsByChrom(exprIndex)
+    else:
+        if atacChromCount > 100:
+            errAbort("There are more than 100 genes that look like a chrom_start_end range but the atacSearch cellbrowser.conf"
+                    " is not set. Please add this option or contact us if you are confused about this error.")
 
     if highCount==0:
         logging.warn("No single value in the matrix is > 100. It looks like this "
@@ -2141,7 +2261,12 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     # keep a flag so the client later can figure out if the expression matrix contains any negative values
     # this is important for handling the 0-value
-    exprIndex["_range"] = (int(allMin),0)
+    matrixMin = float(allMin) # float() in case it is -inf as a np.float32, must be native Python float, not numpy
+    if matrixMin==float('-inf'): # JSON cannot encode -inf nor NaN, so we use "None" for that which will become null in JSON
+        matrixMin = None
+
+    exprIndex["_range"] = (matrixMin, 0)
+
     logging.info("Global minimum in matrix is: %f" % allMin)
 
     jsonOfh = open(jsonFname, "w")
@@ -2176,6 +2301,15 @@ def indexMeta(fname, outFname):
     """ index a tsv by its first field. Writes binary data to outFname.
         binary data is (offset/4 bytes, line length/2 bytes)
     """
+    # traditionally, I always used four bytes. The biggest datasets have meta data 
+    # that is bigger than 4GB, however
+    indexFormat = "<L" # unsigned long, four bytes
+    isEightBytes = False
+    metaSize = getsize(fname)
+    if metaSize > 4294967295:
+        indexFormat = "<Q" # unsigned long long, eight bytes
+        isEightBytes = True
+
     ofh = open(outFname, "wb")
     logging.info("Indexing meta file %s to %s" % (fname, outFname))
     ifh = open(fname)
@@ -2192,36 +2326,48 @@ def indexMeta(fname, outFname):
         lineLen = end - start
         assert(lineLen!=0)
         assert(lineLen<65535) # meta data line cannot be longer than 2 bytes
-        ofh.write(struct.pack("<L", start))
+        ofh.write(struct.pack(indexFormat, start))
         ofh.write(struct.pack("<H", lineLen))
     ofh.close()
+    return isEightBytes
 
 # ----------- main --------------
 
-def parseColors(fname):
-    " parse color table and return as dict value -> color "
-    if fname==None:
-        return {}
-
-    if not isfile(fname):
-        logging.warn("File %s does not exist" % fname)
-        return None
-
-    ifh = openFile(fname)
-    sep = sepForFile(fname)
+def parseOneColorFile(fname):
+    " read key-val file that defines colors "
+    logging.debug("Parsing color file %s" % fname)
     lineNo = 0
     newDict = dict()
-    for line in ifh:
+    invColumns = False
+
+    for row in textFileRows(fname):
         lineNo +=1
-        row = line.rstrip("\n\r").split(sep)
+        if row[0].startswith("#"):
+            continue
         if len(row)!=2:
             errAbort("color file %s - line %d does not contain exactly two fields: %s" % (fname, lineNo, row))
         metaVal, color = row
 
-        if color.lower()=="color":
+        if metaVal.lower().startswith("color") or metaVal.lower().startswith("colour"):
+            # tolerate a header line, otherwise will stop with "color not found"
+            invColumns = True
+            continue
+        if color.lower().startswith("color") or color.lower().startswith("colour"):
+            # tolerate a header line, otherwise will stop with "color not found"
             continue
 
-        color = color.strip().strip("#") # hbeale had a file with trailing spaces
+        if invColumns:
+            color, metaVal = row
+
+        color = color.strip() # hbeale had a 6-digit file with trailing spaces
+
+        if color.startswith("#") and len(color)==9:
+            # we got these a few times now: #abababff
+            logging.warn("Color %s looks like a hex color with alpha value, stripping last two characters"
+                    % color)
+            color = color[1:7]
+
+        color = color.strip("#") # hbeale had a 6-digit file with trailing spaces
 
         isHex = True
         if len(color)!=6: # colors can be no more than six hex digits
@@ -2236,19 +2382,59 @@ def parseColors(fname):
             logging.debug("Not a six-digit hex color code. Trying to map '%s' to a hex color" % color)
             import webcolors # error? -> pip install webcolors
             try:
-                color = webcolors.name_to_hex(color, spec='css3').lstrip("#")
+                color = webcolors.name_to_hex(color).lstrip("#")
             except ValueError:
-                # R knows more colors, like deeppink4. We simply map to deeppink for now
-                # there does not seem to be a good table with R colors in Python yet
-                color = "".join([c for c in color if not c.isdigit()])
-                color = webcolors.name_to_hex(color, spec='css3').lstrip("#")
+                import matplotlib.colors as mcolors
+                try:
+                    color = mcolors.CSS4_COLORS[color].lstrip("#")
+                except ValueError:
+                    # R knows more colors, like deeppink4. We simply map to deeppink for now
+                    # there does not seem to be a good table with R colors in Python yet
+                    color = "".join([c for c in color if not c.isdigit()])
+                    color = webcolors.name_to_hex(color, spec='css3').lstrip("#")
 
         newDict[metaVal] = color
     return newDict
 
+def parseColors(inDir, inConf, outConf, colData):
+    """ parse color table and return as dict fieldName -> value -> color. Can
+    be a single filename (backwards compat) or a dict fieldName -> filename """
+
+    if not "colors" in inConf:
+        return {}
+
+    metaFieldNames = [x for x,y in colData] # so we can check that fieldnames are valid
+
+    colorConf = inConf["colors"]
+
+    if type(colorConf)==type(""):
+        logging.debug("Color config is a single string, falling back to old behavior")
+        colorConf = { "__default__":colorConf }
+
+    colors = {}
+    for fieldName, fname in colorConf.items():
+        if fieldName != "__default__" and fieldName not in metaFieldNames:
+            logging.warn("fieldName %s from 'colors' specification is not a valid meta data field name. Possible names are: %s" % (repr(fieldName), repr(metaFieldNames)))
+            continue
+
+        fname = abspath(join(inDir, fname))
+        if isfile(fname):
+            outConf["fileVersions"]["colors:"+fieldName] = getFileVersion(fname)
+        else:
+            if fieldName=="__default__":
+                # old behavior was to tolerate missing color files. Not sure why. Tolerating this now only for the default field.
+                logging.warn("Color file %s does not exist, skipping it" % fname)
+                continue
+            else:
+                errAbort("Color file %s does not exist, skipping it" % fname)
+
+        colors[fieldName] = parseOneColorFile(fname)
+
+    return colors
+
 def scalePoint(scaleX, scaleY, minX, maxX, minY, maxY, flipY, useTwoBytes, x, y):
     " scale a point to the new coordinate system. used for either lines or points "
-    if useTwoBytes:
+    if useTwoBytes or scaleY!=1.0 or scaleX!=1.0:
         x = int(scaleX * (x - minX))
         y = int(scaleY * (y - minY))
     if flipY:
@@ -2337,15 +2523,16 @@ def readMatrixSampleNames(fname):
         lines = openFile(barcodePath).read().splitlines()
         ret = []
         for l in lines:
-            ret.append(l.split()[0])
+            ret.append(l.split("\t")[0])
         return ret
 
     else:
-        return readHeaders(fname)[1:]
+        names = readHeaders(fname)[1:]
+        return names
 
-def metaReorder(matrixFname, metaFname, fixedMetaFname):
+def metaReorderFilter(matrixFname, metaFname, fixedMetaFname, keepFields):
     """ check and reorder the meta data, has to be in the same order as the
-    expression matrix, write to fixedMetaFname. Remove single-value fields from the meta data. """
+    expression matrix, write to fixedMetaFname. Remove single value fields from the meta data, except if they are in keepFields. """
 
     logging.info("Checking and reordering meta data to %s" % fixedMetaFname)
     metaSampleNames = readSampleNames(metaFname)
@@ -2402,9 +2589,14 @@ def metaReorder(matrixFname, metaFname, fixedMetaFname):
     for fieldIdx, values in iterItems(fieldValues):
         #logging.debug("fieldIdx %d, values %s" % (fieldIdx, values))
         if len(values)==1:
+            fieldName = headers[fieldIdx]
             logging.info("Field %d, '%s', has only a single value. Removing this field from meta data." %
-                    (fieldIdx, headers[fieldIdx] ))
-            skipFields.add(fieldIdx)
+                    (fieldIdx, fieldName))
+            if fieldName in keepFields:
+                logging.warn("Actually, keeping field '%s' since its the default label or color field, "
+                    "but check with submitter if this makes sense." % fieldName)
+            else:
+                skipFields.add(fieldIdx)
 
     # write the header line, removing unused fields
     ofh.write("\t".join(sliceRow(headers, skipFields)))
@@ -2476,7 +2668,10 @@ def writeCoords(coordName, coords, sampleNames, coordBinFname, coordInfo, textOu
         logging.info("%s: %d cells have meta and coords. %d cells have meta but no coord. E.g. %s" % \
             (coordName, len(xVals), len(missNames), missNames[:3]))
         if len(xVals)-len(missNames)==0:
-            errAbort("No coordinates that are also in meta. Check coord and meta cell identifiers.")
+            sampleCoords = list(coords)[:10]
+            exampleSampleNames = sampleNames[:10]
+            errAbort("No coordinates that are also in meta. Check coord and meta cell identifiers. "
+                    "Example meta coords: %s, Example matrix coords: %s" % (sampleCoords, exampleSampleNames))
 
     binFh.close()
     if debugFh:
@@ -2556,12 +2751,14 @@ def checkMtx(mtxFname, geneFname, barcodeFname):
     if len(geneIds) != rowCount:
         errAbort("The number of rows in the file %s (%d) is different from the number of lines in the file %s (%d). "
                 "The number should be identical and usually is the number of genes/features. "
-                "This suggests a problem in the way the data was exported. You may want to remove header lines. "
-                % (mtxFname, len(geneIds), geneFname, rowCount))
+                "This suggests a problem in the way the data was exported. If the difference is one, the problem is often that "
+                                "there is a header line but features.tsv files have no header line. "
+                % (mtxFname, rowCount, geneFname, len(geneIds)))
     if len(barcodes) != colCount:
         errAbort("The number of columns in the file %s is different from the number of lines in the file %s. "
                 "The number should be identical and usually is the number of genes/features. "
-                "This suggests a problem in the way the data was exported. You may want to remove header lines. "
+                "This suggests a problem in the way the data was exported. If the difference is one, the problem is often that "
+                "there is a header line but features.tsv files have no header line. "
                 % (mtxFname, barcodeFname))
 
     return False
@@ -2673,6 +2870,7 @@ nonAscii = re.compile(r'[^a-zA-Z_0-9+]')
 def sanitizeName(name):
     " remove all nonalpha chars, allow underscores, special treatment for %, + and -. Makes a valid file name. "
     assert(name!=None)
+    origName = name
     # some characters are actually pretty common and there we have seen fields where the only 
     # difference are these characters
     # if this continues to be aproblem, maybe append the MD5 of a raw field name to the sanitized name
@@ -2686,7 +2884,7 @@ def sanitizeName(name):
     if newName!=name:
         logging.debug("Sanitized %s -> %s" % (repr(name), newName))
     if (len(newName)==0):
-        errAbort("Field name %s has only special chars?" % name)
+        errAbort("Field name %s has only special chars?" % repr(origName))
     return newName
 
 def nonAlphaToUnderscores(name):
@@ -2756,6 +2954,9 @@ def parseMarkerTable(filename, geneToSym):
     data = defaultdict(list)
     otherColumns = defaultdict(list)
     for row in reader:
+        if row[0].startswith("#"):
+            continue
+
         clusterName = row[clusterIdx]
 
         if clusterName=="":
@@ -2763,7 +2964,14 @@ def parseMarkerTable(filename, geneToSym):
 
         geneId = row[geneIdx]
 
-        scoreVal = float(row[scoreIdx])
+        try:
+            scoreVal = float(row[scoreIdx])
+        except ValueError:
+            logging.error("File %s, column %d: value is not a number but we expect a number in this colum."
+                    "Columns should be: cluster, gene, score. '%s' is not a score`" %
+                    (filename, scoreIdx+1, row[scoreIdx]))
+            raise
+
         otherFields = row[otherStart:otherEnd]
 
         for colIdx, val in enumerate(otherFields):
@@ -2813,7 +3021,7 @@ def parseMarkerTable(filename, geneToSym):
 
     return data, newHeaders
 
-def splitMarkerTable(filename, geneToSym, outDir):
+def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir):
     """ split .tsv on first field and create many files in outDir with columns 2-end.
         Returns the names of the clusters and a dict topMarkers with clusterName -> list of five top marker genes.
     """
@@ -2839,10 +3047,20 @@ def splitMarkerTable(filename, geneToSym, outDir):
         ofh = open(outFname, "w")
         ofh.write("\t".join(newHeaders))
         ofh.write("\n")
+        missGeneIds = set()
         for row in rows:
             row[2] = "%0.5E" % row[2] # limit score to 5 digits
+            geneId = row[0]
+            if geneId not in matrixGeneIds:
+                missGeneIds.add(geneId)
+                continue
+
             ofh.write("\t".join(row))
             ofh.write("\n")
+
+        if len(missGeneIds)!=0:
+            logging.error("Marker table contains these genes, they were skipped, they are not in the matrix: %s" % (",".join(missGeneIds)))
+            #logging.error("Use --force to accept this.")
 
         topSyms = [row[1] for row in rows[:topMarkerCount]]
         topMarkers[clusterName] = topSyms
@@ -2900,6 +3118,11 @@ def getImageSize(inFname):
 
 def copyImage(inDir, summInfo, datasetDir):
     """ copy image to datasetDir and write size to summInfo["imageWidth"] and "imageHeight" """
+    if summInfo["image"]=="":
+        logging.warn("empty string for the 'image' tag in desc.conf, removing it entirely")
+        del summInfo["image"]
+        return summInfo
+
     inFname = join(inDir, summInfo["image"])
     logging.debug("Copying %s to %s" % (inFname, datasetDir))
     shutil.copyfile(inFname, join(datasetDir, basename(inFname)))
@@ -2931,13 +3154,14 @@ def readFile(fname, encoding="utf8"):
 
 def readFileIntoDict(summInfo, key, inDir, fname, mustExist=False, encoding="utf8"):
     " return file with encoding as string into dictionary "
-    logging.debug("Reading file into dict. %s, inDir %s, file name %s" % (key, inDir, fname))
     fname = join(inDir, fname)
     if not isfile(fname):
         if mustExist:
             errAbort("%s does not exist" % fname)
         else:
             return
+
+    logging.debug("Reading file into dict. %s, inDir %s, file name %s" % (key, inDir, fname))
 
     if fname.endswith(".json"):
         data = readJson(fname)
@@ -2989,6 +3213,60 @@ def copyBackgroundImages(inDir, inConf, outConf, datasetDir):
         newImages.append(imageInfo)
     outConf["images"] = newImages
 
+def parseImageTsv(fname):
+    """ parse a tsv file with images to a nested dict structure and return it 
+    input is a four or five column tsv file with mandatory headers:
+        section, set, label, fname, (isDownload, optional)
+    output is a nested dict:
+        list of categories (dict)
+        Each category has "categoryLabel" and "categoryImageSets" (list)
+        Each imageSet is a dict with keys:
+            setLabel and images and downloads.
+            Each image has keys "file" and "label".
+            Each download has keys "file" and "label".
+    """
+    headerOk = False
+    sections = OrderedDict()
+    headers = None
+    for row in textFileRows(open(fname)):
+        row[0] = row[0].lstrip("#")
+        if headers is None:
+            headers = row
+            if not headers[:4]==["section", "set", "label", "fname"]:
+                headerOk = True
+            if headerOk:
+                errAbort("imagesFile files must be .json or .tsv. If .tsv, must have at least these columns in this order: section, set, label, fname. Header found was: %s" % headers)
+            continue
+        section, imgSet, label, fname = row
+
+        isDownload = False
+        if len(row)>4:
+            isDownload = bool(row[4])
+
+        sections.setdefault(section, OrderedDict())
+        sections[section].setdefault(imgSet, OrderedDict())
+        sections[section][imgSet].setdefault(isDownload, []).append( (label, fname) )
+
+    out = []
+    for sectionName, setDict in sections.items():
+        sectDict = {}
+        sectDict["categoryLabel"] = sectionName
+        for setName, downDict in setDict.items():
+            setDict = {}
+            setDict["setLabel"] = setName
+            for isDownload, imgs in downDict.items():
+                for img in imgs:
+                    label, fname = img
+                    if isDownload:
+                        keyName = "downloads"
+                    else:
+                        keyName = "images"
+                    setDict.setdefault(keyName, []).append({"file":fname, "label":label})
+            sectDict.setdefault("categoryImageSets", []).append(setDict)
+        out.append(sectDict)
+
+    return out
+
 def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=None):
     " write a json file that describes the dataset abstract/methods/downloads "
     confFname = join(inDir, "datasetDesc.conf")
@@ -3034,16 +3312,21 @@ def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=No
         readFileIntoDict(summInfo, "methods", inDir, summInfo["methodsFile"], mustExist=True)
         del summInfo["methodsFile"]
 
-    if "imageSetFile" in summInfo:
-        readFileIntoDict(summInfo, "imageSets", inDir, summInfo["imageSetsFile"], mustExist=True)
-    else:
-        readFileIntoDict(summInfo, "imageSets", inDir, "images.json")
+    if "imagesFile" in summInfo:
+        imgFname = summInfo["imagesFile"]
+        if imgFname.endswith(".json"):
+            readFileIntoDict(summInfo, "imageSets", inDir, imgFname, mustExist=True)
+        else:
+            summInfo["imageSets"] = parseImageTsv(imgFname)
+        outConf["fileVersions"]["supplImageConf"] = getFileVersion(imgFname)
+    #else:
+        #readFileIntoDict(summInfo, "imageSets", inDir, "images.json")
 
     # import the unit description from cellbrowser.conf
     if "unit" in outConf and not "unitDesc" in summInfo:
         summInfo["unitDesc"] = outConf["unit"]
 
-    # import the atachSearch attribute from cellbrowser.conf
+    # import the atacSearch attribute from cellbrowser.conf
     if "atacSearch" in outConf and not "atacSearch" in summInfo:
         summInfo["atacSearch"] = outConf["atacSearch"]
 
@@ -3085,10 +3368,12 @@ def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=No
         for catInfo in summInfo["imageSets"]:
             for imageSet in catInfo["categoryImageSets"]:
                 imageSetFnames = set()
-                for dl in imageSet.get("downloads"):
-                    copyImageFile(inDir, dl, imageDir, doneNames, imageSetFnames)
-                for img in imageSet.get("images"):
-                    copyImageFile(inDir, img, imageDir, doneNames, imageSetFnames)
+                if "downloads" in imageSet:
+                    for dl in imageSet.get("downloads"):
+                        copyImageFile(inDir, dl, imageDir, doneNames, imageSetFnames)
+                if "images" in imageSet:
+                    for img in imageSet.get("images"):
+                        copyImageFile(inDir, img, imageDir, doneNames, imageSetFnames)
 
 
     # if we have a desc.conf: with so much data now in other files, generate the md5 from the data
@@ -3247,57 +3532,138 @@ def removeBom(line):
     " strip BOM from line "
     return line.replace('\ufeff', '')
 
+#def indexRangesByChrom(stringList):
+#    " given a list of strings in format chr:start-end, return dict chrom -> sorted list of (start, end) "
+#    byChrom = defaultdict(list)
+#    for rangeStr in stringList:
+#        chrom, pos = rangeStr.split(":")
+#        start, end = pos.split("-")
+#        start = int(start)
+#        end = int(end)
+#        byChrom[chrom].append( (start,end) )
+#
+#    # sort in-place
+#    for chrom, chromList in byChrom.items():
+#        chromList.sort()
+#
+#    return byChrom
+
+def findOverlappingRanges(atacByChrom, posStr):
+    """ atacByChrom is an ATAC dict with chr -> list of (start, end, offset, len), as returned by indexAtacOffsetsByChrom()
+    and posStr is a string chrom:start-end
+    Returns a string like chr1|start1|end1+chr1|start2|end2 
+    start1|end1, start2|end2, etc all are within start-end. Returns an empty string if nothing found. """
+
+    chrom, pos = posStr.split(":")
+    start, end = pos.split("-")
+    start = int(start)
+    end = int(end)
+
+    # this would be a lot faster with binary search but also a lot more complicated...
+    if chrom not in atacByChrom:
+        errAbort("The quickGenes file contains %s, but this chromosome has no features in the matrix." % repr(posStr))
+
+    chromRanges = atacByChrom[chrom]
+    foundRanges = []
+    for rangeStart, rangeEnd, offset, dataLen in chromRanges:
+        if start <= rangeStart  and rangeEnd <= end:
+            foundRanges.append( (chrom, rangeStart, rangeEnd) )
+
+    # if we have one exact match, get rid of all the others
+    # this was added for cortex-dev-splincing/psi, where quick ranges can include others
+    # since ranges overlap each other, but the quick ranges should only be one exact matching range
+    exactRanges = []
+    for ft in foundRanges:
+        chrom, rangeStart, rangeEnd = ft
+        if start == rangeStart and rangeEnd == end:
+            exactRanges.append( (chrom, rangeStart, rangeEnd) )
+
+    if len(exactRanges)==1:
+        foundRanges = exactRanges
+
+    foundStrRanges = []
+    for ft in foundRanges:
+        chrom, rangeStart, rangeEnd = ft
+        foundStrRanges.append( "|".join( [chrom, str(rangeStart), str(rangeEnd)] ) )
+
+    return "+".join(foundStrRanges)
+
 def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
     """ parse quick genes file with three columns: symbol or geneId, desc (optional), pmid (optional).
-    Return as a dict geneId|symbol -> [description, pmid] """
+    Return as a dict geneId|symbol -> description """
     if fname is None:
         return {}
     logging.debug("Parsing %s" % fname)
     symToGene = None
+    nonUniqueSyms = defaultdict(set)
     if geneToSym is not None:
         symToGene = dict()
         for gene, sym in iterItems(geneToSym):
+            if sym in symToGene:
+                #logging.warning("Symbol %s is not unique, geneID %s" % (sym, gene))
+                nonUniqueSyms[sym].add(gene)
+                nonUniqueSyms[sym].add(symToGene[sym])
             symToGene[sym] = gene
 
+    atacByChrom = None # only filled lazily if we find any ATAC quick ranges
     sep = sepForFile(fname)
     geneInfo = []
     for line in openFile(fname):
         if line.startswith("#"):
             continue
         line = removeBom(line)
+        line = line.rstrip("\r\n")
+        if len(line)==0:
+            continue
 
         hasDesc = False
         hasPmid = False
         if line.startswith("symbol"):
             continue
-        row = line.rstrip("\r\n").split(sep)
+        row = line.split(sep)
         geneOrSym = row[0]
 
-        # case 1: user provides both geneId and symbol. Rare.
-        # Necessary when symbol <-> geneId is not unique
+        # The following looks overly complicated but that's due to the complexity of combinations
+        # the we allow and because datasets come in different shapes
+
+        # case 1: user provides both geneId and symbol in the quickgenes file. Rare.
+        # Necessary when symbol <-> geneId is not unique and wrangler wants a particular gene
         if "|" in geneOrSym:
             geneId, sym = geneOrSym.split("|")
             if geneId not in matrixGeneIds:
-                errAbort("geneId %s in quickgenes file is not in expression matrix" % repr(geneId))
+                logging.info("case 1: geneId %s in quickgenes file is not in expression matrix" % repr(geneId))
+                continue
             geneStr = geneOrSym
 
-        # case 2: matrix has only symbols and user provides symbol. legacy format.
+        # case 2: matrix has geneId+symbol or just symbols and user provides symbol in quickgenes. 
+        # (symbol-only is is our legacy format for old datasets.)
         # store only the symbol. We could look up the geneId but that's data inference, 
         # which we try not to do. The lookup could be wrong.
-        elif geneOrSym in matrixSyms and len(matrixGeneIds)==0:
+        elif matrixSyms is not None and geneOrSym in matrixSyms:
             geneStr = geneOrSym
+            if symToGene:
+                geneStr = symToGene[geneStr]+"|"+geneStr
+            else:
+                if geneStr not in matrixGeneIds:
+                    logging.info("case 2: geneId %s in quickgenes file is not in expression matrix" % repr(geneStr))
+                    continue
 
         # case 3: matrix has geneIds and user provides a geneId. add the symbol from our mapping
-        # that's a data inference that should not be wrong
+        # that's data inference, but that should be OK
         elif geneOrSym in matrixGeneIds:
             geneId = geneOrSym
             if not geneToSym:
-                logging.info("quick gene %s has a geneId but we have no geneId/symbol table. You can use "
-                        "the format geneId|symbol in the quick genes file to manually assign a label" % repr(geneId))
-                sym = geneId
+                #logging.info("Quick gene %s but we have no geneId/symbol table. You can use "
+                        #"the format geneId|symbol in the quick genes file to manually assign a label" % repr(geneId))
+                # when geneToSym is None, that means that we have symbols in the matrix. So just pass through the
+                # symbol. example dataset: ams-supercluster
+                geneStr = geneId
             else:
-                sym = geneToSym[geneId]
-            geneStr = geneId+"|"+sym
+                if geneId in geneToSym:
+                    geneStr = geneId+"|"+geneToSym[geneId]
+                else:
+                    logging.info("GeneId %s from marker file was not found in gene symbol table." % geneId)
+                    geneStr = geneId
 
         # case 4: matrix has geneIds and user provides geneId or symbol. Store both.
         elif geneToSym:
@@ -3311,10 +3677,22 @@ def parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds):
                 geneId = symToGene[sym]
             else:
                 errAbort("Gene %s in quickgenes file is neither a symbol nor a geneId" % repr(geneOrSym))
+            if sym in nonUniqueSyms:
+                logging.warn("Symb %s in quick genes files is not unique. Which of these genes do you mean: %s. "
+                        "Use geneId|sym in quickgenes file to solve this." % (sym, ",".join(nonUniqueSyms[sym])))
             geneStr = geneId+"|"+sym
 
+        # case 5: it is an ATAC dataset and the quickgenes file has ranges
+        elif ":" in geneOrSym and "-" in geneOrSym:
+            geneStr = findOverlappingRanges(matrixGeneIds, geneOrSym)
+            if geneStr=="":
+                logging.error("quickGene ATAC range %s does not contain any peak in the matrix, skipping it" % geneOrSym)
+                continue
+
         else:
-            errAbort("Gene '%s' in quickgenes file is not in expr matrix and there is no geneId<->symbol mapping to resolve it to a geneId in the expression matrix" % repr(geneOrSym))
+            logging.info("Gene %s in quickgenes file is not in expr matrix and there is no geneId<->symbol mapping "
+                "to resolve it to a geneId in the expression matrix and it is not an ATAC range" % repr(geneOrSym))
+            continue
 
         # if we had no geneToSym, we'll check the symbol later if it's valid
 
@@ -3375,7 +3753,7 @@ def guessGeneIdType(inputObj):
     elif geneId.startswith("KH2013:"):
         geneType = "ciona-kh2013"
     elif geneId.startswith("ENS"):
-        errAbort("geneID starts with ENS but is neither mouse nor human. Auto-detection doesn't work. Please specify the geneIdType in cellbrowser.conf")
+        errAbort("geneID starts with ENS but is neither mouse nor human. Auto-detection doesn't work. Please specify the geneIdType in cellbrowser.conf. If you do not want geneIDs to be resolved to symbols specify 'symbol' or 'raw'.")
     elif geneId.isdigit():
         geneType = "entrez" # currently contains human and mouse symbols
     else:
@@ -3389,22 +3767,39 @@ def scaleLines(lines, limits, flipY):
     logging.debug("Scaling lines, flip is %s" % flipY)
     minX, maxX, minY, maxY, scaleX, scaleY, useTwoBytes, _ = limits
     scaledLines = []
-    for x1, y1, x2, y2 in lines:
+    for lineRow in lines:
+        x1, y1, x2, y2 = lineRow[:4]
         x1, y1 = scalePoint(scaleX, scaleY, minX, maxX, minY, maxY, flipY, useTwoBytes, x1, y1)
         x2, y2 = scalePoint(scaleX, scaleY, minX, maxX, minY, maxY, flipY, useTwoBytes, x2, y2)
-        scaledLines.append( (x1, y1, x2, y2) )
+
+        # if the line has a label, append it
+        scaledRow = [x1, y1, x2, y2]
+        if len(lineRow)>4:
+            scaledRow.append(lineRow[4])
+        scaledLines.append( scaledRow )
+
     return scaledLines
 
 def parseLineInfo(inFname, limits):
     " parse a tsv or csv file and use the first four columns as x1,y1,x2,y2 for straight lines "
     lines = []
-    for row in lineFileNextRow(inFname):
-        lines.append( (float(row.x1), float(row.y1), float(row.x2), float(row.y2)) )
-
     endPoints = []
-    for x1, y1, x2, y2 in lines:
+    for row in lineFileNextRow(inFname):
+        if len(row) not in [4,5]:
+            errAbort("The line file %s does not have 4 or 5 columns. Format is (x1, y1, x2, y2) with an optional label as the last field" % inFname)
+
+        lineRow = [ float(row.x1), float(row.y1), float(row.x2), float(row.y2) ]
+        if len(row)>4:
+            lineRow.append(row[4])
+        lines.append(lineRow)
+
+    for lineRow in lines:
+        x1, y1, x2, y2 = lineRow[:4]
+        # we need a list of coordinates so we can determine at the end what the total min/max ranges are
+        # and lines can go outside the min/max of the umap coords.
         endPoints.append( (x1, y1) )
         endPoints.append( (x2, y2) )
+
     logging.info("Read lines from %s, got %d lines" % (inFname, len(lines)))
 
     return lines, endPoints
@@ -3419,15 +3814,20 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
 
     if isMtx(outMatrixFname) and needFilterMatrix:
         #errAbort("Some cell identifiers are in the matrix but not in the meta. trimming .mtx files is not supported, only for the tsv.gz format. Consider using cbTool mtx2tsv and edit cellbrowser.conf or remove unannotated cells with Seurat or Scanpy from the expression matrix.Or manually add the missing cells to the meta.tsv. Usually 'cbTool mtx2tsv' is the easiest way forward.")
-        logging.warn("Some cell identifiers are in the matrix but not in the meta. trimming .mtx files is not supported, only for the tsv.gz format. This means that the matrix.mtx.gz file that the user can download has more data than the meta file, but that may not be a problem for most users. You can use cbTool mtx2tsv and edit cellbrowser.conf or remove unannotated cells with Seurat or Scanpy from the expression matrix. Or manually add the missing cells to the meta.tsv. In most cases, this is fine to leave as it is.")
+        logging.warn("Some cell identifiers are in the matrix but not in the meta. trimming .mtx files is not supported, "
+        "only for the tsv.gz format. This means that the matrix.mtx.gz file that the user can download has more data "
+        "than the meta file, but that may not be a problem for most users. You can use cbTool mtx2tsv and edit "
+        "cellbrowser.conf or remove unannotated cells with Seurat or Scanpy from the expression matrix. Or manually "
+        "add the missing cells to the meta.tsv. In most cases, this is fine to leave as it is.")
 
-    # step1: copy expression matrix, so people can download it, potentially
-    # removing those sample names that are not in the meta data
-    matrixFname = getAbsPath(inConf, "exprMatrix")
+    # step1: copy expression matrix, so people can download it. If needed,
+    # remove sample data from the matrix that are not in the meta data
+    matrixFname = getExprMatrixFname(inConf)
     try:
         matType = copyMatrixTrim(matrixFname, outMatrixFname, metaSampleNames, needFilterMatrix, geneToSym, outConf, matType)
     except ValueError:
-        logging.warn("This is rare: mis-guessed the matrix data type, trying again and using floating point numbers. To avoid this message in the future, you can set matrixType='float' in cellbrowser.conf.")
+        logging.warn("This is rare: mis-guessed the matrix data type, trying again and using floating point numbers. To avoid this message in the " \
+            "future, you can set matrixType='float' in cellbrowser.conf.")
         matType = copyMatrixTrim(matrixFname, outMatrixFname, metaSampleNames, needFilterMatrix, geneToSym, outConf, "float")
 
     # step2: compress matrix and index to file
@@ -3436,7 +3836,7 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
     discretBinMat = join(outDir, "discretMat.bin")
     discretMatrixIndex = join(outDir, "discretMat.json")
 
-    genesAreRanges = inConf.get("atacSearch")
+    genesAreRanges = (inConf.get("atacSearch")!=None)
 
     matType = matrixToBin(outMatrixFname, geneToSym, binMat, binMatIndex, discretBinMat, \
             discretMatrixIndex, metaSampleNames, matType=matType, genesAreRanges=genesAreRanges)
@@ -3458,13 +3858,14 @@ def copyConf(inConf, outConf, keyName):
 
 def getLimits(coordsList, extLimits):
     " get x-y-limits, either from data or from externally provided dictionary "
-    minX = 2^32
-    minY = 2^32
-    maxX = -2^32
-    maxY = -2^32
+    minX = 2**32
+    minY = 2**32
+    maxX = -2**32
+    maxY = -2**32
 
     for coords in coordsList:
         for x, y in coords:
+            #logging.debug("x %f y %f, maxY %f" % (x, y, maxY))
             # special values (12345,12345) mean "unknown cellId"
             if x!=HIDDENCOORD and y!=HIDDENCOORD:
                 minX = min(x, minX)
@@ -3496,7 +3897,6 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
     coordFnames = makeAbsDict(inConf, "coords")
     coordFnames = makeAbsDict(inConf, "coords", fnameKey="lineFile")
 
-    flipY = inConf.get("flipY", False) # R has a bottom screen 0 different than most drawing libraries
     useTwoBytes = False # to save space, coordinates are reduced to the range 0-65535
 
     hasLabels = False
@@ -3515,6 +3915,7 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
         coordLabel = inCoordInfo["shortLabel"]
         logging.info("Parsing coordinates for "+coordLabel+" from "+coordFname)
         # 'limits' is everything needed to transform coordinates to the final 0-1.0  or 0-65535 coord system
+        flipY = inConf.get("flipY", False) # R has a bottom screen 0 different than most drawing libraries
         flipY = bool(inCoordInfo.get("flipY", flipY))
 
         coords = parseCoordsAsDict(coordFname)
@@ -3527,18 +3928,25 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
                 logging.debug("Not using 2byte mode")
                 useTwoBytes = False
 
+
         hasLines = False
         allPoints = [justPoints(coords)]
+
+        minX, maxX, minY, maxY = getLimits(allPoints, inCoordInfo)
+        # now that we have the global limits, scale everything
+        scaleX, scaleY, minX, maxX, minY, maxY = calcScaleFact(minX, maxX, minY, maxY, useTwoBytes)
+
+        scaleYFact = inCoordInfo.get("scaleYFact")
+        if scaleYFact:
+            scaleY = scaleYFact
+            logging.debug("Override scale factor on y by config: %f" % scaleY)
+
+        limits = (minX, maxX, minY, maxY, scaleX, scaleY, useTwoBytes, flipY)
         # parse lines, updating the min-max ranges
         if "lineFile" in inCoordInfo:
             lineCoords, linePoints = parseLineInfo(inCoordInfo["lineFile"], limits)
             allPoints.append(linePoints)
             hasLines = True
-
-        minX, maxX, minY, maxY = getLimits(allPoints, inCoordInfo)
-        # now that we have the global limits, scale everything
-        scaleX, scaleY, minX, maxX, minY, maxY = calcScaleFact(minX, maxX, minY, maxY, useTwoBytes)
-        limits = (minX, maxX, minY, maxY, scaleX, scaleY, useTwoBytes, flipY)
 
         coordDict = scaleCoords(coords, limits)
 
@@ -3552,6 +3960,8 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
         coordInfo["shortLabel"] = coordLabel
         if "radius" in inCoordInfo:
             coordInfo["radius"] = inCoordInfo["radius"]
+        if "annots" in inCoordInfo:
+            coordInfo["annots"] = inCoordInfo["annots"]
         if "colorOnMeta" in inCoordInfo:
             coordInfo["colorOnMeta"] = inCoordInfo["colorOnMeta"]
 
@@ -3630,7 +4040,7 @@ def checkClusterNames(markerFname, clusterNames, clusterLabels, doAbort):
                 "Users may not notice the problem, but it may indicate an erroneous meta data file.") % \
                 (markerFname, notInLabels))
 
-def convertMarkers(inConf, outConf, geneToSym, clusterLabels, outDir):
+def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, outDir):
     """ split the marker tables into one file per cluster and add filenames as 'markers' in outConf
     also add the 'topMarkers' to outConf, the top five markers for every cluster.
     """
@@ -3643,6 +4053,10 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, outDir):
     doAbort = False # temp hack # because of single cell cluster filtering in cbScanpy
     topMarkersDone = False
     for markerIdx, markerInfo in enumerate(markerFnames):
+        
+        if type(markerInfo)!=type(dict()):
+            errAbort("The 'markers' setting in cellbrowser.conf is not a dictionary but must be a dictionary with keys 'file' and 'label'.")
+
         markerFname = markerInfo["file"]
         markerLabel = markerInfo["shortLabel"]
 
@@ -3650,7 +4064,7 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, outDir):
         markerDir = join(outDir, "markers", clusterName)
         makeDir(markerDir)
 
-        clusterNames, topMarkers = splitMarkerTable(markerFname, geneToSym, markerDir)
+        clusterNames, topMarkers = splitMarkerTable(markerFname, geneToSym, matrixGeneIds, markerDir)
         # only use the top markers of the first marker file
         if not topMarkersDone:
             outConf["topMarkers"] = topMarkers
@@ -3667,7 +4081,7 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, outDir):
     outConf["markers"] = newMarkers
 
 def areProbablyGeneIds(ids):
-    " if 90% of the identifiers start with the same letter, they are probably gene IDs, not symbols "
+    " if 80% of 'ids' start with the same letter, they are probably gene IDs, not symbols "
     counts = Counter()
     numCount = 0
     for s in ids:
@@ -3675,24 +4089,31 @@ def areProbablyGeneIds(ids):
         if s.isnumeric():
             numCount += 1
 
-    cutoff = 0.9* len(ids)
+    cutoff = 0.8* len(ids)
     if counts.most_common()[0][1] >= cutoff or numCount >= cutoff:
-        logging.debug("GeneIds in matrix are identifiers, not symbols")
+        logging.info("GeneIds in matrix are identifiers, not symbols")
         return True
     else:
-        logging.debug("GeneIds in matrix are symbols, not identifiers")
+        logging.info("GeneIds in matrix are symbols, not identifiers")
         return False
 
-def readValidGenes(outDir):
+def readValidGenes(outDir, inConf):
     """ the output directory contains an exprMatrix.json file that contains all valid gene symbols.
-    We're reading those here """
+    We're reading them here, so we do not have to read the entire .tsv.gz file. """
+
     matrixJsonFname = join(outDir, "exprMatrix.json")
-    validGenes = list(readJson(matrixJsonFname))
+    validGenes = readJson(matrixJsonFname)
+
+    if "atacSearch" in inConf:
+        return None, validGenes, None # in ATAC mode, no need to do anything else
+
+    validGenes = list(validGenes)
 
     syms = []
     geneIds = []
     geneToSym = {}
     hasBoth = False
+    symsOrGeneIds = []
     for g in validGenes:
         if "|" in g:
             parts = g.split("|")
@@ -3703,34 +4124,45 @@ def readValidGenes(outDir):
             hasBoth = True
             geneToSym[geneId] = sym
         else:
-            syms.append( g )
+            symsOrGeneIds.append( g )
 
-
-    if not hasBoth and areProbablyGeneIds(syms):
-        geneIds = syms
+    if hasBoth:
+        logging.debug("Matrix has both geneIds and symbols")
+        geneIds.extend(symsOrGeneIds)
+    else:
+        logging.debug("Matrix does not have both geneIds and symbols, assuming it contains only geneIds")
+        geneIds = symsOrGeneIds
         syms = []
 
     if len(geneToSym)==0:
+        logging.info("There are no gene/symbol pairs in the matrix")
         geneToSym = None
 
-    return set(syms), set(geneIds), geneToSym
+    symSet = set(syms)
 
-def readQuickGenes(inConf, geneToSym, outDir, outConf):
+    #symCounts = Counter(syms).most_common()
+    #for sym, count in symCounts:
+        #if count > 1:
+            #logging.warn("Symbol %d is not unique" % count)
+
+    return symSet, set(geneIds), geneToSym
+
+def readQuickGenes(inConf, geneToSym, matrixSyms, matrixGeneIds, geneToSymFromMatrix, outDir, outConf):
     " read quick genes file and make sure that the genes in it are in the matrix "
     quickGeneFname = inConf.get("quickGenesFile")
-    if quickGeneFname:
+    if not quickGeneFname:
+        return
 
-        matrixSyms, matrixGeneIds, geneToSymFromMatrix = readValidGenes(outDir)
+    # prefer the symbols from the matrix over our own symbol tables
+    if geneToSymFromMatrix is not None:
+        logging.info("Matrix has gene symbols, these are used for quick gene file parsing")
+        geneToSym = geneToSymFromMatrix
 
-        # prefer the symbols from the matrix over our own symbol tables
-        if geneToSymFromMatrix is not None:
-            geneToSym = geneToSymFromMatrix
+    fname = getAbsPath(inConf, "quickGenesFile")
+    quickGenes = parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds)
 
-        fname = getAbsPath(inConf, "quickGenesFile")
-        quickGenes = parseGeneInfo(geneToSym, fname, matrixSyms, matrixGeneIds)
-
-        outConf["quickGenes"] = quickGenes
-        logging.info("Read %d quick genes from %s" % (len(quickGenes), fname))
+    outConf["quickGenes"] = quickGenes
+    logging.info("Read %d quick genes from %s" % (len(quickGenes), fname))
 
 def getFileVersion(fname):
     data = {}
@@ -3766,32 +4198,33 @@ def convertMeta(inDir, inConf, outConf, outDir, finalMetaFname):
 
     metaFname = getAbsPath(inConf, "meta")
     outConf["fileVersions"]["inMeta"] = getFileVersion(metaFname)
-    if "colors" in inConf:
-        fullColorFname = abspath(join(inDir, inConf["colors"]))
-        if isfile(fullColorFname):
-            inConf["colors"] = fullColorFname
-            outConf["fileVersions"]["colors"] = getFileVersion(fullColorFname)
 
     metaDir = join(outDir, "metaFields")
     makeDir(metaDir)
     metaIdxFname = join(outDir, "meta.index")
 
-    matrixFname = getAbsPath(inConf, "exprMatrix")
-    sampleNames, needFilterMatrix = metaReorder(matrixFname, metaFname, finalMetaFname)
+    matrixFname = getExprMatrixFname(inConf)
+
+    keepFields = []
+    for fieldName in ["labelField", "defColorField"]:
+        if fieldName in inConf:
+            keepFields.append( inConf[fieldName] )
+
+    sampleNames, needFilterMatrix = metaReorderFilter(matrixFname, metaFname, finalMetaFname, keepFields)
 
     outConf["sampleCount"] = len(sampleNames)
     outConf["matrixWasFiltered"] = needFilterMatrix
 
-    colorFname = inConf.get("colors")
-    enumFields = inConf.get("enumFields")
-    fieldConf, validFieldNames = metaToBin(inConf, outConf, finalMetaFname, colorFname, metaDir, enumFields)
+    fieldConf, validFieldNames = metaToBin(inDir, inConf, outConf, finalMetaFname, metaDir)
     outConf["metaFields"] = fieldConf
 
     labelField = outConf.get("labelField")
     checkFieldNames(outConf, ["violinField", "clusterField", "defColorField", "labelField"], validFieldNames, \
             fieldConf, labelField)
 
-    indexMeta(finalMetaFname, metaIdxFname)
+    useLongLongMeta = indexMeta(finalMetaFname, metaIdxFname)
+    if useLongLongMeta:
+        outConf["metaNeedsEightBytes"] = True
 
     logging.info("Kept %d cells present in both meta data file and expression matrix" % len(sampleNames))
 
@@ -3935,9 +4368,9 @@ def md5WithPython(fname):
 def md5ForFile(fname, isSmall=False):
     " return the md5sum of a file. Use a command line tool, if possible. "
     logging.debug("Getting md5 of %s" % fname)
-    if spawn.find_executable("md5sum")!=None and not isSmall:
+    if which("md5sum")!=None and not isSmall:
         md5 = getMd5Using("md5sum", fname).split()[0]
-    elif spawn.find_executable("md5")!=None and not isSmall:
+    elif which("md5")!=None and not isSmall:
         md5 = getMd5Using("md5", fname).split()[-1]
     else:
         md5 = md5WithPython(fname)
@@ -3946,8 +4379,11 @@ def md5ForFile(fname, isSmall=False):
 def readOldSampleNames(datasetDir, lastConf):
     """ reads the old cell identifiers from the dataset directory """
     # this obscure command gets file with the the cell identifiers in the dataset directory "
-    sampleNameFname = join(datasetDir, "metaFields", lastConf["metaFields"][0]["name"]+".bin.gz")
-    logging.debug("Reading meta sample names from %s" % sampleNameFname)
+    if len(lastConf["metaFields"])==0:
+        sampleNameFname = "does_not_exist" # this almost never happens, only if the output dataset is broken
+    else:
+        sampleNameFname = join(datasetDir, "metaFields", lastConf["metaFields"][0]["name"]+".bin.gz")
+        logging.debug("Reading meta sample names from %s" % sampleNameFname)
 
     # python3's gzip has 'text mode' but python2 doesn't have that so decode explicitly
     metaSampleNames = []
@@ -3972,12 +4408,12 @@ def matrixOrSamplesHaveChanged(datasetDir, inMatrixFname, outMatrixFname, outCon
     logging.info("Determining if %s needs to be created" % outMatrixFname)
     if not isfile(outMatrixFname):
         logging.info("%s does not exist. Must build matrix now." % outMatrixFname)
-        return True
+        return True, None
 
     confName = join(datasetDir, "dataset.json")
     if not isfile(confName):
         logging.debug("%s does not exist. This looks like the first run with this output directory" % confName)
-        return True
+        return True, None
 
     try:
         lastConf = readJson(confName)
@@ -3987,7 +4423,7 @@ def matrixOrSamplesHaveChanged(datasetDir, inMatrixFname, outMatrixFname, outCon
     if not "fileVersions" in lastConf or not "inMatrix" in lastConf["fileVersions"] \
         or not "outMatrix" in lastConf["fileVersions"]:
             logging.warn("Internal error? Missing 'fileVersions' tag in %s" % confName)
-            return True
+            return True, None
 
     oldMatrixInfo = lastConf["fileVersions"]["inMatrix"]
     origSize = oldMatrixInfo ["size"]
@@ -4016,23 +4452,26 @@ def matrixOrSamplesHaveChanged(datasetDir, inMatrixFname, outMatrixFname, outCon
         logging.info("input matrix has input file size that is different from previously "
             "processed matrix. Expression matrix must be reindexed. Old file(s): %s, current file: %d" %
             (oldMatrixInfo, nowSize))
-        return True
+        return True, None
 
     outConf["fileVersions"]["inMatrix"] = oldMatrixInfo
     outConf["fileVersions"]["outMatrix"] = lastConf["fileVersions"]["outMatrix"]
     outConf["matrixArrType"] = lastConf["matrixArrType"]
 
     metaSampleNames = readOldSampleNames(datasetDir, lastConf)
+    if metaSampleNames is None:
+        return False, None # this can only happen if the old dataset directory is broken somehow
 
     matrixSampleNames = readMatrixSampleNames(outMatrixFname)
     assert(len(matrixSampleNames)!=0)
 
     if set(metaSampleNames)!=set(matrixSampleNames):
         logging.info("meta sample samples from previous run are different from sample names in current matrix, have to reindex the matrix. Counts: %d vs. %d" % (len(metaSampleNames), len(matrixSampleNames)))
-        return True
+        return True, None
 
     logging.info("current input matrix looks identical to previously processed matrix, same file size, same sample names")
-    return False
+    return False, metaSampleNames
+
 
 def readJson(fname, keepOrder=False):
     " read .json and return as a dict "
@@ -4115,7 +4554,8 @@ def checkConfig(inConf, isTopLevel):
     if isTopLevel:
         if not "facets" in inConf:
             # tolerate if there are no facets in the dataset at all - third party installs may use collections but not facets.
-            logging.warn("No 'facets' declared in cellbrowser.conf, but is a top-level dataset and using dataset hierarchies. If this is an old dataset, consider moving facets into their own object.")
+            logging.warn("No 'facets' declared in cellbrowser.conf, but is a top-level dataset and using dataset hierarchies. If this is an old dataset, "\
+                "consider moving facets into their own object.")
         else:
             facets = inConf["facets"]
             reqFacets = ["body_parts", "diseases", "domains", "life_stages", "organisms", "assays", "sources"]
@@ -4129,10 +4569,14 @@ def checkConfig(inConf, isTopLevel):
 
     for tag in reqTagsDataset:
         if tag not in inConf:
-            errAbort("tag '%s' must be defined in cellbrowser.conf" % tag)
+            errAbort("As required by ~/.cellbrowser: tag '%s' must be defined in cellbrowser.conf" % tag)
         if tag=="visibility":
             if tag in inConf and inConf[tag] not in ["hide", "show"]:
                 errAbort("Error in cellbrowser.conf: '%s' can only have values: 'hide' or 'show'" % (tag))
+
+    if "exprMatrix" not in inConf and "matrices" not in inConf:
+            errAbort("The tag 'matrices' must be defined in cellbrowser.conf, with multiple matrices, or alternatively "
+                "the tag 'exprMatrix', with a single expression matrix file")
 
     if "name" in inConf and " " in inConf["name"] or "/" in inConf["name"]:
         errAbort("whitespace or slashes in the dataset 'name' in cellbrowser.conf are not allowed")
@@ -4179,11 +4623,47 @@ def makeFilesTxt(outConf, datasetDir):
 def copyFacets(inConf, outConf):
     """ for backwards compatibility with old Javascript UI, we copy the inConf["facets"] directly into outConf """
     if "facets" in inConf:
+        logging.debug("Copying facets into object")
         for key, val in inConf["facets"].items():
             assert(type(val)==type([])) # facets must be lists
             outConf[key] = val
         outConf["facets"] = inConf["facets"]
     return outConf
+
+def convertTraces(inConf, sampleNames, datasetDir, outConf):
+    " read ephys traces in format 'cellId<tab>comma-sep list of values', one per line and write to outDir "
+    if not "traceFile" in inConf:
+        return
+
+    fname = inConf["traceFile"]
+    traces = {}
+    for rowTuple in lineFileNextRow(fname):
+        cellId = rowTuple[0]
+        arrStr = rowTuple[1]
+        strArr = arrStr.split(",")
+        floatArr = []
+        for x in strArr:
+            x = float(x)
+            if x > 1.0:
+                x = round(x, 3)
+            floatArr.append(x)
+        if all(i != i for i in floatArr):
+            continue # do not store if all elements are Nan
+        traces[cellId] = floatArr
+
+    traceOutFn = join(datasetDir, "traces.json")
+    with open(traceOutFn, "w") as ofh:
+        json.dump(traces, ofh)
+    logging.info("Wrote %s" % traceOutFn)
+
+    outConf["fileVersions"]["traces"] = getFileVersion(traceOutFn)
+
+def getExprMatrixFname(inConf):
+    if "exprMatrix" in inConf:
+        inMatrixFname = getAbsPath(inConf, "exprMatrix")
+    else:
+        inMatrixFname = abspath(join(inConf["inDir"], inConf["matrices"][0]["fileName"]))
+    return inMatrixFname
 
 def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     """ convert everything needed for a dataset to datasetDir, write config to outConf.
@@ -4191,7 +4671,9 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     the matrix won't be converted again, which saves a lot of time.
     """
     checkConfig(inConf, isTopLevel)
-    inMatrixFname = getAbsPath(inConf, "exprMatrix")
+
+    inMatrixFname = getExprMatrixFname(inConf)
+
     # outMetaFname/outMatrixFname are reordered & trimmed tsv versions of the matrix/meta data
     if isMtx(inMatrixFname):
         baseName = basename(inMatrixFname)
@@ -4207,7 +4689,7 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     outMetaFname = join(datasetDir, "meta.tsv")
 
     # try not to recreate files that have been created before, as it is all quite slow (=Python)
-    doMatrix = matrixOrSamplesHaveChanged(datasetDir, inMatrixFname, outMatrixFname, outConf)
+    doMatrix, sampleNames = matrixOrSamplesHaveChanged(datasetDir, inMatrixFname, outMatrixFname, outConf)
     doMeta = metaHasChanged(datasetDir, outMetaFname)
 
     geneToSym = -1 # -1 = "we have not read any", "None" would mean "there are no gene symbols to map to"
@@ -4238,6 +4720,8 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     else:
         logging.info("Matrix and meta sample names have not changed, not indexing matrix again")
 
+    convertTraces(inConf, sampleNames, datasetDir, outConf)
+
     coordFiles, clusterLabels = convertCoords(inDir, inConf, outConf, sampleNames, outMetaFname, datasetDir)
 
     foundConf = writeDatasetDesc(inConf["inDir"], outConf, datasetDir, coordFiles, outMatrixFname)
@@ -4245,19 +4729,25 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     if geneToSym==-1:
         geneToSym = readGeneSymbols(inConf.get("geneIdType"), inMatrixFname)
 
-    convertMarkers(inConf, outConf, geneToSym, clusterLabels, datasetDir)
+    matrixSyms, matrixGeneIds, geneToSymFromMatrix = readValidGenes(datasetDir, inConf)
 
-    readQuickGenes(inConf, geneToSym, datasetDir, outConf)
+    convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, datasetDir)
+
+    readQuickGenes(inConf, geneToSym, matrixSyms, matrixGeneIds, geneToSymFromMatrix, datasetDir, outConf)
 
     copyBackgroundImages(inDir, inConf, outConf, datasetDir)
 
     # a few settings are passed through to the Javascript as they are
-    for tag in ["shortLabel", "radius", "alpha", "priority", "tags", "sampleDesc", "geneLabel",
+    for tag in ["shortLabel", "radius", "alpha", "priority", "tags", "sampleDesc", "featDesc", "geneLabel",
         "clusterField", "defColorField", "xenaPhenoId", "xenaId", "hubUrl", "showLabels", "ucscDb",
         "unit", "violinField", "visibility", "coordLabel", "lineWidth", "hideDataset", "hideDownload",
-        "metaBarWidth", "supplFiles", "defQuantPal", "defCatPal", "clusterPngDir", "wrangler", "shepherd"
+        "metaBarWidth", "supplFiles", "defQuantPal", "defCatPal", "clusterPngDir", "wrangler", "shepherd",
+        "binStrategy", "split",
+        "lineAlpha", "lineWidth", "lineColor",
         # the following are there only for old datasets, they are now nested under "facets"
-        "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays", # these are just here for backwards-compatibility and will eventually get removed
+        # they are just here for backwards-compatibility and will eventually get removed
+        "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays", 
+        # facets are taking their place now
         "facets", "multiModal"]:
         copyConf(inConf, outConf, tag)
 
@@ -4274,12 +4764,39 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
 
     makeFilesTxt(outConf, datasetDir)
 
+def filterFields(anndata, coordFields):
+    " remove all fields with more than 5 columns from anndata.obsm "
+    filtCoordFields = []
+    droppedKeys = []
+    for fieldName in coordFields:
+        colCount = anndata.obsm[fieldName].shape[1]
+        if colCount < 5:
+            filtCoordFields.append(fieldName)
+        else:
+            droppedKeys.append(fieldName)
+    logging.info("These obsm entries were dropped, too many columns: %s" % droppedKeys)
+    coordFields = filtCoordFields
+    return coordFields
+
 def writeAnndataCoords(anndata, coordFields, outDir, desc):
     " write all embedding coordinates from anndata object to outDir, the new filename is <coordName>_coords.tsv "
     import pandas as pd
 
+    if "spatial" in anndata.uns and "is_single" in anndata.uns["spatial"]:
+        logging.warn("Data fix: Found 'is_single' in ad.uns, removing this field")
+        del anndata.uns["spatial"]["is_single"]
+        if len(anndata.uns["spatial"])==0:
+            logging.warn("Data fix: No spatial data left, removing ad.uns['spatial']")
+            del anndata.uns["spatial"]
+
     if coordFields=="all" or coordFields is None:
         coordFields = getObsmKeys(anndata)
+
+    # spatial datasets have a ton of obsm attributes that are usually not coordinates
+    coordFields = filterFields(anndata, coordFields)
+
+    # move over a field to obs:
+    # ad.obs = pd.concat([ad.obs, ad.obsm["ctype_props"]], axis=1)
 
     coordFields.sort(reverse=True) # umap first, then t-sne, then PCA... sorting works to make a good order!
 
@@ -4288,6 +4805,10 @@ def writeAnndataCoords(anndata, coordFields, outDir, desc):
         # X_draw_graph_tsne - old versions
         # X_tsne - newer versions
         # also seen in the wild: X_Compartment_tSNE
+        if fieldName=="spatial" and "spatial" in anndata.uns:
+            logging.info("Not exporting spatial coords now, because there are also spatial images. Will export these coords later.")
+            continue
+
         coordName = fieldName.replace("X_draw_graph_","").replace("X_","")
         fullName = coordLabels.get(coordName, coordName)
 
@@ -4297,7 +4818,7 @@ def writeAnndataCoords(anndata, coordFields, outDir, desc):
         logging.info("Writing %s coords to %s" % (fullName, fname))
         coordDf=pd.DataFrame(anndata.obsm[fieldName],index=anndata.obs.index)
 
-        # why they usually only have (x,y), some objects like PCA have more than 2 dimensions
+        # they usually only have (x,y), but some objects like PCA have more than 2 dimensions
         if len(coordDf.columns)==2:
             coordDf.columns=['x','y']
 
@@ -4314,11 +4835,16 @@ def writeCellbrowserConf(name, coordsList, fname, addMarkers=True, args={}):
     coordStr = json.dumps(coordsList, indent=4)
     matrixFname = args.get("exprMatrix", "exprMatrix.tsv.gz")
 
+    cmdLine = " ".join(sys.argv)
+    dateStr = datetime.datetime.now().isoformat()
+
     conf = """
 # This is a bare-bones, auto-generated Cell Browser config file.
 # Look at https://github.com/maximilianh/cellBrowser/blob/master/src/cbPyLib/cellbrowser/sampleConfig/cellbrowser.conf
 # for a list of possible options
 # You can also write a default template into the current directory with cbBuild --init
+# Command was: %(cmdLine)s
+# Time: %(dateStr)s
 name='%(name)s'
 shortLabel='%(name)s'
 exprMatrix='%(matrixFname)s'
@@ -4330,7 +4856,6 @@ labelField='%(clusterField)s'
 enumFields=['%(clusterField)s']
 coords=%(coordStr)s
 #alpha=0.3
-#body_parts=["embryo", "heart", "brain"]
 #radius=2
 """ % locals()
 
@@ -4351,6 +4876,9 @@ coords=%(coordStr)s
     if "spatialMeta" in args:
         conf += "spatialMeta=%s\n" % json.dumps(args["spatialMeta"], indent=4)
 
+    if "colors" in args:
+        conf += "colors=%s\n" % json.dumps(args["colors"], indent=4)
+
     if isfile(fname):
         logging.info("Not overwriting %s, file already exists." % fname)
         return
@@ -4360,19 +4888,24 @@ coords=%(coordStr)s
     ofh.close()
     logging.info("Wrote %s" % ofh.name)
 
-def geneSeriesToStrings(var, geneKey, indexFirst=False, sep="|"):
+def geneSeriesToStrings(var, geneKey, indexFirst=False, sep="|", justValues=False):
     " convert a pandas data series to a list of |-separated strings "
     geneIdSeries = var[geneKey]
     logging.info("To get the gene names, using the field %s of the .var attribute" % geneKey)
-    if indexFirst:
-        geneIdAndSyms = list(zip(geneIdSeries.index, geneIdSeries.values))
+    if justValues:
+        genes = geneIdSeries.values
+        genes = [str(x) for x in genes]
     else:
-        geneIdAndSyms = list(zip(geneIdSeries.values, geneIdSeries.index))
-    genes = [str(x)+sep+str(y) for (x,y) in geneIdAndSyms]
+        if indexFirst:
+            geneIdAndSyms = list(zip(geneIdSeries.index, geneIdSeries.values))
+        else:
+            geneIdAndSyms = list(zip(geneIdSeries.values, geneIdSeries.index))
+        genes = [str(x)+sep+str(y) for (x,y) in geneIdAndSyms]
     return genes
 
-def geneStringsFromVar(var, sep="|"):
+def geneStringsFromVar(ad, sep="|"):
     " return a list of strings in format geneId<sep>geneSymbol "
+    var = ad.var
     if "gene_ids" in var:
         logging.debug("Found 'gene_ids' attribute in var")
         genes = geneSeriesToStrings(var, "gene_ids", indexFirst=False, sep=sep)
@@ -4382,12 +4915,20 @@ def geneStringsFromVar(var, sep="|"):
     elif "Accession" in var:  # only seen this in the ABA Loom files
         logging.debug("Found 'Accession' attribute in var")
         genes = geneSeriesToStrings(var, "Accession", indexFirst=False, sep=sep)
+    elif "features" in var:
+        # the files in retina-atac had only one 'feature' keys
+        logging.debug("Found 'features' attribute in var, using just those")
+        genes = var["features"].tolist()
+    elif "_index" in var:
+        # mouse-striatal-dev, but only when opened in cbImportScanpy, has the "features" transformed to "_index"
+        logging.debug("Found '_index' attribute in var")
+        genes = geneSeriesToStrings(var, "_index", justValues=True, sep=sep)
     else:
         logging.debug("Using index of var")
         genes = var.index.tolist()
     return genes
 
-def anndataMatrixToMtx(ad, path, useRaw=False):
+def anndataMatrixToMtx(ad, path):
     """
     write the ad expression matrix into a sparse mtx.gz file (matrix-market format)
 
@@ -4398,17 +4939,8 @@ def anndataMatrixToMtx(ad, path, useRaw=False):
 
     import scipy.io
 
-    if useRaw and ad.raw is None:
-        logging.warning("The option to export raw expression data is set, but the scanpy object has no 'raw' attribute. Exporting the processed scanpy matrix. Some genes may be missing.")
-
-    if useRaw and ad.raw is not None:
-        mat = ad.raw.X
-        var = ad.raw.var
-        logging.info("Processed matrix has size (%d cells, %d genes)" % (mat.shape[0], mat.shape[1]))
-        logging.info("Using raw expression matrix")
-    else:
-        mat = ad.X
-        var = ad.var
+    mat = ad.X
+    var = ad.var
 
     rowCount, colCount = mat.shape
     logging.info("Writing scanpy matrix (%d cells, %d genes) to %s in mtx.gz format" % (rowCount, colCount, path))
@@ -4429,9 +4961,10 @@ def anndataMatrixToMtx(ad, path, useRaw=False):
         dataType = "integer"
 
     if ~scipy.sparse.issparse(mat):
+        logging.debug("Convert matrix to sparse")
         mat = scipy.sparse.csr_matrix(mat)
 
-    geneLines = geneStringsFromVar(var, sep="\t")
+    geneLines = geneStringsFromVar(ad, sep="\t")
     genes_file = join(path, 'features.tsv.gz')
     logging.info("Writing %s" % genes_file)
     with gzip.open(genes_file, 'wt') as f:
@@ -4453,22 +4986,13 @@ def anndataMatrixToMtx(ad, path, useRaw=False):
             shutil.copyfileobj(mtx_in, mtx_gz)
     os.remove(mtxfile)
 
-def anndataMatrixToTsv(ad, matFname, usePandas=False, useRaw=False):
+def anndataMatrixToTsv(ad, matFname, usePandas=False):
     " write ad expression matrix to .tsv file and gzip it "
     import pandas as pd
     import scipy.sparse
 
-    if useRaw and ad.raw is None:
-        logging.warn("The option to export raw expression data is set, but the scanpy object has no 'raw' attribute. Exporting the processed scanpy matrix. Some genes may be missing.")
-
-    if useRaw and ad.raw is not None:
-        mat = ad.raw.X
-        var = ad.raw.var
-        logging.info("Processed matrix has size (%d cells, %d genes)" % (mat.shape[0], mat.shape[1]))
-        logging.info("Using raw expression matrix")
-    else:
-        mat = ad.X
-        var = ad.var
+    mat = ad.X
+    var = ad.var
 
     rowCount, colCount = mat.shape
     logging.info("Writing scanpy matrix (%d cells, %d genes) to %s" % (rowCount, colCount, matFname))
@@ -4500,7 +5024,7 @@ def anndataMatrixToTsv(ad, matFname, usePandas=False, useRaw=False):
 
         # when reading 10X files, read_h5 puts the geneIds into a separate field
         # and uses only the symbol. We prefer ENSGxxxx|<symbol> as the gene ID string
-        genes = geneStringsFromVar(var)
+        genes = geneStringsFromVar(ad)
 
         logging.info("Writing %d genes in total" % len(genes))
         for i, geneName in enumerate(genes):
@@ -4509,7 +5033,7 @@ def anndataMatrixToTsv(ad, matFname, usePandas=False, useRaw=False):
             ofh.write(geneName)
             ofh.write("\t")
             if scipy.sparse.issparse(mat):
-                logging.debug("Converting csr row to dense")
+                #logging.debug("Converting csr row to dense")
                 row = mat.getrow(i).todense()
             else:
                 row = mat[i,:]
@@ -4549,11 +5073,11 @@ def runSafeRankGenesGroups(adata, clusterField, minCells=5):
     sc.pp.filter_genes(adata, min_cells=minCells) # rank_genes_groups crashes on zero-value genes
 
     # cell clusters with a cell count = 1 crash rank_genes, so remove their cells
-    clusterCellCounts = list(adata.obs.groupby([clusterField]).apply(len).iteritems())
+    clusterCellCounts = list(adata.obs.groupby([clusterField]).apply(len).items())
     filterOutClusters = [cluster for (cluster,count) in clusterCellCounts if count==1]
     if len(filterOutClusters)!=0:
-        logging.info("Removing cells in clusters %s, as they have only a single cell" % filterOutClusters)
-        adata = adata[~adata.obs[clusterField].isin(filterOutClusters)]
+       logging.info("Removing cells in clusters %s, as they have only a single cell, will mess up marker gene scoring" % filterOutClusters)
+       adata = adata[~adata.obs[clusterField].isin(filterOutClusters)]
 
     logging.info("Calculating 100 marker genes for each cluster")
     # working around bug in scanpy 1.9.1, see https://github.com/scverse/scanpy/issues/2181
@@ -4582,7 +5106,7 @@ def saveMarkers(adata, markerField, nb_marker, fname):
         col=list(concat.columns)
         col[0],col[-2]='z_score','gene'
         concat.columns=col
-        marker_df=marker_df.append(concat)
+        marker_df=pd.concat([marker_df,concat])
 
     #Rearranging columns -> Cluster, gene, score
     cols=marker_df.columns.tolist()
@@ -4600,7 +5124,7 @@ def saveMarkers(adata, markerField, nb_marker, fname):
 
     sep = "\t"
     with open(fname, "w") as ofh:
-        ofh.write(sep.join(["cluster_name", "z_score", "gene"]))
+        ofh.write(sep.join(["cluster_name", "gene", "z_score"]))
         ofh.write("\n")
         for cluster, score, gene in zip(clusterCol, scoreCol, geneCol):
             if isinstance(gene, (bytes, bytearray)):
@@ -4617,70 +5141,109 @@ def exportScanpySpatial(adata, outDir, configData, coordDescs):
     from scanpy.plotting._tools.scatterplots import _check_spatial_data, _check_img, _empty, _check_spot_size, \
         _check_scale_factor, _check_crop_coord, _check_na_color
 
-    imgConfigs = []
 
-    # copied from https://github.com/scverse/scanpy/blob/034ca2823804645e0d4874c9b16ba2eb8c13ac0f/scanpy/plotting/_tools/scatterplots.py#L988
-    library_id = _empty
-    coordsDone = False
-    for img_key in ["hires", "lowres"]:
-        crop_coord = None
-        na_color = None
-        size = 1.0
-        spot_size = None
-        scale_factor = None
-        bw = False
-        img = None
+    if not ("spatial" in adata.obsm and "spatial" in adata.uns):
+        logging.debug("No 'spatial' key found in adata.obsm")
+        return configData, coordDescs
 
-        library_id, spatial_data = _check_spatial_data(adata.uns, library_id)
-        img, img_key = _check_img(spatial_data, img, img_key, bw=bw)
-        spot_size = _check_spot_size(spatial_data, spot_size)
-        assert(spot_size!=None)
-        scale_factor = _check_scale_factor(
-            spatial_data, img_key=img_key, scale_factor=scale_factor
-        )
-        crop_coord = _check_crop_coord(crop_coord, scale_factor)
-        na_color = _check_na_color(na_color, img=img)
-        circle_radius = size * scale_factor * spot_size * 0.5
-        # end copy
+    import pandas as pd
+    coordDf=pd.DataFrame(adata.obsm["spatial"],index=adata.obs.index)
 
-        import matplotlib
-        imgFname = img_key+".jpg"
-        matplotlib.image.imsave(join(outDir, imgFname), img)
-        imgConfigs.append({"file":imgFname, "label":img_key, "radius":circle_radius, \
-                "scale_factor":scale_factor})
+    libraries = adata.uns["spatial"].keys()
+    for library_id in libraries:
+        #Out[8]: dict_keys(['C47', 'C50', 'C56', 'IBM29', 'IBM31', 'IBM35', 'SRP1', 'SRP4'])
 
-        if not coordsDone:
-            # the 10X scale_factor indicates the relationship between pixels in the lowres/hires
-            # images and the original TIFFs. 
-            # https://support.10xgenomics.com/spatial-gene-expression/software/pipelines/latest/output/spatial
-            # Here, we use it to derive the min/max limits which the javascript needs to make sure
-            # that the bitmap is really under the spots
-            width, height = img.shape[:2]
-            invScale = 1.0 / scale_factor
-            yMax = round(width * invScale)
-            xMax = round(height * invScale)
-            coordsDone = True
-            #coordInfo = outConf["coords"][0]
+        coordsDone = False
+        imgConfigs = []
+        for img_key in ["hires", "lowres"]:
 
-    # the origin of the image is top-left, for the spots it's bottom-left. Fixing this for now by flipping the spots on the y.
-    for c in coordDescs:
-        c["flipY"] = 1
+            if not img_key in adata.uns["spatial"][library_id]["images"]:
+                continue
+            crop_coord = None
+            na_color = None
+            size = 1.0
+            spot_size = None
+            scale_factor = None
+            bw = False
+            img = None
+
+            # copied from https://github.com/scverse/scanpy/blob/034ca2823804645e0d4874c9b16ba2eb8c13ac0f/scanpy/plotting/_tools/scatterplots.py#L988
+            library_id, spatial_data = _check_spatial_data(adata.uns, library_id)
+            img, img_key = _check_img(spatial_data, img, img_key, bw=bw)
+            spot_size = _check_spot_size(spatial_data, spot_size)
+            assert(spot_size!=None)
+            scale_factor = _check_scale_factor(
+                spatial_data, img_key=img_key, scale_factor=scale_factor
+            )
+            crop_coord = _check_crop_coord(crop_coord, scale_factor)
+            na_color = _check_na_color(na_color, img=img)
+            circle_radius = size * scale_factor * spot_size * 0.5
+            # end copy
+
+            import matplotlib
+            imgFname = library_id+"_"+img_key+".jpg"
+            matplotlib.image.imsave(join(outDir, imgFname), img)
+
+            label = library_id+"_"+img_key
+            imgConfigs.append({"file":imgFname, "label":label, "radius":circle_radius, \
+                    "scale_factor":scale_factor})
+
+            if "metadata" in spatial_data:
+                meta = dict(spatial_data["metadata"])
+                meta["label"] = label
+                meta["py_spot_size"] = spot_size
+                meta["py_radius"] = circle_radius
+                meta["py_size"] = size
+                meta["scalefactors"] = spatial_data["scalefactors"]
+                if crop_coord is not None:
+                    meta["crop_coord"] = crop_coord
+
+                if "spatialMeta" not in configData:
+                    configData["spatialMeta"] = []
+
+                configData["spatialMeta"].append(meta)
+
+            if not coordsDone:
+                # the 10X scale_factor indicates the relationship between pixels in the lowres/hires
+                # images and the original TIFFs. 
+                # https://support.10xgenomics.com/spatial-gene-expression/software/pipelines/latest/output/spatial
+                # Here, we use it to derive the min/max limits which the javascript needs to make sure
+                # that the bitmap is really under the spots
+                width, height = img.shape[:2]
+                yMax = round(width / scale_factor)
+                xMax = round(height / scale_factor)
+                coordsDone = True
+                #coordInfo = outConf["coords"][0]
+
+        #configData["spatial"] = imgConfigs
+
+        fileBase = "spatial_"+library_id+"_coords.tsv"
+        fname = join(outDir, fileBase)
+
+        logging.info("Writing spatial coords of library %s to %s" % (library_id, fname))
+
+        suffix = "-"+library_id.lower()
+        filtCoords = coordDf[coordDf.index.str.endswith(suffix,na=False)]
+        if filtCoords.shape[0]==0:
+            logging.info("There are no barcodes with the right suffix for the slide %s, using all barcodes" % fileBase)
+            filtCoords = coordDf
+        filtCoords.to_csv(fname,sep='\t')
+        # the origin of the image is top-left, for the spots it's bottom-left. Fixing this for now by flipping the spots on the y.
+        coordConf = {}
+        coordConf["images"]  = imgConfigs
+        coordConf["file"] = fileBase
+        coordConf["shortLabel"] = library_id
+        coordConf["flipY"] = 1
         # by default, cbBuild moves the circles to the minX/minY of the coords. Must switch this off here to align the image with 
         # the spots
-        c["useRaw"] = 1 # switch off: moving the minX/minY and scaling of data to uint16
-        c["minX"] = 0
-        c["minY"] = 0
-        c["maxX"] = xMax
-        c["maxY"] = yMax
+        coordConf["useRaw"] = 1 # switch off: moving the minX/minY and scaling of data to uint16
+        coordConf["minX"] = 0
+        coordConf["minY"] = 0
+        coordConf["maxX"] = xMax
+        coordConf["maxY"] = yMax
 
-    configData["spatial"] = imgConfigs
+        coordDescs.append( coordConf )
 
-    meta = dict(spatial_data["metadata"])
-    meta["py_spot_size"] = spot_size
-    meta["py_radius"] = circle_radius
-    meta["py_size"] = size
-    meta["scalefactors"] = spatial_data["scalefactors"]
-    configData["spatialMeta"] = meta
     return configData, coordDescs
 
 # copied from https://github.com/scverse/scanpy/blob/d7e13025b931ad4afd03b4344ef5ff4a46f78b2b/scanpy/_utils/__init__.py#L487
@@ -4701,11 +5264,55 @@ def check_nonnegative_integers(X):
         return True
 # copy end
 
+def exportScanpyOneFieldColor(fieldName, fieldValues, colors, outDir, configData):
+    "write a single color file, for one field"
+    outFname = join(outDir, fieldName+"_colors.tsv")
+    logging.info("Writing colors of field %s to %s" % (fieldName, outFname))
+    
+    # Debugging: print lengths and contents
+    #print(f"Field name: {fieldName}")
+    #print(f"Field values (length {len(fieldValues)}): {fieldValues}")
+    #print(f"Colors (length {len(colors)}): {colors}")
+
+    # Check lengths
+    if len(fieldValues) != len(colors):
+        logging.error("Mismatch of lengths in h5ad: %s values vs %d colors" % (len(fieldValues), len(colors)))
+        # Handle mismatch: you can either raise an exception or handle it gracefully
+        return
+
+    ofh = open(outFname, "w")
+    ofh.write("#val	color\n")
+    for val, color in zip(fieldValues, colors):
+        ofh.write("%s\t%s\n" % (val, color))
+    ofh.close()
+    if "colors" not in configData:
+        configData["colors"] = {}
+    configData["colors"][fieldName] = outFname
+
+def exportScanpyColors(adata, outDir, configData):
+    " create one tsv with the colors per color definition in adata "
+    for fieldName in adata.obs.keys():
+        colorKey = fieldName+"_colors"
+        #if colorKey in adata.uns:
+            #outFname = exportScanpyOneFieldColor(fieldName, adata.obs[fieldName].values.categories, adata.uns[colorKey], outDir, configData)
+        if colorKey in adata.uns and adata.uns[colorKey] is not None and len(adata.uns[colorKey]) > 0:
+            fieldValues = adata.obs[fieldName].values.categories
+            colors = adata.uns[colorKey]    
+            # Check if colors is a list/array and has a non-zero length
+            if colors is not None and len(colors) > 0:
+                fieldValues = adata.obs[fieldName].values.categories
+                outFname = exportScanpyOneFieldColor(fieldName, fieldValues, colors, outDir, configData)
+            else:
+                logging.warning("Skipping %s because colors are not available or empty." % fieldName)
+    return configData
+
 def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=None,
         nb_marker=50, doDebug=False, coordFields=None, skipMatrix=False, useRaw=False,
-        skipMarkers=False, markerField='rank_genes_groups', matrixFormat="tsv"):
+        skipMarkers=False, markerField='rank_genes_groups', matrixFormat="tsv", atac=None, layer=None):
     """
     Mostly written by Lucas Seninge, lucas.seninge@etu.unistra.fr
+
+    Used by cbImportScanpy and cbScanpy
 
     Given a scanpy object, write dataset to a dataset directory under path.
 
@@ -4721,6 +5328,8 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     from the AnnData object (other than 'louvain' to also save (eg: batches, ...)).
     This can also be a dict of name -> label, if you want to have more human-readable names.
     :param nb_marker: number of cluster markers to store. Default: 50
+    :param atac: assume that the file is an ATAC seq file, chnages the cellbrowser.conf output file
+    :param layer: specify the layer to use in the anndata object
 
     """
     outDir = path
@@ -4737,17 +5346,41 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
 
     import numpy as np
     import pandas as pd
+
+    from warnings import simplefilter
+    simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
+
     import anndata
 
     configData = {} # dict that can override the default arguments in the generated cellbrowser.conf file
 
+    # layers are the new thing to store multiple matrixces. In the old days, there only was the adata.raw matrix
+    # in addition to ad.X. So if a layer was specified, we use that. Only when a layer was not specified do we respect 
+    # the useRaw option
+    if layer:
+        if layer not in adata.layers:
+            raise ValueError("The layer '%s' does not exist. Available layers are: %s" % (layer, adata.layers.keys()))
+        logging.info("Using layer '%s' of anndata object (not using .raw)" % layer)
+        adata.X = adata.layers[layer]
+    else:
+        if useRaw:
+            if adata.raw is None:
+                logging.warn("The option to export raw expression data is set, but the scanpy object has no 'raw' attribute. Exporting the processed scanpy matrix. Some genes may be missing.")
+            else:
+                logging.info("Using raw expression matrix")
+                adata.X = adata.raw.X
+                adata.var = adata.raw.var
+
+    mat = adata.X
+    logging.info("Matrix has size (%d cells, %d genes)" % (mat.shape[0], mat.shape[1]))
+
     if matrixFormat=="tsv" or matrixFormat is None:
         matFname = join(outDir, 'exprMatrix.tsv.gz')
         if not skipMatrix:
-            anndataMatrixToTsv(adata, matFname, useRaw=useRaw)
+            anndataMatrixToTsv(adata, matFname)
     elif matrixFormat=="mtx":
         if not skipMatrix:
-            anndataMatrixToMtx(adata, outDir, useRaw=useRaw)
+            anndataMatrixToMtx(adata, outDir)
         configData["exprMatrix"] = "matrix.mtx.gz"
     else:
         assert(False) # invalid value for 'matrixFormat'
@@ -4756,11 +5389,13 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
 
     coordFields = writeAnndataCoords(adata, coordFields, outDir, coordDescs)
 
+    configData, coordDescs = exportScanpySpatial(adata, outDir, configData, coordDescs)
+
     if len(coordDescs)==0:
-        raise ValueError("No valid embeddings were found in anndata.obsm but at least one array of coordinates is required. Keys  obsm: %s" % (coordFields))
+        logging.warn("No valid embeddings were found in anndata.obsm but at least one array of coordinates is usually required. Keys obsm: %s" % (coordFields))
 
     ##Check for cluster markers
-    if markerField not in adata.uns and not skipMarkers:
+    if (markerField not in adata.uns or clusterField is not None) and not skipMarkers:
         logging.warn("Couldnt find list of cluster marker genes in the h5ad file in adata.uns with the key '%s'. "
             "In the future, from Python, try running sc.tl.rank_genes_groups(adata) to "
             "create the cluster annotation and write the h5ad file then." % markerField)
@@ -4800,6 +5435,7 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
 
         if check_nonnegative_integers(adata.X):
             logging.info("Looks like expression matrix has no negatives and is all integers: taking log2 of data before running rank_groups")
+            sc = importScanpy()
             sc.pp.log1p(adata)
         else:
             logging.info("Looks like expression matrix has already been log2-ed before")
@@ -4815,14 +5451,17 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     ##Save metadata
     if metaFields is None:
         metaFields = list(adata.obs.columns.values)
-    else:
-        # check that field names exist
-        for name in metaFields:
-            if name not in adata.obs.keys():
-                logging.warn('There is no annotation field with the name `%s`.' % name)
-                if name not in ["percent_mito", "n_genes", "n_counts"]:
-                    # tolerate missing default fields
-                    raise ValueError()
+
+    # Filter out any metadata fields that end with 'ontology_term_id'
+    metaFields = [f for f in metaFields if not f.endswith("ontology_term_id")]
+
+    # check that field names exist
+    for name in metaFields:
+        if name not in adata.obs.keys():
+            logging.warn('There is no annotation field with the name `%s`.' % name)
+            if name not in ["percent_mito", "n_genes", "n_counts"]:
+                # tolerate missing default fields
+                raise ValueError()
 
     metaFields = makeDictDefaults(metaFields, metaLabels)
 
@@ -4843,8 +5482,7 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     fname = join(outDir, "meta.tsv")
     meta_df.to_csv(fname,sep='\t', index_label="cellId")
 
-    if "spatial" in adata.uns:
-        configData, coordDescs = exportScanpySpatial(adata, outDir, configData, coordDescs)
+    configData = exportScanpyColors(adata, outDir, configData)
 
     if clusterField is None:
         clusterField = 'louvain'
@@ -4856,6 +5494,10 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     if markersExported:
         generateQuickGenes(outDir)
         configData['quickGenesFile'] = "quickGenes.tsv"
+
+    if atac:
+        assert("." in atac) # --atac must have a dot in it
+        configData["atacSearch"] = atac
 
     if isfile(confName):
         logging.info("%s already exists, not overwriting. Remove and re-run command to recreate." % confName)
@@ -5018,6 +5660,11 @@ def rebuildCollections(dataRoot, webRoot, collList):
         # the collections summary comes from the JSON files
         datasets = subdirDatasetJsonData(webCollDir)
         collSumm = summarizeDatasets(datasets)
+
+        # sort the top level datasets alphabetically
+        if collInfo["name"]=="":
+            collSumm = list(sorted(collSumm, key=operator.itemgetter('shortLabel')))
+
         collInfo["datasets"] = collSumm
 
         parentFnames, fullPath, parentInfos = findParentConfigs(collFname, dataRoot, collInfo["name"])
@@ -5042,7 +5689,7 @@ def findRoot(inDir=None):
         dataRoot = getConfig("dataRoot")
     
     if dataRoot is None:
-        logging.info("dataRoot is not set in ~/.cbDefaults.conf or via $CBDATAROOT. Dataset hierarchies are not supported.")
+        logging.info("dataRoot is not set in ~/.cellbrowser or via $CBDATAROOT. Dataset hierarchies are not supported.")
         return None
 
     dataRoot = abspath(expanduser(dataRoot).rstrip("/"))
@@ -5055,7 +5702,7 @@ def findRoot(inDir=None):
     return dataRoot
 
 def resolveOutDir(outDir):
-    """ user can define mapping e.g. {"alpha" : "/usr/local/apache/htdocs-cells"} in ~/.cbDefaults.conf """
+    """ user can define mapping e.g. {"alpha" : "/usr/local/apache/htdocs-cells"} in ~/.cellbrowser """
     confDirs = getConfig("outDirs")
     if confDirs:
         if outDir in confDirs:
@@ -5064,15 +5711,24 @@ def resolveOutDir(outDir):
 
 def fixupName(inConfFname, inConf):
     " detect hierarchical mode and construct the output path "
-    dataRoot = findRoot(inConfFname)
+    inFullPath = abspath(inConfFname)
+    dataRoot = findRoot(dirname(inFullPath))
     if dataRoot:
         if "name" in inConf:
-            logging.debug("using dataset hierarchies: 'name' in %s is ignored" % inConfFname)
+            logging.debug("using dataset hierarchies: 'name' in %s is ignored" % inFullPath)
         logging.debug("Deriving dataset name from path")
-        inConf["name"] = basename(dirname(abspath(inConfFname)))
+        inConf["name"] = basename(dirname(inFullPath))
 
-        relPath = relpath(dirname(abspath(inConfFname)), dataRoot)
+        relPath = relpath(dirname(inFullPath), dataRoot)
     else:
+        if not "name" in inConf:
+            errAbort("Not running in data hierarchy mode. "
+                "The config file %s needs at least the setting 'name' to a short string, e.g. 'cortex-dev'. "
+                "If you set  a dataRoot directory in your ~/.cellbrowser file or via the CBDATAROOT variable, then the input datasets "
+                "are assumed to be under one single directory and their subdirectory name is the datasetname. "
+                "See https://cellbrowser.readthedocs.io/en/master/collections.html "
+                "Otherwise, as now, they can be spread out over the entire filesystem but then the directory name cannot be used to "
+                "derive the cell browser dataset name. Instead, a 'name' setting must be present in every cellbrowser.conf file." % inConfName)
         relPath = inConf["name"]
 
     dsName = inConf["name"]
@@ -5083,7 +5739,7 @@ def addParents(inConfFname, dataRoot, dsName, outConf, todoConfigs):
     # find all parent cellbrowser.conf-files and fixup the dataset's "name"
     # keep a list of parent config files in todoConfigs (they will need to be updated later)
     if dataRoot is None:
-        logging.info("dataRoot not set in ~/.cbDefaults.conf, no need to rebuild hierarchy")
+        logging.info("dataRoot not set in ~/.cellbrowser, no need to rebuild hierarchy")
         dataRoot = None
     else:
         if not "fileVersions" in outConf:
@@ -5116,6 +5772,13 @@ def rebuildFlatIndex(outDir):
     outFname = join(outDir, "dataset.json")
     writeJson(collInfo, outFname)
 
+
+def checkDsCase(inConfFname, relPath, inConfig):
+    """ relPath should not be uppercase for top-level datasets at UCSC, as we use the hostname part """
+    if not "/" in relPath and getConfig("onlyLower", False) and \
+            "name" in inConfig and inConfig["name"].isupper():
+        errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
+                "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
 
 def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None):
     " build browser from config files confFnames into directory outDir and serve on port "
@@ -5153,6 +5816,8 @@ def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None
         dataRoot, relPath, inConf, dsName = fixupName(inConfFname, inConf)
         outConf = addParents(inConfFname, dataRoot, dsName, outConf, todoConfigs)
 
+        checkDsCase(inConfFname, relPath, inConf)
+
         datasets.append(dsName)
 
         datasetDir = join(outDir, relPath)
@@ -5169,6 +5834,7 @@ def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None
             # This is an actual dataset - the main function that does all the work is convertDataset()
             copyGenes(inConf, outConf, outDir)
             isTopLevel = ("parents" in outConf and len(outConf["parents"])==1) # important for facet checking
+            logging.debug("Datasets parents: %s" % outConf.get("parents"))
             convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel)
 
         outConf = copyFacets(inConf, outConf)
@@ -5294,6 +5960,10 @@ def cbBuildCli():
     if len(args)!=0:
         errAbort("This program doesn't accept arguments. Did you forget to use the -i option?")
 
+    if options.force:
+        global doForce
+        doForce = True
+
     confFnames = options.inConf
     if confFnames==None:
         confFnames = ["cellbrowser.conf"]
@@ -5309,17 +5979,36 @@ def cbBuildCli():
             cbBuild_parseArgs(showHelp=True)
 
     if options.outDir is None:
-        logging.error("You have to specify at least the output directory via -o or set the env. variable CBOUT or set htmlDir in ~/.cbDefaults.conf.")
+        logging.error("You have to specify at least the output directory via -o or set the env. variable CBOUT or set htmlDir in ~/.cellbrowser")
         cbBuild_parseArgs(showHelp=True)
 
 
     outDir = options.outDir
     #onlyMeta = options.onlyMeta
     port = options.port
+    maxDepth = options.depth
 
     try:
         if options.recursive:
-            confFnames = glob.glob("*/cellbrowser.conf")
+            if isPy3:
+                confFnames = glob.glob("**/cellbrowser.conf", recursive=True)
+            else:
+                confFnames = glob.glob("**/cellbrowser.conf") # not the same, at least doesn't throw an error, good enough, Py2 is old
+
+            filtConf = []
+            for cf in confFnames:
+                if "old/" in cf or "tmp/" in cf or "not-used/" in cf or "temp/" in cf or "orig/" in cf or "ignore/" in cf or "skip/" in cf or "marker-recalc/" in cf or "marker_recalc/" in cf or "re-export/" in cf:
+                    logging.debug("Skipping %s, name suggests that it should be skipped" % cf)
+                    continue
+                cfDepth = cf.count("/")
+                if maxDepth and cfDepth > maxDepth:
+                    logging.info("Skipping %s, is at depth %d, but --depth %d was specified" % (cf, cfDepth, maxDepth))
+                    continue
+
+                filtConf.append(cf)
+            confFnames = filtConf
+
+            logging.debug("recursive config filenames without anything that contains old/tmp/temp/not-used/orig/ignore/skip/marker-recalc/marker_recalc/re-export/: %s" % confFnames)
             for cf in confFnames:
                 logging.info("Recursive mode: processing %s" % cf)
                 build(cf, outDir, redo=options.redo)
@@ -5379,8 +6068,8 @@ def readMatrixAnndata(matrixFname, samplesOnRows=False, genome="hg38", reqCoords
     """
     sc = importScanpy()
 
-    if matrixFname.endswith(".mtx.gz"):
-        errAbort("For cellranger3-style .mtx files, please specify the directory, not the .mtx.gz file name")
+    #if matrixFname.endswith(".mtx.gz"):
+        #errAbort("For cellranger3-style .mtx files, please specify the directory, not the .mtx.gz file name")
 
     if matrixFname.endswith(".h5ad"):
         logging.info("File name ends with .h5ad: Loading %s using sc.read" % matrixFname)
@@ -5392,7 +6081,7 @@ def readMatrixAnndata(matrixFname, samplesOnRows=False, genome="hg38", reqCoords
     elif isMtx(matrixFname):
         import pandas as pd
         logging.info("Loading expression matrix: mtx format")
-        adata = sc.read(matrixFname, cache=False).T
+        adata = sc.read_mtx(matrixFname).T
 
         _mtxFname, geneFname, barcodeFname = findMtxFiles(matrixFname)
         adata.var_names = pd.read_csv(geneFname, header=None, sep='\t')[1]
@@ -5626,7 +6315,6 @@ def writeGaScript(ofh, gaTag):
 def summarizeDatasets(datasets):
     """ keep only the most important fields of a list of datasets and return them as a list of dicts.
     Also create a new md5 from all the datasets. """
-    #allMd5s = []
     dsList = []
     for ds in datasets:
         if ds.get("visibility")=="hide" or ds.get("hideDataset") in [True, "True", "true", 1, "1"]:
@@ -5640,7 +6328,7 @@ def summarizeDatasets(datasets):
         summDs = {
             "shortLabel" : ds["shortLabel"],
             "name" : ds["name"],
-            "md5" : ds["md5"]
+            "md5" : ds["md5"],
         }
 
         # these are copied if they are present
@@ -5650,6 +6338,7 @@ def summarizeDatasets(datasets):
                 #summDs[t] = ds[t]
 
         # these are copied and checked for the correct type
+        # DEPRECATE in 2025: duplicated facets
         for optListTag in ["tags", "hasFiles", "body_parts", "diseases", "organisms", "projects", "life_stages", \
                 "domains", "sources", "assays"]:
             if optListTag in ds:
@@ -5659,13 +6348,17 @@ def summarizeDatasets(datasets):
                     logging.error("Dataset: %s" % ds["name"])
                     logging.error("Setting '%s' must be a list of values, not a number or string." % optListTag)
 
+        # the above tags are replaced with the more modern dictionary 'facets' (the old code is still there, for backwards compatibility
+        if "facets" in ds:
+            summDs["facets"] = dict(ds["facets"])
+
         # these are generated
         if "sampleCount" in ds:
             summDs["sampleCount"] = ds["sampleCount"]
         else:
             summDs["isCollection"] = True
             if not "datasets" in ds:
-                errAbort("The dataset %s has a dataset.json file that looks invalid. Please rebuild that dataset. "
+                errAbort("The dataset %s has a dataset.json file that looks invalid. Please remove the file and rebuild that dataset. "
                         "Then go back to the current directory and retry the same command. " % ds["name"])
             children = ds["datasets"]
 
@@ -5720,6 +6413,8 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         "ext/selectize.bootstrap3.css",
         #"ext/selectize.0.12.4.min.css",
         "ext/OverlayScrollbars.min.css", # 1.6.2, from https://cdnjs.com/libraries/overlayscrollbars
+        #"ext/theme.default.css", #  tablesorter
+        "ext/theme.bootstrap_3.css", #  tablesorter
         "css/cellBrowser.css"
         ]
 
@@ -5735,13 +6430,16 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         "ext/jquery.tipsy.min.js", "ext/intro.min.js", "ext/papaparse.min.js",
         "ext/bootstrap.min.js", "ext/bootstrap-submenu.js", "ext/pako_inflate.min.js",
         "ext/FastBitSet.js", "ext/hamster.js", "ext/split.js", "ext/normalizeWheel.js",
-        "ext/tablesort.js", "ext/tablesort.number.min.js", "ext/Chart.bundle.min.js",
+        #"ext/tablesort.js", "ext/tablesort.number.min.js", 
+        "ext/Chart.bundle.min.js",
         "ext/chartjs-chart-box-and-violin-plot.js", "ext/jquery-ui.min.js",
         "ext/select2.min.js",
         "ext/selectize.js", # 0.12.16
         "ext/jquery.sparkline.min.js",
         "ext/jquery.overlayScrollbars.min.js", # 1.6.2 from https://cdnjs.com/libraries/overlayscrollbars
         "ext/jquery.event.drag-2.3.0.js", # for slickgrid 2.4.5
+        "ext/jquery.tablesorter.js",
+        "ext/jquery.tablesorter.widgets.js",
         "ext/lz-string.js",  # 1.4.4, https://raw.githubusercontent.com/pieroxy/lz-string/master/libs/lz-string.js
         "ext/slick.core.js",
         "ext/slick.cellrangedecorator.js", "ext/slick.cellrangeselector.js", "ext/slick.cellselectionmodel.js",
@@ -5981,7 +6679,7 @@ def getObsmKeys(adata):
         obsmKeys = list(adata.obsm.keys()) # this seems to work with newer versions
     return obsmKeys
 
-def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname):
+def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname, skipMarkers):
     """ run expr matrix through scanpy, output a cellbrowser.conf, a matrix and the meta data.
     Return an adata object. Optionally keeps a copy of the raw matrix in adata.raw """
     sc = importScanpy()
@@ -6045,15 +6743,20 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname):
     conf["pcCount"] = conf.get("pcCount", "auto")
     conf["doLayouts"] = doLayouts
     conf["doLouvain"] = conf.get("doLouvain", True)
+    conf["doPca"] = conf.get("doPca", True)
     conf["louvainNeighbors"] = int(conf.get("louvainNeighbors", 6))
     conf["louvainRes"] = float(conf.get("louvainRes", 1.0))
+
     conf["doMarkers"] = conf.get("doMarkers", True)
+    if skipMarkers:
+        conf["doMarkers"] = False
+
     conf["markerCount"] = int(conf.get("markerCount", 20))
     conf["inMeta"] = conf.get("inMeta", inMeta)
     conf["inCluster"] = conf.get("inCluster", inCluster)
 
     if conf["inMeta"]:
-        adata = addMetaToAnnData(adata, inMeta)
+        adata = addMetaToAnnData(adata, conf["inMeta"])
 
     sampleCount = len(adata.obs)
 
@@ -6206,46 +6909,73 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname):
         pipeLog('Scaling data, max_value=%d' % maxValue)
         sc.pp.scale(adata, max_value=maxValue)
 
-    pcCount = conf["pcCount"]
+    if conf["doPca"]:
+        pcCount = conf["pcCount"]
 
-    if pcCount=="auto":
-        firstPcCount = 100
-    else:
-        firstPcCount = pcCount
+        if pcCount=="auto":
+            firstPcCount = 100
+        else:
+            firstPcCount = pcCount
 
-    pipeLog('Performing initial PCA, number of PCs: %d' % firstPcCount)
-    sc.tl.pca(adata, n_comps=firstPcCount)
-    #Multiply by -1 to compare with Seurat
-    #adata.obsm['X_pca'] *= -1
-    #Plot of pca variance ratio to see if formula matches visual determination of pc_nb to use
-    sc.pl.pca_variance_ratio(adata, log=True)
+        X = adata.X.A if hasattr(adata.X, "A") else adata.X  # handle sparse matrices
 
-    #Computing number of PCs to be used in clustering
-    if pcCount == "auto":
-        pipeLog("Estimating number of useful PCs based on Shekar et al, Cell 2016")
-        pipeLog("PC weight cutoff used is (sqrt(# of Genes/# of cells) + 1)^2")
-        pipeLog("See http://www.cell.com/cell/fulltext/S0092-8674(16)31007-8, STAR methods")
-        pc_cutoff= (np.sqrt((adata.n_vars/adata.n_obs))+1)**2
-        pc_nb=0
-        for i in adata.uns['pca']['variance']:
-            if i>pc_cutoff:
-                pc_nb+=1
-        pipeLog('%d PCs will be used for tSNE and clustering' % pc_nb)
-    else:
-        pc_nb = int(pcCount)
-        pipeLog("Using %d PCs as configured in config" % pcCount)
+        pipeLog('Performing initial PCA, number of PCs: %d' % firstPcCount)
+        pipeLog("Has NaN:"+str(np.isnan(X).any()))
+        pipeLog("Has +inf:"+str(np.isposinf(X).any()))
+        pipeLog("Has -inf:"+ str(np.isneginf(X).any()))
+        pipeLog("Max value:"+ str(np.nanmax(X)))
+        if np.isposinf(X).any():
+            logging.warn("Matrix has +inf values, replacing with 2^32")
+            X[np.isinf(X)] = np.nan  # turn inf into NaN
+            X = np.nan_to_num(X, nan=2**32)  # replace NaN with 2E6
+            adata.X = X
 
-    if "tsne" in doLayouts:
+        sc.tl.pca(adata, n_comps=firstPcCount)
+        # X[np.isinf(X)] = np.nan  # turn inf into NaN
+        #X = np.nan_to_num(X, nan=0.0)  # replace NaN with 0
+        #adata.X = X
+
+        # suggestion - Check after normalization:
+        # sc.pp.normalize_total(adata, target_sum=1e4)
+        # print(np.isnan(adata.X).any())
+        # suggestion2 - Before scaling, clip extreme values:
+        # sc.pp.scale(adata, max_value=10)
+
+        #Multiply by -1 to compare with Seurat
+        #adata.obsm['X_pca'] *= -1
+        #Plot of pca variance ratio to see if formula matches visual determination of pc_nb to use
+        sc.pl.pca_variance_ratio(adata, log=True)
+
+        #Computing number of PCs to be used in clustering
+        if pcCount == "auto":
+            pipeLog("Estimating number of useful PCs based on Shekar et al, Cell 2016")
+            pipeLog("PC weight cutoff used is (sqrt(# of Genes/# of cells) + 1)^2")
+            pipeLog("See http://www.cell.com/cell/fulltext/S0092-8674(16)31007-8, STAR methods")
+            pc_cutoff = ( np.sqrt(float(len(adata.var))/len(adata.obs)) +1 ) **2
+            pc_nb = 0
+            for i in adata.uns['pca']['variance']:
+                if i > pc_cutoff:
+                    pc_nb+=1
+            pipeLog('%d PCs will be used for tSNE and clustering' % pc_nb)
+            if pc_nb <= 2:
+                errAbort("Number of useful PCs is too small. The formula from Shekar et all did not work (not gene expression data?). Please set the "
+                        "number of PCs manually via the pcCount variable in scanpy.conf")
+
+        else:
+            pc_nb = int(pcCount)
+            pipeLog("Using %d PCs as configured in config" % pcCount)
+
+    if conf["doPca"] and "tsne" in doLayouts:
         pipeLog('Performing tSNE')
         sc.tl.tsne(adata, n_pcs=int(pc_nb), random_state=2, n_jobs=8)
 
-    if not inCluster or "umap" in doLayouts or conf["doLouvain"]:
+    if conf["doPca"] and (not inCluster or "umap" in doLayouts or conf["doLouvain"]):
         neighbors = conf["louvainNeighbors"]
         res = conf["louvainRes"]
         pipeLog('Running knn, using %d PCs and %d neighbors' % (pc_nb, neighbors))
         sc.pp.neighbors(adata, n_pcs=int(pc_nb), n_neighbors=neighbors)
 
-    if not inCluster or conf["doLouvain"]:
+    if not inCluster or (conf["doPca"] and conf["doLouvain"]):
         pipeLog('Performing Louvain Clustering, resolution %f' % (res))
         sc.tl.louvain(adata, resolution=res)
         pipeLog("Found %d louvain clusters" % len(adata.obs['louvain'].unique()))
@@ -6256,14 +6986,10 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname):
     logging.info("Using cluster annotation from field: %s" % clusterField)
 
     if "tsne" in doLayouts:
-        sc.pl.tsne(adata, color=clusterField)
-
-    #Clustering. Default Resolution: 1
-    #res = 1.0
-    #pipeLog('Performing Louvain Clustering, resolution = %f' % res)
-    #sc.pp.neighbors(adata, n_pcs=int(pc_nb))
-    #sc.tl.louvain(adata, resolution=res)
-    #sc.pl.tsne(adata, color='louvain')
+        try:
+            sc.pl.tsne(adata, color=clusterField)
+        except:
+            logging.error("Error while plotting with Scanpy, ignoring the error")
 
     if "umap" in doLayouts:
         pipeLog("Performing UMAP")
@@ -6400,7 +7126,6 @@ def copyFileIfDiffSize(inFname, outFname):
     else:
         logging.info("identical and same size, not copying %s to %s" % (inFname, outFname))
 
-
 def copyTsvMatrix(matrixFname, outMatrixFname):
     " copy one file to another, but only if both look like valid input formats for cbBuild "
     if isMtx(matrixFname) or ".h5" in matrixFname:
@@ -6413,6 +7138,11 @@ def generateQuickGenes(outDir):
     " make a quickGenes.tsv in outDir from markers.tsv "
     outFname = join(outDir, "quickGenes.tsv")
     markerFname = join(outDir, "markers.tsv")
+
+    if not isfile(markerFname):
+        logging.warning("Cannot find marker file %s, so not generating quick genes file" % markerFname)
+        return
+
     logging.info("Generating %s from %s" % (outFname, markerFname))
 
     clusters = parseMarkerTable(markerFname, None)[0]
@@ -6465,6 +7195,8 @@ def importScanpy():
         print("$ conda install seaborn scikit-learn statsmodels numba pytables")
         print("$ conda install -c conda-forge python-igraph leiden")
         print("Then re-run this command.")
+        from traceback import format_exc
+        print(format_exc())
         sys.exit(1)
     return sc
 
@@ -6522,14 +7254,20 @@ def cbScanpyCli():
     if isfile(logFname):
         os.remove(logFname)
 
-    adata, params = cbScanpy(matrixFname, metaFname, inCluster, confFname, figDir, logFname)
+    adata, params = cbScanpy(matrixFname, metaFname, inCluster, confFname, figDir, logFname, skipMarkers)
 
     logging.info("Writing final result as an anndata object to %s" % adFname)
-    adata.write(adFname)
+
+    # work around scanpy bug for objects that were converted from seurat, https://github.com/theislab/scvelo/issues/255
+    if "_raw" in dir(adata) and "_var" in dir(adata.raw) and "_index" in list(adata.raw.var.columns):
+        adata._raw._var.rename(columns={'_index': 'features'}, inplace=True)
+
+    if params.get("doH5ad", True):
+        adata.write(adFname)
 
     scanpyToCellbrowser(adata, outDir, datasetName=datasetName, skipMarkers=skipMarkers,
             clusterField=inCluster, skipMatrix=(copyMatrix or skipMatrix), matrixFormat=matrixFormat,
-            useRaw=True)
+            useRaw=True, atac=False)
 
     if copyMatrix:
         outMatrixFname = join(outDir, "exprMatrix.tsv.gz")
@@ -6539,14 +7277,20 @@ def cbScanpyCli():
     copyFileIfDiffSize(matrixFname, join(outDir, basename(matrixFname)))
 
 def readGenesBarcodes(geneFname, barcodeFname):
-    " return two lists "
+    " read the features.tsv or barcodes.tsv file, return two lists "
     genes = []
     sep = sepForFile(geneFname)
     for l in openFile(geneFname):
         row = l.rstrip("\r\n").split(sep) # field 3 is "Gene Expression" in cr3
         if len(row)>1:
             geneId, sym = row[:2]
-            genes.append(geneId+"|"+sym)
+            # we have seen features.tsv files where geneId==sym which switched off gene ID resolution
+            # e.g. the t004 dataset 
+            if (geneId!=sym):
+                genes.append(geneId+"|"+sym)
+            else:
+                genes.append(geneId)
+
         else:
             geneId = row[0]
             genes.append(geneId)

@@ -1,0 +1,24 @@
+#!/usr/bin/env python2
+import string, optparse
+import sys,csv
+
+# === COMMAND LINE INTERFACE, OPTIONS AND HELP ===
+parser = optparse.OptionParser("usage: %prog [options] filename - convert csv to tab-sep file") 
+
+parser.add_option("-d", "--debug", dest="debug", action="store_true", help="show debug messages") 
+parser.add_option("-s", "--sep", dest="sep", action="store", help="delimiter, default %default", default=",") 
+#parser.add_option("-f", "--file", dest="file", action="store", help="run on file") 
+#parser.add_option("", "--test", dest="test", action="store_true", help="do something") 
+(options, args) = parser.parse_args()
+# =====
+
+if len(args)==0:
+    ifh = sys.stdin
+else:
+    ifh = open(args[0])
+
+trTab = string.maketrans("\n\r\t", "   ")
+
+for row in csv.reader(ifh, delimiter=options.sep):
+    row = [r.strip().translate(trTab) for r in row]
+    print("\t".join(row))

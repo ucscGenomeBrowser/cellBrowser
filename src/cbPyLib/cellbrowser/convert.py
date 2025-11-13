@@ -1,14 +1,15 @@
 # various format converters for single cell data:
 # - cellranger, mtx to tsv, matcat, metaCat etc
 
-import logging, optparse, io, sys, os, shutil, operator, glob, re, json
-from collections import defaultdict
+import logging, optparse, io, sys, os, shutil, operator, glob, re, json, subprocess
+from collections import defaultdict, OrderedDict
 
 from .cellbrowser import runGzip, openFile, errAbort, setDebug, moveOrGzip, makeDir, iterItems
 from .cellbrowser import mtxToTsvGz, writeCellbrowserConf, getAllFields, readMatrixAnndata, adataStringFix
 from .cellbrowser import anndataMatrixToTsv, loadConfig, sanitizeName, lineFileNextRow, scanpyToCellbrowser, build
 from .cellbrowser import generateHtmls, getObsKeys, renameFile, getMatrixFormat, generateDataDesc
 from .cellbrowser import copyFileIfDiffSize
+from .cellbrowser import generateQuickGenes
 
 from os.path import join, basename, dirname, isfile, isdir, relpath, abspath, getsize, getmtime, expanduser
 
@@ -19,14 +20,17 @@ def cbToolCli_parseArgs(showHelp=False):
 Command is one of:
     mtx2tsv   - convert matrix market to .tsv.gz
     matCatCells - merge expression matrices into a big tsv.gz matrix.
+        This command adds more cells. Adds cells on the right side of the matrix.
         If you have files from different cells, same assay, same genes, this
         allows to merge them into a bigger matrix. Format is one-line-per-gene.
         Matrices must have identical genes in the same order and the same number of
         lines. Handles .csv files, otherwise defaults to tab-sep input. gzip OK.
     matCatGenes - concatenate expression matrices. If you have data from the same cells but with different
-        assays (multi-modal), this allows to merge them and add a prefix to every gene.
+        genes (assays, multi-modal), this allows to merge them and add a prefix to every gene.
+        This command adds more genes. Adds genes to the end of the matrix.
     metaCat - concat/join meta tables on the first (cell ID) field or reorder their fields
     reorder - reorder the meta fields
+    quickgenes - make quickgenes.tsv from markers.tsv in current directory
 
 Examples:
     - %prog mtx2tsv matrix.mtx genes.tsv barcodes.tsv exprMatrix.tsv.gz - convert .mtx to .tsv.gz file
@@ -34,7 +38,7 @@ Examples:
     - %prog matCatGenes mat1.csv.gz mat2.tsv.gz=atac- exprMatrix.tsv.gz - concatenate expression matrices
            and prefix all genes in the second file with 'atac-'
     - %prog metaCat meta.tsv seurat/meta.tsv scanpy/meta.tsv newMeta.tsv - merge meta matrices
-    - %prog reorder meta.tsv meta.newOrder.tsv --delete samId --order=cluster,cellType,age - reorder meta fields
+    - %prog reorder meta.tsv meta.newOrder.tsv --del samId --order=cluster,cellType,age - reorder meta fields
     """)
 
     parser.add_option("-d", "--debug", dest="debug", action="store_true",
@@ -43,6 +47,8 @@ Examples:
             help="for reorder and metaCat: try to fix R's mangling of various special chars to '.' in the cell IDs")
     parser.add_option("", "--order", dest="order", action="store",
         help="only for reorder and metaCat: new order of fields, comma-sep, e.g. 'disease,age'. Do not include cellId, it's always the first field by definition. Fields that are in the file but not specified here will be appended as the last columns.")
+    parser.add_option("", "--only", dest="only", action="store_true",
+            help="when using --order: only use the specified fields, do not append other fields at the end")
     parser.add_option("", "--del", dest="delFields", action="store",
         help="only for reorder and metaCat: names of fields to remove")
 
@@ -60,13 +66,13 @@ def cbToolCli():
     " run various tools from the command line "
     args, options = cbToolCli_parseArgs()
 
-    if len(args)<=1:
+    if len(args)<=1 and not (len(args)!=0 and args[0]=="quickgenes"):
         cbToolCli_parseArgs(showHelp=True)
         sys.exit(1)
 
     cmd = args[0]
 
-    cmds = ["mtx2tsv", "matCatCells", "matCatGenes" "metaCat", "reorder"]
+    cmds = ["mtx2tsv", "matCatCells", "matCatGenes" "metaCat", "reorder", "cxg", "quickgenes"]
 
     if cmd=="mtx2tsv":
         mtxFname = args[1]
@@ -82,6 +88,26 @@ def cbToolCli():
         inFnames = args[1:-1]
         outFname = args[-1]
         matCatGenes(inFnames, outFname)
+    elif cmd=="cxg":
+        subCmd = args[1]
+        if subCmd=="allDatasets":
+            printRows(getCxgAllDatasets())
+        elif subCmd=="asset":
+            dsIds = args[2:]
+            getCxgAssets(dsIds)
+        elif subCmd=="allAssets":
+            getCxgAllAssets()
+        elif subCmd=="cp":
+            dsId = args[2]
+            assetId = args[3]
+            outFname = args[4]
+            url = getCxgAssetUrl(dsId, assetId)
+            cmd = ["curl", url, "--output", outFname]
+            subprocess.run(cmd)
+        elif subCmd=="desc":
+            collId = args[2]
+            getCxgColl(collId)
+
     elif cmd=="metaCat" or cmd=="reorder":
         inFnames = args[1:-1]
         outFname = args[-1]
@@ -99,8 +125,93 @@ def cbToolCli():
             inFnames.pop()
 
         metaCat(inFnames, outFname, options)
+
+    elif cmd=="quickgenes":
+        generateQuickGenes(".")
+
     else:
         errAbort("Command %s is not a valid command. Valid commands are: %s" % (cmd, ", ".join(cmds)))
+
+def getLabels(l):
+    " given a list of dicts, return a |-sep list of 'label' values "
+    labels = []
+    for d in l:
+        if type(d)==str:
+            labels.append(d)
+        else:
+            labels.append(d["label"])
+    return "|".join(labels)
+
+def printRows(iterator, headDone=False):
+    " print all rows gotten from an iterator "
+    #headDone = False
+    for row in iterator:
+        if headDone is False:
+            print("\t".join(row.keys()))
+            headDone = True
+        print("\t".join(row.values()))
+
+def getCxgAssetUrl(datasetId, assetId):
+    " cxg has signed links, get one for an asset ID "
+    url = 'https://api.cellxgene.cziscience.com/dp/v1/datasets/%s/asset/%s' % (datasetId, assetId)
+    import requests
+    ret = requests.post(url=url).json()
+    # keys: dataset_id, file_name, presigned_url
+    return ret["presigned_url"]
+
+def getCxgAllDatasets():
+    " yield all cxg datasets as ordered dicts "
+    import requests
+    url = "https://api.cellxgene.cziscience.com/dp/v1/datasets/index"
+    datasets = requests.get(url=url).json()
+    attrs = ['id', 'name', 'organism', 'collection_id', 'assay', 'explorer_url', 'is_primary_data', \
+            'cell_count', 'mean_genes_per_cell',
+            'development_stage', 'development_stage_ancestors', \
+            'disease', \
+            'published_at', 'revised_at', 'schema_version', 'self_reported_ethnicity', 'sex', 'tissue', \
+            'tissue_ancestors', 'cell_type', 'cell_type_ancestors']
+    for dataset in datasets:
+        row = OrderedDict()
+        for attr in attrs:
+            val = dataset.get(attr, "UNDEFINED")
+            if type(val)==type([]):
+                strVal = getLabels(val)
+            else:
+                strVal = str(val)
+            row[attr] = strVal
+        yield row
+
+def getCxgAllAssets():
+    ""
+    headDone = False
+    for ds in getCxgAllDatasets():
+        printRows(getCxgAssets([ds["id"]]), headDone)
+        headDone = True
+
+def getCxgAssets(dsIds, headDone=False):
+    " download assets for a list of cxg datasets "
+    import requests
+    attrs = ['dataset_id', 'dataset', 'filename', 'filetype', 'id', 's3_uri', 'created_at', 'updated_at', 'user_submitted']
+    #if not headDone:
+        #print("\t".join(attrs))
+
+    for dsId in dsIds:
+        url = "https://api.cellxgene.cziscience.com/dp/v1/datasets/%s/assets" % dsId
+        ret = requests.get(url=url).json()
+        for asset in ret["assets"]:
+            #row = []
+            row = OrderedDict()
+            for attr in attrs:
+                val = asset[attr]
+                if attr == "dataset":
+                    val = val["name"]
+                #row.append(str(val))
+                row[attr] = str(val)
+            #print("\t".join(row))
+            yield row
+
+def getCxgColl(collId):
+    " "
 
 def matCat(inFnames, outFname):
     tmpFname = outFname+".tmp"
@@ -205,24 +316,20 @@ def matCatGenes(inFnames, outFname):
             if headers is None:
                 headers = row
                 if (headers != otherHeaders): # all files must have identical columns = identical header line
-                    #logging.error("first file column headers were (only first ten fields shown): %s" % otherHeaders[:10])
-                    #logging.error("This file has the column headers (only first ten fields): %s" % headers[:10])
-                    #logging.error("The header lines of all files to be concatenated must be identical. Consider editing them manually or reorder them manually with AWK or pandas.")
                     logging.warn("Headers are not identical, need to re-order columns, this will be pretty slow")
                     doReorder = True
 
-                    fields = headers[1:]
-                    fieldOrder = []
+                    fieldOrder = [0]
                     for h in otherHeaders[1:]:
-                        fieldOrder.append( fields.index(h) ) # if this fails, then one file has a column that the other one doesn't have. Not clear what should happen then -> just fail.
+                        idx = headers.index(h)
+                        assert(idx!=0) # internal logic error. Should never happen.
+                        fieldOrder.append( idx ) # if this fails, then one file has a column that the other one doesn't have. Not clear what should happen then -> just fail.
                 continue
 
             if prefix!="":
                 row[0] = prefix+row[0]
 
             if doReorder:
-                ofh.write(row[0])
-                ofh.write("\t")
                 ofh.write("\t".join([row[i] for i in fieldOrder]))
             else:
                 ofh.write("\t".join(row))
@@ -236,21 +343,23 @@ def matCatGenes(inFnames, outFname):
     logging.info("Compressing %s", outFname)
     moveOrGzip(tmpFname, outFname)
 
-def reorderFields(row, firstFields, skipFields):
+def reorderFields(row, firstFields, skipFields, onlyFirst):
     " reorder the row to have firstFields first "
     #logging.debug("Reordering row to have %s fields first" % firstFields)
     newRow = [row[0]]
     for idx in firstFields:
         newRow.append(row[idx])
 
-    for i in range(1, len(row)):
-        if i not in firstFields and i not in skipFields:
-            newRow.append(row[i])
+    if not onlyFirst:
+        for i in range(1, len(row)):
+            if i not in firstFields and i not in skipFields:
+                newRow.append(row[i])
 
     return newRow
 
 def metaCat(inFnames, outFname, options):
     " merge all tsv/csv columns in inFnames into a new file, outFname. Column 1 is ID to join on. "
+    logging.debug("In fnames: %s, out fname: %s" % (repr(inFnames), repr(outFname)))
     allHeaders = ["cellId"]
     allRows = defaultdict(dict) # cellId -> fileIdx -> list of non-ID fields
     fieldCounts = {} # fileIdx -> number of non-ID fields
@@ -332,7 +441,9 @@ def metaCat(inFnames, outFname, options):
         tmpFname = outFname+".tmp"
         ofh = openFile(tmpFname, "w")
 
-    allHeaders = reorderFields(allHeaders, firstFieldIdx, delFieldIdx)
+    onlyFirst = options.only
+
+    allHeaders = reorderFields(allHeaders, firstFieldIdx, delFieldIdx, onlyFirst)
     ofh.write("\t".join(allHeaders))
     ofh.write("\n")
 
@@ -344,7 +455,7 @@ def metaCat(inFnames, outFname, options):
             else:
                 row.extend([""]*fieldCounts[fileIdx])
 
-        row = reorderFields(row, firstFieldIdx, delFieldIdx)
+        row = reorderFields(row, firstFieldIdx, delFieldIdx, onlyFirst)
         ofh.write("\t".join(row))
         ofh.write("\n")
 
@@ -573,7 +684,8 @@ def cbCellrangerCli_parseArgs(showHelp=False):
 def cbImportScanpy_parseArgs(showHelp=False):
     " setup logging, parse command line arguments and options. -h shows auto-generated help page "
     parser = optparse.OptionParser("""usage: %prog [options] -i inFilename -o outDir - convert Scanpy AnnData object to cellbrowser. inFilename can be an .h5ad or .loom file. 
-    Exports raw.X by default, or .X alternatively, see --proc. Exports all meta data. Writes .tsv by default, or alternatively .mtx.gz
+    Exports raw.X by default, or .X alternatively, see --proc and --layer.
+    Exports all meta data. Writes .tsv by default, or alternatively .mtx.gz
 
     Example:
     - %prog -i pbmc3k.h5ad -o pbmc3kScanpy - convert pbmc3k to directory with tab-separated files
@@ -584,9 +696,6 @@ def cbImportScanpy_parseArgs(showHelp=False):
 
     parser.add_option("-i", "--inFile", dest="inFile", action="store",
         help="input .h5ad file. Required parameter")
-
-    parser.add_option("", "--proc", dest="useProc", action="store_true",
-        help="when exporting, do not use the raw input data, instead use the normalized and corrected matrix scanpy. This has no effect if the anndata.raw attribute is not used in the anndata object")
 
     parser.add_option("-o", "--outDir", dest="outDir", action="store",
         help="Output directory. Required parameter")
@@ -616,6 +725,15 @@ def cbImportScanpy_parseArgs(showHelp=False):
 
     parser.add_option("", "--skipMarkers", dest="skipMarkers", action="store_true",
             help="do not try to calculate cluster-specific marker genes. Only useful for the rare datasets where a bug in scanpy crashes the marker gene calculation.")
+
+    parser.add_option("", "--proc", dest="useProc", action="store_true",
+        help="when exporting, do not use the raw input data, instead use the normalized and corrected matrix, aka 'ad.X'. This has no effect if the anndata.raw attribute is not present in the anndata object")
+
+    parser.add_option("-l", "--layer", dest="layer", action="store",
+            help="Specify the layer to export. This takes precedence over --proc.")
+
+    parser.add_option("", "--atac", dest="atac", action="store",
+            help="Indicate that this is an ATAC dataset and specify genome assembly and gene model, for example 'hg38.gencode-42'. Use 'cbGenes ls' to show the list of all available gene models on your disk or cbGenes fetch to download other ones. This will only be passed through to cellbrowser.conf.")
 
     (options, args) = parser.parse_args()
 
@@ -647,11 +765,16 @@ def cbImportScanpyCli():
     clusterField = options.clusterField
     skipMarkers = options.skipMarkers
     matrixFormat = getMatrixFormat(options)
+    atac = options.atac
+    layer = options.layer
+
+    if atac is not None and "." not in atac:
+        errAbort("the --atac option needs to be in the format <assembly>.<genemodel> e.g. hg38.gencode-42")
 
     ad = readMatrixAnndata(inFname, reqCoords=True)
 
     scanpyToCellbrowser(ad, outDir, datasetName, skipMatrix=options.skipMatrix, useRaw=(not options.useProc),
-            markerField=markerField, clusterField=clusterField, skipMarkers=skipMarkers, matrixFormat=matrixFormat)
+            markerField=markerField, clusterField=clusterField, skipMarkers=skipMarkers, matrixFormat=matrixFormat, atac=atac, layer=layer)
 
     copyFileIfDiffSize(inFname, join(outDir, basename(inFname)))
     generateDataDesc(datasetName, outDir, other={"supplFiles": [{"label":"Scanpy H5AD", "file":basename(inFname)}]})

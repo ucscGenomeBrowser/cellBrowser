@@ -23,9 +23,8 @@ file into a cell browser::
 
 This works with objects created by versions 2 and 3 of Seurat. ``cbImportSeurat`` can read 
 both ``.rds`` and ``.rdata`` files, for `.rdata` it assume the first object is the Seurat object.
-Make sure that you have the same major version of Seurat installed that was used to create the
-object. You cannot open Seurat2 objects with Seurat3 or vice versa. 
-(We often need to switch between Seurat versions and found conda environments very helpful for this.)
+Just make sure that you have the a higher major version of Seurat installed that was used to create the
+object. Unsurprisingly, you cannot open Seurat3 objects with Seurat2, Seurat4 objects with Seurat3, etc.
 
 The ``-i`` option specifies the input ``rds`` file and the ``-o`` option specifies a name for the output
 directory. You can use the ``-n`` option to change the dataset name in the cell browser;

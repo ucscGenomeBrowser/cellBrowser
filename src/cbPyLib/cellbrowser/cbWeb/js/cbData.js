@@ -106,13 +106,14 @@ var cbUtil = (function () {
                 onSuccess(data);
             },
             error : function() {
-                if (!silent)
+                if (!silent) {
                     if (url.search("dataset.json")>-1)
                         alert("Could not find a dataset at "+url+". If you are sure that the link is correct, please "+
                             "contact the administrator of this server, "+
                             "or cells@ucsc.edu if this is running at UCSC. ");
                     else
                         alert("Could not load "+url);
+                }
                 onSuccess(null);
             }
         });
@@ -196,9 +197,13 @@ var cbUtil = (function () {
             if (!dataLen)
                 dataLen = new Blob([binData]).size;;
 
-            if (dataLen < expLength -1) // Yes, the -1 does not make sense. This happens only with https://cells-beta.gi.ucsc.edu/?ds=engraftable-hsc+adt
+            if (dataLen < expLength-1) // Yes, the -1 does not make sense. 
+                // This happens only with https://cells-beta.gi.ucsc.edu/?ds=engraftable-hsc+adt
                 // and I have no idea why.
-                alert("internal error cbData.js: chunk is too small. Does the HTTP server really support byte range requests?");
+                alert("internal error cbData.js: data received from web server is too short. Expected data size was "+exprLength+
+                        " but received "+dataLen+" bytes. URL: "+url+
+                        "Does the HTTP server really support byte range requests? You probably will have to contact us to "+
+                        " narrow down this problem.");
 
             if (dataLen > expLength) {
                 console.log("Webserver does not support byte range requests, working around it, but this may be slow");
@@ -343,8 +348,27 @@ var cbUtil = (function () {
         return a;
     };
 
+    my.arrMinMax = function (a) {
+        /* return [min, max] of array */
+        let min = a[0], max = a[0];
+
+        for (let i = 1; i < a.length; i++) {
+            let value = a[i]
+            min = (value < min) ? value : min
+            max = (value > max) ? value : max
+        }
+
+        return [min, max]
+    }
+
+    my.baReadBigOffset = function(ba, o) {
+    /* given a byte array, return the unsigned long long int (little endian), so eight bytes, at offset o */
+        var offset = ba[o] |  ba[o+1] << 8 | ba[o+2] << 16 | ba[o+3] << 24 | ba[o+4] << 32 | ba[o+5] << 40 | ba[o+6] << 48 | ba[o+7] << 56;
+        return offset;
+    };
+
     my.baReadOffset = function(ba, o) {
-    /* given a byte array, return the long int (little endian) at offset o */
+    /* given a byte array, return the unsigned long int (little endian), so four bytes, at offset o */
         var offset = ba[o] |  ba[o+1] << 8 | ba[o+2] << 16 | ba[o+3] << 24;
         return offset;
     };
@@ -408,12 +432,18 @@ function CbDbFile(url) {
             if (doneCount===2) {
                 if (self.conf.atacSearch) {
                     self.peakOffsets = matrixIndex;
+                    self.indexGenesAtac();
                 } else {
                     self.geneOffsets = matrixIndex;
                     self.indexGenes();
                 }
                 onDone(self.name);
             }
+        }
+
+        function gotMatrix(data) {
+            matrixIndex = data; 
+            gotOneFile();
         }
 
         // load config and call onDone
@@ -428,7 +458,7 @@ function CbDbFile(url) {
         if (self.name!='') {
             // start loading gene offsets in the background now, because this takes a while
             var osUrl = cbUtil.joinPaths([this.url, "exprMatrix.json"]);
-            cbUtil.loadJson(osUrl, function(data) { matrixIndex = data; gotOneFile();}, true);
+            cbUtil.loadJson(osUrl, gotMatrix, true);
         } else {
             gotOneFile();
         }
@@ -456,12 +486,32 @@ function CbDbFile(url) {
         }
     }
 
+    this.findCoordIdx = function(name) {
+        /* given coord label return its index */
+        let coords = self.conf.coords;
+        for (let i=0; i<coords.length; i++) {
+            if (coords[i].shortLabel===name)
+                return i;
+        }
+    }
+
     this.loadCoords = function(coordIdx, onDone, onSpatialDone, onProgress) {
     /* load coordinates from URL and call onDone(array of (x,y), coordInfoObj, labelMids) when done */
         var i = 0;
         var binData = null;
         var meta = null;
         var labelMids; // null means: no json file found
+
+        var coordInfo = self.conf.coords[coordIdx];
+        if (coordInfo===null) {
+           alert("Could not find coordinates with name "+this.coordName);
+           return;
+        }
+
+        let hasSpatial = coordInfo.images || self.conf.spatial;
+
+        //if (hasSpatial && coordInfo.aspectRatio===undefined)  // patch up old datasets
+            //coordInfo.aspectRatio = 1.0
 
         function binDone(data, other) {
             binData = data;
@@ -481,13 +531,7 @@ function CbDbFile(url) {
             return;
         }
 
-        var coordInfo = self.conf.coords[coordIdx];
-        if (coordInfo===null) {
-           alert("Could not find coordinates with name "+this.coordName);
-           return;
-        }
-
-        if (coordInfo.images || self.conf.spatial) {
+        if (hasSpatial) {
            var spatials = coordInfo.images;
                if (!spatials)// older placement of the object
                    spatials = self.conf.spatial; //now spatial settings must be on the coords to support multi-coord datasets
@@ -499,7 +543,6 @@ function CbDbFile(url) {
                self.loadBackgroundImage(jpgUrl, onSpatialDone, i, spatials.length, onProgress)
             }
         }
-
 
         var binUrl = cbUtil.joinPaths([self.url, "coords", coordInfo.name, "coords.bin"]);
         if (coordInfo.md5)
@@ -513,12 +556,22 @@ function CbDbFile(url) {
         cbUtil.loadJson(jsonUrl, jsonDone, true);
     };
 
+    this.loadTraces = function(onTracesDone) {
+        /* load the trace file, add to self.traces and call onDone */
+        function onFileDone(res) {
+            self.traces = res;
+            onTracesDone(self.traces);
+        }
+        var fileUrl = cbUtil.joinPaths([self.url, "traces.json"]);
+        cbUtil.loadJson(fileUrl, onFileDone, true);
+    };
+
     this.getDefaultColorField = function() {
-        /* return a pair: [0] is "meta" or "gene" and [1] is the field name or the gene */
+        /* return the meta field to colors on */
         if (self.conf.clusterField)
-            return ["meta", self.conf.clusterField]; // just for backwards-compat. with old datasets
+            return self.conf.clusterField; // just for backwards-compat. with old datasets
         else
-            return ["meta", self.conf.defColorField];
+            return self.conf.defColorField;
     };
 
     this.findMetaInfo= function(findName) {
@@ -553,7 +606,7 @@ function CbDbFile(url) {
                 onProgress, metaInfo);
     }
 
-    this.loadMetaVec = function(metaInfo, onDone, onProgress, otherInfo) {
+    this.loadMetaVec = function(metaInfo, onDone, onProgress, otherInfo, strategy) {
     /* get an array of numbers, one per cell, that reflect the meta field contents
      * and an object with some info about the field. call onDone(arr, metaInfo) when done.
      * Keep all compressed arrays in metaCache;
@@ -584,7 +637,13 @@ function CbDbFile(url) {
             if (metaInfo.arrType==="float32") {
                 // numeric arrays have to be binned on the client. They are always floats.
                 console.time("discretize "+metaInfo.name);
-                var discRes = discretizeArray(arr, self.exprBinCount, FLOATNAN);
+                var discRes;
+
+                if (strategy==="range")
+                    discRes = discretizeArray_binSize(arr, self.exprBinCount, FLOATNAN);
+                else
+                    discRes = discretizeArray(arr, self.exprBinCount, FLOATNAN);
+
                 console.timeEnd("discretize "+metaInfo.name);
                 metaInfo.origVals = arr; // keep original values, so we can later query for them
                 arr = discRes.dArr;
@@ -703,33 +762,43 @@ function CbDbFile(url) {
     }
 
     function discretizeArray(arr, maxBinCount, bin0Val) {
-        /* discretize numeric values to deciles. return an obj with dArr and binInfo */
-        /* bin0Val is the value that is treated differently, it is kept in its own bin */
+        /* This is the default for most users: discretize numeric values to
+         * deciles. return an obj with dArr and binInfo */
+        /* bin0Val is the value that is treated differently, it is kept in its
+         * own bin */
         /* is bin0Val is null, switch off special bin0Value handling
-        /* ported from Python cbAdd:discretizeArray */
+        /* Code ported from Python cbAdd:discretizeArray */
         /* supports NaN special values */
         var breaks = [];
-        var arrSorted = arr.slice(); // sort expression values
+
+	// remove the Nan values - XX REVISIT
+	for (let i = 0; i < arr.length; i++) {
+	    if (Number.isNaN(arr[i])) {
+	       arr[i] = -Infinity;
+	    }
+	}
+
+        // sort expression values into a new array
+        var arrSorted = arr.slice(); // slice() = "make copy"
         arrSorted.sort();
-        var pos = 0;
-        if (arrSorted[0] == bin0Val) { // skip all bin0Val and remember position
-            var zeros = 0;
+
+        var minPos = 0;
+        if (arrSorted[0] == bin0Val) { // do we have any values in bin0? -> skip them and keep their position
             for (var i = 0, I = arrSorted.length; i < I; i++) {
                 if (arrSorted[i] > bin0Val) {
-                    pos = i;
+                    minPos = i;
                     break;
                 }
-                zeros += 1;
             }
         }
-        var minVal = arrSorted[pos];
+        var minVal = arrSorted[minPos];
         // calculate optimal bin size in numbers of cells
-        var desiredBinSize = Math.floor((arrSorted.length - pos) / (maxBinCount - breaks.length));
+        var desiredBinSize = Math.floor((arrSorted.length - minPos) / (maxBinCount - breaks.length));
         var currentCount = 0;
-        var binMin = arrSorted[pos];
+        var binMin = arrSorted[minPos];
         var binMax;
         var lastValue;
-        for (var i = pos, I = arrSorted.length; i < I; i++) {
+        for (var i = minPos, I = arrSorted.length; i < I; i++) {
             // determine if current value can be used as a break
             // i.e. it is different from the previous
             var isBreak = false;
@@ -758,16 +827,19 @@ function CbDbFile(url) {
 
         var binInfo = [];
 
-        var bin0MinMax = "Unknown";
+        var bin0MinMax = "Unknown"; // meta data often has empty string = "Unknown"
         if (bin0Val === 0) {
             bin0MinMax = 0;
+        }
+        if (bin0Val === FLOATNAN) { // this can only happen for expression matrices with "NAN" values in them
+            bin0MinMax = "NaN";
         }
         binInfo.push([bin0MinMax, bin0MinMax, binCounts[0]]);
 
         var idx = binCounts[0];
         for (let i=0; i < breaks.length; i++) {
             // use sorted array of expression values
-            // to get more accurate values
+            // to get the exact break values
             var binMin = arrSorted[idx];
             var binCount = binCounts[i+1];
             idx += binCount - 1;
@@ -778,17 +850,53 @@ function CbDbFile(url) {
         return {"dArr": dArr, "binInfo": binInfo};
     }
 
+    function discretizeArray_binSize(arr, maxBinCount, bin0Val) {
+        /* discretize an array such that each bin has the same size, not the same number of cells */
+        let minMax = cbUtil.arrMinMax(arr);
+        let min = minMax[0];
+        let max = minMax[1];
+        let binSize = (max-min)/(maxBinCount-1);
+
+        var binCounts = [];
+        for (let i=0; i < maxBinCount; i++) {
+            binCounts.push(0);
+        }
+
+        var dArr = [];
+        for (let i=0; i < arr.length; i++) {
+            var binIdx = Math.round( (arr[i]-min) / binSize ) 
+            dArr.push( binIdx );
+            binCounts[binIdx]++;
+        }
+
+        let binInfo = [];
+        for (let i=0; i < maxBinCount; i++)
+            binInfo.push( [i*binSize, (i+1)*binSize, binCounts[i]] );
+
+        let ret = {};
+        ret.dArr = dArr;
+        ret.binInfo = binInfo;
+        return ret;
+    }
+
     this.locusToOffset = function(name) {
         /* for both gene and ATAC mode: */
-        /* return an array [start, end, name] given a locus description (=a string: gene symbol or chr|start|end) */
+        /* return an array [start, end, name] given a locus description (=a string: gene ID/symbol or chr|start|end) */
         var off = null;
+        var geneId = name;
         //if (name.includes("|")) { // atac mode: name is chrom|start|end
         if (self.peakOffsets !== null) { // atac mode: name is chrom|start|end
             let pos = name.split("|");
             off = self.findAtacOffsets(pos[0], parseInt(pos[1]), parseInt(pos[2]));
         }
         else {
-            off = self.geneOffsets[name];
+            var geneIds = self.findGenesExact(name);
+            if (geneIds.length!==0) {
+                geneId = geneIds[0];
+                off = self.geneOffsets[geneIds[0]];
+                if (geneIds.length>1)
+                    alert("More than one match for gene name "+name+", using only first match.");
+            }
         }
 
         if (off===null || off===undefined) {
@@ -799,7 +907,7 @@ function CbDbFile(url) {
         let start = off[0];
         let len = off[1];
         let end = start+len;
-        return [start, end, name];
+        return [start, end, geneId];
     }
 
     this.namesToChunks = function(lociNames) {
@@ -851,7 +959,7 @@ function CbDbFile(url) {
         return newArr;
     }
 
-    this.loadExprAndDiscretize = function(locusName, onDone, onProgress) {
+    this.loadExprAndDiscretize = function(locusName, onDone, onProgress, strategy) {
     /* given a locus name, retrieve data from expression matrix
      * and call onDone with (array, discretizedArray, locusName, geneDesc (or ""),
      * binInfo).
@@ -862,6 +970,10 @@ function CbDbFile(url) {
      * - sums of either of these, e.g. PITX1+OTX2 or chr1|1000|2000+chr2|1000|2000
      * - a single gene or locus name, prefixed by "+", to add to the current array
      * - a single gene or locus name, prefixed by "-", to substract from the current array
+
+     * "strategy" can be "cells" or "range" or "none". If "cells", bins will have an ideally equal number of cells.
+     * if "range", bins will have an equal range between min-max (and somtimes no cells at all). If undefined,
+     * is "cells". "none" switches off discretization.
      * */
 
         var ArrType = cbUtil.makeType(self.conf.matrixArrType); // need this later
@@ -888,16 +1000,35 @@ function CbDbFile(url) {
             let arrs = [];
             for (let r of loadedRanges) {
                 arrs.push(r.arr);
-                if (r.desc!=="")
-                    geneDescs.push(r.desc);
+                if (r.desc!=="") {
+                    let desc = r.name;
+                    if (r.desc===r.name) {
+                        // try to get the symbol for a geneId
+                        desc = self.getGeneInfo(desc).sym;
+                    }
+                    geneDescs.push(desc);
+                }
             }
-            let geneDesc = geneDescs.join("; ");
 
-            // specVal is the value for a special bin, usually 0
+            // set gene description to an ;-separated list for multi-gene mode and
+            // to chrom:minStart-maxStart for ATAC mode
+            let geneDesc;
+            if (self.isAtacMode()) {
+                let chrom = loadedRanges[0].name.split("|")[0];
+                let minStart = loadedRanges[0].name.split("|")[1];
+                let maxEnd = loadedRanges[loadedRanges.length-1].name.split("|")[2];
+                geneDesc = chrom+":"+minStart+"-"+maxEnd;
+            }
+            else
+                geneDesc = geneDescs.join("; ");
+
+            // specVal is the value for the first bin, usually 0. But can also be -Infinity
             var specVal = 0;
             var matrixMin = self.getMatrixMin();
             if (matrixMin < 0)
-                specVal = null;
+                specVal = null; // null = no special bin handling at all
+            if (matrixMin === FLOATNAN)
+                specVal = FLOATNAN;
 
             let newArr = [];
             if (updateOp) {
@@ -908,10 +1039,30 @@ function CbDbFile(url) {
                         newArr = cbUtil.arrAddMult(self.currExprArr, arrs);
                     else
                         newArr = cbUtil.arrSubMult(self.currExprArr, arrs);
-            } else
-                newArr = sumAllArrs(ArrType, arrs);
+            } else {
+                if (arrs.length===1)
+                    newArr = arrs[0];
+                else
+                    newArr = sumAllArrs(ArrType, arrs);
+            }
 
-            var da = discretizeArray(newArr, self.exprBinCount, specVal);
+            var discFunc = null;
+            if (strategy==="range")
+                discFunc = discretizeArray_binSize;
+            else if (strategy="cells")
+                discFunc = discretizeArray;
+            else
+                discFunc = null;
+
+            
+            var da = {};
+            if (discFunc == null) {
+                da.dArr = null;
+                da.binInfo = null;
+            } else {
+                da = discFunc(newArr, self.exprBinCount, specVal);
+            }
+
             self.currExprArr = newArr; // save it away, we'll need it for the next +<locus> operation
 
             onDone(newArr, da.dArr, locusName, geneDesc, da.binInfo);
@@ -1078,6 +1229,14 @@ function CbDbFile(url) {
             return self.geneOffsets;
     };
 
+    this.getRandomLocus = function() {
+        if (self.isAtacMode())
+            alert("getRandomLocus() not implemented for ATAC mode yet.")
+        else {
+            return cbUtil.keys(self.geneOffsets)[0];
+            }
+    }
+
     this.getGeneInfo = function(geneId) {
         /* given geneId, return an object with .geneId and .sym */
         var genes = self.geneOffsets;
@@ -1204,6 +1363,8 @@ function CbDbFile(url) {
         // first we need to lookup the offset of the line and its length from the index
         var url = cbUtil.joinPaths([self.url, "meta.index"]);
         var start = (cellIdx*6); // four bytes for the offset + 2 bytes for the line length
+        if (self.conf.metaNeedsEightBytes)
+            start = (cellIdx*10); // meta files > 4GB need 8 bytes for the offset + 2 for the line length
         var end   = start+6;
 
         function lineDone(text) {
@@ -1215,7 +1376,12 @@ function CbDbFile(url) {
 
         function offsetDone(arr) {
             /* called when the offset in meta.index has been read */
-            var offset = cbUtil.baReadOffset(arr, 0);
+            var offset;
+            if (self.conf.metaNeedsEightBytes)
+                offset = cbUtil.baReadBigOffset(arr, 0);
+            else
+                offset = cbUtil.baReadOffset(arr, 0);
+
             var lineLen = cbUtil.baReadUint16(arr, 4);
             // now get the line from the .tsv file
             var url = cbUtil.joinPaths([self.url, "meta.tsv"]);
@@ -1263,19 +1429,22 @@ function CbDbFile(url) {
 	return lo;
     }
 
-    function updateGeneSyns(geneSyns, name) {
+    function addToGeneSynsAndSplit(geneSyns, name) {
         /* given a symbol which can be geneId|sym, append to geneSyn array 1 or 2 tuples with [searchKey, geneId] */
+        var geneId = name;
+        var sym = name;
         if (name.indexOf("|")===-1) {
             // datasets with only one gene name: old behavior
             geneSyns.push( [name.toLowerCase(), name] );
         } else {
             // dataset with geneId and symbol
             var parts = name.split("|");
-            var geneId = parts[0];
-            var sym = parts[1];
+            geneId = parts[0];
+            sym = parts[1];
             geneSyns.push( [geneId.toLowerCase(), geneId] );
             geneSyns.push( [sym.toLowerCase(), geneId] );
         }
+        return [geneId, sym];
     }
 
     this.indexGenes = function() {
@@ -1286,51 +1455,36 @@ function CbDbFile(url) {
         var newIdx = {};
         var geneIdx = self.geneOffsets;
         var geneSyns = [];
-        for (var key in geneIdx) { // as of 2019, faster than Object.entries()
-            updateGeneSyns(geneSyns, key);
-
-            var val = geneIdx[key];
-            var sym = key;
-            var geneId = key;
-            if (key.indexOf("|")!==-1) {
-                var parts = key.split("|");
-                geneId = parts[0];
-                sym = parts[1];
-            }
-
-            var newVal = [val[0], val[1], sym];
-            newIdx[geneId] = newVal;
-                
-            self.geneOffsets=newIdx;
-            self.geneSyns = geneSyns;
+        for (var geneName in geneIdx) { // as of 2019, faster than Object.entries()
+            // a geneName can be either a single symbol or a string like geneId|sym
+            var offsets = geneIdx[geneName];
+            var geneIdSym = addToGeneSynsAndSplit(geneSyns, geneName);
+            var geneId = geneIdSym[0];
+            var sym = geneIdSym[1];
+            newIdx[geneId] = [offsets[0], offsets[1], sym];
         }
+        self.geneOffsets=newIdx;
+        self.geneSyns = geneSyns;
     }
 
-    function searchGeneNames(geneSyns, searchStr, doPrefix) {
+    function searchGeneNames(geneSyns, searchStr) {
         /* search the geneSyns (arr of [syn, geneId]) for matches. Return arr of geneId */
         var foundIds = [];
         for (var i=0; i<geneSyns.length; i++) {
             var synRow = geneSyns[i];
             var syn = synRow[0];
-            if (doPrefix) {
-                if (syn.startsWith(searchStr))
-                    foundIds.push(synRow[1]);
-            } else {
-                if (syn.endsWith(searchStr))
-                    foundIds.push(synRow[1]);
-            }
+            if (syn.startsWith(searchStr) || syn.endsWith(searchStr))
+                foundIds.push(synRow[1]);
         }
         return foundIds;
     }
 
-    this.findGeneIds = function(searchStr) {
+    this.findGeneIdsPrefixSuffix = function(searchStr) {
         /* return an array of matching geneIds for searchStr, uses self.geneSyns */
         searchStr = searchStr.toLowerCase();
         var geneSyns = self.geneSyns;
 
-        var foundIds = searchGeneNames(geneSyns, searchStr, true);
-        if (foundIds.length===0)
-            foundIds = searchGeneNames(geneSyns, searchStr, false);
+        var foundIds = searchGeneNames(geneSyns, searchStr);
         return foundIds;
     }
 
@@ -1340,7 +1494,7 @@ function CbDbFile(url) {
      * returns an array of objects with .id and .sym.
      * There is a version using this for ATAC mode, see findGenesAtac()
      * */
-        var foundIds = self.findGeneIds(searchStr);
+        var foundIds = self.findGeneIdsPrefixSuffix(searchStr);
         var geneNameObjs = [];
         for (var geneId of foundIds)
             geneNameObjs.push(self.getGeneInfo(geneId)); // for selectizeSendGenes
@@ -1348,10 +1502,10 @@ function CbDbFile(url) {
         return geneNameObjs;
     };
 
-    this.findGenesExact = function(geneSyns, geneSym) {
+    this.findGenesExact = function(geneSym) {
         /* search the geneSyns (arr of [syn, geneId]) for matches. Return arr of geneIds 
          * Used to resolve symbol to geneId (symToGene)*/
-        geneSym = geneSyns.toLowerCase();
+        geneSym = geneSym.toLowerCase();
         var geneSyns = self.geneSyns;
         var foundIds = [];
         for (var i=0; i<geneSyns.length; i++) {
@@ -1361,6 +1515,27 @@ function CbDbFile(url) {
                 foundIds.push(synRow[1]);
         }
         return foundIds;
+    }
+
+    this.mustFindOneGeneExact= function(symOrId) { 
+        /* given a geneId or symbol, return the geneId. If 0 or >1 are found, abort and show error message. */
+        if (symOrId.indexOf("|")!==-1)
+            symOrId = symOrId.split("|")[0];
+
+        let geneIds = self.findGenesExact(symOrId);
+        if (geneIds.length===0) {
+            alert("Could not find gene symbold or ID: "+symOrId);
+            return null;
+        }
+        if (geneIds.length>1) {
+            alert("Found more than one geneId for symbol, using only the first match: "+symOrId);
+        }
+        return geneIds[0];
+    }
+
+    this.isGeneId = function (geneId) {
+        /* check if a given string is a geneId */
+        return (geneId in self.geneOffsets);
     }
 
     function pickTssForGene(loc) {
@@ -1418,7 +1593,7 @@ function CbDbFile(url) {
     this.findGenesAtac = function(searchStr) {
         /* like findGenes(), but for ATAC mode: return an array of {.id and .sym} given a search string  */
         //var geneInfos = cbUtil.searchKeys(self.geneToTss, searchStr);
-        var geneIds = self.findGeneIds(searchStr);
+        var geneIds = self.findGeneIdsPrefixSuffix(searchStr);
 
         if (geneIds.length===0)
             return [];
@@ -1527,10 +1702,12 @@ function CbDbFile(url) {
        var matrixMin = 0;
        if ("_range" in validNames)
            matrixMin = validNames["_range"][0];
+       if (matrixMin === null)
+           matrixMin = FLOATNAN;
         return matrixMin;
     }
 
-    this.preloadGenes = function(geneSyms, onDone, onProgress) {
+    this.preloadGenes = function(geneSyms, onDone, onProgress, strategy) {
        /* start loading the gene expression vectors in the background. call onDone when done. */
        var validGenes = self.geneOffsets;
 
@@ -1542,7 +1719,7 @@ function CbDbFile(url) {
                   //alert("Error: "+sym+" is in quick genes list but is not a valid gene");
                   //continue;
                //}
-               if (geneId.indexOf("|")!==-1)
+               if (geneId.indexOf("|")!==-1 && !self.conf.atacSearch)
                    geneId = geneId.split("|")[0];
 
                 self.loadExprAndDiscretize(
@@ -1552,9 +1729,9 @@ function CbDbFile(url) {
                        loadCounter++;
                        if (loadCounter===geneSyms.length) onDone();
                    },
-                   onProgress);
+                   onProgress, strategy);
            }
-       }
+        }
     };
 
     this.loadGeneSetExpr = function(onDone) {
@@ -1580,11 +1757,13 @@ function CbDbFile(url) {
         self.conf.metaFields = newMetaInfo;
     }
 
-    this.loadGeneLocs = function(dbAndGene, fileInfo) {
+    this.loadGeneLocs = function(dbAndGene, fileInfo, onLoadDone) {
         /* load genes/dbAndGene.json into db.geneLocs */
 
         function genesDone(data) {
             self.geneLocs = data;
+            self.indexGenesAtac();
+            onLoadDone();
         }
 
         var addUrl = "";

@@ -46,15 +46,18 @@ saveMatrix <- function(counts, dir, prefix, use.mtx) {
         genesPath <- file.path(dir, paste(prefix, "features.tsv", sep=""))
         barcodesPath <- file.path(dir, paste(prefix, "barcodes.tsv", sep=""))
         message("Writing expression matrix to ", matrixPath)
+        if (class(counts)[1]=="matrix") {
+            counts <- as(counts, "sparseMatrix")
+        }
         writeMM(counts, matrixPath)
         # easier to load if the genes file has at least two columns. Even though seurat objects
         # don't have yet explicit geneIds/geneSyms data, we just duplicate whatever the matrix has now
         write.table(as.data.frame(cbind(rownames(counts), rownames(counts))), file=genesPath, sep="\t", row.names=F, col.names=F, quote=F)
         write(colnames(counts), file = barcodesPath)
         message("Gzipping expression matrix")
-        gzip(matrixPath)
-        gzip(genesPath)
-        gzip(barcodesPath)
+        gzip(matrixPath, overwrite=TRUE)
+        gzip(genesPath, overwrite=TRUE)
+        gzip(barcodesPath, overwrite=TRUE)
   } else {
       # we can write the matrix as a tsv file
       gzPath <- file.path(dir, paste(prefix, "exprMatrix.tsv.gz", sep=""))
@@ -67,6 +70,83 @@ saveMatrix <- function(counts, dir, prefix, use.mtx) {
       write.table(x = df, sep="\t", file=z, quote = FALSE, row.names = FALSE)
       close(con = z)
   }
+}
+
+exportImages <- function(obj, outDir, embeddings.conf) {
+#' used by ExportToCellbrowser:
+#' Write spatial images to outDir
+#'
+#' @param obj The Seurat4 object
+#' @param outDir output directory
+#' @param an array of strings to write into the coords object into the cellbrowser config file
+#'
+    if (length(obj@images)==0)
+        return(embeddings.conf)
+
+    message("Exporting spatial images")
+    require(png)
+    for (name in names(obj@images)) { 
+        message(name); 
+        # SlideSeq-class SpatialImage objects do not contain a bitmap image
+        # They only contain a coordinates df, so test if this image is a SlideSeq
+        # And process using this code block (instead of usual steps further below)
+        if ("SlideSeq" %in% class(obj@images$image)[1]) {
+            coordsPath <- file.path(outDir, paste0(name, ".coords.tsv"))
+            message("Writing coords for image to ", coordsPath)
+            coords <- GetTissueCoordinates(object = obj[[name]])
+            # One of the columns I want to delete is currently named 'NA' for
+            # a missing value
+            colnames(coords)[3] <- "missing"
+            # Delete columns 3 and 4 by name, keeping columns 1 and 2 for printing out
+            coords = subset(coords, select = -c(missing, cells))
+
+            write.table(coords, coordsPath, sep="\t", row.names=T, quote=F, col.names=NA)
+            conf <- sprintf(
+             '  {\n    "file": "%s",\n    "shortLabel": "Spatial %s",\n   }',
+             coordsPath,
+             name
+            )
+            embeddings.conf <- c(conf, embeddings.conf)
+            return(embeddings.conf)
+        }
+        img = GetImage(obj, mode="raw", image=name); 
+        if (is.null(img)) {
+            message("The image is not a bitmap image, cannot export yet.")
+            return(embeddings.conf)
+        }
+        imgPath <- file.path(outDir, paste0(name, ".jpg"))
+        message("Writing image ", imgPath)
+        #writePNG(img, imgPath);  # JPEG seems like a better choice here, 4x smaller at default quality settings.
+        writeJPEG(img, target=imgPath, quality=0.95); 
+        yMax = dim(img)[1];
+        xMax = dim(img)[2]; # there is a difference of 3 pixels on height when comparing "identify file.jpeg" with this. NO IDEA WHY!
+        coordsPath <- file.path(outDir, paste0(name, ".coords.tsv")) 
+        message("Writing coords for image to ", coordsPath)
+        coords <- GetTissueCoordinates(object = obj[[name]])
+
+        if (all(c("imagecol", "imagerow") %in% colnames(coords))) {
+        # Seurat-style naming: reverse order
+          coordsRev <- coords[, c("imagecol", "imagerow")]
+          colnames(coordsRev) <- c("x", "y")
+        } else if (all(c("x", "y") %in% colnames(coords))) {
+          # Already in standard x/y format
+          coordsRev <- coords[, c("y", "x")]
+        } else {
+          stop("Error: coordinates must have either (imagecol, imagerow) or (x, y) columns.")
+        }
+
+        write.table(coordsRev, coordsPath, sep="\t", row.names=T, quote=F, col.names=NA)
+        conf <- sprintf(
+         '  {\n    "file": "%s",\n    "shortLabel": "Spatial %s",\n    "flipY":True,\n    "images" : [{"file":"%s"}],\n     "minX":0, "minY":0, "maxX":%d, "maxY":%d\n  }',
+         coordsPath,
+         name,
+         imgPath,
+         xMax,
+         yMax
+        )
+        embeddings.conf <- c(conf, embeddings.conf)
+    }
+    return(embeddings.conf)
 }
 
 #' Export \code{Seurat} objects for UCSC cell browser and stop open cell browser
@@ -119,6 +199,7 @@ saveMatrix <- function(counts, dir, prefix, use.mtx) {
 #' @importFrom reticulate py_module_available import
 #' @importFrom Seurat Project Idents GetAssayData Embeddings FetchData
 #' @importFrom Matrix  writeMM
+#' @importFrom jpeg writeJPEG
 #'
 #' @export
 #'
@@ -184,32 +265,43 @@ ExportToCellbrowser <- function(
   reducNames <- reductions
 
   # Use or find the default cluster field
+  #if (is.null(x = cluster.field)) {
+    ## find and use the default Idents() field as the cluster field
+    #idents <- Idents(object)
+    #for (colName in colnames(object@meta.data)) {
+        #col = object@meta.data[[colName]]
+        #if (identical(idents@.Data,col@.Data)) {
+            #message("Default Idents() meta field:",colName) 
+            #cluster.field <- colName
+            #break
+        #}
+    #}
   if (is.null(x = cluster.field)) {
-    # find and use the default Idents() field as the cluster field
-    idents <- Idents(object)
-    for (colName in colnames(object@meta.data)) {
-        col = object@meta.data[[colName]]
-        if (identical(idents@.Data,col@.Data)) {
-            message("Default Idents() meta field:",colName) 
-            cluster.field <- colName
-            break
-        }
-    }
+        message("No cluster field specified: Using the value of Idents()")
+        # create a new meta data field named "Cluster"
+        #newDf <- cbind(object@meta.data, Idents(object))
+        # default name is "Idents(object)", not good, let's rename that to "Cluster"
+        #names(newDf)[length(newDf)] <- "Cluster"
+        #object@meta.data <- newDf
+        #cluster.field <- "Cluster"
   } else {
-    message("A custom cluster field was specified: ", cluster.field)
-    Idents(object) <- object[[cluster.field]]
+      message("A custom cluster field was specified: ", cluster.field)
+      Idents(object = object) <- cluster.field
+      # another, convoluted way to set the Idents field, if the command above makes trouble again
+      #Idents(object) <- as.factor([object[[cluster.field]], cluster.field])
   }
 
   # make sure that we have a cluster field
-  if (is.null(x = cluster.field))
-      stop("There was no cluster field provided and the auto-detection to find one based on Idents() did not work. Please provide a cluster field with cluster.field='xxx' from R or --clusterField=xxx if using cbImportSeurat. Possible meta annotation fields are: ", toString(colnames(x = meta)))
+  #if (is.null(x = cluster.field))
+      #stop("There was no cluster field provided and the auto-detection to find one based on Idents() did not work. Please provide a cluster field with cluster.field='xxx' from R or --clusterField=xxx if using cbImportSeurat. Possible meta annotation fields are: ", toString(colnames(x = meta)))
 
   if (is.null(x = meta.fields)) {
     meta.fields <- colnames(x = meta)
-    if (length(x = levels(x = idents)) > 1) {
-      meta.fields <- c(meta.fields, ".ident")
-    }
+    #if (length(x = levels(x = Idents(object))) > 1) {
+      #meta.fields <- c(meta.fields, ".ident")
+    #}
   }
+
   if (!is.null(x = port) && is.null(x = cb.dir)) {
     stop("cb.dir parameter is needed when port is set")
   }
@@ -278,7 +370,7 @@ ExportToCellbrowser <- function(
   embeddings.conf <- c()
   for (embedName in foundEmbedNames) {
       conf <- sprintf(
-        '{"file": "%s.coords.tsv", "shortLabel": "Seurat %1$s"}',
+        '  {"file": "%s.coords.tsv", "shortLabel": "Seurat %1$s"}',
         embedName
       )
       embeddings.conf <- c(embeddings.conf, conf)
@@ -287,7 +379,7 @@ ExportToCellbrowser <- function(
   df <- data.frame(row.names = cellOrder, check.names = FALSE)
   for (field in meta.fields) {
     if (field == ".ident") {
-      df$Cluster <- idents
+      df$Cluster <- Idents(object)
       enum.fields <- c(enum.fields, "Cluster")
     } else {
       name <- meta.fields.names[[field]]
@@ -321,39 +413,59 @@ ExportToCellbrowser <- function(
     file <- NULL
   }
   if (is.null(markers.file) && !skip.markers) {
-    if (length(levels(idents)) > 1) {
-      markers.helper <- function(x) {
-        partition <- markers[x,]
+    if (length(levels(Idents(object))) > 1) {
+      #markers.helper <- function(x) {
+        #partition <- markers[x,]
 
         # Seurat4 changed the field name! grrrr...
-        if ("avg_log2FC" %in% colnames(markers))
-            avgs <- -partition$avg_log2FC
-        else
-            avgs <- -partition$avg_logFC
-
-        ord <- order(partition$p_val_adj < 0.05, avgs)
-        res <- x[ord]
-        naCount <- max(0, length(x) - markers.n)
-        res <- c(res[1:markers.n], rep(NA, naCount))
-        return(res)
-      }
-      if (.hasSlot(object, "misc") && !is.null(x = object@misc["markers"][[1]])) {
+        #if ("avg_log2FC" %in% colnames(markers))
+            #avgs <- -partition$avg_log2FC
+        #else
+            #avgs <- -partition$avg_logFC
+        #ord <- order(partition$p_val_adj < 0.05, avgs)
+        #res <- x[ord]
+        #naCount <- max(0, length(x) - markers.n)
+        #res <- c(res[1:markers.n], rep(NA, naCount))
+        #return(res)
+      #}
+      hasMarkers = FALSE
+      if (.hasSlot(object, "misc") && !is.null(x = object@misc["markers"][[1]]) ) {
+        hasMarkers = TRUE
         message("Found precomputed markers in obj@misc['markers']")
-        markers <- object@misc["markers"]$markers
+      }
+
+      if (skip.markers) {
+        message("Not using precomputed markers, as --skipMarkers was set")
+        hasMarkers = FALSE
+      }
+    
+      if (hasMarkers) {
+            message("Using precomputed markers")
+            markers <- object@misc["markers"]$markers
       } else {
         message("Running FindAllMarkers(), using wilcox test, min logfc diff 0.25")
+        # Only run this block if the Active assay is SCT
+        if ("SCT" %in% DefaultAssay(object = object)) {
+            message("Looks like an SCT object, so running PrepSCTFindMarkers()")
+            # The results from this command need to be written back to the object prior to
+            # running FindAllMarkers
+            object <- PrepSCTFindMarkers(object = object)
+        }
         markers <- FindAllMarkers(
           object,
           do.print = TRUE,
-          print.bar = TRUE,
-          test.use = "wilcox",
-          logfc.threshold = 0.25
+          only.pos = TRUE,
+          logfc.threshold = 0.25,
+          min.pct = 0.25
         )
       }
       message("Writing top ", markers.n, ", cluster markers to ", fname)
-      markers.order <- ave(x = rownames(x = markers), markers$cluster, FUN = markers.helper)
-      top.markers <- markers[markers.order[!is.na(x = markers.order)], ]
-      write.table(x = top.markers, file = fname, quote = FALSE, sep = "\t", col.names = NA)
+      #markers.order <- ave(x = rownames(x = markers), markers$cluster, FUN = markers.helper)
+      #top.markers <- markers[markers.order[!is.na(x = markers.order)], ]
+      require(dplyr);
+      #markers  %>% group_by(cluster) %>% top_n(n = markers.n, wt = avg_logFC)
+      markers %>% group_by(cluster) %>% dplyr::filter(avg_log2FC > 1) %>% slice_head(n = markers.n) %>% ungroup() -> topMarkers
+      write.table(x = topMarkers, file = fname, quote = FALSE, sep = "\t", col.names = NA)
     } else {
       message("No clusters found in Seurat object and no external marker file provided, so no marker genes can be computed")
       file <- NULL
@@ -390,6 +502,8 @@ ExportToCellbrowser <- function(
   if (use.mtx) {
     matrixOutPath <- sprintf("%s%smatrix.mtx.gz", firstPrefix, matSep)
   }
+
+  embeddings.conf <- exportImages(object, dir, embeddings.conf)
 
   config <- '# This is a bare-bones cellbrowser config file auto-generated by the command-line tool cbImportSeurat 
 # or directly from R with SeuratWrappers::ExportToCellbrowser().
