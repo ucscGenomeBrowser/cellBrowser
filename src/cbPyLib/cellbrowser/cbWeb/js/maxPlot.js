@@ -78,7 +78,7 @@ function MaxPlot(div, top, left, width, height, args) {
     const nonFatColorRect = "DDDDDD"; // rectangle mode: color used in fattening mode for all non-fat cells
     const nonFatColorCircles = "BBBBBB"; // color used in fattening mode for all non-fat cell circles
 
-    self.mode = 1;   // drawing mode
+    self.mode = 2;   // drawing mode
 
     // the rest of the initialization is done at the end of this file,
     // because the init involves many functions that are not defined yet here
@@ -1218,6 +1218,7 @@ function MaxPlot(div, top, left, width, height, args) {
             ctx.restore();
         } else if(self.mode === 2) {
             // Drawing mode uses WebGL2RenderingContext
+            console.warn("Drawing Labels Not Yet Supported for WebGL Drawing")
         }
         if(DEBUG) console.timeEnd("labels");
         return bboxArr;
@@ -1573,11 +1574,87 @@ function MaxPlot(div, top, left, width, height, args) {
      * @param {int|null} fatIdx 
      */
     function drawCirclesWebGL(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
-        const CIRCLE_VERTEX_SHADER = ``;
+        const CIRCLE_VERTEX_SHADER = `
+            precision mediump float;
+            attribute vec2 a_Position;
 
-        // // Clear canvas
-        // gl.clearColor(0, 0, 0, 0);
-        // gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            void main() {
+                gl_Position = vec4(a_Position, 0.0, 1.0);
+            }`;
+
+        const CIRCLE_FRAGMENT_SHADER = `
+            precision mediump float;
+            uniform vec4 u_FragColor;
+            
+            void main() {
+                gl_FragColor = u_FragColor;
+            }`;
+
+        // WebGL Test
+        // Define vertices for triangle
+        const triangleVertices = new Float32Array([0.0, 0.5,
+                                                   -0.5, -0.5,
+                                                   0.5, 0.5]);
+        const triangleColor = [0.5, 0.0, 1.0, 1.0]; 
+
+        // Define the webGL buffer
+        const buffer = ctx.createBuffer();
+
+        // Define and compile the webGL vertex shader
+        const vertexShader = ctx.createShader(ctx.VERTEX_SHADER);
+        ctx.shaderSource(vertexShader, CIRCLE_VERTEX_SHADER);
+        ctx.compileShader(vertexShader);
+        if(!ctx.getShaderParameter(vertexShader, ctx.COMPILE_STATUS)) {
+            console.error(`Failed to compile vertex shader. Error: ${ctx.getShaderInfoLog(vertexShader)}`);
+        }
+
+        // Define and compile the webGL fragment shader
+        const fragShader = ctx.createShader(ctx.FRAGMENT_SHADER);
+        ctx.shaderSource(fragShader, CIRCLE_FRAGMENT_SHADER);
+        ctx.compileShader(fragShader);
+        if(!ctx.getShaderParameter(fragShader, ctx.COMPILE_STATUS)) {
+            console.error(`Failed to compile fragment shader. Error: ${ctx.getShaderInfoLog(fragShader)}`);
+        }
+
+        // Combine shaders into 1 program
+        const glProgram = ctx.createProgram();
+        ctx.attachShader(glProgram, vertexShader);
+        ctx.attachShader(glProgram, fragShader);
+        ctx.linkProgram(glProgram);
+        if(!ctx.getProgramParameter(glProgram, ctx.LINK_STATUS)) {
+            console.error(`Failed to link shaders. Error: ${ctx.getProgramInfoLog(glProgram)}`);
+        }
+
+        // Add vertex data to vertex buffer
+        const a_Position = ctx.getAttribLocation(glProgram, 'a_Position');
+        if (a_Position < 0) {
+            console.error('Failed to get the storage location of a_Position');
+        }
+        ctx.vertexAttribPointer(a_Position, 2, ctx.FLOAT, false, 0, 0);
+
+        // Add the fragment data to the fragment buffer
+        const u_FragColor = ctx.getUniformLocation(glProgram, 'u_FragColor');
+        if (!u_FragColor) {
+            console.error('Failed to get the storage location of u_FragColor');
+        }
+
+        // Output Merger
+
+        // Rasterizer
+
+        // Set program
+        ctx.useProgram(glProgram);
+        ctx.enableVertexAttribArray(a_Position);
+        ctx.uniform4f(u_FragColor, triangleColor[0], triangleColor[1], triangleColor[2], triangleColor[3]);
+        
+        // Input assembler
+        ctx.bindBuffer(ctx.ARRAY_BUFFER, buffer);
+        ctx.bufferData(ctx.ARRAY_BUFFER, triangleVertices, ctx.STATIC_DRAW);
+
+        // Draw
+        ctx.drawArrays(ctx.TRIANGLES, 0, 3);
+
+        console.warn("Viewing Test: WebGL Support for Drawing not yet implemented.");
     }
 
     function drawBackground(ctx, back) {
@@ -1723,10 +1800,10 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     function clearCanvas(ctx, width, height) {
+        /* clear with a white background */
         switch(self.mode) {
             case 0:
             case 1:
-                /* clear with a white background */
                 // jsperf says this is fastest on Chrome, and still OK-ish in FF
                 //if(DEBUG) console.time("clear");
                 ctx.save();
@@ -1737,7 +1814,8 @@ function MaxPlot(div, top, left, width, height, args) {
                 //if(DEBUG) console.timeEnd("clear");
                 break;
             case 2:
-                console.warn("Cannot Clear Canvas: WebGL support not yet implemented");
+                ctx.clearColor(1, 1, 1, 1);
+                ctx.clear(ctx.COLOR_BUFFER_BIT | ctx.DEPTH_BUFFER_BIT);
                 break;
             default:
                 break;
