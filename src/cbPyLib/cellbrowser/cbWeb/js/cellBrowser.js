@@ -11,6 +11,8 @@
 "use strict";
 
 var cellbrowser = function() {
+    const DEBUG = true;
+    
     var db = null; // the cbData object from cbData.js. Loads coords,
                    // annotations and gene expression vectors
 
@@ -129,8 +131,6 @@ var cellbrowser = function() {
         "Eurexp" : "http://www.eurexpress.org/ee/databases/assay.jsp?assayID=", // internal ID
         "LMD" : "http://www.brainspan.org/lcm/search?exact_match=true&search_type=gene&search_term=" // entrez
     };
-
-    var DEBUG = true;
 
     function _dump(o) {
     /* for debugging */
