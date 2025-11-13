@@ -78,9 +78,11 @@ function MaxPlot(div, top, left, width, height, args) {
     const nonFatColorRect = "DDDDDD"; // rectangle mode: color used in fattening mode for all non-fat cells
     const nonFatColorCircles = "BBBBBB"; // color used in fattening mode for all non-fat cell circles
 
+    self.mode = 1;   // drawing mode
+
     // the rest of the initialization is done at the end of this file,
     // because the init involves many functions that are not defined yet here
-
+    
     this.initCanvas = function (div, top, left, width, height, args) {
         /* initialize a new Canvas */
 
@@ -195,8 +197,6 @@ function MaxPlot(div, top, left, width, height, args) {
         self.scalingDone = false;
 
         self.globalOpts = args;
-
-        self.mode = 1;   // drawing mode
 
         // everything related to circle coordinates
         self.coords = {};
@@ -695,8 +695,29 @@ function MaxPlot(div, top, left, width, height, args) {
 
         div.appendChild(canv); // adds the canvas to the div element
         self.canvas = canv;
-        // alpha:false recommended by https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Optimizing_canvas
-        self.ctx = self.canvas.getContext("2d", { alpha: false });
+
+        // Save the drawing context
+        // Mode 0 and 1: CanvasRenderingContext2D
+        // Mode 2: WebGLRenderingContext
+        switch(self.mode){
+            case 0:
+            case 1:
+                // alpha:false recommended by https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Optimizing_canvas
+                self.ctx = self.canvas.getContext("2d", { alpha: false });
+                break;
+            case 2:
+                self.ctx = self.canvas.getContext("webgl2");
+
+                if(!self.ctx) {
+                    console.error("WebGL 2 not supported");
+                    return;
+                }
+                break;
+            default:
+                console.error(`Error: Mode ${self.mode} not supported`);
+                break;
+        }
+
         // by default, the canvas background is transparent+black
         // we use alpha=false, so we need to initialize the canvas with white pixels
         clearCanvas(self.ctx, width, height);
@@ -990,28 +1011,33 @@ function MaxPlot(div, top, left, width, height, args) {
          * color is a CSS name, so usually prefixed by # if a hexcode
          * width is the width in pixels.
          * */
-        ctx.save();
-        //ctx.globalAlpha = 1.0;
 
-        ctx.strokeStyle = attrs.lineColor || "#888888";
-        ctx.lineWidth = attrs.lineWidth || 3;
-        ctx.globalAlpha = attrs.lineAlpha || 0.5;
-        //ctx.miterLimit =2;
-        //ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+        if (self.mode === 0 || self.mode === 1) {
+            ctx.save();
+            //ctx.globalAlpha = 1.0;
 
-        for (var i=0; i < pxLines.length; i++) {
-            var line = pxLines[i];
-            var x1 = line[0];
-            var y1 = line[1];
-            var x2 = line[2];
-            var y2 = line[3];
+            ctx.strokeStyle = attrs.lineColor || "#888888";
+            ctx.lineWidth = attrs.lineWidth || 3;
+            ctx.globalAlpha = attrs.lineAlpha || 0.5;
+            //ctx.miterLimit =2;
+            //ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
 
-            ctx.beginPath();
-            ctx.moveTo(x1, y1);
-            ctx.lineTo(x2, y2);
-            ctx.stroke();
+            for (var i=0; i < pxLines.length; i++) {
+                var line = pxLines[i];
+                var x1 = line[0];
+                var y1 = line[1];
+                var x2 = line[2];
+                var y2 = line[3];
+
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            }
+            ctx.restore();
+        } else if (self.mode === 2) {
+
         }
-        ctx.restore();
     }
 
     function drawLabelsSvg(svgLines, labelCoords, winWidth, winHeight, zoomFact) {
@@ -1127,67 +1153,72 @@ function MaxPlot(div, top, left, width, height, args) {
             return undefined;
 
         if(DEBUG) console.time("labels");
-        ctx.save();
-        ctx.font = "bold "+gTextSize+"px Sans-serif"
-        ctx.globalAlpha = 1.0;
+        if(self.mode === 0 || self.mode === 1) {
+            // Drawing mode uses CanvasRenderingContext2D
+            ctx.save();
+            ctx.font = "bold "+gTextSize+"px Sans-serif"
+            ctx.globalAlpha = 1.0;
 
-        //ctx.strokeStyle = '#EEEEEE';
-        if (doGrey===undefined) {
-            ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
-            ctx.lineWidth = 5;
-            ctx.miterLimit =2;
-        }
-        //else
-            //ctx.strokeStyle = "rgba(20, 20, 20, 0.3)";
-
-        ctx.textBaseline = "top";
-
-        if (doGrey===undefined) {
-            ctx.fillStyle = "rgba(0,0,0,0.8)";
-            ctx.shadowBlur=6;
-            ctx.shadowColor="white";
-        }
-        else
-            ctx.fillStyle = "rgba(0,0,0,1.0)";
-
-        ctx.textAlign = "left";
-
-        var addMargin = 1; // how many pixels to extend the bbox around the text, make clicking easier
-        var bboxArr = []; // array of click hit boxes
-
-        for (var i=0; i < labelCoords.length; i++) {
-            var coord = labelCoords[i];
-            if (coord===null) { // outside of view range, push a null to avoid messing up the order of bboxArr
-                bboxArr.push( null );
-                continue;
+            //ctx.strokeStyle = '#EEEEEE';
+            if (doGrey===undefined) {
+                ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+                ctx.lineWidth = 5;
+                ctx.miterLimit =2;
             }
+            //else
+                //ctx.strokeStyle = "rgba(20, 20, 20, 0.3)";
 
-            var x = coord[0];
-            var y = coord[1];
-            var text = coord[2];
+            ctx.textBaseline = "top";
 
-            var textWidth = Math.round(ctx.measureText(text).width);
-            // move x to the left, so text is centered on x
-            x = x - Math.round(textWidth*0.5);
-
-            var textX1 = x;
-            var textY1 = y;
-            var textX2 = Math.round(x+textWidth);
-            var textY2 = y+gTextSize;
-
-            // don't draw labels where the midpoint is off-screen
-            if (x<0 || y<0 || x>winWidth || y>winHeight) {
-                bboxArr.push( null );
-                continue;
+            if (doGrey===undefined) {
+                ctx.fillStyle = "rgba(0,0,0,0.8)";
+                ctx.shadowBlur=6;
+                ctx.shadowColor="white";
             }
+            else
+                ctx.fillStyle = "rgba(0,0,0,1.0)";
+
+            ctx.textAlign = "left";
+
+            var addMargin = 1; // how many pixels to extend the bbox around the text, make clicking easier
+            var bboxArr = []; // array of click hit boxes
+
+            for (var i=0; i < labelCoords.length; i++) {
+                var coord = labelCoords[i];
+                if (coord===null) { // outside of view range, push a null to avoid messing up the order of bboxArr
+                    bboxArr.push( null );
+                    continue;
+                }
+
+                var x = coord[0];
+                var y = coord[1];
+                var text = coord[2];
+
+                var textWidth = Math.round(ctx.measureText(text).width);
+                // move x to the left, so text is centered on x
+                x = x - Math.round(textWidth*0.5);
+
+                var textX1 = x;
+                var textY1 = y;
+                var textX2 = Math.round(x+textWidth);
+                var textY2 = y+gTextSize;
+
+                // don't draw labels where the midpoint is off-screen
+                if (x<0 || y<0 || x>winWidth || y>winHeight) {
+                    bboxArr.push( null );
+                    continue;
+                }
 
 
-            ctx.strokeText(text,x,y);
-            ctx.fillText(text,x,y);
+                ctx.strokeText(text,x,y);
+                ctx.fillText(text,x,y);
 
-            bboxArr.push( [textX1-addMargin, textY1-addMargin, textX2+addMargin, textY2+addMargin] );
+                bboxArr.push( [textX1-addMargin, textY1-addMargin, textX2+addMargin, textY2+addMargin] );
+            }
+            ctx.restore();
+        } else if(self.mode === 2) {
+            // Drawing mode uses WebGL2RenderingContext
         }
-        ctx.restore();
         if(DEBUG) console.timeEnd("labels");
         return bboxArr;
     }
@@ -1530,11 +1561,32 @@ function MaxPlot(div, top, left, width, height, args) {
        }
     }
 
+    /**
+     * 
+     * @param {WebGL2RenderingContext} ctx 
+     * @param {Uint16Array} pxCoords 
+     * @param {Uint8Array} coordColors 
+     * @param {Array} colors 
+     * @param {int|float} radius 
+     * @param {float} alpha 
+     * @param {Set} selCells 
+     * @param {int|null} fatIdx 
+     */
+    function drawCirclesWebGL(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
+        const CIRCLE_VERTEX_SHADER = ``;
+
+        // // Clear canvas
+        // gl.clearColor(0, 0, 0, 0);
+        // gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    }
+
     function drawBackground(ctx, back) {
         /* draw the background image onto the canvas ctx */
         if (!back)
             return;
         if(DEBUG) console.time("image");
+
+        if(self.mode == 0 || self.mode == 1){
         //var ctxWidth = ctx.canvas.width; // size of the canvas on the screen in pixels
         //var ctxHeight = ctx.canvas.height;
 
@@ -1544,11 +1596,14 @@ function MaxPlot(div, top, left, width, height, args) {
         // arguments are: (imgObject, x/y coord on image for clipping, width / height of clipped image, where to place the image, width/height of image)
         //var a = getSafeRect(back.image.width, back.image.height, back.clipX, back.clipY, back.image.width, back.image.height, 0, 0, ctxWidth, ctxHeight);
         //if(DEBUG) console.log("drawing fixed coords", a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
-        //self.ctx.drawImage(back.image, a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
-        //self.ctx.drawImage(back.image, a.sx, a.sy, back.width, back.height, a.dx, a.dy, a.dw, a.dh);
+        //ctx.drawImage(back.image, a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
+        //ctx.drawImage(back.image, a.sx, a.sy, back.width, back.height, a.dx, a.dy, a.dw, a.dh);
         if(DEBUG) console.log("drawImage sx, sy, sw, sh, dx, dy, dw, dh", back.sx, back.sy, back.sw, back.sh, back.dx,back.dy, back.dw, back.dh);
-        //self.ctx.drawImage(back.image, back.sx, back.sy, back.width, back.height, 0, 0, ctxWidth, ctxHeight);
-        self.ctx.drawImage(back.image, back.sx, back.sy, back.sw, back.sh, back.dx, back.dy, back.dw, back.dh);
+        //ctx.drawImage(back.image, back.sx, back.sy, back.width, back.height, 0, 0, ctxWidth, ctxHeight);
+        ctx.drawImage(back.image, back.sx, back.sy, back.sw, back.sh, back.dx, back.dy, back.dw, back.dh);
+        } else if(self.mode == 2) {
+
+        }
 
         if(DEBUG) console.timeEnd("image");
     }
@@ -1637,7 +1692,7 @@ function MaxPlot(div, top, left, width, height, args) {
             })
         }
 
-       self.ctx.putImageData(canvasData, 0, 0);
+       ctx.putImageData(canvasData, 0, 0);
        return count;
     }
 
@@ -1668,15 +1723,25 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     function clearCanvas(ctx, width, height) {
-    /* clear with a white background */
-        // jsperf says this is fastest on Chrome, and still OK-ish in FF
-        //if(DEBUG) console.time("clear");
-        ctx.save();
-        ctx.globalAlpha = 1.0;
-        ctx.fillStyle = "rgb(255,255,255)";
-        ctx.fillRect(0, 0, width, height);
-        ctx.restore();
-        //if(DEBUG) console.timeEnd("clear");
+        switch(self.mode) {
+            case 0:
+            case 1:
+                /* clear with a white background */
+                // jsperf says this is fastest on Chrome, and still OK-ish in FF
+                //if(DEBUG) console.time("clear");
+                ctx.save();
+                ctx.globalAlpha = 1.0;
+                ctx.fillStyle = "rgb(255,255,255)";
+                ctx.fillRect(0, 0, width, height);
+                ctx.restore();
+                //if(DEBUG) console.timeEnd("clear");
+                break;
+            case 2:
+                console.warn("Cannot Clear Canvas: WebGL support not yet implemented");
+                break;
+            default:
+                break;
+        }
     }
 
     // -- object methods (=access the self object)
@@ -2065,12 +2130,12 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.fatIdx && !self.doDrawLabels)
             self.fatIdx = null;
 
-        if (radius===0) {
+        if ((self.mode == 0 || self.mode == 1) && radius===0) {
             count = drawPixels(self.ctx, self.canvas.width, self.canvas.height, coords,
                 colArr, pal, alpha, self.selCells, self.fatIdx);
         }
 
-        else if (radius===1 || radius===2) {
+        else if ((self.mode == 0 || self.mode == 1) && (radius===1 || radius===2)) {
             count = drawRect(self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
         }
         else {
@@ -2082,6 +2147,8 @@ function MaxPlot(div, top, left, width, height, args) {
                     count = drawCirclesDrawImage(self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
                     break;
                 case 2:
+                    count = drawCirclesWebGL    (self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
+                default:
                     break;
             }
         }
@@ -2312,12 +2379,16 @@ function MaxPlot(div, top, left, width, height, args) {
         /* pan current image by x/y pixels */
         debug('panning by '+xDiff+' '+yDiff);
 
-       //var srcCtx = self.panCopy.getContext("2d", { alpha: false });
-       clearCanvas(self.ctx, self.canvas.width, self.canvas.height);
-       self.ctx.drawImage(self.panCopy, -xDiff, -yDiff);
-       // keep these for panEnd
-       self.panDiffX = xDiff;
-       self.panDiffY = yDiff;
+        if(self.mode == 0 || self.mode == 1) {
+            //var srcCtx = self.panCopy.getContext("2d", { alpha: false });
+            clearCanvas(self.ctx, self.canvas.width, self.canvas.height);
+            self.ctx.drawImage(self.panCopy, -xDiff, -yDiff);
+        } else {
+            console.warn("Cannot Pan: WebGL not yet implemented");
+        }
+        // keep these for panEnd
+        self.panDiffX = xDiff;
+        self.panDiffY = yDiff;
     }
 
     this.panEnd = function() {
