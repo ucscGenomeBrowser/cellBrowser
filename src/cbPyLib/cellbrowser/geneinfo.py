@@ -354,4 +354,27 @@ def cbMarkerAnnotateCli():
 
     logging.info("Annotated %d marker gene rows, output written to %s" % (rowCount, outFname))
 
+def cbMarkerAnnotate(filename,outFname):
 
+    entrezToBrainspanMouseDev = parseSimpleMap(BRAINSPANMOUSEDEV)
+    symToEntrez, hgncIdToEntrez = parseHgnc(HGNC)
+    mouseEntrezToHumanEntrez, humanToMouseEntrezList = parseMgiOrtho(hgncIdToEntrez, MGIORTHO)
+
+    entrezToEuroexpress = parseEurexpress(mouseEntrezToHumanEntrez, EUREXPRESS)
+    entrezToLmd = parseBrainspanLmd(BRAINSPANLMD)
+    entrezToHpo = parseHpo(HPO)
+    entrezToCosmic = parseCosmic(COSMIC)
+    entrezToOmim = parseOmim(OMIM)
+    symToSfari = parseSfari(SFARI)
+    entrezToClass = parseHprd(HPRD)
+    #symToDdd = parseDdd(DDD)
+
+    rowCount = 0
+    ofh = open(outFname, "w")
+    for row in tabGeneAnnotate(filename, symToEntrez, symToSfari, entrezToClass, entrezToOmim, entrezToCosmic, entrezToHpo, entrezToLmd, entrezToEuroexpress, humanToMouseEntrezList, entrezToBrainspanMouseDev):
+        ofh.write("\t".join(row))
+        ofh.write("\n")
+        rowCount +=1
+    ofh.close()
+
+    logging.info("Annotated %d marker gene rows, output written to %s" % (rowCount, outFname))
