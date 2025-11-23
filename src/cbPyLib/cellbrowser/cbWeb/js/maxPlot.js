@@ -3290,6 +3290,11 @@ function MaxPlot(div, top, left, width, height, args) {
             return self.width;
     }
 
+    this.destroy = function() {
+        self.div.remove(); // remove all DOM objects
+        self.initPlot(); // free memory
+    }
+
     this.calcMedian = function(coords, values, names, numNames) {
         /* given an array of coordinates (x at even positions, y at odd positions) and an array of names for each of them
          * return the median for each name as an object name -> array of [x, y, count]

@@ -6,6 +6,7 @@ from os.path import join, basename, dirname, isfile, isdir, relpath, abspath, ge
 from .cellbrowser import copyPkgFile, writeCellbrowserConf, pipeLog, makeDir, maybeLoadConfig, errAbort, popen
 from .cellbrowser import setDebug, build, isDebugMode, generateHtmls, runCommand, copyFileIfDiffSize
 from .cellbrowser import generateQuickGenes
+import cellbrowser.geneinfo
 
 
 def parseArgs():
@@ -387,6 +388,9 @@ def cbImportSeurat_parseArgs(showHelp=False):
     parser.add_option("", "--markerFile", dest="markerFile", action="store",
             help="Instead of calculating cluster markers again, use this file. Format: cluster,gene,pVal + any other fields. Or alternatively the native Seurat cluster markers format, as created by write.table")
 
+    parser.add_option("", "--annotMarkers", dest="annotMarkers", action="store_true",
+            help="annotate marker genes with disease info, etc. - same as cbMarkerAnnotate")
+
     parser.add_option("", "--useMtx", dest="useMtx", action="store_true",
             help="Write a .mtx.gz file, instead of a tsv.gz file. Necessary for big datasets.")
 
@@ -545,6 +549,9 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
     fh = open(cbConfPath, "a")
     fh.write("\nquickGenesFile = 'quickGenes.tsv'\n")
     fh.close()
+
+    if not options.skipMarkers and options.annotMarkers:
+        cellbrowser.geneinfo.cbMarkerAnnotate(join(outDir, "markers.tsv"), join(outDir,"markers.annotated.tsv"))
 
     generateHtmls(datasetName, outDir, desc = descDict)
 
