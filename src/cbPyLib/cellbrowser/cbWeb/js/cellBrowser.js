@@ -3996,16 +3996,17 @@ var cellbrowser = function() {
            // so defer the coloring until all the peaks are loaded
            let onLocsDone = function() { colorByDefaultField(doneOnePart); };
            db.loadGeneLocs(db.conf.atacSearch, db.conf.fileVersions.geneLocs, onLocsDone);
-       } else
+       } else {
            // in gene mode, we can start coloring right away
            colorByDefaultField(doneOnePart);
+       }
 
        // pre-load the dataset description file, as the users will often go directly to the info dialog
        // and the following pre-loads risk blocking this load.
        var jsonUrl = cbUtil.joinPaths([db.conf.name, "desc.json"]) +"?"+db.conf.md5;
        fetch(jsonUrl);
 
-       //if (db.conf.sampleCount < 50000) {
+       if (db.conf.sampleCount < 50000) {
            if (db.conf.quickGenes)
                db.preloadGenes(db.conf.quickGenes, function() {
                    updateGeneTableColors(null);
@@ -4013,7 +4014,7 @@ var cellbrowser = function() {
                        onHeatClick();
                 }, onProgressConsole, db.conf.binStrategy);
            db.preloadAllMeta();
-        //}
+        }
     }
 
     function onTransClick(ev) {
@@ -4193,6 +4194,7 @@ var cellbrowser = function() {
             htmls.push('<li><a class="tpColorLink" data-palette="magma" href="#">Gradient: Magma</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="inferno" href="#">Gradient: Inferno</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="plasma" href="#">Gradient: Plasma</a></li>');
+            htmls.push('<li><a class="tpColorLink" data-palette="blue" href="#">Single color: Blue</a></li>');
             htmls.push('</ul>');
         htmls.push("</div>"); // btn-group
         //htmls.push("</div>"); // tpToolbarButtons
@@ -7720,6 +7722,14 @@ var cellbrowser = function() {
       return [ r * 255, g * 255, b * 255 ];
     }
 
+    function makePseudoPalette(col, n) {
+        /* return a list of identical colors */
+        var pal = [];
+        for (var i=1; i<n+1; i++) {
+            pal.push( col );
+        }
+    }
+
     function makeHslPalette(hue, n) {
         /* return a list of n hexcodes from hue to white */
         var pal = [];
@@ -7798,6 +7808,8 @@ var cellbrowser = function() {
             pal = ["0000FF","FF0000"];
         else if (palName==="blues")
             pal = makeHslPalette(0.6, n);
+        else if (palName==="blue")
+            pal = makePseudoPalette([255,0,0], n);
         else if (palName==="magma" || palName==="viridis" || palName==="inferno" || palName=="plasma")
             pal = makePercPalette(palName, n);
         else if (palName==="iwanthue")
@@ -8750,7 +8762,8 @@ var cellbrowser = function() {
                 var metaMsg = null;
                 if (metaInfo.type!=="uniqueString") {
                     console.log("cellBrowser.js:updateMetaBarManyCells - could not find meta info");
-                    metaMsg = "(still loading - please wait and retry)";
+                    //metaMsg = "(still loading - please wait and retry)";
+                    metaMsg = "";
                 }
                 else
                     metaMsg = "(unique identifier field)";
@@ -9857,8 +9870,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
     }
 
 }();
-
-
 
 function _tpReset() {
 /* for debugging: reset the intro setting */

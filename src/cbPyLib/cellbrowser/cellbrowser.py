@@ -845,7 +845,7 @@ def parseIntoColumns(fname):
     headers = ifh.readline().rstrip("\r\n").split(sep)
     if headers[0]=="":
         headers[0]="cell_id" # some tolerance, for R
-    headers = [h.split("|")[0] for h in headers]
+    #headers = [h.split("|")[0] for h in headers]
 
     for i, h in enumerate(headers):
         if h=="":
