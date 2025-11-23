@@ -6161,6 +6161,10 @@ var cellbrowser = function() {
         });
     }
 
+    function switchToHeat() {
+        renderer.destroy();
+    }
+
     function activateGeneCombo(id, onGeneComboChange) {
     /* initialize the gene search combo box with selectize */
         // selectize: gene or ATAC Color by search box
@@ -7171,6 +7175,8 @@ var cellbrowser = function() {
         //if (!db.conf.atacSearch)
         htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Violin Plot Viewer" data-placement="bottom">Gene Expression Plots</button>');
 
+        htmls.push('<button id="tpHeatButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Show Heatmap" data-placement="bottom">Heatmap</button>');
+
         //var nextLeft = 220;
         if (db.conf.hubUrl!==undefined) {
             htmls.push('<a target=_blank href="#" id="tpOpenGenome" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-left: 10px; margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Show sequencing read coverage and gene expression on UCSC Genome Browser" data-placement="bottom">Genome Browser</a>');
@@ -7211,6 +7217,7 @@ var cellbrowser = function() {
         activateTooltip('#tpOpenUcsc');
         activateTooltip('#tpOpenDatasetButton');
         activateTooltip('#tpOpenExprButton');
+        activateTooltip('#tpHeatButton');
         activateTooltip('#tpOpenImgButton');
 
         $('#tpButtonInfo').click( function() { openDatasetDialog(db.conf, db.name) } );
@@ -7258,6 +7265,7 @@ var cellbrowser = function() {
         $('#tpLayoutCombo').change(onLayoutChange);
         $('#tpOpenDatasetButton').click(openCurrentDataset);
         $('#tpOpenExprButton').click(buildExprViewWindow);
+        $('#tpHeatButton').click(switchToHeat);
     }
 
     function metaFieldToLabel(fieldName) {
@@ -9215,7 +9223,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
         changeUrl({'heat':null});
     }
 
-    function onHeatClick() {
+    function drawHeatmap(div) {
         // TODO: rewrite this one day with promises...
         let resultCount = 0;
         let exprVecs = [];
@@ -9225,7 +9233,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
         function partDone() {
             resultCount++;
             if (resultCount===2)
-                plotHeatmap(metaInfo, exprVecs, geneSyms);
+                plotHeatmap(metaInfo, exprVecs, geneSyms, div);
         }
 
         function onClusterMetaDone(metaArr, metaInfo) {
@@ -9259,6 +9267,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
             db.loadMetaVec(metaInfo, onClusterMetaDone, onProgress, {}, db.conf.binStrategy);
             changeUrl({"heat":"1"});
         }
+    }
+
+    function onHeatClick() {
+        drawHeatmap(null);
     }
 
     function onClusterNameClick(clusterName, clusterLabel, event) {
