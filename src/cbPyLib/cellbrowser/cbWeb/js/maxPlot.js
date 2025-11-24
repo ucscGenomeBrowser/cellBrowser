@@ -140,7 +140,7 @@ function MaxPlot(div, top, left, width, height, args) {
             addSliders();
 
         //if (args && args.flipBook)
-            addFlipbookSlider();
+        self.addFlipbookSlider();
 
         // timer that is reset on every mouse move
         self.timer = null;
@@ -578,33 +578,6 @@ function MaxPlot(div, top, left, width, height, args) {
         //newPal[hlColIdx] = "0000AA";
         //self.setColors(newPal);
         self.drawDots();
-
-    }
-
-    function addFlipbookSlider() {
-        var contDiv = document.createElement('div');
-        contDiv.style.position = "absolute";
-        contDiv.style.top = "8px";
-        let fromLeft = 55;
-        contDiv.style.left = fromLeft+"px";
-        contDiv.style.zIndex = "10";
-
-        var labelDiv = document.createElement('span');
-        labelDiv.style.fontWeight = "bold";
-        labelDiv.textContent = "Flip through values:"
-
-        var sliderDiv = document.createElement('div');
-        sliderDiv.style.width = self.canvas.width-fromLeft+"px";
-        sliderDiv.style.height = "8px";
-        sliderDiv.id = "mpFlipbook";
-        //sliderDiv.style.height = self.canvas.height-3+"px";
-
-        contDiv.appendChild(labelDiv);
-        contDiv.appendChild(sliderDiv);
-
-        self.div.appendChild(contDiv);
-
-        self.flipBookEl = sliderDiv;
 
     }
 
@@ -3265,6 +3238,30 @@ function MaxPlot(div, top, left, width, height, args) {
 
         return plot2;
     };
+
+    this.addFlipbookSlider = function() {
+        var contDiv = document.createElement('div');
+        contDiv.style.position = "absolute";
+        contDiv.style.top = "8px";
+        let fromLeft = 55;
+        contDiv.style.left = fromLeft+"px";
+        contDiv.style.zIndex = "10";
+
+        var labelDiv = document.createElement('span');
+        labelDiv.style.fontWeight = "bold";
+        labelDiv.textContent = "Quickflip through annotations:"
+
+        var sliderDiv = document.createElement('div');
+        sliderDiv.style.width = self.canvas.width-fromLeft+"px";
+        sliderDiv.style.height = "8px";
+        sliderDiv.id = "mpFlipbook";
+
+        contDiv.appendChild(labelDiv);
+        contDiv.appendChild(sliderDiv);
+
+        self.div.appendChild(contDiv);
+        self.flipBookEl = sliderDiv;
+    }
 
     this.unsplit = function() {
         /* remove the connected non-active renderer */
