@@ -845,7 +845,7 @@ def parseIntoColumns(fname):
     headers = ifh.readline().rstrip("\r\n").split(sep)
     if headers[0]=="":
         headers[0]="cell_id" # some tolerance, for R
-    headers = [h.split("|")[0] for h in headers]
+    #headers = [h.split("|")[0] for h in headers]
 
     for i, h in enumerate(headers):
         if h=="":
@@ -6479,6 +6479,25 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
     ofh.write('<body>\n')
     #ofh.write('<div id="tpWait">Please wait. Cell Browser is loading...</div>\n')
     ofh.write('</body>\n')
+    # try to always force a fresh reload of the index.html page
+    ofh.write('''<script>
+       // Bust cache on every load
+       (function() {
+         const url = new URL(window.location.href);
+         url.searchParams.set("nc", performance.now()); // high-precision unique
+         if (!window.location.search.includes("nc=")) {
+           window.location.replace(url.toString());
+         }
+       })();
+       
+       // Prevent bfcache restore
+       window.onpageshow = function(e) {
+         if (e.persisted) {
+           window.location.reload();
+         }
+       };
+</script>
+   ''')
     ofh.write('<script>\n')
     ofh.write("var rootMd5 = '%s';\n" % md5[:MD5LEN])
     ofh.write('cellbrowser.main(rootMd5);\n')

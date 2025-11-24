@@ -139,6 +139,9 @@ function MaxPlot(div, top, left, width, height, args) {
         if (!args || args.showSliders===undefined || args.showSliders===true)
             addSliders();
 
+        //if (args && args.flipBook)
+        self.addFlipbookSlider();
+
         // timer that is reset on every mouse move
         self.timer = null;
     }
@@ -160,7 +163,7 @@ function MaxPlot(div, top, left, width, height, args) {
             const blue = Math.min(maxCol, addCol+parseInt(hexColor.slice(5, 7), 16));
 
             // Calculate the grayscale value using the luminosity method
-            const gray = Math.round(0.2126 * red + 0.7152 * green + 0.0722 * blue);
+            const gray = Math.min(255, 128+(0.5*Math.round(0.2126 * red + 0.7152 * green + 0.0722 * blue)));
 
             // Convert the grayscale value to a two-character hex string
             const grayHex = gray.toString(16).padStart(2, '0');
@@ -561,6 +564,23 @@ function MaxPlot(div, top, left, width, height, args) {
         self.sliderDiv = sliderDiv; // for quickResize()
     }
 
+    function onChangeFlipBook(ev) {
+        let hlColIdx = $( "#mpFlipbook" ).slider( "value" );
+        console.log(hlColIdx);
+
+        self.selectClear(true);
+        self.selectByColor ( hlColIdx );
+        //
+        //let newPal = [];
+        //for (let i=0; i < self.col.pal.length; i++) {
+            //newPal.push("DDDDDD");
+        //}
+        //newPal[hlColIdx] = "0000AA";
+        //self.setColors(newPal);
+        self.drawDots();
+
+    }
+
     function addCloseButton(top, left) {
         /* add close button and sync checkbox */
         var div = document.createElement('div');
@@ -826,7 +846,6 @@ function MaxPlot(div, top, left, width, height, args) {
 
         var xMult = winWidth / spanX;
         var yMult = winHeight / spanY;
-
 
         // transform from data floats to screen pixel coordinates
         var pixelCoords = new Uint16Array(coords.length);
@@ -1435,6 +1454,10 @@ function MaxPlot(div, top, left, width, height, args) {
            origCoordColors = coordColors;
            coordColors = copyColorsOnly(origCoordColors, fatIdx, templates.nonFatImgIdx);
        }
+
+       if (selCells.size!==0 || fatIdx!==null)
+           //colors = makeAllGreyHex(colors.length);
+           colors = hexToGrey(colors);
        
        count = blitAll(ctx, off, pxCoords, coordColors, tileWidth, tileHeight, radius, selCells, templates.greyImgIdx, fatIdx, colors);
        if (origCoordColors)
@@ -1961,14 +1984,26 @@ function MaxPlot(div, top, left, width, height, args) {
     };
 
     this.setColorArr = function(colorArr) {
-    /* set the color array, one array with one index per coordinate */
+    /* set the color array, one array with one integer color-index per coordinate */
        self.col.arr = colorArr;
     };
 
     this.setColors = function(colors) {
-    /* set the colors, one for each value of a in setColorArr(a). colors is an
+    /* set the colors, one for each color-index in setColorArr(a). colors is an
      * array of six-digit hex strings. Not #-prefixed! */
        self.col.pal = colors;
+
+       if (self.flipBookEl) {
+           $(self.flipBookEl).slider({
+                //"orientation" : "vertical",
+                "value": 1,
+                "min"  : 1,
+                "max"  : colors.length,
+                "step" : 1, 
+                "slide": onChangeFlipBook
+           });
+           $(self.flipBookEl).on("slidestart", onChangeFlipBook);
+        }
     };
 
     this.calcRadius = function() {
@@ -3204,6 +3239,30 @@ function MaxPlot(div, top, left, width, height, args) {
         return plot2;
     };
 
+    this.addFlipbookSlider = function() {
+        var contDiv = document.createElement('div');
+        contDiv.style.position = "absolute";
+        contDiv.style.top = "8px";
+        let fromLeft = 55;
+        contDiv.style.left = fromLeft+"px";
+        contDiv.style.zIndex = "10";
+
+        var labelDiv = document.createElement('span');
+        labelDiv.style.fontWeight = "bold";
+        labelDiv.textContent = "Quickflip through annotations:"
+
+        var sliderDiv = document.createElement('div');
+        sliderDiv.style.width = self.canvas.width-fromLeft+"px";
+        sliderDiv.style.height = "8px";
+        sliderDiv.id = "mpFlipbook";
+
+        contDiv.appendChild(labelDiv);
+        contDiv.appendChild(sliderDiv);
+
+        self.div.appendChild(contDiv);
+        self.flipBookEl = sliderDiv;
+    }
+
     this.unsplit = function() {
         /* remove the connected non-active renderer */
         //var canvWidth = window.innerWidth - canvLeft - legendBarWidth;
@@ -3226,6 +3285,11 @@ function MaxPlot(div, top, left, width, height, args) {
             return self.width + self.childPlot.width;
         else
             return self.width;
+    }
+
+    this.destroy = function() {
+        self.div.remove(); // remove all DOM objects
+        self.initPlot(); // free memory
     }
 
     this.calcMedian = function(coords, values, names, numNames) {
