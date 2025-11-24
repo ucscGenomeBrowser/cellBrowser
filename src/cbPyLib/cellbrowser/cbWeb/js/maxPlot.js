@@ -1574,12 +1574,14 @@ function MaxPlot(div, top, left, width, height, args) {
      * @param {int|null} fatIdx 
      */
     function drawCirclesWebGL(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
+        console.log(pxCoords.length);
         const CIRCLE_VERTEX_SHADER = `
             precision mediump float;
             attribute vec2 a_Position;
 
             void main() {
                 gl_Position = vec4(a_Position, 0.0, 1.0);
+                gl_PointSize = 5.0;
             }`;
 
         const CIRCLE_FRAGMENT_SHADER = `
@@ -1593,7 +1595,7 @@ function MaxPlot(div, top, left, width, height, args) {
         // WebGL Test
         // Define vertices for triangle
         const triangleVertices = new Float32Array([0.0, 0.5,
-                                                   -0.5, -0.5,
+                                                   0.0, -0.5,
                                                    0.5, 0.5]);
         const triangleColor = [0.5, 0.0, 1.0, 1.0]; 
 
@@ -1652,7 +1654,7 @@ function MaxPlot(div, top, left, width, height, args) {
         ctx.bufferData(ctx.ARRAY_BUFFER, triangleVertices, ctx.STATIC_DRAW);
 
         // Draw
-        ctx.drawArrays(ctx.TRIANGLES, 0, 3);
+        ctx.drawArrays(ctx.POINTS, 0, 3);
 
         console.warn("Viewing Test: WebGL Support for Drawing not yet implemented.");
     }
