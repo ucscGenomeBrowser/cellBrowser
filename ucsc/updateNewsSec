@@ -342,11 +342,11 @@ def main():
                 if "/" not in entry:
                     if not args.newsOnly:
                         addSiteToSitemap(entry, sitemapSet)
-                    dateDict[str(day)].add(entry)
-                    #try:
-                    #    dateDict[str(day)].add(entry)
-                    #except KeyError:
-                    #    dateDict[str(day)] = {entry}
+                    #dateDict[str(day)].add(entry)
+                    try:
+                        dateDict[str(day)].add(entry)
+                    except KeyError:
+                        dateDict[str(day)] = {entry}
                     outLine = "  <li><a href='?ds=" + entry + "' target='_blank'>" + label + "</a>\n"
                     # If doesn't already in exist in toPrint, add it
                     if day not in toPrint.keys():
