@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Extract corresponding author email from bioRxiv/medRxiv preprints.
+Extract author emails from bioRxiv/medRxiv preprints.
 
-Gets author name and institution from bioRxiv API, then uses
-Claude API with web search to find the email address.
+Gets author names and institution from bioRxiv API, then uses
+Claude API with web search to find email addresses for all authors.
 """
 import sys
 import os
@@ -15,6 +15,32 @@ import anthropic
 
 BIO_RXIV_API = "https://api.biorxiv.org/details/biorxiv"
 MEDRXIV_API = "https://api.biorxiv.org/details/medrxiv"
+
+
+def parse_authors(authors_str: str) -> list:
+    """
+    Parse the authors string from bioRxiv API into a list of full names.
+    Input format: "Last1, F.; Last2, F. M.; Last3, F."
+    Output: ["F. Last1", "F. M. Last2", "F. Last3"]
+    """
+    authors = []
+    for author in authors_str.split(";"):
+        author = author.strip()
+        if not author:
+            continue
+        # Format is "LastName, Initials"
+        if "," in author:
+            parts = author.split(",", 1)
+            last_name = parts[0].strip()
+            initials = parts[1].strip() if len(parts) > 1 else ""
+            # Reconstruct as "Initials LastName"
+            if initials:
+                authors.append(f"{initials} {last_name}")
+            else:
+                authors.append(last_name)
+        else:
+            authors.append(author)
+    return authors
 
 
 def get_biorxiv_record(doi: str) -> dict:
@@ -36,40 +62,55 @@ def get_biorxiv_record(doi: str) -> dict:
     raise RuntimeError(f"No records found for DOI {doi}")
 
 
-def find_email_with_claude(name: str, institution: str, paper_title: str) -> str:
+def find_emails_with_claude(authors: list, institution: str, paper_title: str) -> dict:
     """
-    Use Claude API with web search to find the researcher's email.
+    Use Claude API with web search to find email addresses for all authors.
+    Returns a dict mapping author names to their email addresses.
     """
     client = anthropic.Anthropic()
 
-    prompt = f"""Find the email address for the researcher named "{name}" who works at "{institution}".
+    authors_list = "\n".join(f"- {name}" for name in authors)
 
-They recently published a paper titled: "{paper_title}"
+    prompt = f"""Find email addresses for these researchers who co-authored a paper:
 
-Search for their faculty profile page, lab website, or other official university page that lists their contact email.
+{authors_list}
 
-Return ONLY the email address, nothing else. If you cannot find it, return "NOT_FOUND"."""
+The paper is titled: "{paper_title}"
+The corresponding author's institution is: "{institution}"
+
+Search for faculty profile pages, lab websites, or other official pages that list their contact emails.
+
+For each author you find an email for, output a line in this exact format:
+AUTHOR_NAME: email@example.com
+
+If you cannot find an email for an author, output:
+AUTHOR_NAME: NOT_FOUND
+
+List all authors with their results."""
 
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=1024,
-        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
+        max_tokens=4096,
+        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 10}],
         messages=[{"role": "user", "content": prompt}]
     )
 
-    # Extract the text response
+    # Parse the response to extract author-email pairs
+    results = {}
     for block in response.content:
         if block.type == "text":
-            text = block.text.strip()
-            # Try to extract an email from the response
-            email_match = re.search(r'[\w.+-]+@[\w.-]+\.\w+', text)
-            if email_match:
-                return email_match.group(0)
-            if text == "NOT_FOUND":
-                return None
-            return text
+            text = block.text
+            # Look for lines with "name: email" pattern
+            for line in text.split("\n"):
+                # Try to match "Name: email@domain.com" pattern
+                match = re.match(r'^[*-]?\s*(.+?):\s*([\w.+-]+@[\w.-]+\.\w+|NOT_FOUND)\s*$', line.strip())
+                if match:
+                    name = match.group(1).strip()
+                    email = match.group(2)
+                    if email != "NOT_FOUND":
+                        results[name] = email
 
-    return None
+    return results
 
 
 def main():
@@ -87,33 +128,39 @@ def main():
     # Step 1: Get bioRxiv metadata
     try:
         record = get_biorxiv_record(doi)
-        corr_name = record.get("author_corresponding")
+        authors_str = record.get("authors", "")
         corr_inst = record.get("author_corresponding_institution")
         paper_title = record.get("title", "")
 
-        if not corr_name:
-            print("Error: No corresponding author found in bioRxiv metadata", file=sys.stderr)
+        if not authors_str:
+            print("Error: No authors found in bioRxiv metadata", file=sys.stderr)
             sys.exit(1)
 
-        print(f"Corresponding author: {corr_name}")
-        print(f"Institution: {corr_inst or 'Unknown'}")
+        authors = parse_authors(authors_str)
+
         print(f"Paper: {paper_title[:80]}...")
+        print(f"Institution: {corr_inst or 'Unknown'}")
+        print(f"Authors ({len(authors)}):")
+        for author in authors:
+            print(f"  - {author}")
         print()
-        print("Searching for email with Claude...")
+        print("Searching for emails with Claude...")
 
     except Exception as e:
         print(f"Error: Could not fetch bioRxiv metadata: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Step 2: Use Claude to find the email
+    # Step 2: Use Claude to find emails for all authors
     try:
-        email = find_email_with_claude(corr_name, corr_inst or "", paper_title)
+        emails = find_emails_with_claude(authors, corr_inst or "", paper_title)
 
-        if email and email != "NOT_FOUND":
-            print(f"\nEmail found: {email}")
+        if emails:
+            print(f"\nEmails found ({len(emails)}/{len(authors)}):")
+            for name, email in emails.items():
+                print(f"  {name}: {email}")
             sys.exit(0)
         else:
-            print("\nCould not find email address.")
+            print("\nCould not find any email addresses.")
             sys.exit(2)
 
     except anthropic.APIError as e:
