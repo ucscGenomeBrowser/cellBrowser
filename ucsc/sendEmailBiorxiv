@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""
+Extract corresponding author email from bioRxiv/medRxiv preprints.
+
+Gets author name and institution from bioRxiv API, then uses
+Claude API with web search to find the email address.
+"""
+import sys
+import os
+import re
+import requests
+from urllib.parse import quote
+
+import anthropic
+
+BIO_RXIV_API = "https://api.biorxiv.org/details/biorxiv"
+MEDRXIV_API = "https://api.biorxiv.org/details/medrxiv"
+
+
+def get_biorxiv_record(doi: str) -> dict:
+    """
+    Query the bioRxiv/medRxiv API for a single DOI and return the first record.
+    """
+    doi_encoded = quote(doi, safe="/")
+
+    # Try bioRxiv first, then medRxiv
+    for api_url in [BIO_RXIV_API, MEDRXIV_API]:
+        url = f"{api_url}/{doi_encoded}/na/json"
+        resp = requests.get(url, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            collection = data.get("collection", [])
+            if collection:
+                return collection[0]
+
+    raise RuntimeError(f"No records found for DOI {doi}")
+
+
+def find_email_with_claude(name: str, institution: str, paper_title: str) -> str:
+    """
+    Use Claude API with web search to find the researcher's email.
+    """
+    client = anthropic.Anthropic()
+
+    prompt = f"""Find the email address for the researcher named "{name}" who works at "{institution}".
+
+They recently published a paper titled: "{paper_title}"
+
+Search for their faculty profile page, lab website, or other official university page that lists their contact email.
+
+Return ONLY the email address, nothing else. If you cannot find it, return "NOT_FOUND"."""
+
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1024,
+        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    # Extract the text response
+    for block in response.content:
+        if block.type == "text":
+            text = block.text.strip()
+            # Try to extract an email from the response
+            email_match = re.search(r'[\w.+-]+@[\w.-]+\.\w+', text)
+            if email_match:
+                return email_match.group(0)
+            if text == "NOT_FOUND":
+                return None
+            return text
+
+    return None
+
+
+def main():
+    if len(sys.argv) != 2:
+        print(f"Usage: {sys.argv[0]} <biorxiv_DOI>", file=sys.stderr)
+        sys.exit(1)
+
+    doi = sys.argv[1].strip()
+
+    # Check for API key
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("Error: ANTHROPIC_API_KEY environment variable not set", file=sys.stderr)
+        sys.exit(1)
+
+    # Step 1: Get bioRxiv metadata
+    try:
+        record = get_biorxiv_record(doi)
+        corr_name = record.get("author_corresponding")
+        corr_inst = record.get("author_corresponding_institution")
+        paper_title = record.get("title", "")
+
+        if not corr_name:
+            print("Error: No corresponding author found in bioRxiv metadata", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"Corresponding author: {corr_name}")
+        print(f"Institution: {corr_inst or 'Unknown'}")
+        print(f"Paper: {paper_title[:80]}...")
+        print()
+        print("Searching for email with Claude...")
+
+    except Exception as e:
+        print(f"Error: Could not fetch bioRxiv metadata: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Step 2: Use Claude to find the email
+    try:
+        email = find_email_with_claude(corr_name, corr_inst or "", paper_title)
+
+        if email and email != "NOT_FOUND":
+            print(f"\nEmail found: {email}")
+            sys.exit(0)
+        else:
+            print("\nCould not find email address.")
+            sys.exit(2)
+
+    except anthropic.APIError as e:
+        print(f"Error calling Claude API: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
