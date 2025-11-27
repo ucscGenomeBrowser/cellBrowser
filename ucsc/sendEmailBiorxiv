@@ -27,11 +27,12 @@ FROM_EMAIL = "cells@ucsc.edu"
 EMAIL_TEMPLATE = """
 Dear Dr. {author_name},
 
-We came across your recent preprint "{title}" through the daily Biorxiv updates
-which we go through every day.
+We came across your recent preprint "{title}" through the Biorxiv updates
+which we manually go through every day to find new single cell datasets.
 
 Our website would allow users to explore your single cell data through a UMAP plot,
 with violin and dot plots. We support scRNA-seq, ATAC, spatial and multiomic data.
+Researchers can also download your dataset from our website, the unmodified data files.
 Here is an example link: https://cortex-dev.cells.ucsc.edu.  You can color by any cell
 annotation, any gene or combinations of genes.  A quick
 tutorial should show up automatically, but it can also be found in the menu
@@ -46,10 +47,15 @@ until publication, please select the option “Private dataset” on the submiss
 website.
 
 Given your paper title and abstract, we suggest the dataset name $DATASET_NAME.
+The full URL that you can add to your manuscript will then be $DATASET_NAME.cells.ucsc.edu
+once you give us permission to release the dataset.
 
-Please feel free to email us if you have any questions during the submission process.
+Please feel free to email us if you have any questions during the submission process. Once
+we have the dataset converted, you will receive another email with a testing link and if
+you like the result, we can release the dataset to the public site.
 
-Would you be open to discussing this further?
+We are happy to answer any questions, and look forward to receiving your dataset
+via https://cells-submit.gi.ucsc.edu.
 
 Best regards,
 UCSC Cell Browser Team
