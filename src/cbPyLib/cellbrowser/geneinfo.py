@@ -383,7 +383,7 @@ def cbMarkerAnnotateFromArgs(args, options):
     filename = args[0]
     outFname = args[1]
 
-    return cb_marker_annotate(
+    return cbMarkerAnnotate(
         filename=filename,
         outFname=outFname,
         brainspanMouseDev=options.brainspanMouseDev,
