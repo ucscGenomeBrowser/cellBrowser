@@ -10,7 +10,7 @@ from .cellbrowser import anndataMatrixToTsv, loadConfig, sanitizeName, lineFileN
 from .cellbrowser import generateHtmls, getObsKeys, renameFile, getMatrixFormat, generateDataDesc
 from .cellbrowser import copyFileIfDiffSize
 from .cellbrowser import generateQuickGenes
-import cellbrowser.geneinfo
+import cellbrowser.geneinfo as gi
 
 from os.path import join, basename, dirname, isfile, isdir, relpath, abspath, getsize, getmtime, expanduser
 
@@ -781,7 +781,11 @@ def cbImportScanpyCli():
             markerField=markerField, clusterField=clusterField, skipMarkers=skipMarkers, matrixFormat=matrixFormat, atac=atac, layer=layer)
 
     if not options.skipMarkers and options.annotMarkers:
-        cellbrowser.geneinfo.cbMarkerAnnotate(join(outDir, "markers.tsv"), join(outDir,"markers.annotated.tsv"))
+        gi.cbMarkerAnnotate(join(outDir, "markers.tsv"),\
+            join(outDir,"markers.annot.tmp"), gi.BRAINSPANMOUSEDEV, gi.HGNC,\
+            gi.MGIORTHO, gi.EUREXPRESS, gi.BRAINSPANLMD, gi.HPO, gi.COSMIC,\
+            gi.OMIM, gi.SFARI, gi.HPRD)
+        os.rename(join(outDir,"markers.annot.tmp"), join(outDir, "markers.tsv"))
 
     copyFileIfDiffSize(inFname, join(outDir, basename(inFname)))
     generateDataDesc(datasetName, outDir, other={"supplFiles": [{"label":"Scanpy H5AD", "file":basename(inFname)}]})
