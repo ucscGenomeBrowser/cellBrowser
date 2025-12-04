@@ -118,6 +118,9 @@ var cellbrowser = function() {
     // the sparkline is a bit shorter
     var SPARKHISTOCOUNT = 12;
 
+    // if the user selects a field with more than that values, show the flipbook slider
+    const gFlipbookMin = 100;
+
     // links to various external databases
     var dbLinks = {
         "HPO" : "https://hpo.jax.org/app/browse/gene/", // entrez ID
@@ -1749,6 +1752,15 @@ var cellbrowser = function() {
         getById("tpSizeInput").value = radius;
         getById("tpAlphaInput").value = alpha;
     }
+
+    function onSliderChange(valIdx, x, y) {
+        /* user moves the quickflip slider */
+        let metaName = db.conf.activeColorField;
+        let metaInfo = db.findMetaInfo(metaName)
+        showTooltip(x, y, metaInfo.ui.shortLabels[valIdx]);
+        legendHighlightRow(valIdx);
+    }
+
     function onSaveAsClick() {
     /* File - Save Image as ... */
         var canvas = $("canvas")[0];
@@ -3084,6 +3096,12 @@ var cellbrowser = function() {
             renderer.setColorArr(metaArr);
             buildWatermark(); // if we're in split mode
             metaInfo.arr = metaArr;
+
+            if (gLegend.rows.length > gFlipbookMin)
+                renderer.showFlipbook();
+            else
+                renderer.hideFlipbook();
+
             doneLoad();
         }
 
@@ -9023,6 +9041,15 @@ var cellbrowser = function() {
             showTooltip(ev.clientX+15, ev.clientY, lineLabel);
     }
 
+    function legendHighlightRow(legendRowIdx) {
+        // highlight the legend
+        let legQuery = "#tpLegend_"+legendRowIdx;
+        $(".tpLegendHl").removeClass("tpLegendHl");
+        let newRow = $(legQuery).addClass("tpLegendHl")[0];
+        if (newRow)
+            newRow.scrollIntoView();
+    }
+
     function drawAndFattenCluster(clusterName) {
     /* highlight one of the clusters and redraw */
 
@@ -9031,10 +9058,7 @@ var cellbrowser = function() {
         renderer.fatIdx = legendRowIdx;
         renderer.drawDots();
 
-        // also highlight the legend
-        let legQuery = "#tpLegend_"+legendRowIdx;
-        $(".tpLegendHl").removeClass("tpLegendHl");
-        $(legQuery).addClass("tpLegendHl");
+        legendHighlightRow(legendRowIdx);
     }
 
     function resetFattening() {
@@ -9875,6 +9899,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
     /* ==== MAIN ==== ENTRY FUNCTION */
     function main(rootMd5) {
         /* start the data loaders, show first dataset. If in  */
+        changeUrl({"nc":null});
         if (redirectIfSubdomain())
             return;
 
@@ -9919,6 +9944,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
         renderer.onZoom100Click = onZoom100Click;
         renderer.onSelChange = onSelChange;
         renderer.onRadiusAlphaChange = onRadiusAlphaChange;
+        renderer.onSliderChange = onSliderChange;
+
         renderer.canvas.addEventListener("mouseleave", hideTooltip);
 
         loadDataset(datasetName, false, rootMd5);

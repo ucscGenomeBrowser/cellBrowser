@@ -550,8 +550,6 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // add both to the big container div that holds all three slider elements
         var sliderDiv = document.createElement('span');
-        //sliderDiv.style.top = fromTop+"px";
-        //sliderDiv.style.left = fromLeft+"px";
         sliderDiv.style.bottom = "28px";
         sliderDiv.style.right = "200px";
         sliderDiv.style.position = "absolute";
@@ -560,7 +558,6 @@ function MaxPlot(div, top, left, width, height, args) {
         sliderDiv.appendChild(radiusCont);
         sliderDiv.appendChild(alphaCont);
         self.div.appendChild(sliderDiv);
-        //self.canvasDiv.appendChild(sliderDiv);
         self.sliderDiv = sliderDiv; // for quickResize()
     }
 
@@ -570,6 +567,13 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.selectClear(true);
         self.selectByColor ( hlColIdx );
+
+        let mouseEv = ev.originalEvent.originalEvent;
+        let x = mouseEv.clientX;
+        let y = mouseEv.clientY;
+        if (self.onSliderChange)
+            self.onSliderChange( hlColIdx, x, y );
+
         //
         //let newPal = [];
         //for (let i=0; i < self.col.pal.length; i++) {
@@ -2810,17 +2814,6 @@ function MaxPlot(div, top, left, width, height, args) {
         var xCanvas = clientX - canvasLeft;
         var yCanvas = clientY - canvasTop;
 
-        // is there just white space under the mouse, do nothing,
-        // from https://stackoverflow.com/questions/15325283/how-to-detect-if-a-mouse-pointer-hits-a-line-already-drawn-on-an-html-5-canvas
-        //var imageData = self.ctx.getImageData(0, 0, self.width, self.height);
-        //var inputData = imageData.data;
-        //var pData = (~~xCanvas + (~~yCanvas * self.width)) * 4;
-
-        //if (!inputData[pData + 3]) {
-            //console.log("just white space under mouse");
-            //return;
-        //}
-
         // when the cursor is over a label, change it to a hand, but only when there is no marquee
         if (self.coords.labelBbox!==null && self.mouseDownX === null) {
             var labelInfo = self.labelAt(xCanvas, yCanvas);
@@ -3241,19 +3234,23 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.addFlipbookSlider = function() {
         var contDiv = document.createElement('div');
+        contDiv.style.display = "none";
         contDiv.style.position = "absolute";
-        contDiv.style.top = "8px";
+        contDiv.style.bottom = "40px";
+        contDiv.id = "mpFlipbookCont";
         let fromLeft = 55;
         contDiv.style.left = fromLeft+"px";
         contDiv.style.zIndex = "10";
 
         var labelDiv = document.createElement('span');
-        labelDiv.style.fontWeight = "bold";
+        //labelDiv.style.fontWeight = "bold";
+        labelDiv.className = "mpFlipbookLabel";
         labelDiv.textContent = "Quickflip through annotations:"
 
         var sliderDiv = document.createElement('div');
         sliderDiv.style.width = self.canvas.width-fromLeft+"px";
         sliderDiv.style.height = "8px";
+        sliderDiv.style.marginTop = "4px";
         sliderDiv.id = "mpFlipbook";
 
         contDiv.appendChild(labelDiv);
@@ -3261,6 +3258,13 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.div.appendChild(contDiv);
         self.flipBookEl = sliderDiv;
+    }
+
+    this.hideFlipbook = function() {
+        $("#mpFlipbookCont").hide();
+    }
+    this.showFlipbook = function() {
+        $("#mpFlipbookCont").show();
     }
 
     this.unsplit = function() {
