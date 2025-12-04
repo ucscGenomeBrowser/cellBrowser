@@ -6,7 +6,7 @@ from os.path import join, basename, dirname, isfile, isdir, relpath, abspath, ge
 from .cellbrowser import copyPkgFile, writeCellbrowserConf, pipeLog, makeDir, maybeLoadConfig, errAbort, popen
 from .cellbrowser import setDebug, build, isDebugMode, generateHtmls, runCommand, copyFileIfDiffSize
 from .cellbrowser import generateQuickGenes
-import cellbrowser.geneinfo
+import cellbrowser.geneinfo as gi
 
 
 def parseArgs():
@@ -551,7 +551,11 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
     fh.close()
 
     if not options.skipMarkers and options.annotMarkers:
-        cellbrowser.geneinfo.cbMarkerAnnotate(join(outDir, "markers.tsv"), join(outDir,"markers.annotated.tsv"))
+        gi.cbMarkerAnnotate(join(outDir, "markers.tsv"),\
+            join(outDir,"markers.annot.tmp"), gi.BRAINSPANMOUSEDEV, gi.HGNC,\
+            gi.MGIORTHO, gi.EUREXPRESS, gi.BRAINSPANLMD, gi.HPO, gi.COSMIC,\
+            gi.OMIM, gi.SFARI, gi.HPRD)
+        os.rename(join(outDir,"markers.annot.tmp"), join(outDir, "markers.tsv"))
 
     generateHtmls(datasetName, outDir, desc = descDict)
 
