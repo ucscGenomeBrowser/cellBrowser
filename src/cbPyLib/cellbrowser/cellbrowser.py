@@ -6482,13 +6482,13 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
     # try to always force a fresh reload of the index.html page
     ofh.write('''<script>
        // Bust cache on every load
-       (function() {
-         const url = new URL(window.location.href);
-         url.searchParams.set("nc", performance.now()); // high-precision unique
-         if (!window.location.search.includes("nc=")) {
-           window.location.replace(url.toString());
-         }
-       })();
+       //(function() {
+       //  const url = new URL(window.location.href);
+       //  url.searchParams.set("nc", performance.now()); // high-precision unique
+       //  if (!window.location.search.includes("nc=")) {
+       //    window.location.replace(url.toString());
+       //  }
+       //})();
        
        // Prevent bfcache restore
        window.onpageshow = function(e) {
