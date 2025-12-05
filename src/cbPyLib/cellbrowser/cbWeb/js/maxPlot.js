@@ -706,12 +706,121 @@ function MaxPlot(div, top, left, width, height, args) {
                 self.ctx = self.canvas.getContext("2d", { alpha: false });
                 break;
             case 2:
+                // Find the canvas' webgl2 context
                 self.ctx = self.canvas.getContext("webgl2");
 
                 if(!self.ctx) {
                     console.error("WebGL 2 not supported");
                     return;
                 }
+
+                // Set the canvas' clear color
+                self.ctx.clearColor(1, 1, 1, 1);
+
+                // Crate the GLSL shaders from the external source code
+                // Vertex shader GLSL code
+                const VERTEX_SHADER_SRC = `
+                precision mediump float;
+                attribute vec2 a_Position;
+                attribute vec3 a_Color;
+
+                varying vec3 v_Color;
+
+                void main() {
+                    gl_Position = vec4(a_Position, 0.0, 1.0);
+                    gl_PointSize = 5.0;
+                    v_Color = a_Color;
+                }
+                `;
+                // Fragemnt shader GLSL code
+                const FRAGMENT_SHADER_SRC = `
+                precision mediump float;
+                uniform vec4 u_FragColor;
+
+                varying vec3 v_Color;
+
+                void main() {
+                    gl_FragColor = vec4(v_Color, 1.0);
+                }
+                `;
+                const loadShader = (src, type) => {
+                    // Figure out if this is the vertex or fragment shader
+                    const shaderType = type === self.ctx.VERTEX_SHADER ? `vertex` : `fragment`
+
+                    // Create the shader
+                    const shader = self.ctx.createShader(type);
+                    if (!shader) {
+                        console.error(`Unable to create ${shaderType} shader`);
+                    }
+
+                    // Set the program
+                    self.ctx.shaderSource(shader, src);
+
+                    // Compile the program
+                    self.ctx.compileShader(shader);
+                    if (!self.ctx.getShaderParameter(shader, self.ctx.COMPILE_STATUS)) {
+                        console.error(`Failed to compile ${shaderType} shader. Error: ${self.ctx.getShaderInfoLog(shader)}`);
+                    }
+
+                    // Return the shader
+                    return shader;
+                }
+                const vertexShader = loadShader(VERTEX_SHADER_SRC, self.ctx.VERTEX_SHADER);
+                const fragmentShader = loadShader(FRAGMENT_SHADER_SRC, self.ctx.FRAGMENT_SHADER);
+
+                // Create the GLSL program
+                self.program = self.ctx.createProgram();
+                if (!self.program) {
+                    console.error("Error: Unable to create program");
+                }
+                self.ctx.attachShader(self.program, vertexShader);
+                self.ctx.attachShader(self.program, fragmentShader);
+                self.ctx.linkProgram(self.program);
+                if (!self.ctx.getProgramParameter(self.program, self.ctx.LINK_STATUS)) {
+                    console.error(`Failed to link shaders. Error: ${ctx.getProgramInfoLog(glProgram)}`);
+                }
+                self.ctx.useProgram(self.program);
+
+                // Create local references for GLSL variables
+                /**
+                 * Gets the location of the specified GLSL attribute
+                 * 
+                 * @param {String} name Attribue name
+                 * @returns Attribute location
+                 */
+                const getAttribute = (name) => {
+                    // Find attribute
+                    let attribute = self.ctx.getAttribLocation(self.program, name);
+                    if (attribute < 0) {
+                    throw (`Failed to get storage location of ${name}`);
+                    }
+
+                    // Enable assignment to the attribute
+                    self.ctx.enableVertexAttribArray(attribute);
+
+                    // Return attribute for later usage
+                    return attribute;
+                }
+
+                /**
+                 * Gets the location of the specified GLSL uniform
+                 * 
+                 * @param {String} name Uniform name
+                 * @returns Uniform location
+                 */
+                const getUniform = (name) => {
+                    // Find attribute
+                    let uniform = self.ctx.getUniformLocation(self.program, name);
+                    if (!uniform) {
+                    throw (`Failed to get storage location of ${name}`);
+                    }
+
+                    // Return for later use
+                    return uniform;
+                }
+                self.a_Position = getAttribute('a_Position');
+                self.a_Color = getAttribute('a_Color');
+
                 break;
             default:
                 console.error(`Error: Mode ${self.mode} not supported`);
@@ -1573,90 +1682,48 @@ function MaxPlot(div, top, left, width, height, args) {
      * @param {Set} selCells 
      * @param {int|null} fatIdx 
      */
-    function drawCirclesWebGL(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
-        console.log(pxCoords.length);
-        const CIRCLE_VERTEX_SHADER = `
-            precision mediump float;
-            attribute vec2 a_Position;
+    const drawCirclesWebGL = (ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) => {
+        // Clear canvas
+        ctx.clear(ctx.COLOR_BUFFER_BIT);
 
-            void main() {
-                gl_Position = vec4(a_Position, 0.0, 1.0);
-                gl_PointSize = 5.0;
-            }`;
+        // DEBUG arrays
+        const vertices = new Float32Array([0.0, 0.5,
+                                    0.0, -0.5,
+                                    0.5, 0.5,
+                                    -0.5, -0.5,
+                                    -0.25, -0.25,
+                                    -0.5, -0.25
+                                  ]);
 
-        const CIRCLE_FRAGMENT_SHADER = `
-            precision mediump float;
-            uniform vec4 u_FragColor;
-            
-            void main() {
-                gl_FragColor = u_FragColor;
-            }`;
+        const colors2 = new Float32Array([1, 0, 0,
+                                        0, 1, 0,
+                                        0, 0, 1,
+                                        1, 1, 0,
+                                        1, 0, 1,
+                                        0, 1, 1
+                                        ]);
 
-        // WebGL Test
-        // Define vertices for triangle
-        const triangleVertices = new Float32Array([0.0, 0.5,
-                                                   0.0, -0.5,
-                                                   0.5, 0.5]);
-        const triangleColor = [0.5, 0.0, 1.0, 1.0]; 
-
-        // Define the webGL buffer
+        // Set attributes
+        /**
+         * 
+         * @param {*} vec_size Number of elements in each attribute entry
+         * @param {*} attribute Location of the attribute
+         * @param {*} data Data to set in the attribute
+         * @param {*} normalize Whether or not to normalize the attribute
+         */
+        const bindBuffer = (vec_size, attribute, data, normalize = false) => {
         const buffer = ctx.createBuffer();
-
-        // Define and compile the webGL vertex shader
-        const vertexShader = ctx.createShader(ctx.VERTEX_SHADER);
-        ctx.shaderSource(vertexShader, CIRCLE_VERTEX_SHADER);
-        ctx.compileShader(vertexShader);
-        if(!ctx.getShaderParameter(vertexShader, ctx.COMPILE_STATUS)) {
-            console.error(`Failed to compile vertex shader. Error: ${ctx.getShaderInfoLog(vertexShader)}`);
-        }
-
-        // Define and compile the webGL fragment shader
-        const fragShader = ctx.createShader(ctx.FRAGMENT_SHADER);
-        ctx.shaderSource(fragShader, CIRCLE_FRAGMENT_SHADER);
-        ctx.compileShader(fragShader);
-        if(!ctx.getShaderParameter(fragShader, ctx.COMPILE_STATUS)) {
-            console.error(`Failed to compile fragment shader. Error: ${ctx.getShaderInfoLog(fragShader)}`);
-        }
-
-        // Combine shaders into 1 program
-        const glProgram = ctx.createProgram();
-        ctx.attachShader(glProgram, vertexShader);
-        ctx.attachShader(glProgram, fragShader);
-        ctx.linkProgram(glProgram);
-        if(!ctx.getProgramParameter(glProgram, ctx.LINK_STATUS)) {
-            console.error(`Failed to link shaders. Error: ${ctx.getProgramInfoLog(glProgram)}`);
-        }
-
-        // Add vertex data to vertex buffer
-        const a_Position = ctx.getAttribLocation(glProgram, 'a_Position');
-        if (a_Position < 0) {
-            console.error('Failed to get the storage location of a_Position');
-        }
-        ctx.vertexAttribPointer(a_Position, 2, ctx.FLOAT, false, 0, 0);
-
-        // Add the fragment data to the fragment buffer
-        const u_FragColor = ctx.getUniformLocation(glProgram, 'u_FragColor');
-        if (!u_FragColor) {
-            console.error('Failed to get the storage location of u_FragColor');
-        }
-
-        // Output Merger
-
-        // Rasterizer
-
-        // Set program
-        ctx.useProgram(glProgram);
-        ctx.enableVertexAttribArray(a_Position);
-        ctx.uniform4f(u_FragColor, triangleColor[0], triangleColor[1], triangleColor[2], triangleColor[3]);
-        
-        // Input assembler
         ctx.bindBuffer(ctx.ARRAY_BUFFER, buffer);
-        ctx.bufferData(ctx.ARRAY_BUFFER, triangleVertices, ctx.STATIC_DRAW);
+        ctx.bufferData(ctx.ARRAY_BUFFER, data, ctx.STATIC_DRAW);
+        ctx.vertexAttribPointer(attribute, vec_size, ctx.FLOAT, normalize, 0, 0);
+        }
+        bindBuffer(2, this.a_Position, vertices);
+        bindBuffer(3, this.a_Color, colors2, true);
 
         // Draw
-        ctx.drawArrays(ctx.POINTS, 0, 3);
+        ctx.drawArrays(this.ctx.POINTS, 0, vertices.length / 2);
 
-        console.warn("Viewing Test: WebGL Support for Drawing not yet implemented.");
+        console.warn("Viewing Test: WebGL Support for Drawing not yet fully implemented.");
     }
 
     function drawBackground(ctx, back) {
@@ -1816,7 +1883,6 @@ function MaxPlot(div, top, left, width, height, args) {
                 //if(DEBUG) console.timeEnd("clear");
                 break;
             case 2:
-                ctx.clearColor(1, 1, 1, 1);
                 ctx.clear(ctx.COLOR_BUFFER_BIT | ctx.DEPTH_BUFFER_BIT);
                 break;
             default:
