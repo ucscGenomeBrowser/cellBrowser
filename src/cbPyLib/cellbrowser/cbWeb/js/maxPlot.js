@@ -735,7 +735,6 @@ function MaxPlot(div, top, left, width, height, args) {
                 // Fragemnt shader GLSL code
                 const FRAGMENT_SHADER_SRC = `
                 precision mediump float;
-                uniform vec4 u_FragColor;
 
                 varying vec3 v_Color;
 
@@ -1676,7 +1675,7 @@ function MaxPlot(div, top, left, width, height, args) {
      * @param {WebGL2RenderingContext} ctx 
      * @param {Uint16Array} pxCoords 
      * @param {Uint8Array} coordColors 
-     * @param {Array} colors 
+     * @param {string[]} colors 
      * @param {int|float} radius 
      * @param {float} alpha 
      * @param {Set} selCells 
@@ -1686,22 +1685,22 @@ function MaxPlot(div, top, left, width, height, args) {
         // Clear canvas
         ctx.clear(ctx.COLOR_BUFFER_BIT);
 
-        // DEBUG arrays
-        const vertices = new Float32Array([0.0, 0.5,
-                                    0.0, -0.5,
-                                    0.5, 0.5,
-                                    -0.5, -0.5,
-                                    -0.25, -0.25,
-                                    -0.5, -0.25
-                                  ]);
+        // Parse pxCoords array into something WebGL can use
+        // TODO: Technically, WebGL should be able to do this. Figure out how
+        // const coords = new Float32Array(pxCoords.length).fill(0);
+        const coords = new Float32Array(Array.from({length: pxCoords.length}, () => (Math.random() * 2) - 1));
 
-        const colors2 = new Float32Array([1, 0, 0,
-                                        0, 1, 0,
-                                        0, 0, 1,
-                                        1, 1, 0,
-                                        1, 0, 1,
-                                        0, 1, 1
-                                        ]);
+        // Parse coordColors array into something WebGL can use
+        // TODO: Technically, WebGL should be able to do this. Figure out how
+        let colorNumbers = [];
+        for(let colorIndex of coordColors) {
+            let intHex = parseInt(colors[colorIndex], 16);
+            let red = (intHex & 0xff0000) >> 16;
+            let green = (intHex & 0x00ff00) >> 8;
+            let blue = (intHex & 0x0000ff) >> 0;
+            colorNumbers.push(red, green, blue);
+        }
+        const colorBuf = new Uint8Array(colorNumbers);
 
         // Set attributes
         /**
@@ -1711,17 +1710,20 @@ function MaxPlot(div, top, left, width, height, args) {
          * @param {*} data Data to set in the attribute
          * @param {*} normalize Whether or not to normalize the attribute
          */
-        const bindBuffer = (vec_size, attribute, data, normalize = false) => {
-        const buffer = ctx.createBuffer();
-        ctx.bindBuffer(ctx.ARRAY_BUFFER, buffer);
-        ctx.bufferData(ctx.ARRAY_BUFFER, data, ctx.STATIC_DRAW);
-        ctx.vertexAttribPointer(attribute, vec_size, ctx.FLOAT, normalize, 0, 0);
+        const bindBuffer = (vec_size, attribute, data, type, normalize = false) => {
+            const buffer = this.ctx.createBuffer();
+            this.ctx.bindBuffer(this.ctx.ARRAY_BUFFER, buffer);
+            this.ctx.bufferData(this.ctx.ARRAY_BUFFER, data, this.ctx.STATIC_DRAW);
+            this.ctx.vertexAttribPointer(attribute, vec_size, type, normalize, 0, 0);
         }
-        bindBuffer(2, this.a_Position, vertices);
-        bindBuffer(3, this.a_Color, colors2, true);
+        bindBuffer(2, this.a_Position, coords, ctx.FLOAT);
+        bindBuffer(3, this.a_Color, colorBuf, ctx.UNSIGNED_BYTE);
+
+        // Set uniforms
+        // None
 
         // Draw
-        ctx.drawArrays(this.ctx.POINTS, 0, vertices.length / 2);
+        ctx.drawArrays(this.ctx.POINTS, 0, coordColors.length);
 
         console.warn("Viewing Test: WebGL Support for Drawing not yet fully implemented.");
     }
@@ -1753,7 +1755,6 @@ function MaxPlot(div, top, left, width, height, args) {
 
         if(DEBUG) console.timeEnd("image");
     }
-
 
     function drawPixels(ctx, width, height, pxCoords, coordColors, colors, alpha, selCells, fatIdx) {
         /* draw single pixels into a pixel buffer and copy the buffer into a canvas */
