@@ -59,6 +59,7 @@ function MaxPlot(div, top, left, width, height, args) {
     this.hiddenCoord = HIDCOORD;
 
     const DEBUG = false;
+    const WEBGL_DEBUG = true;
 
     var self = this; // 'this' has two conflicting meanings in javascript.
     // I use 'self' to refer to object variables, so I can use 'this' to refer to the caller context
@@ -1681,17 +1682,22 @@ function MaxPlot(div, top, left, width, height, args) {
      * @param {Set} selCells 
      * @param {int|null} fatIdx 
      */
-    const drawCirclesWebGL = (ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) => {
+    function drawCirclesWebGL (ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
+        if(WEBGL_DEBUG) console.time("drawCirclesWebGL");
+
         // Clear canvas
         ctx.clear(ctx.COLOR_BUFFER_BIT);
 
         // Parse pxCoords array into something WebGL can use
         // TODO: Technically, WebGL should be able to do this. Figure out how
+        if(WEBGL_DEBUG) console.time("Generate Coordinates");
         // const coords = new Float32Array(pxCoords.length).fill(0);
         const coords = new Float32Array(Array.from({length: pxCoords.length}, () => (Math.random() * 2) - 1));
+        if(WEBGL_DEBUG) console.timeEnd("Generate Coordinates");
 
         // Parse coordColors array into something WebGL can use
         // TODO: Technically, WebGL should be able to do this. Figure out how
+        if(WEBGL_DEBUG) console.time("Parse Colors");
         let colorNumbers = [];
         for(let colorIndex of coordColors) {
             let intHex = parseInt(colors[colorIndex], 16);
@@ -1701,6 +1707,7 @@ function MaxPlot(div, top, left, width, height, args) {
             colorNumbers.push(red, green, blue);
         }
         const colorBuf = new Uint8Array(colorNumbers);
+        if(WEBGL_DEBUG) console.timeEnd("Parse Colors");
 
         // Set attributes
         /**
@@ -1711,21 +1718,27 @@ function MaxPlot(div, top, left, width, height, args) {
          * @param {*} normalize Whether or not to normalize the attribute
          */
         const bindBuffer = (vec_size, attribute, data, type, normalize = false) => {
-            const buffer = this.ctx.createBuffer();
-            this.ctx.bindBuffer(this.ctx.ARRAY_BUFFER, buffer);
-            this.ctx.bufferData(this.ctx.ARRAY_BUFFER, data, this.ctx.STATIC_DRAW);
-            this.ctx.vertexAttribPointer(attribute, vec_size, type, normalize, 0, 0);
+            const buffer = self.ctx.createBuffer();
+            self.ctx.bindBuffer(self.ctx.ARRAY_BUFFER, buffer);
+            self.ctx.bufferData(self.ctx.ARRAY_BUFFER, data, self.ctx.STATIC_DRAW);
+            self.ctx.vertexAttribPointer(attribute, vec_size, type, normalize, 0, 0);
         }
-        bindBuffer(2, this.a_Position, coords, ctx.FLOAT);
-        bindBuffer(3, this.a_Color, colorBuf, ctx.UNSIGNED_BYTE);
+        if(WEBGL_DEBUG) console.time("Bind Buffers");
+        bindBuffer(2, self.a_Position, coords, ctx.FLOAT);
+        bindBuffer(3, self.a_Color, colorBuf, ctx.UNSIGNED_BYTE);
+        if(WEBGL_DEBUG) console.timeEnd("Bind Buffers");
 
         // Set uniforms
         // None
 
         // Draw
-        ctx.drawArrays(this.ctx.POINTS, 0, coordColors.length);
-
+        if(WEBGL_DEBUG) console.time("draw");
+        ctx.drawArrays(self.ctx.POINTS, 0, coordColors.length);
+        if(WEBGL_DEBUG) console.timeEnd("draw");
+        
         console.warn("Viewing Test: WebGL Support for Drawing not yet fully implemented.");
+        console.log(`${coordColors.length} points drawn`);
+        if(WEBGL_DEBUG) console.timeEnd("drawCirclesWebGL");
     }
 
     function drawBackground(ctx, back) {
