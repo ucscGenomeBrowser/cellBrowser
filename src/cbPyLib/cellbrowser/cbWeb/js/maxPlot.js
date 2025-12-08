@@ -1685,6 +1685,9 @@ function MaxPlot(div, top, left, width, height, args) {
     function drawCirclesWebGL (ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
         if(WEBGL_DEBUG) console.time("drawCirclesWebGL");
 
+        // const multiplier = 2**12;
+        const multiplier = 1;
+
         // Clear canvas
         ctx.clear(ctx.COLOR_BUFFER_BIT);
 
@@ -1692,19 +1695,27 @@ function MaxPlot(div, top, left, width, height, args) {
         // TODO: Technically, WebGL should be able to do this. Figure out how
         if(WEBGL_DEBUG) console.time("Generate Coordinates");
         // const coords = new Float32Array(pxCoords.length).fill(0);
-        const coords = new Float32Array(Array.from({length: pxCoords.length}, () => (Math.random() * 2) - 1));
+        const coords = new Float32Array(Array.from({length: pxCoords.length * multiplier}, () => (Math.random() * 2) - 1));
         if(WEBGL_DEBUG) console.timeEnd("Generate Coordinates");
 
         // Parse coordColors array into something WebGL can use
         // TODO: Technically, WebGL should be able to do this. Figure out how
         if(WEBGL_DEBUG) console.time("Parse Colors");
-        let colorNumbers = [];
-        for(let colorIndex of coordColors) {
-            let intHex = parseInt(colors[colorIndex], 16);
+        // First, convert all hex numbers to a format WebGL can use
+        const colorRGB = colors.map(function (hex) {
+            let intHex = parseInt(hex, 16);
             let red = (intHex & 0xff0000) >> 16;
             let green = (intHex & 0x00ff00) >> 8;
             let blue = (intHex & 0x0000ff) >> 0;
-            colorNumbers.push(red, green, blue);
+            return [red, green, blue];
+        });
+
+        // Now find the color of each point
+        let colorNumbers = [];
+        for(let i = 0; i < multiplier; i++){
+            for(let colorIndex of coordColors) {
+                colorNumbers.push(colorRGB[colorIndex][0], colorRGB[colorIndex][1], colorRGB[colorIndex][2]);
+            }
         }
         const colorBuf = new Uint8Array(colorNumbers);
         if(WEBGL_DEBUG) console.timeEnd("Parse Colors");
@@ -1733,11 +1744,11 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // Draw
         if(WEBGL_DEBUG) console.time("draw");
-        ctx.drawArrays(self.ctx.POINTS, 0, coordColors.length);
+        ctx.drawArrays(self.ctx.POINTS, 0, coordColors.length * multiplier);
         if(WEBGL_DEBUG) console.timeEnd("draw");
         
         console.warn("Viewing Test: WebGL Support for Drawing not yet fully implemented.");
-        console.log(`${coordColors.length} points drawn`);
+        console.log(`${coordColors.length * multiplier} points drawn`);
         if(WEBGL_DEBUG) console.timeEnd("drawCirclesWebGL");
     }
 
