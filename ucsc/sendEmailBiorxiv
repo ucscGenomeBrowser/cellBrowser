@@ -221,7 +221,9 @@ Here is the email template to personalize:
 Please rewrite this email to make it specific to this paper. Reference specific aspects of their research (from the title/abstract) without praising the work, no sycophancy please. Keep the same overall structure and style.
 
 Replace $DATASET_NAME with a suggested shortname of the dataset. A good dataset shortname is shorter than 25 characters. It should not include the word "human", as most datasets are human. It usually includes the organ and the disease, if these are important,
-or the cell line or condition that the paper focusses on. If the paper has mostly ATAC or spatial data, add -atac or -spatial to the dataset name. You can add the celltype if the paper focuses on a celltype. Abbreviate parts of the name to shorten the name if necessary. Only dashes are allowed in the name and lowercase characters. Example dataset names are: cortex-dev for a paper about the developing cortex, cortex-atac, for ATAC-seq on the cortex. Other examples: mouse-liver-scaring, ciona-regeneration, zebrafish-dev, hindbrain-dev, mouse-olig-dev.
+or the cell line or condition that the paper focusses on. If the paper has mostly ATAC or spatial data, add -atac or -spatial to the dataset name. You can add the celltype if the paper focuses on a celltype. Abbreviate parts of the name to shorten the name if necessary. Only dashes are allowed in the name and lowercase characters. Example dataset names are: cortex-dev for a paper about the developing cortex, cortex-atac, for ATAC-seq on the cortex. Other examples: mouse-liver-scaring, ciona-regeneration, zebrafish-dev, hindbrain-dev, mouse-olig-dev. ms is usually multiple sclerosis, common acronyms for diseases are fine to use as acronyms. We do not usually abbreviate "organoid", so leave that as a word. 
+Try not to use more than three parts separated by dashes. If the dataset is from mouse or another non-human species, prefix
+the dataset with the name of the species.
 
 IMPORTANT: Your response must be in this exact format with no other text:
 SUBJECT: [generated subject line here]
