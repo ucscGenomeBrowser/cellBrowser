@@ -1758,7 +1758,7 @@ var cellbrowser = function() {
         let metaName = db.conf.activeColorField;
         let metaInfo = db.findMetaInfo(metaName)
         showTooltip(x, y, metaInfo.ui.shortLabels[valIdx]);
-        legendHighlightRow(valIdx);
+        legendHighlightRow(valIdx, true);
     }
 
     function onSaveAsClick() {
@@ -8166,7 +8166,7 @@ var cellbrowser = function() {
         /* mouse hovers over legend */
         var legendId = parseInt(ev.target.id.split("_")[1]);
         var legendLabel = ev.target.innerText;
-        onClusterNameHover(legendLabel, legendId, ev, true);
+        onClusterNameHover(legendLabel, legendId, ev, true, false);
     }
 
     function onLegendLabelClick(ev) {
@@ -9041,16 +9041,24 @@ var cellbrowser = function() {
             showTooltip(ev.clientX+15, ev.clientY, lineLabel);
     }
 
-    function legendHighlightRow(legendRowIdx) {
+    function legendHighlightRow(legendRowIdx, doScroll) {
         // highlight the legend
         let legQuery = "#tpLegend_"+legendRowIdx;
         $(".tpLegendHl").removeClass("tpLegendHl");
         let newRow = $(legQuery).addClass("tpLegendHl")[0];
-        if (newRow)
-            newRow.scrollIntoView();
+        if (newRow && doScroll) {
+           const childRect = newRow.getBoundingClientRect();
+           const containerEl = document.getElementById("tpLegendContent");
+           const containerRect = containerEl.getBoundingClientRect();
+           const offset = childRect.top - containerRect.top + containerEl.scrollTop;
+           containerEl.scrollTo({ top: offset});
+        }
+
+           //newRow.scrollIntoView({"container":cont});
+            
     }
 
-    function drawAndFattenCluster(clusterName) {
+    function drawAndFattenCluster(clusterName, doScroll) {
     /* highlight one of the clusters and redraw */
 
         let legendRowIdx = legendLabelGetIntKey(gLegend, clusterName);
@@ -9058,7 +9066,7 @@ var cellbrowser = function() {
         renderer.fatIdx = legendRowIdx;
         renderer.drawDots();
 
-        legendHighlightRow(legendRowIdx);
+        legendHighlightRow(legendRowIdx, doScroll);
     }
 
     function resetFattening() {
@@ -9070,9 +9078,13 @@ var cellbrowser = function() {
         }
     }
 
-function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
+function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         /* user hovers over cluster label */
         /* doHighlight can be undefined, which means true = called from onHoverLabel */
+        // when called from the maxPlot interface = mouse is over label = scroll the legend to the right place
+        if (doScroll===undefined)
+            doScroll = true;
+
         var labelLines = [clusterName];
 
         var labelField = renderer.getLabelField();
@@ -9114,7 +9126,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
             // XX cannot do anything when not coloring on the meta field that we are coloring on
         } else {
             //var valIdx = findMetaValIndex(metaInfo, clusterName);
-            drawAndFattenCluster(clusterName);
+            drawAndFattenCluster(clusterName, doScroll);
         }
     }
 
