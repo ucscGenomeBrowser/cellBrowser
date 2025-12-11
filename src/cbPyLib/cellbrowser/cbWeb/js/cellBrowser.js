@@ -4207,7 +4207,8 @@ var cellbrowser = function() {
             htmls.push('<li><a class="tpColorLink" data-palette="blues" href="#">Gradient: shades of blue</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="reds" href="#">Gradient: shades of red</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="tol-sq-blue" href="#">Gradient: beige to red</a></li>');
-            htmls.push('<li><a class="tpColorLink" data-palette="tol-rainbow" href="#">Gradient: blue to red</a></li>');
+            htmls.push('<li><a class="tpColorLink" data-palette="tol-rainbow" href="#">Gradient: dark rainbow</a></li>');
+            htmls.push('<li><a class="tpColorLink" data-palette="blueWhiteRed" href="#">Gradient: blue to white to red</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="viridis" href="#">Gradient: Viridis</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="magma" href="#">Gradient: Magma</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="inferno" href="#">Gradient: Inferno</a></li>');
@@ -7869,6 +7870,40 @@ var cellbrowser = function() {
         return pal.slice(0, n);
     }
 
+    function blueWhiteRedPalette(n) {
+        const toHex = (v) => {
+            const h = v.toString(16);
+            return h.length === 1 ? "0" + h : h;
+        };
+    
+        const mix = (a, b, t) => a + (b - a) * t;
+    
+        const colors = [];
+        for (let i = 0; i < n; i++) {
+            const t = i / (n - 1);
+    
+            let r, g, b;
+            if (t < 0.5) {
+                // blue (0,0,255) → white (255,255,255)
+                const u = t / 0.5;
+                r = mix(0,   255, u);
+                g = mix(0,   255, u);
+                b = mix(255, 255, u);
+            } else {
+                // white (255,255,255) → red (255,0,0)
+                const u = (t - 0.5) / 0.5;
+                r = mix(255, 255, u);
+                g = mix(255,   0, u);
+                b = mix(255,   0, u);
+            }
+    
+            const hex = "#" + toHex(Math.round(r)) + toHex(Math.round(g)) + toHex(Math.round(b));
+            colors.push(hex);
+        }
+    
+        return colors;
+    }
+
     function makeColorPalette(palName, n) {
     /* return an array with n color hex strings */
     /* Use Google's palette functions for now, first Paul Tol's colors, if that fails, use the usual HSV rainbow
@@ -7879,6 +7914,8 @@ var cellbrowser = function() {
             pal = ["0000FF","FF0000"];
         else if (palName==="blues")
             pal = makeHslPalette(0.6, n);
+        else if (palName==="blueWhiteRed")
+            pal = blueWhiteRedPalette(n);
         else if (palName==="blue")
             pal = makePseudoPalette([255,0,0], n);
         else if (palName==="magma" || palName==="viridis" || palName==="inferno" || palName=="plasma")
@@ -9265,7 +9302,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         */
         let heatmap = db.heatmap;
 
-        var colors = makeColorPalette(cDefGradPaletteHeat, db.exprBinCount);
+        //var colors = makeColorPalette(cDefGradPaletteHeat, db.exprBinCount);
+        var colors = makeColorPalette("blueWhiteRed", db.exprBinCount);
 
         let syms = exprData.syms;
         let metaLabels = exprData.metaLabels;
