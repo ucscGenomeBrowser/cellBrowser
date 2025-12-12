@@ -1758,7 +1758,7 @@ var cellbrowser = function() {
         let metaName = db.conf.activeColorField;
         let metaInfo = db.findMetaInfo(metaName)
         showTooltip(x, y, metaInfo.ui.shortLabels[valIdx]);
-        legendHighlightRow(valIdx);
+        legendHighlightRow(valIdx, true);
     }
 
     function onSaveAsClick() {
@@ -4207,7 +4207,8 @@ var cellbrowser = function() {
             htmls.push('<li><a class="tpColorLink" data-palette="blues" href="#">Gradient: shades of blue</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="reds" href="#">Gradient: shades of red</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="tol-sq-blue" href="#">Gradient: beige to red</a></li>');
-            htmls.push('<li><a class="tpColorLink" data-palette="tol-rainbow" href="#">Gradient: blue to red</a></li>');
+            htmls.push('<li><a class="tpColorLink" data-palette="tol-rainbow" href="#">Gradient: dark rainbow</a></li>');
+            htmls.push('<li><a class="tpColorLink" data-palette="blueWhiteRed" href="#">Gradient: blue to white to red</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="viridis" href="#">Gradient: Viridis</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="magma" href="#">Gradient: Magma</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="inferno" href="#">Gradient: Inferno</a></li>');
@@ -7869,6 +7870,40 @@ var cellbrowser = function() {
         return pal.slice(0, n);
     }
 
+    function blueWhiteRedPalette(n) {
+        const toHex = (v) => {
+            const h = v.toString(16);
+            return h.length === 1 ? "0" + h : h;
+        };
+    
+        const mix = (a, b, t) => a + (b - a) * t;
+    
+        const colors = [];
+        for (let i = 0; i < n; i++) {
+            const t = i / (n - 1);
+    
+            let r, g, b;
+            if (t < 0.5) {
+                // blue (0,0,255) → white (255,255,255)
+                const u = t / 0.5;
+                r = mix(0,   255, u);
+                g = mix(0,   255, u);
+                b = mix(255, 255, u);
+            } else {
+                // white (255,255,255) → red (255,0,0)
+                const u = (t - 0.5) / 0.5;
+                r = mix(255, 255, u);
+                g = mix(255,   0, u);
+                b = mix(255,   0, u);
+            }
+    
+            const hex = "#" + toHex(Math.round(r)) + toHex(Math.round(g)) + toHex(Math.round(b));
+            colors.push(hex);
+        }
+    
+        return colors;
+    }
+
     function makeColorPalette(palName, n) {
     /* return an array with n color hex strings */
     /* Use Google's palette functions for now, first Paul Tol's colors, if that fails, use the usual HSV rainbow
@@ -7879,6 +7914,8 @@ var cellbrowser = function() {
             pal = ["0000FF","FF0000"];
         else if (palName==="blues")
             pal = makeHslPalette(0.6, n);
+        else if (palName==="blueWhiteRed")
+            pal = blueWhiteRedPalette(n);
         else if (palName==="blue")
             pal = makePseudoPalette([255,0,0], n);
         else if (palName==="magma" || palName==="viridis" || palName==="inferno" || palName=="plasma")
@@ -8166,7 +8203,7 @@ var cellbrowser = function() {
         /* mouse hovers over legend */
         var legendId = parseInt(ev.target.id.split("_")[1]);
         var legendLabel = ev.target.innerText;
-        onClusterNameHover(legendLabel, legendId, ev, true);
+        onClusterNameHover(legendLabel, legendId, ev, true, false);
     }
 
     function onLegendLabelClick(ev) {
@@ -9041,16 +9078,24 @@ var cellbrowser = function() {
             showTooltip(ev.clientX+15, ev.clientY, lineLabel);
     }
 
-    function legendHighlightRow(legendRowIdx) {
+    function legendHighlightRow(legendRowIdx, doScroll) {
         // highlight the legend
         let legQuery = "#tpLegend_"+legendRowIdx;
         $(".tpLegendHl").removeClass("tpLegendHl");
         let newRow = $(legQuery).addClass("tpLegendHl")[0];
-        if (newRow)
-            newRow.scrollIntoView();
+        if (newRow && doScroll) {
+           const childRect = newRow.getBoundingClientRect();
+           const containerEl = document.getElementById("tpLegendContent");
+           const containerRect = containerEl.getBoundingClientRect();
+           const offset = childRect.top - containerRect.top + containerEl.scrollTop;
+           containerEl.scrollTo({ top: offset});
+        }
+
+           //newRow.scrollIntoView({"container":cont});
+            
     }
 
-    function drawAndFattenCluster(clusterName) {
+    function drawAndFattenCluster(clusterName, doScroll) {
     /* highlight one of the clusters and redraw */
 
         let legendRowIdx = legendLabelGetIntKey(gLegend, clusterName);
@@ -9058,7 +9103,7 @@ var cellbrowser = function() {
         renderer.fatIdx = legendRowIdx;
         renderer.drawDots();
 
-        legendHighlightRow(legendRowIdx);
+        legendHighlightRow(legendRowIdx, doScroll);
     }
 
     function resetFattening() {
@@ -9070,9 +9115,13 @@ var cellbrowser = function() {
         }
     }
 
-function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
+function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         /* user hovers over cluster label */
         /* doHighlight can be undefined, which means true = called from onHoverLabel */
+        // when called from the maxPlot interface = mouse is over label = scroll the legend to the right place
+        if (doScroll===undefined)
+            doScroll = true;
+
         var labelLines = [clusterName];
 
         var labelField = renderer.getLabelField();
@@ -9114,7 +9163,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
             // XX cannot do anything when not coloring on the meta field that we are coloring on
         } else {
             //var valIdx = findMetaValIndex(metaInfo, clusterName);
-            drawAndFattenCluster(clusterName);
+            drawAndFattenCluster(clusterName, doScroll);
         }
     }
 
@@ -9253,7 +9302,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
         */
         let heatmap = db.heatmap;
 
-        var colors = makeColorPalette(cDefGradPaletteHeat, db.exprBinCount);
+        //var colors = makeColorPalette(cDefGradPaletteHeat, db.exprBinCount);
+        var colors = makeColorPalette("blueWhiteRed", db.exprBinCount);
 
         let syms = exprData.syms;
         let metaLabels = exprData.metaLabels;

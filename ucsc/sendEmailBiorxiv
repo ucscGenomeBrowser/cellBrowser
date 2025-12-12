@@ -22,42 +22,39 @@ RETRY_DELAY = 65  # seconds to wait before retrying (rate limit is per minute)
 # ============================================================================
 # EDIT THESE VALUES
 # ============================================================================
-FROM_EMAIL = "cells@ucsc.edu"
+FROM_EMAIL = "Max Haeussler <mhaeussl@ucsc.edu>"
 
 EMAIL_TEMPLATE = """
-Dear Dr. {author_name},
+Dear {author_first_name},
 
-We came across your recent preprint "{title}" through the Biorxiv updates
-which we manually go through every day to find new single cell datasets.
+I saw "{title}" through the Biorxiv updates
+which I manually go through every day to find new single cell datasets for
+our NIH-funded project, the UCSC Cell Browser (https://cells.ucsc.edu).
+If you're interested, we can set up a interactive browser for your
+data.
 
-Our website would allow users to explore your single cell data through a UMAP plot,
-with violin and dot plots. We support scRNA-seq, ATAC, spatial and multiomic data.
-Researchers can also download your dataset from our website, the unmodified data files.
+Our website allows researchers to explore your single cell data,
+including scRNA-seq, ATAC, spatial and multiomic data.
 Here is an example link: https://cortex-dev.cells.ucsc.edu.  You can color by any cell
 annotation, any gene or combinations of genes.  A quick
 tutorial should show up automatically, but it can also be found in the menu
-under Help > Tutorial.
+under Help > Tutorial. The original source data files can be downloaded, too.
 
-If you're interested, we can help you set up an interactive browser for your
-data. The process is straightforward and we provide full support.
-All we need to add your dataset to our website is a short description of your
-dataset and the Seurat/Scanpy object files.  You can upload these files here:
-https://cells-submit.gi.ucsc.edu.  Also, if you’d like your dataset hidden
-until publication, please select the option “Private dataset” on the submission
-website.
-
-Given your paper title and abstract, we suggest the dataset name $DATASET_NAME.
+For your datasets, we suggest the dataset name "$DATASET_NAME".
 The full URL that you can add to your manuscript will then be $DATASET_NAME.cells.ucsc.edu
 once you give us permission to release the dataset.
 
-Please feel free to email us if you have any questions during the submission process. Once
+You can upload your dataset here:
+https://cells-submit.gi.ucsc.edu?ds=$DATASET_NAME.  To hide the dataset
+now until publication, please select the option “Private dataset” on the submission
+website.
+
+Feel free to email us if you have any questions. Once
 we have the dataset converted, you will receive another email with a testing link and if
 you like the result, we can release the dataset to the public site.
 
-We are happy to answer any questions, and look forward to receiving your dataset
-via https://cells-submit.gi.ucsc.edu.
-
 Best regards,
+Maximilian Haeussler, PhD
 UCSC Cell Browser Team
 """
 # ============================================================================
@@ -214,6 +211,7 @@ Here is information about the paper:
 - Abstract: {abstract}
 
 The recipient is: {recipient_name}
+(Use only their first name in the greeting, e.g., "Dear John," not "Dear Dr. Smith,")
 
 Here is the email template to personalize:
 ---
@@ -223,7 +221,9 @@ Here is the email template to personalize:
 Please rewrite this email to make it specific to this paper. Reference specific aspects of their research (from the title/abstract) without praising the work, no sycophancy please. Keep the same overall structure and style.
 
 Replace $DATASET_NAME with a suggested shortname of the dataset. A good dataset shortname is shorter than 25 characters. It should not include the word "human", as most datasets are human. It usually includes the organ and the disease, if these are important,
-or the cell line or condition that the paper focusses on. If the paper has mostly ATAC or spatial data, add -atac or -spatial to the dataset name. You can add the celltype if the paper focuses on a celltype. Abbreviate parts of the name to shorten the name if necessary. Only dashes are allowed in the name and lowercase characters. Example dataset names are: cortex-dev for a paper about the developing cortex, cortex-atac, for ATAC-seq on the cortex. Other examples: mouse-liver-scaring, ciona-regeneration, zebrafish-dev, hindbrain-dev, mouse-olig-dev.
+or the cell line or condition that the paper focusses on. If the paper has mostly ATAC or spatial data, add -atac or -spatial to the dataset name. You can add the celltype if the paper focuses on a celltype. Abbreviate parts of the name to shorten the name if necessary. Only dashes are allowed in the name and lowercase characters. Example dataset names are: cortex-dev for a paper about the developing cortex, cortex-atac, for ATAC-seq on the cortex. Other examples: mouse-liver-scaring, ciona-regeneration, zebrafish-dev, hindbrain-dev, mouse-olig-dev. ms is usually multiple sclerosis, common acronyms for diseases are fine to use as acronyms. We do not usually abbreviate "organoid", so leave that as a word. 
+Try not to use more than three parts separated by dashes. If the dataset is from mouse or another non-human species, prefix
+the dataset with the name of the species.
 
 IMPORTANT: Your response must be in this exact format with no other text:
 SUBJECT: [generated subject line here]
@@ -295,11 +295,13 @@ Subject: {subject}
 
 
 def main():
-    if len(sys.argv) != 2:
-        print(f"Usage: {sys.argv[0]} <biorxiv_DOI>", file=sys.stderr)
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <biorxiv_DOI> [email1] [email2] ...", file=sys.stderr)
+        print(f"  If email addresses are provided, skips the email search step.", file=sys.stderr)
         sys.exit(1)
 
     doi = sys.argv[1].strip()
+    provided_emails = [e.strip() for e in sys.argv[2:] if e.strip()]
 
     # Check for API key
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -317,38 +319,49 @@ def main():
             print("Error: No authors found in bioRxiv metadata", file=sys.stderr)
             sys.exit(1)
 
-        authors = parse_authors(authors_str)
+        if "author_corresponding" in record:
+            authors = [record["author_corresponding"]]
+        else:
+            authors = parse_authors(authors_str)
 
         print(f"Paper: {paper_title[:80]}...")
         print(f"Institution: {corr_inst or 'Unknown'}")
         if len(authors) >= 2:
             print(f"First author: {authors[0]}")
             print(f"Last author: {authors[-1]}")
-            print(f"Searching for emails...")
         else:
             print(f"Author: {authors[0]}")
-            print("Searching for email...")
 
     except Exception as e:
         print(f"Error: Could not fetch bioRxiv metadata: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Step 2: Use Claude to find emails for all authors
-    try:
-        emails = find_emails_with_claude(authors, corr_inst or "")
+    # Step 2: Get email addresses (either from command line or search with Claude)
+    if provided_emails:
+        # Use provided email addresses
+        print(f"\nUsing provided email addresses:")
+        for email in provided_emails:
+            print(f"  {email}")
+        email_list = provided_emails
+    else:
+        # Search for emails with Claude
+        print(f"Searching for emails...")
+        try:
+            emails = find_emails_with_claude(authors, corr_inst or "")
 
-        if emails:
-            target_count = min(2, len(authors))
-            print(f"\nEmails found ({len(emails)}/{target_count} first/last authors):")
-            for name, email in emails.items():
-                print(f"  {name}: {email}")
-        else:
-            print("\nCould not find any email addresses.")
-            sys.exit(2)
+            if emails:
+                target_count = min(2, len(authors))
+                print(f"\nEmails found ({len(emails)}/{target_count} first/last authors):")
+                for name, email in emails.items():
+                    print(f"  {name}: {email}")
+                email_list = list(emails.values())
+            else:
+                print("\nCould not find any email addresses.")
+                sys.exit(2)
 
-    except anthropic.APIError as e:
-        print(f"Error calling Claude API: {e}", file=sys.stderr)
-        sys.exit(1)
+        except anthropic.APIError as e:
+            print(f"Error calling Claude API: {e}", file=sys.stderr)
+            sys.exit(1)
 
     # Step 3: Personalize email and send to all recipients
     if FROM_EMAIL == "your-email@example.com":
@@ -360,8 +373,7 @@ def main():
     print("=" * 60)
 
     # Use last author name for salutation (typically the PI)
-    recipient_names = list(emails.keys())
-    last_author_name = recipient_names[-1] if recipient_names else "Researcher"
+    last_author_name = authors[-1] if authors else "Researcher"
 
     try:
         personalized = personalize_email_with_claude(EMAIL_TEMPLATE, record, last_author_name)
@@ -375,7 +387,7 @@ def main():
         sys.exit(1)
 
     # Collect all email addresses
-    all_recipients = list(emails.values())
+    all_recipients = email_list.copy()
     all_recipients.append(FROM_EMAIL)
     to_line = ", ".join(all_recipients)
 
