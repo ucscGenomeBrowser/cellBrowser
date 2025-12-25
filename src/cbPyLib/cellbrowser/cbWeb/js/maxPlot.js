@@ -1773,7 +1773,7 @@ function MaxPlot(div, top, left, width, height, args) {
             console.time("Bind Buffers");
         }
         bindBuffer(2, self.a_Position, coords, ctx.FLOAT);
-        bindBuffer(3, self.a_Color, colorBuf, ctx.UNSIGNED_BYTE);
+        bindBuffer(3, self.a_Color, colorBuf, ctx.UNSIGNED_BYTE, true);
         if(WEBGL_DEBUG) console.timeEnd("Bind Buffers");
 
         // Set uniforms
