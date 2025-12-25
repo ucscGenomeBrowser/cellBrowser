@@ -737,10 +737,12 @@ function MaxPlot(div, top, left, width, height, args) {
                 const FRAGMENT_SHADER_SRC = `
                 precision mediump float;
 
+                uniform float u_Alpha;
+
                 varying vec3 v_Color;
 
                 void main() {
-                    gl_FragColor = vec4(v_Color, 1.0);
+                    gl_FragColor = vec4(v_Color, u_Alpha);
                 }
                 `;
                 const loadShader = (src, type) => {
@@ -818,8 +820,13 @@ function MaxPlot(div, top, left, width, height, args) {
                     // Return for later use
                     return uniform;
                 }
+
+                // Get attributes
                 self.a_Position = getAttribute('a_Position');
                 self.a_Color = getAttribute('a_Color');
+
+                // Get uniforms
+                self.u_Alpha = getUniform('u_Alpha');
 
                 break;
             default:
@@ -927,6 +934,17 @@ function MaxPlot(div, top, left, width, height, args) {
         return pxLines;
     }
 
+    /**
+     * 
+     * @param {Array} coords 
+     * @param {*} borderSize 
+     * @param {*} zoomRange 
+     * @param {*} winWidth 
+     * @param {*} winHeight 
+     * @param {*} annots 
+     * @param {*} aspectRatio 
+     * @returns 
+     */
     function scaleCoords(coords, borderSize, zoomRange, winWidth, winHeight, annots, aspectRatio) {
     /* scale list of [x (float),y (float)] to integer pixels on screen and
      * annots is an array with on-screen annotations in the format (x, y,
@@ -959,29 +977,52 @@ function MaxPlot(div, top, left, width, height, args) {
         var xMult = winWidth / spanX;
         var yMult = winHeight / spanY;
 
+        if (self.mode === 0 || self.mode === 1) {
+            // transform from data floats to screen pixel coordinates
+            var pixelCoords = new Uint16Array(coords.length);
+            for (var i = 0; i < coords.length/2; i++) {
+                var x = coords[i*2];
+                var y = coords[i*2+1];
+                // set everything outside of current zoom range to hidden
+                if ((x < minX) || (x > maxX) || (y < minY) || (y > maxY)) {
+                    pixelCoords[2*i] = HIDCOORD; // see isHidden()
+                    pixelCoords[2*i+1] = HIDCOORD;
+                }
+                else {
+                    var xPx = Math.round((x-minX)*xMult)+borderSize;
+                    // our y-axis is flipped compared to matplotlib/R, so we do winHeight - pixel value
+                    // to make sure that our plot looks like the figures in the papers
+                    var yPx = winHeight - Math.round((y-minY)*yMult)+borderSize;
+                    pixelCoords[2*i] = xPx;
+                    pixelCoords[2*i+1] = yPx;
+                }
+            }
 
-        // transform from data floats to screen pixel coordinates
-        var pixelCoords = new Uint16Array(coords.length);
-        for (var i = 0; i < coords.length/2; i++) {
-            var x = coords[i*2];
-            var y = coords[i*2+1];
-            // set everything outside of current zoom range to hidden
-            if ((x < minX) || (x > maxX) || (y < minY) || (y > maxY)) {
-                pixelCoords[2*i] = HIDCOORD; // see isHidden()
-                pixelCoords[2*i+1] = HIDCOORD;
+            if(DEBUG) console.timeEnd("scale");
+            return pixelCoords;
+        } else {
+            // Scale coordinates to range [-1, 1] to fit in WebGL clip space
+            // TODO: Find a way to do this in webGL
+            let scaledCoords = new Float32Array(coords.length);
+
+            for (let i = 0; i < coords.length/2; i++) {
+                let x = coords[i*2];
+                let y = coords[i*2+1];
+                // set everything outside of current zoom range to hidden
+                // if ((x < minX) || (x > maxX) || (y < minY) || (y > maxY)) {
+                //     scaledCoords[2*i] = HIDCOORD; // see isHidden()
+                //     scaledCoords[2*i+1] = HIDCOORD;
+                // }
+                // else {
+                    // scaledCoords[2*i] = 0
+                    scaledCoords[2*i] = (x - minX) / (spanX / 2) - 1;
+                    scaledCoords[2*i+1] = (y - minY) / (spanY / 2) - 1;
+                // }
             }
-            else {
-                var xPx = Math.round((x-minX)*xMult)+borderSize;
-                // our y-axis is flipped compared to matplotlib/R, so we do winHeight - pixel value
-                // to make sure that our plot looks like the figures in the papers
-                var yPx = winHeight - Math.round((y-minY)*yMult)+borderSize;
-                pixelCoords[2*i] = xPx;
-                pixelCoords[2*i+1] = yPx;
-            }
+
+            if(DEBUG) console.timeEnd("scale");
+            return scaledCoords;
         }
-
-        if(DEBUG) console.timeEnd("scale");
-        return pixelCoords;
     }
 
     function drawRect(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
@@ -1674,7 +1715,7 @@ function MaxPlot(div, top, left, width, height, args) {
     /**
      * 
      * @param {WebGL2RenderingContext} ctx 
-     * @param {Uint16Array} pxCoords 
+     * @param {Float32Array} coords 
      * @param {Uint8Array} coordColors 
      * @param {string[]} colors 
      * @param {int|float} radius 
@@ -1682,7 +1723,7 @@ function MaxPlot(div, top, left, width, height, args) {
      * @param {Set} selCells 
      * @param {int|null} fatIdx 
      */
-    function drawCirclesWebGL (ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
+    function drawCirclesWebGL (ctx, coords, coordColors, colors, radius, alpha, selCells, fatIdx) {
         if(WEBGL_DEBUG) console.time("drawCirclesWebGL");
 
         // const multiplier = 2**12;
@@ -1690,13 +1731,6 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // Clear canvas
         ctx.clear(ctx.COLOR_BUFFER_BIT);
-
-        // Parse pxCoords array into something WebGL can use
-        // TODO: Technically, WebGL should be able to do this. Figure out how
-        if(WEBGL_DEBUG) console.time("Generate Coordinates");
-        // const coords = new Float32Array(pxCoords.length).fill(0);
-        const coords = new Float32Array(Array.from({length: pxCoords.length * multiplier}, () => (Math.random() * 2) - 1));
-        if(WEBGL_DEBUG) console.timeEnd("Generate Coordinates");
 
         // Parse coordColors array into something WebGL can use
         // TODO: Technically, WebGL should be able to do this. Figure out how
@@ -1743,7 +1777,7 @@ function MaxPlot(div, top, left, width, height, args) {
         if(WEBGL_DEBUG) console.timeEnd("Bind Buffers");
 
         // Set uniforms
-        // None
+        self.ctx.uniform1f(self.u_Alpha, 1);
 
         // Draw
         if(WEBGL_DEBUG) {
