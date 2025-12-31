@@ -725,11 +725,13 @@ function MaxPlot(div, top, left, width, height, args) {
                 attribute vec2 a_Position;
                 attribute vec3 a_Color;
 
+                uniform float u_Radius;
+
                 varying vec3 v_Color;
 
                 void main() {
                     gl_Position = vec4(a_Position, 0.0, 1.0);
-                    gl_PointSize = 5.0;
+                    gl_PointSize = u_Radius;
                     v_Color = a_Color;
                 }
                 `;
@@ -826,6 +828,7 @@ function MaxPlot(div, top, left, width, height, args) {
                 self.a_Color = getAttribute('a_Color');
 
                 // Get uniforms
+                self.u_Radius = getUniform('u_Radius');
                 self.u_Alpha = getUniform('u_Alpha');
 
                 break;
@@ -1777,6 +1780,7 @@ function MaxPlot(div, top, left, width, height, args) {
         if(WEBGL_DEBUG) console.timeEnd("Bind Buffers");
 
         // Set uniforms
+        self.ctx.uniform1f(self.u_Radius, radius);
         self.ctx.uniform1f(self.u_Alpha, 1);
 
         // Draw
