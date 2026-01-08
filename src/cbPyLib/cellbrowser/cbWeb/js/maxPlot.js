@@ -718,11 +718,15 @@ function MaxPlot(div, top, left, width, height, args) {
                 // Set the canvas' clear color
                 self.ctx.clearColor(1, 1, 1, 1);
 
+                // Enable 3D Graphics
+                self.ctx.enable(self.ctx.DEPTH_TEST);
+
                 // Crate the GLSL shaders from the external source code
                 // Vertex shader GLSL code
                 const VERTEX_SHADER_SRC = `
                 precision mediump float;
                 attribute vec2 a_Position;
+                attribute float a_Depth;
                 attribute vec3 a_Color;
 
                 uniform float u_Radius;
@@ -730,7 +734,7 @@ function MaxPlot(div, top, left, width, height, args) {
                 varying vec3 v_Color;
 
                 void main() {
-                    gl_Position = vec4(a_Position, 0.0, 1.0);
+                    gl_Position = vec4(a_Position, -a_Depth, 1.0);
                     gl_PointSize = u_Radius;
                     v_Color = a_Color;
                 }
@@ -825,6 +829,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
                 // Get attributes
                 self.a_Position = getAttribute('a_Position');
+                self.a_Depth = getAttribute('a_Depth');
                 self.a_Color = getAttribute('a_Color');
 
                 // Get uniforms
@@ -1735,8 +1740,12 @@ function MaxPlot(div, top, left, width, height, args) {
         // Clear canvas
         ctx.clear(ctx.COLOR_BUFFER_BIT);
 
+        // Find out what points should be behind others
+        if(WEBGL_DEBUG) console.time("Parse Depth");
+        const depthBuf = Uint8Array.from(coordColors, (col) => col === 0 ? 0 : 1);
+        if(WEBGL_DEBUG) console.timeEnd("Parse Depth");
+
         // Parse coordColors array into something WebGL can use
-        // TODO: Technically, WebGL should be able to do this. Figure out how
         if(WEBGL_DEBUG) console.time("Parse Colors");
         // First, convert all hex numbers to a format WebGL can use
         const colorRGB = colors.map(function (hex) {
@@ -1776,6 +1785,7 @@ function MaxPlot(div, top, left, width, height, args) {
             console.time("Bind Buffers");
         }
         bindBuffer(2, self.a_Position, coords, ctx.FLOAT);
+        bindBuffer(1, self.a_Depth, depthBuf, ctx.UNSIGNED_BYTE, true);
         bindBuffer(3, self.a_Color, colorBuf, ctx.UNSIGNED_BYTE, true);
         if(WEBGL_DEBUG) console.timeEnd("Bind Buffers");
 
