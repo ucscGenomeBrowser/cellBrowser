@@ -1742,7 +1742,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // Find out what points should be behind others
         if(WEBGL_DEBUG) console.time("Parse Depth");
-        const depthBuf = Uint8Array.from(coordColors, (col) => col === 0 ? 0 : 1);
+        const depthBuf = Float32Array.from(coordColors, (col) => col === 0 ? -0.5 : Math.random());
         if(WEBGL_DEBUG) console.timeEnd("Parse Depth");
 
         // Parse coordColors array into something WebGL can use
@@ -1785,7 +1785,7 @@ function MaxPlot(div, top, left, width, height, args) {
             console.time("Bind Buffers");
         }
         bindBuffer(2, self.a_Position, coords, ctx.FLOAT);
-        bindBuffer(1, self.a_Depth, depthBuf, ctx.UNSIGNED_BYTE, true);
+        bindBuffer(1, self.a_Depth, depthBuf, ctx.FLOAT);
         bindBuffer(3, self.a_Color, colorBuf, ctx.UNSIGNED_BYTE, true);
         if(WEBGL_DEBUG) console.timeEnd("Bind Buffers");
 
