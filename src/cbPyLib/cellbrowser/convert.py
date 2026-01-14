@@ -10,6 +10,7 @@ from .cellbrowser import anndataMatrixToTsv, loadConfig, sanitizeName, lineFileN
 from .cellbrowser import generateHtmls, getObsKeys, renameFile, getMatrixFormat, generateDataDesc
 from .cellbrowser import copyFileIfDiffSize
 from .cellbrowser import generateQuickGenes
+import cellbrowser.geneinfo as gi
 
 from os.path import join, basename, dirname, isfile, isdir, relpath, abspath, getsize, getmtime, expanduser
 
@@ -685,7 +686,7 @@ def cbImportScanpy_parseArgs(showHelp=False):
     " setup logging, parse command line arguments and options. -h shows auto-generated help page "
     parser = optparse.OptionParser("""usage: %prog [options] -i inFilename -o outDir - convert Scanpy AnnData object to cellbrowser. inFilename can be an .h5ad or .loom file. 
     Exports raw.X by default, or .X alternatively, see --proc and --layer.
-    Exports all meta data. Writes .tsv by default, or alternatively .mtx.gz
+    Exports all meta data. Writes .tsv by default, or alternatively .mtx.gz.
 
     Example:
     - %prog -i pbmc3k.h5ad -o pbmc3kScanpy - convert pbmc3k to directory with tab-separated files
@@ -712,6 +713,9 @@ def cbImportScanpy_parseArgs(showHelp=False):
 
     parser.add_option("", "--markerField", dest="markerField", action="store",
             help="name of the marker genes field, default: %default", default="rank_genes_groups")
+
+    parser.add_option("", "--annotMarkers", dest="annotMarkers", action="store_true",
+            help="annotate marker genes with disease info, etc. - same as cbMarkerAnnotate")
 
     parser.add_option("", "--clusterField", dest="clusterField", action="store",
             help="if no marker genes are present, use this field to calculate them. Default is to try a list of common field names, like 'Cluster' or 'louvain' and a few others")
@@ -775,6 +779,13 @@ def cbImportScanpyCli():
 
     scanpyToCellbrowser(ad, outDir, datasetName, skipMatrix=options.skipMatrix, useRaw=(not options.useProc),
             markerField=markerField, clusterField=clusterField, skipMarkers=skipMarkers, matrixFormat=matrixFormat, atac=atac, layer=layer)
+
+    if not options.skipMarkers and options.annotMarkers:
+        gi.cbMarkerAnnotate(join(outDir, "markers.tsv"),\
+            join(outDir,"markers.annot.tmp"), gi.BRAINSPANMOUSEDEV, gi.HGNC,\
+            gi.MGIORTHO, gi.EUREXPRESS, gi.BRAINSPANLMD, gi.HPO, gi.COSMIC,\
+            gi.OMIM, gi.SFARI, gi.HPRD)
+        os.rename(join(outDir,"markers.annot.tmp"), join(outDir, "markers.tsv"))
 
     copyFileIfDiffSize(inFname, join(outDir, basename(inFname)))
     generateDataDesc(datasetName, outDir, other={"supplFiles": [{"label":"Scanpy H5AD", "file":basename(inFname)}]})

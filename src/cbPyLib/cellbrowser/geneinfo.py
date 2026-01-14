@@ -325,33 +325,79 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
 
         yield row
 
-def cbMarkerAnnotateCli():
-    args, options = parseArgs()
+def cbMarkerAnnotate(
+    filename: str,
+    outFname: str,
+    brainspanMouseDev: str,
+    hgnc: str,
+    mgiOrtho: str,
+    eurexpress: str,
+    lmd: str,
+    hpo: str,
+    cosmic: str,
+    omim: str,
+    sfari: str,
+    hprd: str,
+):
+    """Core function that does marker annotation using explicit arguments."""
 
-    entrezToBrainspanMouseDev = parseSimpleMap(options.brainspanMouseDev)
-    symToEntrez, hgncIdToEntrez = parseHgnc(options.hgnc)
-    mouseEntrezToHumanEntrez, humanToMouseEntrezList = parseMgiOrtho(hgncIdToEntrez, options.mgiOrtho)
+    entrezToBrainspanMouseDev = parseSimpleMap(brainspanMouseDev)
+    symToEntrez, hgncIdToEntrez = parseHgnc(hgnc)
+    mouseEntrezToHumanEntrez, humanToMouseEntrezList = parseMgiOrtho(
+        hgncIdToEntrez, mgiOrtho
+    )
 
-    entrezToEuroexpress = parseEurexpress(mouseEntrezToHumanEntrez, options.eurexpress)
-    entrezToLmd = parseBrainspanLmd(options.lmd)
-    entrezToHpo = parseHpo(options.hpo)
-    entrezToCosmic = parseCosmic(options.cosmic)
-    entrezToOmim = parseOmim(options.omim)
-    symToSfari = parseSfari(options.sfari)
-    entrezToClass = parseHprd(options.hprd)
-    #symToDdd = parseDdd(DDD)
+    entrezToEuroexpress = parseEurexpress(mouseEntrezToHumanEntrez, eurexpress)
+    entrezToLmd = parseBrainspanLmd(lmd)
+    entrezToHpo = parseHpo(hpo)
+    entrezToCosmic = parseCosmic(cosmic)
+    entrezToOmim = parseOmim(omim)
+    symToSfari = parseSfari(sfari)
+    entrezToClass = parseHprd(hprd)
 
+    rowCount = 0
+    with open(outFname, "w") as ofh:
+        for row in tabGeneAnnotate(
+            filename,
+            symToEntrez,
+            symToSfari,
+            entrezToClass,
+            entrezToOmim,
+            entrezToCosmic,
+            entrezToHpo,
+            entrezToLmd,
+            entrezToEuroexpress,
+            humanToMouseEntrezList,
+            entrezToBrainspanMouseDev,
+        ):
+            ofh.write("\t".join(row) + "\n")
+            rowCount += 1
+
+    logging.info(
+        "Annotated %d marker gene rows, output written to %s",
+        rowCount,
+        outFname,
+    )
+
+def cbMarkerAnnotateFromArgs(args, options):
     filename = args[0]
     outFname = args[1]
 
-    rowCount = 0
-    ofh = open(outFname, "w")
-    for row in tabGeneAnnotate(filename, symToEntrez, symToSfari, entrezToClass, entrezToOmim, entrezToCosmic, entrezToHpo, entrezToLmd, entrezToEuroexpress, humanToMouseEntrezList, entrezToBrainspanMouseDev):
-        ofh.write("\t".join(row))
-        ofh.write("\n")
-        rowCount +=1
-    ofh.close()
+    return cbMarkerAnnotate(
+        filename=filename,
+        outFname=outFname,
+        brainspanMouseDev=options.brainspanMouseDev,
+        hgnc=options.hgnc,
+        mgiOrtho=options.mgiOrtho,
+        eurexpress=options.eurexpress,
+        lmd=options.lmd,
+        hpo=options.hpo,
+        cosmic=options.cosmic,
+        omim=options.omim,
+        sfari=options.sfari,
+        hprd=options.hprd,
+    )
 
-    logging.info("Annotated %d marker gene rows, output written to %s" % (rowCount, outFname))
-
-
+def cbMarkerAnnotateCli():
+    args, options = parseArgs()
+    cbMarkerAnnotateFromArgs(args, options)

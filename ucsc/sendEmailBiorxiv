@@ -1,0 +1,424 @@
+#!/usr/bin/env python3
+"""
+Extract author emails from bioRxiv/medRxiv preprints.
+
+Gets author names and institution from bioRxiv API, then uses
+Claude API with web search to find email addresses for all authors.
+"""
+import sys
+import os
+import re
+import subprocess
+import time
+import requests
+from urllib.parse import quote
+
+import anthropic
+
+# Retry settings for rate limits
+MAX_RETRIES = 3
+RETRY_DELAY = 65  # seconds to wait before retrying (rate limit is per minute)
+
+# ============================================================================
+# EDIT THESE VALUES
+# ============================================================================
+FROM_EMAIL = "Max Haeussler <mhaeussl@ucsc.edu>"
+
+EMAIL_TEMPLATE = """
+Dear {author_first_name},
+
+I saw "{title}" through the Biorxiv updates
+which I manually go through every day to find new single cell datasets for
+our NIH-funded project, the UCSC Cell Browser (https://cells.ucsc.edu).
+If you're interested, we can set up a interactive browser for your
+data.
+
+Our website allows researchers to explore your single cell data,
+including scRNA-seq, ATAC, spatial and multiomic data.
+Here is an example link: https://cortex-dev.cells.ucsc.edu.  You can color by any cell
+annotation, any gene or combinations of genes.  A quick
+tutorial should show up automatically, but it can also be found in the menu
+under Help > Tutorial. The original source data files can be downloaded, too.
+
+For your datasets, we suggest the dataset name "$DATASET_NAME".
+The full URL that you can add to your manuscript will then be $DATASET_NAME.cells.ucsc.edu
+once you give us permission to release the dataset.
+
+You can upload your dataset here:
+https://cells-submit.gi.ucsc.edu?ds=$DATASET_NAME.  To hide the dataset
+now until publication, please select the option “Private dataset” on the submission
+website.
+
+Feel free to email us if you have any questions. Once
+we have the dataset converted, you will receive another email with a testing link and if
+you like the result, we can release the dataset to the public site.
+
+Best regards,
+Maximilian Haeussler, PhD
+UCSC Cell Browser Team
+"""
+# ============================================================================
+
+BIO_RXIV_API = "https://api.biorxiv.org/details/biorxiv"
+MEDRXIV_API = "https://api.biorxiv.org/details/medrxiv"
+
+
+def parse_authors(authors_str: str) -> list:
+    """
+    Parse the authors string from bioRxiv API into a list of full names.
+    Input format: "Last1, F.; Last2, F. M.; Last3, F."
+    Output: ["F. Last1", "F. M. Last2", "F. Last3"]
+    """
+    authors = []
+    for author in authors_str.split(";"):
+        author = author.strip()
+        if not author:
+            continue
+        # Format is "LastName, Initials"
+        if "," in author:
+            parts = author.split(",", 1)
+            last_name = parts[0].strip()
+            initials = parts[1].strip() if len(parts) > 1 else ""
+            # Reconstruct as "Initials LastName"
+            if initials:
+                authors.append(f"{initials} {last_name}")
+            else:
+                authors.append(last_name)
+        else:
+            authors.append(author)
+    return authors
+
+
+def get_biorxiv_record(doi: str) -> dict:
+    """
+    Query the bioRxiv/medRxiv API for a single DOI and return the first record.
+    """
+    doi_encoded = quote(doi, safe="/")
+
+    # Try bioRxiv first, then medRxiv
+    for api_url in [BIO_RXIV_API, MEDRXIV_API]:
+        url = f"{api_url}/{doi_encoded}/na/json"
+        resp = requests.get(url, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            collection = data.get("collection", [])
+            if collection:
+                return collection[0]
+
+    raise RuntimeError(f"No records found for DOI {doi}")
+
+
+def find_emails_with_claude(authors: list, institution: str) -> dict:
+    """
+    Use Claude API with web search to find email addresses for first and last authors.
+    Returns a dict mapping author names to their email addresses.
+    Includes retry logic for rate limit errors.
+    """
+    client = anthropic.Anthropic()
+
+    # Only search for first and last author
+    if len(authors) >= 2:
+        search_authors = [authors[0], authors[-1]]
+    else:
+        search_authors = authors
+
+    authors_list = "\n".join(f"- {name}" for name in search_authors)
+
+    prompt = f"""Find email addresses for these researchers at {institution}:
+
+{authors_list}
+
+Search the institution's website for faculty profile pages, lab websites, or directory listings that show their contact emails.
+
+IMPORTANT: Your response must contain ONLY lines in this exact format, with no other text, explanations, or commentary:
+AUTHOR_NAME: email@example.com
+
+If you cannot find an email for an author, output:
+AUTHOR_NAME: NOT_FOUND
+
+Example correct output (use actual names and emails found):
+John Smith: john.smith@university.edu
+Jane Doe: NOT_FOUND
+
+Do not include any other text besides lines in the above format.
+"""
+
+    # Retry loop for rate limits
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=4096,
+                tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 10}],
+                messages=[{"role": "user", "content": prompt}]
+            )
+            break  # Success, exit retry loop
+        except anthropic.RateLimitError as e:
+            if attempt < MAX_RETRIES - 1:
+                print(f"Rate limited, waiting {RETRY_DELAY}s before retry {attempt + 2}/{MAX_RETRIES}...")
+                time.sleep(RETRY_DELAY)
+            else:
+                raise  # Re-raise on final attempt
+
+    # Parse the response to extract author-email pairs
+    results = {}
+    for block in response.content:
+        if block.type == "text":
+            text = block.text
+            # Look for lines with "name: email" pattern
+            for line in text.split("\n"):
+                # Try to match "Name: email@domain.com" pattern
+                # Name should be just letters, dots, spaces, hyphens (typical author name format)
+                match = re.match(r'^[*-]?\s*([A-Za-z][A-Za-z.\-\s]{1,50}):\s*([\w.+-]+@[\w.-]+\.\w+|NOT_FOUND)\s*$', line.strip())
+                if match:
+                    name = match.group(1).strip()
+                    email = match.group(2)
+                    if email != "NOT_FOUND":
+                        results[name] = email
+
+    return results
+
+
+def personalize_email_with_claude(template: str, record: dict, recipient_name: str) -> dict:
+    """
+    Use Claude to personalize the email template based on paper metadata.
+    Returns dict with 'subject' and 'body' keys.
+    Uses Haiku for speed and lower rate limits.
+    Includes retry logic for rate limit errors.
+    """
+    client = anthropic.Anthropic()
+
+    title = record.get("title", "")
+    abstract = record.get("abstract", "")
+    doi = record.get("doi", "")
+    institution = record.get("author_corresponding_institution", "")
+    authors = record.get("authors", "")
+    category = record.get("category", "")
+    date = record.get("date", "")
+
+    paper_url = f"https://doi.org/{doi}" if doi else ""
+
+    prompt = f"""You are helping to personalize an outreach email to a researcher about their preprint.
+
+Here is information about the paper:
+- Title: {title}
+- Authors: {authors}
+- Institution: {institution}
+- Category: {category}
+- Date: {date}
+- DOI: {doi}
+- Paper URL: {paper_url}
+- Abstract: {abstract}
+
+The recipient is: {recipient_name}
+(Use only their first name in the greeting, e.g., "Dear John," not "Dear Dr. Smith,")
+
+Here is the email template to personalize:
+---
+{template}
+---
+
+Please rewrite this email to make it specific to this paper. Reference specific aspects of their research (from the title/abstract) without praising the work, no sycophancy please. Keep the same overall structure and style.
+
+Replace $DATASET_NAME with a suggested shortname of the dataset. A good dataset shortname is shorter than 25 characters. It should not include the word "human", as most datasets are human. It usually includes the organ and the disease, if these are important,
+or the cell line or condition that the paper focusses on. If the paper has mostly ATAC or spatial data, add -atac or -spatial to the dataset name. You can add the celltype if the paper focuses on a celltype. Abbreviate parts of the name to shorten the name if necessary. Only dashes are allowed in the name and lowercase characters. Example dataset names are: cortex-dev for a paper about the developing cortex, cortex-atac, for ATAC-seq on the cortex. Other examples: mouse-liver-scaring, ciona-regeneration, zebrafish-dev, hindbrain-dev, mouse-olig-dev. ms is usually multiple sclerosis, common acronyms for diseases are fine to use as acronyms. We do not usually abbreviate "organoid", so leave that as a word. 
+Try not to use more than three parts separated by dashes. If the dataset is from mouse or another non-human species, prefix
+the dataset with the name of the species.
+
+IMPORTANT: Your response must be in this exact format with no other text:
+SUBJECT: [generated subject line here]
+BODY:
+[personalized email body here]
+"""
+
+    # Retry loop for rate limits
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client.messages.create(
+                model="claude-3-5-haiku-latest",
+                max_tokens=2048,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            break  # Success, exit retry loop
+        except anthropic.RateLimitError as e:
+            if attempt < MAX_RETRIES - 1:
+                print(f"Rate limited, waiting {RETRY_DELAY}s before retry {attempt + 2}/{MAX_RETRIES}...")
+                time.sleep(RETRY_DELAY)
+            else:
+                raise  # Re-raise on final attempt
+
+    # Parse the response
+    result = {"subject": "", "body": ""}
+    for block in response.content:
+        if block.type == "text":
+            text = block.text
+            # Extract subject
+            subject_match = re.search(r'^SUBJECT:\s*(.+?)(?:\n|$)', text, re.MULTILINE)
+            if subject_match:
+                result["subject"] = subject_match.group(1).strip()
+            # Extract body
+            body_match = re.search(r'BODY:\s*\n(.*)', text, re.DOTALL)
+            if body_match:
+                result["body"] = body_match.group(1).strip()
+
+    return result
+
+
+def send_email_via_sendmail(to_addr: str, from_addr: str, subject: str, body: str) -> bool:
+    """
+    Send an email using the sendmail command.
+    Returns True if successful, False otherwise.
+    """
+    email_content = f"""To: {to_addr}
+From: {from_addr}
+Subject: {subject}
+
+{body}
+"""
+    try:
+        proc = subprocess.Popen(
+            ['/usr/sbin/sendmail', '-t'],
+            stdin=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        _, stderr = proc.communicate(email_content.encode('utf-8'))
+        if proc.returncode != 0:
+            print(f"sendmail error: {stderr.decode('utf-8')}", file=sys.stderr)
+            return False
+        return True
+    except FileNotFoundError:
+        print("Error: sendmail not found at /usr/sbin/sendmail", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"Error sending email: {e}", file=sys.stderr)
+        return False
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <biorxiv_DOI> [email1] [email2] ...", file=sys.stderr)
+        print(f"  If email addresses are provided, skips the email search step.", file=sys.stderr)
+        sys.exit(1)
+
+    doi = sys.argv[1].strip()
+    provided_emails = [e.strip() for e in sys.argv[2:] if e.strip()]
+
+    # Check for API key
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("Error: ANTHROPIC_API_KEY environment variable not set", file=sys.stderr)
+        sys.exit(1)
+
+    # Step 1: Get bioRxiv metadata
+    try:
+        record = get_biorxiv_record(doi)
+        authors_str = record.get("authors", "")
+        corr_inst = record.get("author_corresponding_institution")
+        paper_title = record.get("title", "")
+
+        if not authors_str:
+            print("Error: No authors found in bioRxiv metadata", file=sys.stderr)
+            sys.exit(1)
+
+        if "author_corresponding" in record:
+            authors = [record["author_corresponding"]]
+        else:
+            authors = parse_authors(authors_str)
+
+        print(f"Paper: {paper_title[:80]}...")
+        print(f"Institution: {corr_inst or 'Unknown'}")
+        if len(authors) >= 2:
+            print(f"First author: {authors[0]}")
+            print(f"Last author: {authors[-1]}")
+        else:
+            print(f"Author: {authors[0]}")
+
+    except Exception as e:
+        print(f"Error: Could not fetch bioRxiv metadata: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Step 2: Get email addresses (either from command line or search with Claude)
+    if provided_emails:
+        # Use provided email addresses
+        print(f"\nUsing provided email addresses:")
+        for email in provided_emails:
+            print(f"  {email}")
+        email_list = provided_emails
+    else:
+        # Search for emails with Claude
+        print(f"Searching for emails...")
+        try:
+            emails = find_emails_with_claude(authors, corr_inst or "")
+
+            if emails:
+                target_count = min(2, len(authors))
+                print(f"\nEmails found ({len(emails)}/{target_count} first/last authors):")
+                for name, email in emails.items():
+                    print(f"  {name}: {email}")
+                email_list = list(emails.values())
+            else:
+                print("\nCould not find any email addresses.")
+                sys.exit(2)
+
+        except anthropic.APIError as e:
+            print(f"Error calling Claude API: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Step 3: Personalize email and send to all recipients
+    if FROM_EMAIL == "your-email@example.com":
+        print("\nError: Please edit FROM_EMAIL in the script before sending emails.", file=sys.stderr)
+        sys.exit(1)
+
+    print("\n" + "=" * 60)
+    print("Personalizing email template with Claude...")
+    print("=" * 60)
+
+    # Use last author name for salutation (typically the PI)
+    last_author_name = authors[-1] if authors else "Researcher"
+
+    try:
+        personalized = personalize_email_with_claude(EMAIL_TEMPLATE, record, last_author_name)
+
+        if not personalized["subject"] or not personalized["body"]:
+            print("\nError: Could not personalize email", file=sys.stderr)
+            sys.exit(1)
+
+    except anthropic.APIError as e:
+        print(f"Error personalizing email: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Collect all email addresses
+    all_recipients = email_list.copy()
+    all_recipients.append(FROM_EMAIL)
+    to_line = ", ".join(all_recipients)
+
+    # Display the email for user approval
+    print("\n" + "=" * 60)
+    print(f"Email to: {to_line}")
+    print("=" * 60)
+    print(f"Subject: {personalized['subject']}")
+    print("-" * 60)
+    print(personalized['body'])
+    print("=" * 60)
+
+    # Prompt for confirmation
+    response = input("Press Enter to send, 'q' to quit: ").strip().lower()
+
+    if response == 'q':
+        print("Quitting...")
+        sys.exit(0)
+
+    # Send the email to all recipients
+    # XX ONLY FOR DEBUGGING - HARDCODED to my own address
+    #to_line = "mhaeussl@ucsc.edu"
+    if send_email_via_sendmail(to_line, FROM_EMAIL,
+                              personalized['subject'], personalized['body']):
+        print(f"Sent to {to_line}")
+    else:
+        print(f"Failed to send email", file=sys.stderr)
+        sys.exit(1)
+
+    print("\nDone.")
+
+
+if __name__ == "__main__":
+    main()

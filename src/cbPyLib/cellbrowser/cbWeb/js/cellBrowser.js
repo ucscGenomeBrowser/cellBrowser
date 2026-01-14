@@ -120,6 +120,9 @@ var cellbrowser = function() {
     // the sparkline is a bit shorter
     var SPARKHISTOCOUNT = 12;
 
+    // if the user selects a field with more than that values, show the flipbook slider
+    const gFlipbookMin = 100;
+
     // links to various external databases
     var dbLinks = {
         "HPO" : "https://hpo.jax.org/app/browse/gene/", // entrez ID
@@ -1749,6 +1752,15 @@ var cellbrowser = function() {
         getById("tpSizeInput").value = radius;
         getById("tpAlphaInput").value = alpha;
     }
+
+    function onSliderChange(valIdx, x, y) {
+        /* user moves the quickflip slider */
+        let metaName = db.conf.activeColorField;
+        let metaInfo = db.findMetaInfo(metaName)
+        showTooltip(x, y, metaInfo.ui.shortLabels[valIdx]);
+        legendHighlightRow(valIdx, true);
+    }
+
     function onSaveAsClick() {
     /* File - Save Image as ... */
         var canvas = $("canvas")[0];
@@ -2957,16 +2969,16 @@ var cellbrowser = function() {
        var rendererWidth = window.innerWidth - legendBarWidth - rendererLeft;
        var legendBarLeft = rendererWidth+metaBarMargin+metaBarWidth;
 
-       var heatWidth, heatHeight;
-       if (db && db.heatmap) {
-            heatWidth = rendererWidth;
-            heatHeight = db.heatmap.height;
-            rendererHeight = rendererHeight - heatHeight;
-            db.heatmap.setSize(heatWidth, heatHeight);
-            let heatTop = window.innerHeight - heatHeight;
-            db.heatmap.div.style.top = heatTop+"px";
-            db.heatmap.draw();
-       }
+       //var heatWidth, heatHeight;
+       //if (db && db.heatmap) {
+            //heatWidth = rendererWidth;
+            //heatHeight = db.heatmap.height;
+            //rendererHeight = rendererHeight - heatHeight;
+            //db.heatmap.setSize(heatWidth, heatHeight);
+            //let heatTop = window.innerHeight - heatHeight;
+            //db.heatmap.div.style.top = heatTop+"px";
+            //db.heatmap.draw();
+       //}
 
        $("#tpToolBar").css("width", rendererWidth+"px");
 
@@ -3084,6 +3096,12 @@ var cellbrowser = function() {
             renderer.setColorArr(metaArr);
             buildWatermark(); // if we're in split mode
             metaInfo.arr = metaArr;
+
+            if (gLegend.rows.length > gFlipbookMin)
+                renderer.showFlipbook();
+            else
+                renderer.hideFlipbook();
+
             doneLoad();
         }
 
@@ -3836,7 +3854,7 @@ var cellbrowser = function() {
        let divEl = document.createElement('div'); 
        divEl.style.position = "absolute";
        divEl.style.left = metaBarWidth+"px";
-       // from plotHeatmap
+
        var canvLeft = metaBarWidth+metaBarMargin;
        var traceWidth = window.innerWidth - canvLeft - legendBarWidth;
        divEl.style.width = traceWidth+"px";
@@ -3997,16 +4015,17 @@ var cellbrowser = function() {
            // so defer the coloring until all the peaks are loaded
            let onLocsDone = function() { colorByDefaultField(doneOnePart); };
            db.loadGeneLocs(db.conf.atacSearch, db.conf.fileVersions.geneLocs, onLocsDone);
-       } else
+       } else {
            // in gene mode, we can start coloring right away
            colorByDefaultField(doneOnePart);
+       }
 
        // pre-load the dataset description file, as the users will often go directly to the info dialog
        // and the following pre-loads risk blocking this load.
        var jsonUrl = cbUtil.joinPaths([db.conf.name, "desc.json"]) +"?"+db.conf.md5;
        fetch(jsonUrl);
 
-       //if (db.conf.sampleCount < 50000) {
+       if (db.conf.sampleCount < 50000) {
            if (db.conf.quickGenes)
                db.preloadGenes(db.conf.quickGenes, function() {
                    updateGeneTableColors(null);
@@ -4014,7 +4033,7 @@ var cellbrowser = function() {
                        onHeatClick();
                 }, onProgressConsole, db.conf.binStrategy);
            db.preloadAllMeta();
-        //}
+        }
     }
 
     function onTransClick(ev) {
@@ -4189,11 +4208,13 @@ var cellbrowser = function() {
             htmls.push('<li><a class="tpColorLink" data-palette="blues" href="#">Gradient: shades of blue</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="reds" href="#">Gradient: shades of red</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="tol-sq-blue" href="#">Gradient: beige to red</a></li>');
-            htmls.push('<li><a class="tpColorLink" data-palette="tol-rainbow" href="#">Gradient: blue to red</a></li>');
+            htmls.push('<li><a class="tpColorLink" data-palette="tol-rainbow" href="#">Gradient: dark rainbow</a></li>');
+            htmls.push('<li><a class="tpColorLink" data-palette="blueWhiteRed" href="#">Gradient: blue to white to red</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="viridis" href="#">Gradient: Viridis</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="magma" href="#">Gradient: Magma</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="inferno" href="#">Gradient: Inferno</a></li>');
             htmls.push('<li><a class="tpColorLink" data-palette="plasma" href="#">Gradient: Plasma</a></li>');
+            htmls.push('<li><a class="tpColorLink" data-palette="blue" href="#">Single color: Blue</a></li>');
             htmls.push('</ul>');
         htmls.push("</div>"); // btn-group
         //htmls.push("</div>"); // tpToolbarButtons
@@ -6165,6 +6186,48 @@ var cellbrowser = function() {
         });
     }
 
+    function switchToHeat() {
+       /* hide the renderer and legend and put the heatmap over them */
+       renderer.div.style.display = 'none';
+       $("#tpLegendBar").hide();
+              
+       var heatLeft = metaBarWidth+metaBarMargin;
+       var heatWidth = window.innerWidth - heatLeft;
+       var heatTop  = menuBarHeight - toolBarHeight;
+       var heatHeight  = window.innerHeight - heatTop;
+
+       let divEl = document.createElement('div'); 
+       divEl.style.position = "absolute";
+       divEl.style.left = heatLeft+"px";
+       divEl.style.top = heatTop+"px";
+       divEl.style.width = heatWidth+"px";
+       divEl.style.height = heatHeight+"px";
+       divEl.id = "tpHeat";
+
+       document.body.appendChild(divEl);
+
+       let geneIds = [];
+       for (let qg of db.conf.quickGenes)
+           geneIds.push(qg[0]);
+
+        if (!geneIds || geneIds.length===0) {
+            alert("No quick genes are defined. Heatmaps currently only work on pre-defined gene sets.");
+            return;
+        }
+
+       let metaName = db.conf.activeColorField;
+
+       var heatmap = new MaxHeat(divEl, {mainRenderer:renderer});
+       db.heatmap = heatmap;
+       db.heatmap.exprData = null;
+
+       function onExprDataDoneHeat(exprData) {
+           plotHeatmap(divEl, metaName, exprData);
+       }
+
+       loadGroupedExprData(db.heatmap.exprData, geneIds, metaName, onExprDataDoneHeat);
+    }
+
     function activateGeneCombo(id, onGeneComboChange) {
     /* initialize the gene search combo box with selectize */
         // selectize: gene or ATAC Color by search box
@@ -6210,7 +6273,7 @@ var cellbrowser = function() {
     function promiseGeneSplitByMeta(locusStr, onProgress, metaArr, metaCount) {
         /* A promise for loading the gene data and calculation average expression per meta data value.
            Resolves with a geneData object with gene-related attributes, exprMin, exprMax and dotRows.  */
-        /* dotRows is an array of [cellCount, zeroPerc, avg] */
+        /* geneData.dotRows is an array of [cellCount, zeroPerc, avg] */
         return new Promise(function(resolve, reject) {
 
             function gotGeneData(exprArr, decArr, locusStr, geneDesc, binInfo) {
@@ -6520,7 +6583,8 @@ var cellbrowser = function() {
         return maxHeight;
     }
 
-    function plotDotCircles(htmls, syms, rowLabels, dotRows, leftPad, topPad, colDist, rowDist, maxDotSize, colors, cellCounts, avgMin, avgMax) {
+    function plotDotCircles(htmls, syms, rowLabels, dotRows, leftPad, topPad, colDist, 
+                                rowDist, maxDotSize, colors, cellCounts, avgMin, avgMax) {
         /* plot the circles of the dot plot */
         let rows = dotRows;
 
@@ -6612,10 +6676,9 @@ var cellbrowser = function() {
 
     }
 
-    let exprData = null;
-
     function exprDataRemoveGene(sym) {
         /* remove a gene from the expr data */
+        let exprData = db.exprData;
         let geneIdx = exprData.syms.indexOf(sym);
         exprData.syms.splice(geneIdx, 1); // remove the symbol
         exprData.geneIds.splice(geneIdx, 1); // and the geneId
@@ -6804,10 +6867,8 @@ var cellbrowser = function() {
             }
             let cellCount = exprArr.length;
             let avg = 0;
-            //let nonZeroPercent = 0;
             if (cellCount!==0) {
                 avg = sum / cellCount;
-                //nonZeroPercent = nonZeroCount / cellCount;
             }
 
             rows.push( [cellCount, nonZeroCount, avg] );
@@ -6868,12 +6929,15 @@ var cellbrowser = function() {
     }
 
     function exprDataLoadGenes(geneIds, exprData, onDone) {
-        /* add a list of geneIds to the current exprData object */
+        /* add a list of geneIds to the current exprData object and call onDone when done.*/
         let promises = [];
+        let metaArr = exprData.metaData.arr;
+        let metaCount = exprData.metaData.valCounts.length;
+
         for (let geneId of geneIds) {
             geneId = geneId.split("|")[0]; // internal genes sometimes can be in format ENSG-ID|geneSymbol
             if (exprData.geneIds.indexOf(geneId)===-1)
-                promises.push( promiseGeneSplitByMeta(geneId, geneExprOnProgress, exprData.metaData.arr, exprData.metaData.valCounts.length ));
+                promises.push( promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount));
             else
                 alert("This gene is already on the plot");
         }
@@ -6881,11 +6945,13 @@ var cellbrowser = function() {
         // pull out necesssary data from exprData object
         let cellCounts = exprData.cellCounts;
 
-        let addNewRows = false;
-        if (exprData.syms.length===0)
-            addNewRows = true;
+        let rows = exprData.rows; // one row per meta data value (e.g. cell type)
 
-        let rows = exprData.rows;
+        // first call -> make empty data rows
+        if (exprData.syms.length===0) {
+            for (let i=0; i<metaCount; i++)
+                rows.push([]);
+        }
 
         // reformat input gene expression "geneData" to an array of gene symbols, an array of meta values, 
         // an array of cell counts (one per meta value) and
@@ -6901,8 +6967,6 @@ var cellbrowser = function() {
 
                 for (let rowIdx=0; rowIdx < dotRows.length; rowIdx++) {
                     let dotRow = geneData.dotRows[rowIdx];
-                    if (addNewRows)
-                        rows.push( [] );
 
                     let cellCount = dotRow[0];
                     let zeroPerc = dotRow[1];
@@ -6917,7 +6981,28 @@ var cellbrowser = function() {
             }
 
             exprDataUpdateMinMax(exprData);
-            onDone();
+            onDone(exprData);
+        });
+    }
+
+    function loadGroupedExprData(exprData, geneIds, metaName, onGenesDone) {
+
+        if (exprData===null) {
+            exprData = {};
+            exprData.metaData = {};
+            exprData.metaLabels = [];
+            exprData.syms = [];
+            exprData.rows = [];
+            exprData.cellCounts = [];
+            exprData.geneIds = [];
+            exprData.allAvgMax = NaN;
+            exprData.allAvgMin = NaN;
+        }
+
+        Promise.all([promiseMeta(metaName, geneExprOnProgress)]).then( function (resArr) {
+            exprData.metaData = resArr[0];
+            exprData.metaLabels = exprData.metaData.ui.shortLabels;
+            exprDataLoadGenes(geneIds, exprData, onGenesDone);
         });
     }
 
@@ -6932,9 +7017,9 @@ var cellbrowser = function() {
             chosenSetValue("tpGeneExprMetaCombo", "tpMetaVal_"+metaIdx);
         }
 
-        if (geneIds===null) {
-            geneIds = exprData.geneIds;
-            exprData = null;
+        if (geneIds===null) { // metaName was changed = re-calc the expr object
+            geneIds = db.exprData.geneIds;
+            db.exprData = null;
         }
 
         if (geneIds.length>0)
@@ -6959,33 +7044,15 @@ var cellbrowser = function() {
         buildProgressBar('progressBarExpr');
         buildProgressBar('progressBarMeta');
 
-        if (exprData===null) {
-            exprData = {};
-            exprData.metaData = {};
-            exprData.metaLabels = [];
-            exprData.syms = [];
-            exprData.rows = [];
-            exprData.cellCounts = [];
-            exprData.geneIds = [];
-            exprData.allAvgMax = NaN;
-            exprData.allAvgMin = NaN;
-        }
+        function onExprDataDone (exprData) { 
+            buildExprDotplot("tpExprViewPlot", exprData); 
+            // save into URL
+            let allGeneIdStr = db.exprData.geneIds.join(" ");
+            let urlOpts = { "exprGene" : allGeneIdStr, "exprMeta" : metaName };
+            changeUrl(urlOpts);
+        };
 
-        Promise.all([promiseMeta(metaName, geneExprOnProgress)]).then( function (resArr) {
-            exprData.metaData = resArr[0];
-            exprData.metaLabels = exprData.metaData.ui.shortLabels;
-
-            function onGenesDone () { 
-                buildExprDotplot("tpExprViewPlot", exprData); 
-                // save into URL
-                let allGeneIdStr = exprData.geneIds.join(" ");
-                let urlOpts = { "exprGene" : allGeneIdStr, "exprMeta" : metaName };
-                changeUrl(urlOpts);
-            };
-
-            exprDataLoadGenes(geneIds, exprData, onGenesDone);
-
-        });
+        loadGroupedExprData(db.exprData, geneIds, metaName, onExprDataDone);
 
         //Promise.all([promiseGeneSplitByMeta(geneId, geneExprOnProgress), promiseMeta(metaName, geneExprOnProgress)]).then( function(resArr) {
         //    //if(DEBUG) console.log("promises are all loaded", resArr);
@@ -7046,6 +7113,9 @@ var cellbrowser = function() {
                     " do not hesitate to contact us at cells@ucsc.edu");
             return;
         }
+
+        if (db.exprData===undefined)
+            db.exprData = null; // mark the object to be initialized on first start
 
         var htmls = [];
         htmls.push("<div id='tpExprView'>");
@@ -7175,6 +7245,8 @@ var cellbrowser = function() {
         //if (!db.conf.atacSearch)
         htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Violin Plot Viewer" data-placement="bottom">Gene Expression Plots</button>');
 
+        htmls.push('<button id="tpHeatButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Show Heatmap" data-placement="bottom">Heatmap</button>');
+
         //var nextLeft = 220;
         if (db.conf.hubUrl!==undefined) {
             htmls.push('<a target=_blank href="#" id="tpOpenGenome" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-left: 10px; margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Show sequencing read coverage and gene expression on UCSC Genome Browser" data-placement="bottom">Genome Browser</a>');
@@ -7215,6 +7287,7 @@ var cellbrowser = function() {
         activateTooltip('#tpOpenUcsc');
         activateTooltip('#tpOpenDatasetButton');
         activateTooltip('#tpOpenExprButton');
+        activateTooltip('#tpHeatButton');
         activateTooltip('#tpOpenImgButton');
 
         $('#tpButtonInfo').click( function() { openDatasetDialog(db.conf, db.name) } );
@@ -7262,6 +7335,7 @@ var cellbrowser = function() {
         $('#tpLayoutCombo').change(onLayoutChange);
         $('#tpOpenDatasetButton').click(openCurrentDataset);
         $('#tpOpenExprButton').click(buildExprViewWindow);
+        $('#tpHeatButton').click(switchToHeat);
     }
 
     function metaFieldToLabel(fieldName) {
@@ -7724,6 +7798,14 @@ var cellbrowser = function() {
       return [ r * 255, g * 255, b * 255 ];
     }
 
+    function makePseudoPalette(col, n) {
+        /* return a list of identical colors */
+        var pal = [];
+        for (var i=1; i<n+1; i++) {
+            pal.push( col );
+        }
+    }
+
     function makeHslPalette(hue, n) {
         /* return a list of n hexcodes from hue to white */
         var pal = [];
@@ -7792,6 +7874,40 @@ var cellbrowser = function() {
         return pal.slice(0, n);
     }
 
+    function blueWhiteRedPalette(n) {
+        const toHex = (v) => {
+            const h = v.toString(16);
+            return h.length === 1 ? "0" + h : h;
+        };
+    
+        const mix = (a, b, t) => a + (b - a) * t;
+    
+        const colors = [];
+        for (let i = 0; i < n; i++) {
+            const t = i / (n - 1);
+    
+            let r, g, b;
+            if (t < 0.5) {
+                // blue (0,0,255) → white (255,255,255)
+                const u = t / 0.5;
+                r = mix(0,   255, u);
+                g = mix(0,   255, u);
+                b = mix(255, 255, u);
+            } else {
+                // white (255,255,255) → red (255,0,0)
+                const u = (t - 0.5) / 0.5;
+                r = mix(255, 255, u);
+                g = mix(255,   0, u);
+                b = mix(255,   0, u);
+            }
+    
+            const hex = "#" + toHex(Math.round(r)) + toHex(Math.round(g)) + toHex(Math.round(b));
+            colors.push(hex);
+        }
+    
+        return colors;
+    }
+
     function makeColorPalette(palName, n) {
     /* return an array with n color hex strings */
     /* Use Google's palette functions for now, first Paul Tol's colors, if that fails, use the usual HSV rainbow
@@ -7802,6 +7918,10 @@ var cellbrowser = function() {
             pal = ["0000FF","FF0000"];
         else if (palName==="blues")
             pal = makeHslPalette(0.6, n);
+        else if (palName==="blueWhiteRed")
+            pal = blueWhiteRedPalette(n);
+        else if (palName==="blue")
+            pal = makePseudoPalette([255,0,0], n);
         else if (palName==="magma" || palName==="viridis" || palName==="inferno" || palName=="plasma")
             pal = makePercPalette(palName, n);
         else if (palName==="iwanthue")
@@ -8087,7 +8207,7 @@ var cellbrowser = function() {
         /* mouse hovers over legend */
         var legendId = parseInt(ev.target.id.split("_")[1]);
         var legendLabel = ev.target.innerText;
-        onClusterNameHover(legendLabel, legendId, ev, true);
+        onClusterNameHover(legendLabel, legendId, ev, true, false);
     }
 
     function onLegendLabelClick(ev) {
@@ -8427,7 +8547,8 @@ var cellbrowser = function() {
         if (gLegend.rows===undefined)
             return;
 
-        $('#tpLegendContent').empty();
+        $('#tpLegendContent').empty(); // simpler in jquery
+        gLegend.div = $('#tpLegendContent')[0];
 
         var htmls = [];
 
@@ -8754,7 +8875,8 @@ var cellbrowser = function() {
                 var metaMsg = null;
                 if (metaInfo.type!=="uniqueString") {
                     if(DEBUG) console.log("cellBrowser.js:updateMetaBarManyCells - could not find meta info");
-                    metaMsg = "(still loading - please wait and retry)";
+                    // metaMsg = "(still loading - please wait and retry)";
+                    metaMsg = "";
                 }
                 else
                     metaMsg = "(unique identifier field)";
@@ -8960,7 +9082,24 @@ var cellbrowser = function() {
             showTooltip(ev.clientX+15, ev.clientY, lineLabel);
     }
 
-    function drawAndFattenCluster(clusterName) {
+    function legendHighlightRow(legendRowIdx, doScroll) {
+        // highlight the legend
+        let legQuery = "#tpLegend_"+legendRowIdx;
+        $(".tpLegendHl").removeClass("tpLegendHl");
+        let newRow = $(legQuery).addClass("tpLegendHl")[0];
+        if (newRow && doScroll) {
+           const childRect = newRow.getBoundingClientRect();
+           const containerEl = document.getElementById("tpLegendContent");
+           const containerRect = containerEl.getBoundingClientRect();
+           const offset = childRect.top - containerRect.top + containerEl.scrollTop;
+           containerEl.scrollTo({ top: offset});
+        }
+
+           //newRow.scrollIntoView({"container":cont});
+            
+    }
+
+    function drawAndFattenCluster(clusterName, doScroll) {
     /* highlight one of the clusters and redraw */
 
         let legendRowIdx = legendLabelGetIntKey(gLegend, clusterName);
@@ -8968,10 +9107,7 @@ var cellbrowser = function() {
         renderer.fatIdx = legendRowIdx;
         renderer.drawDots();
 
-        // also highlight the legend
-        let legQuery = "#tpLegend_"+legendRowIdx;
-        $(".tpLegendHl").removeClass("tpLegendHl");
-        $(legQuery).addClass("tpLegendHl");
+        legendHighlightRow(legendRowIdx, doScroll);
     }
 
     function resetFattening() {
@@ -8983,9 +9119,13 @@ var cellbrowser = function() {
         }
     }
 
-function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
+function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         /* user hovers over cluster label */
         /* doHighlight can be undefined, which means true = called from onHoverLabel */
+        // when called from the maxPlot interface = mouse is over label = scroll the legend to the right place
+        if (doScroll===undefined)
+            doScroll = true;
+
         var labelLines = [clusterName];
 
         var labelField = renderer.getLabelField();
@@ -9027,7 +9167,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
             // XX cannot do anything when not coloring on the meta field that we are coloring on
         } else {
             //var valIdx = findMetaValIndex(metaInfo, clusterName);
-            drawAndFattenCluster(clusterName);
+            drawAndFattenCluster(clusterName, doScroll);
         }
     }
 
@@ -9107,42 +9247,38 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
         renderer.drawDots();
     }
 
-    function groupAverages(geneArrs, arrGroups, groupCount) {
-        /* given an array of gene expression vectors (ints), and a 2nd array that assigns these to groups,
-        return an array of the arrays with the averages for the groups (as integers)
-        */
-        let geneAvgs = [];
+    //function groupAverages(geneArrs, arrGroups, groupCount) {
+    //    /* given an array of gene expression vectors (ints), and a 2nd array that assigns these to groups,
+    //    return an array of the arrays with the averages for the groups (as integers)
+    //    */
+    //    let geneAvgs = [];
 
-        for (let geneIdx=0; geneIdx < geneArrs.length; geneIdx++) {
-            let geneArr = geneArrs[geneIdx];
+    //    for (let geneIdx=0; geneIdx < geneArrs.length; geneIdx++) {
+    //        let geneArr = geneArrs[geneIdx];
 
-            let groupSums = new Uint32Array(groupCount);
-            let groupCounts = new Uint32Array(groupCount);
-            //for (var groupIdx=0; groupIdx < groupCount; groupIdx++) {
-            //    groupSums.push(0);
-            //    groupCounts.push(0);
-            //}
+    //        let groupSums = new Uint32Array(groupCount);
+    //        let groupCounts = new Uint32Array(groupCount);
 
-            for (let i=0; i<geneArr.length; i++) {
-                let group = arrGroups[i];
-                groupSums[group] += geneArr[i];
-                groupCounts[group]++;
-            }
+    //        for (let i=0; i<geneArr.length; i++) {
+    //            let group = arrGroups[i];
+    //            groupSums[group] += geneArr[i];
+    //            groupCounts[group]++;
+    //        }
 
-            let groupAvgs = [];
-            for (var groupIdx=0; groupIdx < groupCount; groupIdx++)
-            {
-                var cellCount = groupCounts[groupIdx];
-                var groupAvg = 0;
-                if (cellCount!==0)
-                    groupAvg = Math.round(groupSums[groupIdx]/cellCount);
-                groupAvgs.push(groupAvg);
-            }
-            geneAvgs.push(groupAvgs);
+    //        let groupAvgs = [];
+    //        for (var groupIdx=0; groupIdx < groupCount; groupIdx++)
+    //        {
+    //            var cellCount = groupCounts[groupIdx];
+    //            var groupAvg = 0;
+    //            if (cellCount!==0)
+    //                groupAvg = Math.round(groupSums[groupIdx]/cellCount);
+    //            groupAvgs.push(groupAvg);
+    //        }
+    //        geneAvgs.push(groupAvgs);
 
-        }
-        return geneAvgs;
-    }
+    //    }
+    //    return geneAvgs;
+    //}
 
     function onHeatCellClick(geneName, clusterName) {
         /* color by gene and select all cells in cluster */
@@ -9151,7 +9287,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
         //selectByColor
     }
 
-    function onHeatCellHover(rowIdx, colIdx, rowName, colName, value, ev) {
+    function onHeatCellHover(rowIdx, colIdx, rowName, colName, value, cellCount, ev) {
         /* user hovers over a cell on the heatmap */
         let htmls = [];
         if (rowName)
@@ -9159,110 +9295,123 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
         if (colName)
             htmls.push(colName)
         if (value!==null)
-            htmls.push(" "+(value*10)+"-"+((value+1)*10)+"%");
+            //htmls.push(" "+(value*10)+"-"+((value+1)*10)+"%");
+            htmls.push(" <b>Average</b>:"+parseFloat(value).toPrecision(3)+"<br>");
+        htmls.push(" <b>Cell Count</b>:"+cellCount+"<br>");
         showTooltip(ev.clientX+15, ev.clientY, htmls.join(" "));
     }
 
-    function plotHeatmap(clusterMetaInfo, exprVecs, geneSyms) {
-        /* Create the heatmap from exprVecs.
+    function plotHeatmap(divEl, metaName, exprData) {
+        /* Create the heatmap from exprData and put it under the DOM Element div.
         */
-        if (!geneSyms || geneSyms.length===0) {
-            alert("No quick genes are defined. Heatmaps currently only work on pre-defined gene sets.");
-            return;
-        }
+        let heatmap = db.heatmap;
 
-        var clusterCount = clusterMetaInfo.valCounts.length;
+        //var colors = makeColorPalette(cDefGradPaletteHeat, db.exprBinCount);
+        var colors = makeColorPalette("blueWhiteRed", db.exprBinCount);
 
-        var clusterNames = [];
-        for (let valInfo of clusterMetaInfo.valCounts) {
-            clusterNames.push(valInfo[0]); // 0=name, 1=count
-        }
+        let syms = exprData.syms;
+        let metaLabels = exprData.metaLabels;
 
-        var clusterArr = clusterMetaInfo.arr;
-        var geneAvgs = groupAverages(exprVecs, clusterArr, clusterCount);
+        let cellCounts = exprData.cellCounts;
 
-        var div = document.createElement("div");
-        //let heatHeight = Math.min(150, 16*exprVecs.length);
-        let heatHeight = parseInt(renderer.height*0.5);
-        div.id = "tpHeat";
-        div.style.height = heatHeight+"px";
+        let binCount = colors.length;
 
-        renderer.setSize(renderer.getWidth(), renderer.height-heatHeight, true);
+        let geneVals = convExprDataForHeatmap(exprData,  binCount);
 
-        var canvLeft = metaBarWidth+metaBarMargin;
-        var heatWidth = window.innerWidth - canvLeft - legendBarWidth;
-        // create the div for the heat map view
-        div.style.width = heatWidth+"px";
-        div.style.left = metaBarWidth+"px";
-        div.style.top = (menuBarHeight+toolBarHeight+renderer.height)+"px";
-        div.style.position = "absolute";
-        document.body.appendChild(div);
-
-        var heatmap = new MaxHeat(div, {mainRenderer:renderer});
-        //var colors = getFieldColors(clusterMetaInfo)
-        var colors = makeColorPalette(cDefGradPaletteHeat, db.exprBinCount);
-
-        heatmap.loadData(geneSyms, clusterNames, geneAvgs, colors);
+        heatmap.loadData(metaLabels, syms, colors, geneVals.rowBins, geneVals.rowAvgs, cellCounts);
         heatmap.draw();
         heatmap.onCellHover = onHeatCellHover;
         heatmap.onClick = onHeatCellClick;
-        db.heatmap = heatmap;
-    }
 
+
+    }
 
     function removeHeatmap() {
         /* remove the heatmap */
         let heatHeight = db.heatmap.height;
-        document.getElementById("tpHeat").remove();
+        db.heatmap.div.remove();
         delete db.heatmap;
         renderer.setSize(renderer.getWidth(), renderer.height+heatHeight, true);
         changeUrl({'heat':null});
     }
 
+    function convExprDataForHeatmap(exprData, binCount) {
+        /* given an exprData object, return an array with geneExpr averages and their bins */
+        /* rows is an array of [cellCount, zeroPerc, avg] */
+        /* Return obj with rowBins and rowAvgs */
+        let rows = exprData.rows;
+        let avgMin = exprData.allAvgMin;
+        let avgMax = exprData.allAvgMax;
+        let binSize = (avgMax-avgMin)/binCount;
+
+        let rowBins = [];
+        let rowAvgs = [];
+
+        for (let rowI=0; rowI < rows.length; rowI++) {
+            let row = rows[rowI];
+            let binRow = [];
+            let avgRow = [];
+            for (let colI=0; colI < row.length; colI++) {
+                let colData = row[colI];
+                let avgExpr = colData[1];
+                // at the edge, floating point problems can make it sometimes 21, so use Math.min
+                let colBin = Math.min(binCount, Math.round((avgExpr-avgMin) / binSize)); 
+                binRow.push(colBin);
+                avgRow.push(avgExpr);
+            }
+            rowBins.push(binRow);
+            rowAvgs.push(avgRow);
+        }
+       return { rowBins, rowAvgs };
+    }
+
+    //function drawHeatmap(div) {
+        //changeUrl({"heat":"1"});
+
+        //let resultCount = 0;
+        //let metaInfo = null;
+
+        //function partDone() {
+            //resultCount++;
+            //if (resultCount===2)
+                //plotHeatmap(metaInfo, binnedExprVecs, geneSyms, div);
+        //}
+
+        //function onClusterMetaDone(metaArr, metaInfo) {
+            //metaInfo.arr = metaArr;
+            //partDone();
+        //}
+
+        //function onGenesDoneHeatMap(geneVecs) {
+            ///* */
+            //for (var geneInfo of geneVecs) {
+                //geneSyms.push(geneInfo[0]); // gene symbol
+                //binnedExprVecs.push(geneInfo[1]);
+                //rawExprVecs.push(geneInfo[4]);
+            //}
+            //partDone();
+        //}
+
+        ///* user clicked on View > Heatmap */
+        //if (db && db.heatmap) {
+            //removeHeatmap();
+        //}
+        //else {
+            //if (!db.conf.quickGenes) {
+                //alert("No quick genes defined for this dataset. Heatmaps currently only work if "+
+                    //"a list of dataset-specific genes is defined. " +
+                    //"Add a statement quickGenesFile to cellbrowser.conf and put a few gene symbols "+
+                    //"into the file, one per line.");
+                //return;
+            //}
+            //db.loadGeneSetExpr(onGenesDoneHeatMap);
+            //metaInfo = getClusterFieldInfo();
+            //db.loadMetaVec(metaInfo, onClusterMetaDone, onProgress, {}, db.conf.binStrategy);
+        //}
+    //}
+
     function onHeatClick() {
-        // TODO: rewrite this one day with promises...
-        let resultCount = 0;
-        let exprVecs = [];
-        let geneSyms = [];
-        let metaInfo = null;
-
-        function partDone() {
-            resultCount++;
-            if (resultCount===2)
-                plotHeatmap(metaInfo, exprVecs, geneSyms);
-        }
-
-        function onClusterMetaDone(metaArr, metaInfo) {
-            metaInfo.arr = metaArr;
-            partDone();
-        }
-
-        function onGenesDone(geneVecs) {
-            /* */
-            for (var geneInfo of geneVecs) {
-                geneSyms.push(geneInfo[0]); // gene symbol
-                exprVecs.push(geneInfo[1]); // binned expression vector
-            }
-            partDone();
-        }
-
-        /* user clicked on View > Heatmap */
-        if (db && db.heatmap) {
-            removeHeatmap();
-        }
-        else {
-            if (!db.conf.quickGenes) {
-                alert("No quick genes defined for this dataset. Heatmaps currently only work if "+
-                    "a list of dataset-specific genes is defined. " +
-                    "Add a statement quickGenesFile to cellbrowser.conf and put a few gene symbols "+
-                    "into the file, one per line.");
-                return;
-            }
-            db.loadGeneSetExpr(onGenesDone);
-            metaInfo = getClusterFieldInfo();
-            db.loadMetaVec(metaInfo, onClusterMetaDone, onProgress, {}, db.conf.binStrategy);
-            changeUrl({"heat":"1"});
-        }
+        switchToHeat();
     }
 
     function onClusterNameClick(clusterName, clusterLabel, event) {
@@ -9804,6 +9953,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
     /* ==== MAIN ==== ENTRY FUNCTION */
     function main(rootMd5) {
         /* start the data loaders, show first dataset. If in  */
+        changeUrl({"nc":null});
         if (redirectIfSubdomain())
             return;
 
@@ -9848,6 +9998,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
         renderer.onZoom100Click = onZoom100Click;
         renderer.onSelChange = onSelChange;
         renderer.onRadiusAlphaChange = onRadiusAlphaChange;
+        renderer.onSliderChange = onSliderChange;
+
         renderer.canvas.addEventListener("mouseleave", hideTooltip);
 
         loadDataset(datasetName, false, rootMd5);
@@ -9861,8 +10013,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend) {
     }
 
 }();
-
-
 
 function _tpReset() {
 /* for debugging: reset the intro setting */

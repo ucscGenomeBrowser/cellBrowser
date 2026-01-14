@@ -129,6 +129,10 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
   margin: 1px 1px;
 } 
 
+.mpFlipbookLabel {
+        font-weight:bold;
+}
+
 .ui-helper-reset { font-size: 12px}
 .ui-tabs { padding: 0 }
 .ui-tabs { padding: 0 }

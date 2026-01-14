@@ -16,9 +16,11 @@ function MaxHeat(div, args) {
         args = {};
 
     let labelFontSize = args.fontSize || 11; // height of row labels, will decrease with increasing row count
-    let rowLabelSize = args.rowLabelSize || 60; // space for row labels on the left 
-    let colLabelSize = args.colLabelSize || 34; // empty space above the heatmap
     let drawMode = 2; // 1 = stupid simple, 2 = 2x faster
+    var colLabelAngle = 50; // column labels are slanted
+
+    self.rowLabelWidth = null; // width of the row labels on the left 
+    self.colLabelHeight = null; // height of the column label row
 
     // the rest of the constructor is done at the end of this file,
     // the init involves many functions that are not defined yet
@@ -133,35 +135,35 @@ function MaxHeat(div, args) {
     }
 
     function evToRowCol(ev) {
-        /* given a click or hover event, return [rowName, colName] */
+        /* given a click or hover event, return [rowIdx, colIdx, rowName, colName] */
         var rect = ev.target.getBoundingClientRect();
         var x = ev.clientX - rect.left; //x position within the canvas.
         var y = ev.clientY - rect.top;  //y position within the canvas.
         
-        var rowIdx = parseInt((y-colLabelSize)/self.rowHeight);
-        var colIdx = parseInt((x-rowLabelSize)/self.colWidth);
+        var rowIdx = parseInt((y-self.colLabelHeight)/self.rowHeight);
+        var colIdx = parseInt((x-self.rowLabelWidth)/self.colWidth);
 
         let colName;
-        if (x<rowLabelSize)
+        if (x<self.rowLabelWidth)
             colIdx = null;
         else
             colName = self.colLabels[self.colOrder[colIdx]];
 
         let rowName;
-        if (y<colLabelSize)
+        if (y<self.colLabelHeight)
             rowIdx = null;
         else
             rowName = self.rowLabels[self.rowOrder[rowIdx]];
         //console.log("mouse over coords:", x, y, rowIdx, colIdx);
         //return [rowName, colName];
-        return [rowIdx, colIdx];
+        return [rowIdx, colIdx, rowName, colName];
     }
 
     function onClick(ev) {
         /* call self.click(rowName, colName) */
         let rowAndCol = evToRowCol(ev);
-        let rowName = rowAndCol[0];
-        let colName = rowAndCol[1];
+        let rowName = rowAndCol[2];
+        let colName = rowAndCol[3];
         if (self.onClick)
             self.onClick(rowName, colName);
     }
@@ -171,6 +173,8 @@ function MaxHeat(div, args) {
         let rowAndCol = evToRowCol(ev);
         let rowIdx = rowAndCol[0];
         let colIdx = rowAndCol[1];
+        let rowName = rowAndCol[2];
+        let colName = rowAndCol[3];
         
         var value = null;
 
@@ -184,19 +188,20 @@ function MaxHeat(div, args) {
             var selTop = rowStart;
             var selLeft = colStart;
             var selEl = self.selEl;
-            selEl.style.top=(colLabelSize+selTop)+"px";
-            selEl.style.left=(rowLabelSize+selLeft)+"px";
+            selEl.style.top=(self.colLabelHeight+selTop)+"px";
+            selEl.style.left=(self.rowLabelWidth+selLeft)+"px";
             selEl.style.height=rowHeight+"px";
             selEl.style.width=colWidth+"px";
             selEl.style.display="block"; 
-            value = self.rows[rowIdx][colIdx];
+            value = self.rowValues[rowIdx][colIdx];
+            var rowExtra = self.rowExtraInfo[rowIdx];
         }
 
         if (colName==="")
             colName = "(empty)";
 
         if (self.onCellHover)
-            self.onCellHover(self.rowOrder[rowIdx], self.colOrder[colIdx], rowName, colName, value, ev);
+            self.onCellHover(self.rowOrder[rowIdx], self.colOrder[colIdx], rowName, colName, value, rowExtra, ev);
     }
 
     this.initDrawing = function (div, opts) {
@@ -224,8 +229,8 @@ function MaxHeat(div, args) {
         /* calculate the row and column sizes. They're not all the same, due to half pixels */
         var rowCount = self.rowLabels.length;
         var colCount = self.colLabels.length;
-        self.rowStartsSizes = makeIntRanges(self.height-colLabelSize, rowCount);
-        self.colStartsSizes = makeIntRanges(self.width-rowLabelSize, colCount);
+        self.rowStartsSizes = makeIntRanges(self.height-self.colLabelHeight, rowCount);
+        self.colStartsSizes = makeIntRanges(self.width-self.rowLabelWidth, colCount);
     }
 
     this.setSize = function(width, height) {
@@ -243,34 +248,27 @@ function MaxHeat(div, args) {
 
     };
 
-    this.loadData = function(rowLabels, colLabels, rows, palette, rowOrder, colOrder) {
-        /* load data into object, rowOrder and colOrder are optional */
+    this.loadData = function(rowLabels, colLabels, palette, rows, rowValues, rowExtraInfo, rowOrder, colOrder) {
+        /* load data into object, rowOrder and colOrder are optional. 
+           rows is an array of array of integers, indices into palette.
+           rowValues is array of array of floats, the actual values, shown on mouse over
+           
+        */
         self.rowLabels = rowLabels;
+
         self.colLabels = colLabels;
+
+        self.calcFontSize();
+        self.calcColLabelHeight();
+        self.calcRowLabelWidth();
+
         self.maxVal = palette.length; // maximum value that ever appears in 'rows'. The minimum is 0.
         self.rows = rows;
+        self.rowValues = rowValues;
+        self.rowExtraInfo = rowExtraInfo;
         self.checkData();
         self.setPalette(palette);
         self.calcBoundaries();
-
-        //self.rowOrder = []; // used to convert screen to data row index, e.g. rowOrder[0] = 3
-        //self.colOrder = [];
-
-        //if (rowOrder===undefined) {
-            // default row order is simply 0...n
-            //for (let i=0; i<rowLabels.length; i++)
-                //self.rowOrder.push(rowLabels.length-i-1);
-        //} else
-            //self.rowOrder = rowOrder;
-
-
-        //if (colOrder===undefined) {
-            // default col order is simply 0...n
-            //for (let i=0; i<colLabels.length; i++)
-                //self.colOrder.push(colLabels.length-i-1);
-                ////self.colOrder.push(i);
-        //} else
-            //self.colOrder = colOrder;
 
         self.optimalLeaf();
     };
@@ -303,7 +301,7 @@ function MaxHeat(div, args) {
                 ctx.fillStyle = "#"+pal[row[colIdx]];
                 var colStart = colStartsSizes[colIdx*2];
                 var colSize = colStartsSizes[colIdx*2+1];
-                ctx.fillRect(rowLabelSize+colStart, colLabelSize+rowStart, colSize, rowSize);           
+                ctx.fillRect(self.rowLabelWidth+colStart, self.colLabelHeight+rowStart, colSize, rowSize);           
             }
         }    
     }
@@ -319,7 +317,7 @@ function MaxHeat(div, args) {
         for (var i=0; i<maxVal+1; i++) // why +1 ? Because of float rounding edge cases. Easier like this than to understand the code. :-)
             valToCoords.push([]);
         
-        // convert from rows (array of arrays) to arrays of of coords, one array per color
+        // convert from rows (array of arrays) to arrays of coords, one array per color
         for (var rowI=0; rowI<rowCount; rowI++) {
             var dataRowI = rowOrder[rowI];
             var row = rows[dataRowI];
@@ -344,9 +342,64 @@ function MaxHeat(div, args) {
                 var rowSize  = rowStartsSizes[rowIdx*2+1];
                 var colStart = colStartsSizes[colIdx*2];
                 var colSize = colStartsSizes[colIdx*2+1];
-                ctx.fillRect(rowLabelSize+colStart, colLabelSize+rowStart, colSize, rowSize); 
+                ctx.fillRect(self.rowLabelWidth+colStart, self.colLabelHeight+rowStart, colSize, rowSize); 
             }
         }
+    }
+
+    this.calcFontSize = function() {
+        var rowCount = self.rowLabels.length;
+        var colCount = self.colLabels.length;
+        var rowHeight = (self.height - self.colLabelHeight) / rowCount;
+        var colWidth  = (self.width - self.rowLabelWidth) / colCount;
+
+        self.rowHeight = rowHeight;
+        self.colWidth = colWidth;
+
+        var fontSize = labelFontSize;
+        if (rowHeight < labelFontSize)
+            self.fontSize = rowHeight-1; 
+    }
+
+    this.calcColLabelHeight = function() {
+        // determine the height of the column labels
+        var ctx = self.ctx;
+        ctx.save();
+        ctx.font = self.fontSize+"px sans-serif";
+        
+        let maxHeight = 0;
+        for (let label of self.colLabels) {
+            const m = self.ctx.measureText(label);
+            const w = m.width;
+            const h = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
+
+            const cos = Math.cos(colLabelAngle);
+            const sin = Math.sin(colLabelAngle);
+            const height = Math.abs(w * sin) + Math.abs(h * cos);
+            maxHeight = Math.round(Math.max(height, maxHeight)+0.5);
+
+            //const width  = Math.abs(w * cos) + Math.abs(h * sin);
+
+            //return height;
+        }
+        self.colLabelHeight = maxHeight;
+        ctx.restore();
+   } 
+
+    this.calcRowLabelWidth = function() {
+        var ctx = self.ctx;
+        ctx.save();
+        ctx.font = self.fontSize+"px sans-serif";
+        
+        // determine the width of the column labels
+        let maxW = 0;
+        for (let label of self.rowLabels) {
+            const m = self.ctx.measureText(label);
+            const w = m.width;
+            maxW = Math.round(Math.max(maxW, w)+0.5);
+        }
+        self.rowLabelWidth = maxW;
+        ctx.restore();
     }
 
     this.draw = function() {
@@ -355,10 +408,11 @@ function MaxHeat(div, args) {
 
         var pal = self.palette;
         var rows = self.rows;
+        var fontSize = self.fontSize;
+        var rowHeight = self.rowHeight;
+        var colWidth = self.colWidth;
         var rowCount = self.rowLabels.length;
         var colCount = self.colLabels.length;
-        var rowHeight = (self.height - colLabelSize) / rowCount;
-        var colWidth  = (self.width - rowLabelSize) / colCount;
 
         var colStartsSizes = self.colStartsSizes;
         var rowStartsSizes = self.rowStartsSizes;
@@ -366,9 +420,6 @@ function MaxHeat(div, args) {
         var ctx = self.ctx;
         ctx.save();
         
-        var fontSize = labelFontSize;
-        if (rowHeight < labelFontSize)
-            fontSize = rowHeight-1; 
         var rowEndToTextBase = (rowHeight - fontSize)/2;
         ctx.font = fontSize+"px sans-serif";
         
@@ -376,27 +427,27 @@ function MaxHeat(div, args) {
             // draw the row labels
             console.time("draw column labels");
             var rowLabels = self.rowLabels;
-            for (var labelI=0; labelI<rowCount; labelI++) {
+            for (var labelI=0; labelI < rowCount; labelI++) {
                 var realLabelI = self.rowOrder[labelI]; // rows can be reordered: real... is after reordering
-                var textY = parseInt(colLabelSize+(labelI*rowHeight) + rowEndToTextBase + fontSize - (0.2*rowHeight));
+                var textY = parseInt(self.colLabelHeight+(labelI*rowHeight) + rowEndToTextBase + fontSize - (0.2*rowHeight));
                 ctx.fillText(rowLabels[realLabelI], 4, textY);
             }
             console.timeEnd("draw labels");
         }
 
-        if (colLabelSize>5) {
+        if (self.colLabelHeight>5) {
             // draw the col labels
             console.time("draw column labels");
-            var rot = -Math.PI / 7;
-            var colLabels = self.colLabels;
+            let colLabels = self.colLabels;
+            let colLabelRot = -Math.PI / (360/colLabelAngle);
             for (var labelI=0; labelI<colCount; labelI++) {
-                var realLabelI = self.colOrder[labelI]; // rows can be reordered: real... is after reordering
-                var startIdx = 2*labelI;
-                var textX = rowLabelSize+colStartsSizes[startIdx];
-                var rowWidth = colStartsSizes[startIdx+1];
+                let realLabelI = self.colOrder[labelI]; // rows can be reordered: real... is after reordering
+                let startIdx = 2*labelI;
+                let textX = self.rowLabelWidth+colStartsSizes[startIdx];
+                let rowWidth = colStartsSizes[startIdx+1];
                 ctx.save();
-                ctx.translate(textX+(0.3*rowWidth), colLabelSize);
-                ctx.rotate(rot);
+                ctx.translate(textX+(0.3*rowWidth), self.colLabelHeight);
+                ctx.rotate(colLabelRot);
                 ctx.fillText(colLabels[realLabelI], 0, 0);
                 ctx.restore();
             }
@@ -473,10 +524,10 @@ function MaxHeat(div, args) {
     };
 
     this.checkData = function() {
-        if (self.colLabels.length > self.width - rowLabelSize)
+        if (self.colLabels.length > self.width - self.rowLabelWidth)
             alert("You are trying to show more columns on the heatmap than the window has pixels. "+
                 "The heatmap will not be very useful until you reduce the number of columns that are shown.");
-        if (self.rowLabels.length > self.height - colLabelSize)
+        if (self.rowLabels.length > self.height - self.colLabelHeight)
             alert("You are trying to show more rows on the heatmap than the window has pixels. "+
                 "The heatmap will not be very useful until you reduce the number of rows that are shown.");
 

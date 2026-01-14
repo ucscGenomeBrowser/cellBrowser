@@ -1730,7 +1730,7 @@ function CbDbFile(url) {
                 self.loadExprAndDiscretize(
                    geneId,
                    function(exprVec, discExprVec, geneSym, geneDesc, binInfo) {
-                       self.quickExpr[geneSym] = [discExprVec, geneDesc, binInfo];
+                       self.quickExpr[geneSym] = [discExprVec, geneDesc, binInfo, exprVec];
                        loadCounter++;
                        if (loadCounter===geneSyms.length) onDone();
                    },
@@ -1741,12 +1741,13 @@ function CbDbFile(url) {
 
     this.loadGeneSetExpr = function(onDone) {
         /* return array of [geneSym, discExprVec, geneDesc, binInfo] */
+        // XX this should return an object -> more readable
         var setInfo = [];
 
         for (var geneInfo of self.conf.quickGenes) {
             var geneSym = geneInfo[0];
-            var exprInfo = self.quickExpr[geneSym]; // contains: [discExprVec, geneDesc, binInfo]
-            var newInfo = [geneSym, exprInfo[0], exprInfo[1], exprInfo[2]];
+            var exprInfo = self.quickExpr[geneSym]; // contains: [discExprVec, geneDesc, binInfo, rawExprVec]
+            var newInfo = [geneSym, exprInfo[0], exprInfo[1], exprInfo[2], exprInfo[3]];
             setInfo.push(newInfo);
         }
         onDone(setInfo);
