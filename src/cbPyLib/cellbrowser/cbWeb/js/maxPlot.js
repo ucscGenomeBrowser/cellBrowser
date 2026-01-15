@@ -1221,7 +1221,7 @@ function MaxPlot(div, top, left, width, height, args) {
          * width is the width in pixels.
          * */
 
-        if (!self.usesWebGL) {
+        if (!self.usesWebGL()) {
             ctx.save();
             //ctx.globalAlpha = 1.0;
 
@@ -1362,7 +1362,7 @@ function MaxPlot(div, top, left, width, height, args) {
             return undefined;
 
         if(DEBUG) console.time("labels");
-        if(!self.usesWebGL) {
+        if(!self.usesWebGL()) {
             // Drawing mode uses CanvasRenderingContext2D
             ctx.save();
             ctx.font = "bold "+gTextSize+"px Sans-serif"
@@ -1870,7 +1870,7 @@ function MaxPlot(div, top, left, width, height, args) {
             return;
         if(DEBUG) console.time("image");
 
-        if(!self.usesWebGL){
+        if(!self.usesWebGL()){
         //var ctxWidth = ctx.canvas.width; // size of the canvas on the screen in pixels
         //var ctxHeight = ctx.canvas.height;
 
@@ -2137,7 +2137,7 @@ function MaxPlot(div, top, left, width, height, args) {
        if (!self.coords) // window resize can call this before coordinates are loaded.
            return;
 
-        if(self.usesWebGL) return;
+        if(self.usesWebGL()) return;
 
        var borderMargin = self.port.radius;
        self.calcRadius();
@@ -2234,10 +2234,10 @@ function MaxPlot(div, top, left, width, height, args) {
 
        self.quickResize(width, height);
 
-       if (self.coords)
-           self.scaleData();
+    //    if (self.coords)
+    //        self.scaleData();
 
-       if (doRedraw===undefined || doRedraw===true)
+    //    if (doRedraw===undefined || doRedraw===true)
            self.drawDots();
     };
 
@@ -2310,10 +2310,10 @@ function MaxPlot(div, top, left, width, height, args) {
        if (opts.lines)
            self._setLines(opts["lines"], opts);
     
-       if(!self.usesWebGL) {
-        self.scaleData();
-       } else {
-        self.scaleDataWebGL();
+       if(self.usesWebGL()) {
+           self.scaleDataWebGL();
+        } else {
+           self.scaleData();
        }
     };
 
@@ -2439,12 +2439,12 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.fatIdx && !self.doDrawLabels)
             self.fatIdx = null;
 
-        if (!self.usesWebGL && radius===0) {
+        if (!self.usesWebGL() && radius===0) {
             count = drawPixels(self.ctx, self.canvas.width, self.canvas.height, coords,
                 colArr, pal, alpha, self.selCells, self.fatIdx);
         }
 
-        else if (!self.usesWebGL && (radius===1 || radius===2)) {
+        else if (!self.usesWebGL() && (radius===1 || radius===2)) {
             count = drawRect(self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
         }
         else {
@@ -2688,7 +2688,7 @@ function MaxPlot(div, top, left, width, height, args) {
         /* pan current image by x/y pixels */
         debug('panning by '+xDiff+' '+yDiff);
 
-        if(!self.usesWebGL) {
+        if(!self.usesWebGL()) {
             //var srcCtx = self.panCopy.getContext("2d", { alpha: false });
             clearCanvas(self.ctx, self.canvas.width, self.canvas.height);
             self.ctx.drawImage(self.panCopy, -xDiff, -yDiff);
