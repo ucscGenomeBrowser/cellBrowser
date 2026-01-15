@@ -2228,17 +2228,23 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     this.setSize = function(width, height, doRedraw) {
-       /* resize canvas on the page re-scale the data and re-draw, unless doRedraw is false */
-       if (width===null)
-           width = self.div.getBoundingClientRect().width;
+        /* resize canvas on the page re-scale the data and re-draw, unless doRedraw is false */
+        if (width===null) {
+            width = self.div.getBoundingClientRect().width;
+        }
 
-       self.quickResize(width, height);
+        self.quickResize(width, height);
 
-    //    if (self.coords)
-    //        self.scaleData();
+        if(this.usesWebGL()) {
+            // If we're drawing using WebGL, we have to reset the viewport
+            this.ctx.viewport(0, 0, this.canvas.width, this.canvas.height);
+        }else {
+            // If we're drawing using CanvasRenderingContext2D, coordinate pixels must be recalculated
+            if (self.coords) self.scaleData();
+        }
 
-    //    if (doRedraw===undefined || doRedraw===true)
-           self.drawDots();
+        //    if (doRedraw===undefined || doRedraw===true)
+        self.drawDots();
     };
 
     this.setCoords = function(coords, clusterLabels, coordInfo, opts) {
