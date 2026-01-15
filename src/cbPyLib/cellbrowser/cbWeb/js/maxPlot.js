@@ -81,6 +81,8 @@ function MaxPlot(div, top, left, width, height, args) {
 
     self.mode = 2;   // drawing mode
 
+    self.usesWebGL = function() {return !(self.mode === 0 || self.mode === 1)}
+
     // the rest of the initialization is done at the end of this file,
     // because the init involves many functions that are not defined yet here
     
@@ -1009,52 +1011,77 @@ function MaxPlot(div, top, left, width, height, args) {
         var xMult = winWidth / spanX;
         var yMult = winHeight / spanY;
 
-        if (self.mode === 0 || self.mode === 1) {
-            // transform from data floats to screen pixel coordinates
-            var pixelCoords = new Uint16Array(coords.length);
-            for (var i = 0; i < coords.length/2; i++) {
-                var x = coords[i*2];
-                var y = coords[i*2+1];
-                // set everything outside of current zoom range to hidden
-                if ((x < minX) || (x > maxX) || (y < minY) || (y > maxY)) {
-                    pixelCoords[2*i] = HIDCOORD; // see isHidden()
-                    pixelCoords[2*i+1] = HIDCOORD;
-                }
-                else {
-                    var xPx = Math.round((x-minX)*xMult)+borderSize;
-                    // our y-axis is flipped compared to matplotlib/R, so we do winHeight - pixel value
-                    // to make sure that our plot looks like the figures in the papers
-                    var yPx = winHeight - Math.round((y-minY)*yMult)+borderSize;
-                    pixelCoords[2*i] = xPx;
-                    pixelCoords[2*i+1] = yPx;
-                }
+        // transform from data floats to screen pixel coordinates
+        var pixelCoords = new Uint16Array(coords.length);
+        for (var i = 0; i < coords.length/2; i++) {
+            var x = coords[i*2];
+            var y = coords[i*2+1];
+            // set everything outside of current zoom range to hidden
+            if ((x < minX) || (x > maxX) || (y < minY) || (y > maxY)) {
+                pixelCoords[2*i] = HIDCOORD; // see isHidden()
+                pixelCoords[2*i+1] = HIDCOORD;
             }
-
-            if(DEBUG) console.timeEnd("scale");
-            return pixelCoords;
-        } else {
-            // Scale coordinates to range [-1, 1] to fit in WebGL clip space
-            // TODO: Find a way to do this in webGL
-            let scaledCoords = new Float32Array(coords.length);
-
-            for (let i = 0; i < coords.length/2; i++) {
-                let x = coords[i*2];
-                let y = coords[i*2+1];
-                // set everything outside of current zoom range to hidden
-                // if ((x < minX) || (x > maxX) || (y < minY) || (y > maxY)) {
-                //     scaledCoords[2*i] = HIDCOORD; // see isHidden()
-                //     scaledCoords[2*i+1] = HIDCOORD;
-                // }
-                // else {
-                    // scaledCoords[2*i] = 0
-                    scaledCoords[2*i] = (x - minX) / (spanX / 2) - 1;
-                    scaledCoords[2*i+1] = (y - minY) / (spanY / 2) - 1;
-                // }
+            else {
+                var xPx = Math.round((x-minX)*xMult)+borderSize;
+                // our y-axis is flipped compared to matplotlib/R, so we do winHeight - pixel value
+                // to make sure that our plot looks like the figures in the papers
+                var yPx = winHeight - Math.round((y-minY)*yMult)+borderSize;
+                pixelCoords[2*i] = xPx;
+                pixelCoords[2*i+1] = yPx;
             }
-
-            if(DEBUG) console.timeEnd("scale");
-            return scaledCoords;
         }
+
+        if(DEBUG) console.timeEnd("scale");
+        return pixelCoords;
+    }
+
+    /**
+     * Scale a list of coords to fit to the range [-1, 1], allowing them to be seen
+     * at the default zoom and position for a webGL draw
+     * 
+     * @param {num[]} coords
+     * 
+     * @return Float32Array of [x, y] such that x and y fall into range [-1, 1]
+     */
+
+
+    function scaleCoordsWebGL(coords) {
+        // Safety check
+        if (coords === undefined || coords.length < 2 || coords.length % 2 != 0) return;
+
+        // Special case: if there's only 1 point, set it to [0, 0]
+        if(coords.length == 2) return new Float32Array([0, 0]);
+
+        if(DEBUG) console.time("scale");
+
+        // Find the extreme x and y values in the coords
+        let minX, minY, maxX, maxY;
+        for (let i = 0; i < coords.length / 2; i++) {
+            const x = coords[i*2];
+            const y = coords[i*2 + 1];
+
+            if(minX === undefined || minX > x) minX = x;
+            if(minY === undefined || minY > y) minY = y;
+            if(maxX === undefined || maxX < x) maxX = x;
+            if(maxY === undefined || maxY < y) maxY = y;
+        }
+
+        // Find the span of x and y
+        const spanX = maxX - minX;
+        const spanY = maxY - minY;
+
+        // Scale coordiantes to fit [-1, 1]
+        let scaledCoords = new Float32Array(coords.length);
+        for(let i = 0; i < coords.length / 2; i++) {
+            const x = coords[i*2];
+            const y = coords[i*2 + 1];
+
+            scaledCoords[2*i] = (x - minX) / (spanX / 2) - 1;
+            scaledCoords[2*i+1] = (y - minY) / (spanY / 2) - 1;
+        }
+
+        if(DEBUG) console.timeEnd("scale");
+        return scaledCoords;
     }
 
     function drawRect(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
@@ -1194,7 +1221,7 @@ function MaxPlot(div, top, left, width, height, args) {
          * width is the width in pixels.
          * */
 
-        if (self.mode === 0 || self.mode === 1) {
+        if (!self.usesWebGL) {
             ctx.save();
             //ctx.globalAlpha = 1.0;
 
@@ -1335,7 +1362,7 @@ function MaxPlot(div, top, left, width, height, args) {
             return undefined;
 
         if(DEBUG) console.time("labels");
-        if(self.mode === 0 || self.mode === 1) {
+        if(!self.usesWebGL) {
             // Drawing mode uses CanvasRenderingContext2D
             ctx.save();
             ctx.font = "bold "+gTextSize+"px Sans-serif"
@@ -1843,7 +1870,7 @@ function MaxPlot(div, top, left, width, height, args) {
             return;
         if(DEBUG) console.time("image");
 
-        if(self.mode == 0 || self.mode == 1){
+        if(!self.usesWebGL){
         //var ctxWidth = ctx.canvas.width; // size of the canvas on the screen in pixels
         //var ctxHeight = ctx.canvas.height;
 
@@ -2110,6 +2137,8 @@ function MaxPlot(div, top, left, width, height, args) {
        if (!self.coords) // window resize can call this before coordinates are loaded.
            return;
 
+        if(self.usesWebGL) return;
+
        var borderMargin = self.port.radius;
        self.calcRadius();
 
@@ -2120,6 +2149,13 @@ function MaxPlot(div, top, left, width, height, args) {
            self.coords.pxLines = scaleLines(self.coords.lines, self.port.zoomRange, self.canvas.width, self.canvas.height);
        self.scaleBackground(self.background, self.port.initZoom, self.port.zoomRange);
        self.scalingDone = true;
+    }
+
+    this.scaleDataWebGL = function() {
+        /* Scale coords and labels to fit to WebGL clip space. Write results to glCoords and glLabels */
+        self.coords.gl = scaleCoordsWebGL(self.coords.orig);
+        self.calcRadius();
+        self.scalingDone = true;
     }
 
     this.readyToDraw = function() {
@@ -2273,7 +2309,12 @@ function MaxPlot(div, top, left, width, height, args) {
 
        if (opts.lines)
            self._setLines(opts["lines"], opts);
-       self.scaleData();
+    
+       if(!self.usesWebGL) {
+        self.scaleData();
+       } else {
+        self.scaleDataWebGL();
+       }
     };
 
     this.setLabelCoords = function(labelCoords) {
@@ -2375,7 +2416,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var radius = self.port.radius;
         var alpha = self.port.alpha;
         var zoomFact = self.port.zoomFact;
-        var coords = self.coords.px;
+        var coords = self.usesWebGL() ? self.coords.gl : self.coords.px;
         var pal = self.col.pal;
         var colArr = self.col.arr;
         var count = 0;
@@ -2398,12 +2439,12 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.fatIdx && !self.doDrawLabels)
             self.fatIdx = null;
 
-        if ((self.mode == 0 || self.mode == 1) && radius===0) {
+        if (!self.usesWebGL && radius===0) {
             count = drawPixels(self.ctx, self.canvas.width, self.canvas.height, coords,
                 colArr, pal, alpha, self.selCells, self.fatIdx);
         }
 
-        else if ((self.mode == 0 || self.mode == 1) && (radius===1 || radius===2)) {
+        else if (!self.usesWebGL && (radius===1 || radius===2)) {
             count = drawRect(self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
         }
         else {
@@ -2647,7 +2688,7 @@ function MaxPlot(div, top, left, width, height, args) {
         /* pan current image by x/y pixels */
         debug('panning by '+xDiff+' '+yDiff);
 
-        if(self.mode == 0 || self.mode == 1) {
+        if(!self.usesWebGL) {
             //var srcCtx = self.panCopy.getContext("2d", { alpha: false });
             clearCanvas(self.ctx, self.canvas.width, self.canvas.height);
             self.ctx.drawImage(self.panCopy, -xDiff, -yDiff);
@@ -2961,7 +3002,7 @@ function MaxPlot(div, top, left, width, height, args) {
         /* check which cell's bounding boxes contain (x, y), return a list of the cell IDs, sorted by distance */
         //if(DEBUG) console.time("cellSearch");
         var pxCoords = self.coords.px;
-        if (pxCoords===null)
+        if (pxCoords === null || pxCoords === undefined)
             return null;
         var possIds = [];
         var radius = self.port.radius;
