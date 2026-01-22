@@ -4,12 +4,15 @@ Extract author emails from bioRxiv/medRxiv preprints.
 
 Gets author names and institution from bioRxiv API, then uses
 Claude API with web search to find email addresses for all authors.
+
+Accepts either a DOI or a PMID (PubMed ID) as input.
 """
 import sys
 import os
 import re
 import subprocess
 import time
+import xml.etree.ElementTree as ET
 import requests
 from urllib.parse import quote
 
@@ -27,31 +30,27 @@ FROM_EMAIL = "Max Haeussler <mhaeussl@ucsc.edu>"
 EMAIL_TEMPLATE = """
 Dear {author_first_name},
 
-I saw "{title}" through the Biorxiv updates
-which I manually go through every day to find new single cell datasets for
-our NIH-funded project, the UCSC Cell Browser (https://cells.ucsc.edu).
-If you're interested, we can set up a interactive browser for your
-data.
+I work for the UCSC Cell Browser, an NIH-funded academic project, and found your preprint about
+{SUMMARIZE THE ARTICLE IN A FEW WORDS}. If you're interested, we can add your dataset, and you would get an
+interactive browser for your single-cell dataset on https://cells.ucsc.edu.
 
 Our website allows researchers to explore your single cell data,
 including scRNA-seq, ATAC, spatial and multiomic data.
-Here is an example link: https://cortex-dev.cells.ucsc.edu.  You can color by any cell
-annotation, any gene or combinations of genes.  A quick
-tutorial should show up automatically, but it can also be found in the menu
-under Help > Tutorial. The original source data files can be downloaded, too.
+Here is an example link: https://cortex-dev.cells.ucsc.edu.
 
-For your datasets, we suggest the dataset name "$DATASET_NAME".
+{UCSC Genome Browser tracks note for ATAC-seq datasets}
+
+For your {DESCRIBE THE DATASET IN 2-5 WORDS} dataset, I suggest the dataset name "$DATASET_NAME".
 The full URL that you can add to your manuscript will then be $DATASET_NAME.cells.ucsc.edu
-once you give us permission to release the dataset.
+once you give us permission for release (usually after review or publication).
 
 You can upload your dataset here:
 https://cells-submit.gi.ucsc.edu?ds=$DATASET_NAME.  To hide the dataset
-now until publication, please select the option “Private dataset” on the submission
-website.
+until publication, select “Private dataset”.
 
 Feel free to email us if you have any questions. Once
-we have the dataset converted, you will receive another email with a testing link and if
-you like the result, we can release the dataset to the public site.
+we have the dataset converted, we will send you an email with a testing link and
+you can add the link to your manuscript and let us know when to make it public.
 
 Best regards,
 Maximilian Haeussler, PhD
@@ -61,6 +60,44 @@ UCSC Cell Browser Team
 
 BIO_RXIV_API = "https://api.biorxiv.org/details/biorxiv"
 MEDRXIV_API = "https://api.biorxiv.org/details/medrxiv"
+NCBI_EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+
+
+def is_pmid(identifier: str) -> bool:
+    """
+    Check if the identifier is a PMID (purely numeric) or a DOI.
+    PMIDs are numeric strings, DOIs typically start with "10."
+    """
+    return identifier.isdigit()
+
+
+def pmid_to_doi(pmid: str) -> str:
+    """
+    Convert a PMID to a DOI using the NCBI E-utilities API.
+    Returns the DOI string or raises RuntimeError if not found.
+    """
+    params = {
+        "db": "pubmed",
+        "id": pmid,
+        "retmode": "xml"
+    }
+    resp = requests.get(NCBI_EFETCH_URL, params=params, timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"NCBI API returned status {resp.status_code}")
+
+    root = ET.fromstring(resp.text)
+
+    # Look for DOI in ArticleIdList
+    for article_id in root.findall(".//ArticleId"):
+        if article_id.get("IdType") == "doi":
+            return article_id.text
+
+    # Also check ELocationID with EIdType="doi"
+    for eloc in root.findall(".//ELocationID"):
+        if eloc.get("EIdType") == "doi":
+            return eloc.text
+
+    raise RuntimeError(f"No DOI found for PMID {pmid}")
 
 
 def parse_authors(authors_str: str) -> list:
@@ -218,15 +255,17 @@ Here is the email template to personalize:
 {template}
 ---
 
-Please rewrite this email to make it specific to this paper. Reference specific aspects of their research (from the title/abstract) without praising the work, no sycophancy please. Keep the same overall structure and style.
+Please rewrite this email to make it specific to this paper. Reference specific aspects of their research (from the title/abstract) without praising the work, no sycophancy please. Keep the same overall structure and style of the template.
 
-Replace $DATASET_NAME with a suggested shortname of the dataset. A good dataset shortname is shorter than 25 characters. It should not include the word "human", as most datasets are human. It usually includes the organ and the disease, if these are important,
+Replace $DATASET_NAME with a suggested shortname of the dataset. A good dataset shortname is shorter than 25 characters. Never include the word "human", as most datasets are human. Never include "singlecell" or "sc" into the name, as all datasets are from single cells. The name usually includes the organ and the disease, the most important one of the paper,
 or the cell line or condition that the paper focusses on. If the paper has mostly ATAC or spatial data, add -atac or -spatial to the dataset name. You can add the celltype if the paper focuses on a celltype. Abbreviate parts of the name to shorten the name if necessary. Only dashes are allowed in the name and lowercase characters. Example dataset names are: cortex-dev for a paper about the developing cortex, cortex-atac, for ATAC-seq on the cortex. Other examples: mouse-liver-scaring, ciona-regeneration, zebrafish-dev, hindbrain-dev, mouse-olig-dev. ms is usually multiple sclerosis, common acronyms for diseases are fine to use as acronyms. We do not usually abbreviate "organoid", so leave that as a word. 
 Try not to use more than three parts separated by dashes. If the dataset is from mouse or another non-human species, prefix
 the dataset with the name of the species.
 
+If the abstract suggests that the paper contains ATAC-seq or Chip-Seq or "chromatin accessibility" data or other cis-regulatory data, replace the placeholder "UCSC Genome Browser tracks note for ATAC-seq datasets" with a text like the following: "Since your paper seems to include Chip-Seq or ATAC-seq data, note that we have support for this assay: You can send us your bigWig files and we convert them to UCSC Genome Browser Tracks, that can be loaded from the single cell browser or can be loaded via the UCSC Genome Browser public hubs page."
+
 IMPORTANT: Your response must be in this exact format with no other text:
-SUBJECT: [generated subject line here]
+SUBJECT: UCSC Cell browser for <summarize paper with 2-5 words> preprint
 BODY:
 [personalized email body here]
 """
@@ -296,12 +335,26 @@ Subject: {subject}
 
 def main():
     if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <biorxiv_DOI> [email1] [email2] ...", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} <DOI_or_PMID> [email1] [email2] ...", file=sys.stderr)
+        print(f"  Accepts either a bioRxiv/medRxiv DOI or a PubMed ID (PMID).", file=sys.stderr)
         print(f"  If email addresses are provided, skips the email search step.", file=sys.stderr)
         sys.exit(1)
 
-    doi = sys.argv[1].strip()
+    identifier = sys.argv[1].strip()
     provided_emails = [e.strip() for e in sys.argv[2:] if e.strip()]
+
+    # Convert PMID to DOI if necessary
+    if is_pmid(identifier):
+        print(f"PMID detected: {identifier}")
+        print("Converting PMID to DOI via NCBI...")
+        try:
+            doi = pmid_to_doi(identifier)
+            print(f"Found DOI: {doi}")
+        except Exception as e:
+            print(f"Error: Could not convert PMID to DOI: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        doi = identifier
 
     # Check for API key
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -389,6 +442,7 @@ def main():
     # Collect all email addresses
     all_recipients = email_list.copy()
     all_recipients.append(FROM_EMAIL)
+    all_recipients.append("cells@ucsc.edu")
     to_line = ", ".join(all_recipients)
 
     # Display the email for user approval
@@ -409,7 +463,7 @@ def main():
 
     # Send the email to all recipients
     # XX ONLY FOR DEBUGGING - HARDCODED to my own address
-    #to_line = "mhaeussl@ucsc.edu"
+    # to_line = "mhaeussl@ucsc.edu"
     if send_email_via_sendmail(to_line, FROM_EMAIL,
                               personalized['subject'], personalized['body']):
         print(f"Sent to {to_line}")
