@@ -2593,8 +2593,8 @@ def metaReorderFilter(matrixFname, metaFname, fixedMetaFname, keepFields):
     maxValCount = len(matrixSampleNames) - 100
     for fieldIdx, values in iterItems(fieldValues):
         #logging.debug("fieldIdx %d, values %s" % (fieldIdx, values))
+        fieldName = headers[fieldIdx]
         if len(values)==1:
-            fieldName = headers[fieldIdx]
             logging.info("Field %d, '%s', has only a single value. Removing this field from meta data." %
                     (fieldIdx, fieldName))
             if fieldName in keepFields:
