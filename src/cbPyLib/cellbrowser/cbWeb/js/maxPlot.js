@@ -2572,6 +2572,22 @@ function MaxPlot(div, top, left, width, height, args) {
        self.calcRadius();
     };
 
+    /**
+     * Scale x and y to fit into clip space [-1, 1]
+     * @param {Number} x 
+     * @param {Number} y 
+     * @returns Array of scaled [x, y]
+     */
+    this.getClipCoords = function(x, y) {
+        if(self.usesWebGL()) {
+            const u = x ? x / self.canvas.width * 2 - 1 : 0;
+            const v = y ? -(y / self.canvas.height * 2 - 1) : 0;
+            return [u, v];
+        } else {
+            return [x, y];
+        }
+    }
+
     this.zoom100 = function() {
        /* zoom to 100% and redraw */
         self.resetAlpha();
@@ -2633,8 +2649,7 @@ function MaxPlot(div, top, left, width, height, args) {
         // This is calculated differently depending on if the draw program uses WebGL
         if(this.usesWebGL()) {
             // Calculate where xPx and yPx exist relative to the canvas
-            const x = xPx ? xPx / self.canvas.width * 2 - 1 : 0;
-            const y = yPx ? -(yPx / self.canvas.height * 2 - 1) : 0;
+            const [x, y] = this.getClipCoords(xPx, yPx);
 
             // Scale the matrix accordingly
             self.port.projection.scale(zoomFact, x, y);
@@ -2703,36 +2718,48 @@ function MaxPlot(div, top, left, width, height, args) {
     };
 
     this.panStart = function() {
-       /* called when starting a panning sequence, makes a snapshop of the current image */
-       self.panCopy = document.createElement('canvas'); // not added to DOM, will be gc'ed
-       self.panCopy.width = self.canvas.width;
-       self.panCopy.height = self.canvas.height;
-       var destCtx = self.panCopy.getContext("2d", { alpha: false });
-       destCtx.drawImage(self.canvas, 0, 0);
+       /* called when starting a panning sequence, makes a snapshop of the current image. Not used with WebGL modes */
+       if(!self.usesWebGL()) {
+            self.panCopy = document.createElement('canvas'); // not added to DOM, will be gc'ed
+            self.panCopy.width = self.canvas.width;
+            self.panCopy.height = self.canvas.height;
+            var destCtx = self.panCopy.getContext("2d", { alpha: false });
+            destCtx.drawImage(self.canvas, 0, 0);
+       }
     }
 
     this.panBy = function(xDiff, yDiff) {
         /* pan current image by x/y pixels */
         debug('panning by '+xDiff+' '+yDiff);
 
-        if(!self.usesWebGL()) {
+        if(self.usesWebGL()) {
+            // Scale distance relative to canvas
+            const x = xDiff / self.canvas.width;
+            const y = yDiff / self.canvas.height;
+            
+            // Translate the projection matrix
+            self.port.projection.translate(-x, y);
+
+            self.drawDots();
+        } else {
             //var srcCtx = self.panCopy.getContext("2d", { alpha: false });
             clearCanvas(self.ctx, self.canvas.width, self.canvas.height);
             self.ctx.drawImage(self.panCopy, -xDiff, -yDiff);
-        } else {
-            console.warn("Cannot Pan: WebGL not yet implemented");
         }
+
         // keep these for panEnd
         self.panDiffX = xDiff;
         self.panDiffY = yDiff;
     }
 
     this.panEnd = function() {
-        /* end a sequence of panBy calls, called when the mouse is released */
-        self.moveBy(self.panDiffX, -self.panDiffY); // -1 because of flipY
-        self.panCopy = null;
-        self.panDiffX = null;
-        self.panDiffY = null;
+        /* end a sequence of panBy calls, called when the mouse is released. Not used with WebGL modes */
+        if(!self.usesWebGL()) {
+            self.moveBy(self.panDiffX, -self.panDiffY); // -1 because of flipY
+            self.panCopy = null;
+            self.panDiffX = null;
+            self.panDiffY = null;
+        }
     }
 
     // BEGIN SELECTION METHODS (could be an object?)
@@ -2826,6 +2853,11 @@ function MaxPlot(div, top, left, width, height, args) {
     };
 
     this.selectInRect = function(x1, y1, x2, y2) {
+        if(this.usesWebGL()) {
+            console.warn("Rect select not currently supported");
+            return;
+        }
+        
         /* find all cells within a rectangle and add them to the selection. */
         var minX = Math.min(x1, x2);
         var maxX = Math.max(x1, x2);
@@ -3205,10 +3237,16 @@ function MaxPlot(div, top, left, width, height, args) {
 
         if (self.mouseDownX!==null) {
             // we're panning
-            if (((ev.altKey || self.dragMode==="move")) && self.panCopy!==null) {
+            if (((ev.altKey || self.dragMode==="move")) && (self.usesWebGL() || self.panCopy!==null)) {
                 var xDiff = self.mouseDownX - clientX;
                 var yDiff = self.mouseDownY - clientY;
                 self.panBy(xDiff, yDiff);
+
+                // If using webGL, reset mouse position since that translates relatively not absolutely
+                if(self.usesWebGL()) {
+                    self.mouseDownX = clientX;
+                    self.mouseDownY = clientY;
+                }
             }
             else  {
                // zooming or selecting
