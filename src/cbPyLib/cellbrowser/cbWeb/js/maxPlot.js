@@ -2588,33 +2588,17 @@ function MaxPlot(div, top, left, width, height, args) {
        self.calcRadius();
     };
 
-    /**
-     * Scale x and y to fit into clip space [-1, 1]
-     * @param {Number} x 
-     * @param {Number} y 
-     * @returns Array of scaled [x, y]
-     */
-    this.getClipCoords = function(x, y) {
-        if(self.usesWebGL()) {
-            const u = (x !== undefined && x !== null) ? x / self.canvas.width * 2 - 1 : 0;
-            const v = (y !== undefined && y !== null) ? -(y / self.canvas.height * 2 - 1) : 0;
-            return [u, v];
-        } else {
-            return [x, y];
-        }
-    }
-
     this.zoom100 = function() {
        /* zoom to 100% and redraw */
-        self.resetAlpha();
-        self.resetRadius();
-
-        if(self.usesWebGL()) {
+       if(self.usesWebGL()) {
             self.port.projection.reset();
         } else {
             copyObj(self.port.initZoom, self.port.zoomRange);
             self.scaleData();
         }
+
+        self.resetAlpha();
+        self.resetRadius();
     };
 
     this.zoomToTest = function(x1, y1, x2, y2) {
@@ -2623,37 +2607,62 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     this.zoomTo = function(x1, y1, x2, y2) {
-       /* zoom to rectangle defined by two pixel points */
-       // make sure that x1<x2 and y1<y2 - can happen if mouse movement was upwards
-       debug("Zooming to pixels: ", x1, y1, x2, y2);
-       var pxMinX = Math.min(x1, x2);
-       var pxMaxX = Math.max(x1, x2);
+        /* zoom to rectangle defined by two pixel points */
+        // make sure that x1<x2 and y1<y2 - can happen if mouse movement was upwards
+        debug("Zooming to pixels: ", x1, y1, x2, y2);
+        var pxMinX = Math.min(x1, x2);
+        var pxMaxX = Math.max(x1, x2);
 
-       var pxMinY = Math.min(y1, y2);
-       var pxMaxY = Math.max(y1, y2);
+        var pxMinY = Math.min(y1, y2);
+        var pxMaxY = Math.max(y1, y2);
 
-       var zoomRange = self.port.zoomRange;
-       // window size in data coordinates
-       var spanX = zoomRange.maxX - zoomRange.minX;
-       var spanY = zoomRange.maxY - zoomRange.minY;
+        // This is calculated differently depending on if we're using a WebGL canvas
+        if(this.usesWebGL()) {
+            // Convert the pixel coordinates to clip space
+            const glMinX = pxMinX / self.canvas.width * 2 - 1;
+            const glMaxX = pxMaxX / self.canvas.width * 2 - 1;
+            const glMinY = pxMinY / self.canvas.height * 2 - 1;
+            const glMaxY = pxMaxY / self.canvas.height * 2 - 1;
 
-       // multiplier to convert from pixels to data coordinates
-       var xMult = spanX / self.canvas.width; // multiplier dataRange/pixel
-       var yMult = spanY / self.canvas.height;
+            // Fetch the projection matrix
+            /** @type {Matrix4} */
+            let p = self.port.projection;
 
-       var oldMinX = zoomRange.minX;
-       var oldMinY = zoomRange.minY;
+            console.error("Foo");
+            // return;
 
-       zoomRange.minX = oldMinX + (pxMinX * xMult);
-       zoomRange.minY = oldMinY + (pxMinY * yMult);
+            // Set the new bounds
+            p.setBounds(glMinX, glMaxX, glMaxY, glMinY);
 
-       zoomRange.maxX = oldMinX + (pxMaxX * xMult);
-       zoomRange.maxY = oldMinY + (pxMaxY * yMult);
+            // Recalculate radius
+            this.calcRadius();
 
-       self.port.zoomRange = zoomRange;
-       debug("Marquee zoom window: "+JSON.stringify(self.port.zoomRange));
+            // Redraw
+            this.drawDots();
+        } else {
+            var zoomRange = self.port.zoomRange;
+            // window size in data coordinates
+            var spanX = zoomRange.maxX - zoomRange.minX;
+            var spanY = zoomRange.maxY - zoomRange.minY;
 
-       self.scaleData();
+            // multiplier to convert from pixels to data coordinates
+            var xMult = spanX / self.canvas.width; // multiplier dataRange/pixel
+            var yMult = spanY / self.canvas.height;
+
+            var oldMinX = zoomRange.minX;
+            var oldMinY = zoomRange.minY;
+
+            zoomRange.minX = oldMinX + (pxMinX * xMult);
+            zoomRange.minY = oldMinY + (pxMinY * yMult);
+
+            zoomRange.maxX = oldMinX + (pxMaxX * xMult);
+            zoomRange.maxY = oldMinY + (pxMaxY * yMult);
+
+            self.port.zoomRange = zoomRange;
+            debug("Marquee zoom window: "+JSON.stringify(self.port.zoomRange));
+
+            self.scaleData();
+        }
     };
 
     this.zoomBy = function(zoomFact, xPx, yPx) {
@@ -2665,7 +2674,8 @@ function MaxPlot(div, top, left, width, height, args) {
         // This is calculated differently depending on if the draw program uses WebGL
         if(this.usesWebGL()) {
             // Calculate where xPx and yPx exist relative to the canvas
-            const [x, y] = this.getClipCoords(xPx, yPx);
+            const x = (xPx !== undefined && xPx !== null) ? xPx / self.canvas.width * 2 - 1 : 0;
+            const y = (yPx !== undefined && yPx !== null) ? -(yPx / self.canvas.height * 2 - 1) : 0;
 
             // Scale the matrix accordingly
             self.port.projection.scale(zoomFact, x, y);
@@ -3849,6 +3859,23 @@ class Matrix4 {
     this.right = u + (this.right - u) / zoomFactor;
     this.top = v + (this.top - v) / zoomFactor;
     this.bottom = v - (v - this.bottom) / zoomFactor;
+    this.calculate();
+  }
+
+  // Resize the viewport to the given bounds
+  setBounds(l, r, t, b) {
+    // Safety check
+    if(l > r || b > t) throw new Error(`Invalid Bounds:\nleft: ${l}\tright: ${r}\ntop: ${t}\tbottom: ${b}`);
+
+    // Find each set of coordinates in space
+    const [sl, sb] = this.getCoordinates(l, b);
+    const [sr, st] = this.getCoordinates(r, t);
+
+    // Set the new bounds and recalculate
+    this.left = sl;
+    this.right = sr;
+    this.top = st;
+    this.bottom = sb;
     this.calculate();
   }
 
