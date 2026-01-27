@@ -2364,13 +2364,24 @@ function MaxPlot(div, top, left, width, height, args) {
     this.calcRadius = function() {
         /* calculate the radius from current zoom factor and set radius, alpha and zoomFact in self.port */
         // make the circles a bit smaller than expected
-        var zr = self.port.zoomRange;
-        var iz = self.port.initZoom;
-        var initAlpha = self.port.initAlpha;
-        var initSpan = iz.maxX-iz.minX;
-        var currentSpan = zr.maxX-zr.minX;
-        var zoomFact = initSpan/currentSpan;
 
+        // Zoom factor is calculated differently depending on whether or not WebGL is being used
+        let zoomFact;
+
+        if(this.usesWebGL()) {
+            const p = self.port.projection;
+            const initSpan = 2;
+            const currentSpan = p.width;
+            zoomFact = initSpan / currentSpan;
+        } else {
+            var zr = self.port.zoomRange;
+            var iz = self.port.initZoom;
+            var initSpan = iz.maxX-iz.minX;
+            var currentSpan = zr.maxX-zr.minX;
+            zoomFact = initSpan/currentSpan;
+        }
+        var initAlpha = self.port.initAlpha;
+        
         // both radius and alpha can be change by a 'multiplier'
         var alphaMult = self.port.alphaMult || 1.0;
         var radiusMult = self.port.radiusMult || 1.0;
@@ -2378,7 +2389,9 @@ function MaxPlot(div, top, left, width, height, args) {
         var baseRadius = self.port.initRadius;
         if (baseRadius===0)
             baseRadius = 0.7;
-        var radius = Math.floor(baseRadius * Math.sqrt(zoomFact) * radiusMult);
+
+        const newRadius = baseRadius * Math.sqrt(zoomFact) * radiusMult;
+        const radius = this.usesWebGL() ? newRadius : Math.floor(newRadius);
 
         // the higher the zoom factor, the higher the alpha value
         var zoomFrac = Math.min(1.0, zoomFact/100.0); // zoom as fraction, max is 1.0
@@ -2656,6 +2669,9 @@ function MaxPlot(div, top, left, width, height, args) {
 
             // Scale the matrix accordingly
             self.port.projection.scale(zoomFact, x, y);
+
+            // Resize the radius accordingly
+            this.calcRadius();
         } else {
             var zr = self.port.zoomRange;
             var iz = self.port.initZoom;
