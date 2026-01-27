@@ -1794,60 +1794,8 @@ function MaxPlot(div, top, left, width, height, args) {
     function drawCirclesWebGL (ctx, coords, coordColors, colors, radius, alpha, selCells, fatIdx, projection) {
         if(WEBGL_DEBUG) console.time("drawCirclesWebGL");
 
-        // const multiplier = 2**12;
-        const multiplier = 1;
-
         // Clear canvas
         ctx.clear(ctx.COLOR_BUFFER_BIT);
-
-        // Find out what points should be behind others
-        if(WEBGL_DEBUG) console.time("Parse Depth");
-        const depthBuf = Float32Array.from(coordColors, (col) => col === 0 ? -0.5 : Math.random());
-        if(WEBGL_DEBUG) console.timeEnd("Parse Depth");
-
-        // Parse coordColors array into something WebGL can use
-        if(WEBGL_DEBUG) console.time("Parse Colors");
-        // First, convert all hex numbers to a format WebGL can use
-        const colorRGB = colors.map(function (hex) {
-            let intHex = parseInt(hex, 16);
-            let red = (intHex & 0xff0000) >> 16;
-            let green = (intHex & 0x00ff00) >> 8;
-            let blue = (intHex & 0x0000ff) >> 0;
-            return [red, green, blue];
-        });
-
-        // Now find the color of each point
-        let colorNumbers = [];
-        for(let i = 0; i < multiplier; i++){
-            for(let colorIndex of coordColors) {
-                colorNumbers.push(colorRGB[colorIndex][0], colorRGB[colorIndex][1], colorRGB[colorIndex][2]);
-            }
-        }
-        const colorBuf = new Uint8Array(colorNumbers);
-        if(WEBGL_DEBUG) console.timeEnd("Parse Colors");
-
-        // Set attributes
-        /**
-         * 
-         * @param {*} vec_size Number of elements in each attribute entry
-         * @param {*} attribute Location of the attribute
-         * @param {*} data Data to set in the attribute
-         * @param {*} normalize Whether or not to normalize the attribute
-         */
-        const bindBuffer = (vec_size, attribute, data, type, normalize = false) => {
-            const buffer = self.ctx.createBuffer();
-            self.ctx.bindBuffer(self.ctx.ARRAY_BUFFER, buffer);
-            self.ctx.bufferData(self.ctx.ARRAY_BUFFER, data, self.ctx.STATIC_DRAW);
-            self.ctx.vertexAttribPointer(attribute, vec_size, type, normalize, 0, 0);
-        }
-        if(WEBGL_DEBUG) {
-            ctx.finish();
-            console.time("Bind Buffers");
-        }
-        bindBuffer(2, self.a_Position, coords, ctx.FLOAT);
-        bindBuffer(1, self.a_Depth, depthBuf, ctx.FLOAT);
-        bindBuffer(3, self.a_Color, colorBuf, ctx.UNSIGNED_BYTE, true);
-        if(WEBGL_DEBUG) console.timeEnd("Bind Buffers");
 
         // Set uniforms
         ctx.uniform1f(self.u_Radius, radius);
@@ -1859,13 +1807,13 @@ function MaxPlot(div, top, left, width, height, args) {
             ctx.finish();
             console.time("draw");
         }
-        ctx.drawArrays(self.ctx.POINTS, 0, coordColors.length * multiplier);
+        ctx.drawArrays(self.ctx.POINTS, 0, coordColors.length);
         if(WEBGL_DEBUG) {
             ctx.finish();
             console.timeEnd("draw");
         }
         
-        console.log(`${coordColors.length * multiplier} points drawn`);
+        console.log(`${coordColors.length} points drawn`);
         if(WEBGL_DEBUG) console.timeEnd("drawCirclesWebGL");
     }
 
@@ -2156,9 +2104,64 @@ function MaxPlot(div, top, left, width, height, args) {
         self.scalingDone = true;
     }
 
-    this.scaleDataWebGL = function() {
-        /* Scale coords and labels to fit to WebGL clip space. Write results to glCoords and glLabels */
-        self.coords.gl = scaleCoordsWebGL(self.coords.orig);
+    this.initDataWebGL = function() {
+        /* Scale coords and labels to fit to WebGL clip space. Bind the results and other constant data to their buffers */
+
+        // Scale coordiantes to clip space
+        const coords = scaleCoordsWebGL(self.coords.orig);
+        self.coords.gl = coords;
+        const coordColors = self.col.arr;
+        const colors = self.col.pal;
+
+        // Find out what points should be behind others
+        if(WEBGL_DEBUG) console.time("Parse Depth");
+        const depthBuf = Float32Array.from(coordColors, (col) => col === 0 ? -0.5 : Math.random());
+        if(WEBGL_DEBUG) console.timeEnd("Parse Depth");
+
+        // Parse coordColors array into something WebGL can use
+        if(WEBGL_DEBUG) console.time("Parse Colors");
+
+        // Convert all hex numbers to a format WebGL can use
+        const colorRGB = colors.map(function (hex) {
+            let intHex = parseInt(hex, 16);
+            let red = (intHex & 0xff0000) >> 16;
+            let green = (intHex & 0x00ff00) >> 8;
+            let blue = (intHex & 0x0000ff) >> 0;
+            return [red, green, blue];
+        });
+
+        // Now find the color of each point
+        let colorNumbers = [];
+        for(let colorIndex of coordColors) {
+            colorNumbers.push(colorRGB[colorIndex][0], colorRGB[colorIndex][1], colorRGB[colorIndex][2]);
+        }
+        const colorBuf = new Uint8Array(colorNumbers);
+        if(WEBGL_DEBUG) console.timeEnd("Parse Colors");
+
+        // Set attributes. These should not be changed
+        /**
+         * 
+         * @param {*} vec_size Number of elements in each attribute entry
+         * @param {*} attribute Location of the attribute
+         * @param {*} data Data to set in the attribute
+         * @param {*} normalize Whether or not to normalize the attribute
+         */
+        const bindBuffer = (vec_size, attribute, data, type, normalize = false) => {
+            const buffer = self.ctx.createBuffer();
+            self.ctx.bindBuffer(self.ctx.ARRAY_BUFFER, buffer);
+            self.ctx.bufferData(self.ctx.ARRAY_BUFFER, data, self.ctx.STATIC_DRAW);
+            self.ctx.vertexAttribPointer(attribute, vec_size, type, normalize, 0, 0);
+        }
+        if(WEBGL_DEBUG) {
+            self.ctx.finish();
+            console.time("Bind Buffers");
+        }
+        bindBuffer(2, self.a_Position, self.coords.gl, self.ctx.FLOAT);
+        bindBuffer(1, self.a_Depth, depthBuf, self.ctx.FLOAT);
+        bindBuffer(3, self.a_Color, colorBuf, self.ctx.UNSIGNED_BYTE, true);
+        if(WEBGL_DEBUG) console.timeEnd("Bind Buffers");
+
+        // Initialize dynamic data
         self.calcRadius();
         self.scalingDone = true;
     }
@@ -2322,7 +2325,7 @@ function MaxPlot(div, top, left, width, height, args) {
            self._setLines(opts["lines"], opts);
     
        if(self.usesWebGL()) {
-           self.scaleDataWebGL();
+           self.initDataWebGL();
         } else {
            self.scaleData();
        }
@@ -2734,8 +2737,8 @@ function MaxPlot(div, top, left, width, height, args) {
 
         if(self.usesWebGL()) {
             // Scale distance relative to canvas
-            const x = xDiff / self.canvas.width;
-            const y = yDiff / self.canvas.height;
+            const x = 2 * xDiff / self.canvas.width;
+            const y = 2 * yDiff / self.canvas.height;
             
             // Translate the projection matrix
             self.port.projection.translate(-x, y);
