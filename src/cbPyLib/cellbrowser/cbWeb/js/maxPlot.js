@@ -2580,8 +2580,8 @@ function MaxPlot(div, top, left, width, height, args) {
      */
     this.getClipCoords = function(x, y) {
         if(self.usesWebGL()) {
-            const u = x ? x / self.canvas.width * 2 - 1 : 0;
-            const v = y ? -(y / self.canvas.height * 2 - 1) : 0;
+            const u = (x !== undefined && x !== null) ? x / self.canvas.width * 2 - 1 : 0;
+            const v = (y !== undefined && y !== null) ? -(y / self.canvas.height * 2 - 1) : 0;
             return [u, v];
         } else {
             return [x, y];
