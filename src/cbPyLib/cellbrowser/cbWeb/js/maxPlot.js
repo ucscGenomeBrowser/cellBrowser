@@ -2628,9 +2628,6 @@ function MaxPlot(div, top, left, width, height, args) {
             /** @type {Matrix4} */
             let p = self.port.projection;
 
-            console.error("Foo");
-            // return;
-
             // Set the new bounds
             p.setBounds(glMinX, glMaxX, glMaxY, glMinY);
 
@@ -3843,9 +3840,10 @@ class Matrix4 {
   // Scale:
   scale(zoomFactor, x, y) {
     // Safety check
-    if(zoomFactor === undefined || zoomFactor === null || zoomFactor == 1) return;
+    if(zoomFactor === undefined || zoomFactor === null || zoomFactor == 1 || zoomFactor <= 0) return;
     if(x === undefined || x === null) x = 0;
     if(y === undefined || y === null) y = 0;
+
     if(x < -1) x = -1;
     if (x > 1) x = 1;
     if (y < -1) y = -1;
@@ -3859,6 +3857,7 @@ class Matrix4 {
     this.right = u + (this.right - u) / zoomFactor;
     this.top = v + (this.top - v) / zoomFactor;
     this.bottom = v - (v - this.bottom) / zoomFactor;
+
     this.calculate();
   }
 
