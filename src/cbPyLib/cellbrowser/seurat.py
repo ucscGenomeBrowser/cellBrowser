@@ -530,8 +530,13 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
     cmds.append("ExportToCellbrowser(sobj, '%s', '%s', markers.file = %s, cluster.field=%s, skip.expr.matrix = %s, skip.markers = %s, use.mtx=%s, matrix.slot='%s')" %
             (outDir, datasetName, markerFileStr, clusterStr, skipStr, skipMarkerStr, useMtx, matrixSlot))
 
-    # add a comment with the command line
+    writeRScript(cmds, scriptPath, "cbImportSeurat")
+    runRscript(scriptPath, logPath)
     confPath = join(outDir, "cellbrowser.conf")
+    if not isfile(metaPath) or not isfile(confPath):
+        errAbort("R script did not complete successfully. Check %s and analysisLog.txt." % scriptPath)
+
+    # add a comment with the command line to cellbrowser.conf
     confData = open(confPath, "r").read()
     confFh = open(confPath, "w")
     # copied from cellbrowser.py:writeCellbrowserConf()
@@ -541,11 +546,6 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
     confFh.write("#Time: "+dateStr+"\n")
     confFh.write(confData)
     confFh.close()
-
-    writeRScript(cmds, scriptPath, "cbImportSeurat")
-    runRscript(scriptPath, logPath)
-    if not isfile(metaPath):
-        errAbort("R script did not complete successfully. Check %s and analysisLog.txt." % scriptPath)
 
 
     descDict = None
