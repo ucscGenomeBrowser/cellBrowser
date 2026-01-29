@@ -532,11 +532,11 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
 
     writeRScript(cmds, scriptPath, "cbImportSeurat")
     runRscript(scriptPath, logPath)
-    if not isfile(metaPath):
+    confPath = join(outDir, "cellbrowser.conf")
+    if not isfile(metaPath) or not isfile(confPath):
         errAbort("R script did not complete successfully. Check %s and analysisLog.txt." % scriptPath)
 
     # add a comment with the command line to cellbrowser.conf
-    confPath = join(outDir, "cellbrowser.conf")
     confData = open(confPath, "r").read()
     confFh = open(confPath, "w")
     # copied from cellbrowser.py:writeCellbrowserConf()
