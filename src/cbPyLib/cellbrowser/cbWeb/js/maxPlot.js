@@ -756,16 +756,33 @@ function MaxPlot(div, top, left, width, height, args) {
                 attribute vec2 a_Position;
                 attribute float a_Depth;
                 attribute vec3 a_Color;
-
+                attribute float a_ColID;
+                
                 uniform float u_Radius;
                 uniform mat4 u_Projection;
+                
+                uniform float u_SelectedID;
+                uniform vec3 u_SelectedColor;
 
                 varying vec3 v_Color;
 
                 void main() {
-                    gl_Position = vec4(a_Position, -a_Depth, 1.0) * u_Projection;
+                    float l_Depth = a_ColID == u_SelectedID ? 0.9 : a_Depth;
+
+                    gl_Position = vec4(a_Position, -l_Depth, 1.0) * u_Projection;
                     gl_PointSize = u_Radius;
-                    v_Color = a_Color;
+
+                    if(u_SelectedID == -1.0) {
+                        v_Color = a_Color;
+                    } else if(u_SelectedID == a_ColID) {
+                        v_Color = u_SelectedColor;
+                    } else {
+                        float l_Red = 0.08 + a_Color[0];
+                        float l_Green = 0.08 + a_Color[1];
+                        float l_Blue = 0.08 + a_Color[2];
+                        float l_Luminosity = 0.5 + ((0.2126 * l_Red + 0.7152 * l_Green + 0.0722 * l_Blue) * 0.5);
+                        v_Color = vec3(l_Luminosity, l_Luminosity, l_Luminosity);
+                    }
                 }
                 `;
                 // Fragemnt shader GLSL code
@@ -860,10 +877,14 @@ function MaxPlot(div, top, left, width, height, args) {
                 self.a_Position = getAttribute('a_Position');
                 self.a_Depth = getAttribute('a_Depth');
                 self.a_Color = getAttribute('a_Color');
+                self.a_ColID = getAttribute('a_ColID');
 
                 // Get uniforms
                 self.u_Radius = getUniform('u_Radius');
                 self.u_Projection = getUniform('u_Projection');
+                self.u_SelectedID = getUniform('u_SelectedID');
+                self.u_SelectedColor = getUniform('u_SelectedColor');
+
                 self.u_Alpha = getUniform('u_Alpha');
 
                 break;
@@ -1797,9 +1818,14 @@ function MaxPlot(div, top, left, width, height, args) {
         // Clear canvas
         ctx.clear(ctx.COLOR_BUFFER_BIT);
 
+        // Test
+        const gray = hexToGrey(colors);
+
         // Set uniforms
         ctx.uniform1f(self.u_Radius, radius);
         ctx.uniformMatrix4fv(self.u_Projection, false, projection.elements);
+        ctx.uniform1f(self.u_SelectedID, fatIdx ?? -1);
+        ctx.uniform3f(self.u_SelectedColor, 0.0, 0.0, 1.0);
         ctx.uniform1f(self.u_Alpha, 1);
 
         // Draw
@@ -2115,10 +2141,10 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // Find out what points should be behind others
         if(WEBGL_DEBUG) console.time("Parse Depth");
-        const depthBuf = Float32Array.from(coordColors, (col) => col === 0 ? -0.5 : Math.random());
+        const depthBuf = Float32Array.from(coordColors, (col) => col === 0 ? -0.5 : Math.random() * 0.5);
         if(WEBGL_DEBUG) console.timeEnd("Parse Depth");
 
-        // Parse coordColors array into something WebGL can use
+        // Parse colors array into something WebGL can use
         if(WEBGL_DEBUG) console.time("Parse Colors");
 
         // Convert all hex numbers to a format WebGL can use
@@ -2137,6 +2163,9 @@ function MaxPlot(div, top, left, width, height, args) {
         }
         const colorBuf = new Uint8Array(colorNumbers);
         if(WEBGL_DEBUG) console.timeEnd("Parse Colors");
+
+        // Save the coordColors array for selection
+        const colIDBuf = new Uint8Array(coordColors);
 
         // Set attributes. These should not be changed
         /**
@@ -2159,6 +2188,7 @@ function MaxPlot(div, top, left, width, height, args) {
         bindBuffer(2, self.a_Position, self.coords.gl, self.ctx.FLOAT);
         bindBuffer(1, self.a_Depth, depthBuf, self.ctx.FLOAT);
         bindBuffer(3, self.a_Color, colorBuf, self.ctx.UNSIGNED_BYTE, true);
+        bindBuffer(1, self.a_ColID, colIDBuf, self.ctx.UNSIGNED_BYTE);
         if(WEBGL_DEBUG) console.timeEnd("Bind Buffers");
 
         // Initialize dynamic data
