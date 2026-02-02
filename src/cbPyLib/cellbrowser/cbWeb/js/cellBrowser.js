@@ -9983,7 +9983,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         if (renderer===null) {
            var div = document.createElement('div');
            div.id = "tpMaxPlot";
-           renderer = new MaxPlot(div, canvTop, canvLeft, canvWidth, canvHeight);
+
+           const drawMode = parseInt(getVar("drawMode"));
+           renderer = new MaxPlot(div, canvTop, canvLeft, canvWidth, canvHeight, Number.isInteger(drawMode) ? {drawMode: drawMode} : undefined);
            window.renderer = renderer; // XX undo this?
 
            document.body.appendChild(div);

@@ -79,7 +79,13 @@ function MaxPlot(div, top, left, width, height, args) {
     const nonFatColorRect = "DDDDDD"; // rectangle mode: color used in fattening mode for all non-fat cells
     const nonFatColorCircles = "BBBBBB"; // color used in fattening mode for all non-fat cell circles
 
-    self.mode = 2;   // drawing mode
+    // Drawing mode
+    const defaultDrawMode = 1;
+    if(args !== undefined && args !== null) {
+        self.mode = getAttr(args, "drawMode", defaultDrawMode);
+    } else {
+        self.mode = defaultDrawMode;
+    }
 
     self.usesWebGL = function() {return !(self.mode === 0 || self.mode === 1)}
 
