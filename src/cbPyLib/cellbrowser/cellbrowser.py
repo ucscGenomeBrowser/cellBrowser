@@ -2113,6 +2113,20 @@ def exprEncode(geneDesc, exprArr, matType):
     logging.debug("raw - compression factor of %s: %f, before %d, after %d"% (geneDesc, fact, len(geneStr), len(geneCompr)))
     return geneCompr, minVal
 
+def parseRange(chromRange):
+    # chromRange can be in format chr:start-end or chr_start_end or chr-start-end
+    if ":" in chromRange:
+        chrom, startEnd = chromRange.split(":")
+        start, end = startEnd.split("-")
+    elif "_" in chromRange:
+        chrom, start, end = chromRange.split("_")
+    else:
+        chrom, start, end = chromRange.split("-") # chrom names must be in format chrom:start-end or chrom_start_end or chrom-start-end. Broken? Email us at cells@ucsc.edu
+
+    start = int(start)
+    end = int(end)
+    return chrom, start, end
+
 def indexAtacOffsetsByChrom(exprIndex):
     """ given a dict with name -> (offset, len) and name being a string of chrom:start-end,
     reformat the dict to one with chrom -> [ [start, end, offset, len], ... ] and return it.
@@ -2120,17 +2134,7 @@ def indexAtacOffsetsByChrom(exprIndex):
     """
     byChrom = defaultdict(list)
     for chromRange, (offs, dataLen) in iterItems(exprIndex):
-        # chromRange can be in format chr:start-end or chr_start_end or chr-start-end
-        if ":" in chromRange:
-            chrom, startEnd = chromRange.split(":")
-            start, end = startEnd.split("-")
-        elif "_" in chromRange:
-            chrom, start, end = chromRange.split("_")
-        else:
-            chrom, start, end = chromRange.split("-") # chrom names must be in format chrom:start-end or chrom_start_end or chrom-start-end. Broken? Email us at cells@ucsc.edu
-
-        start = int(start)
-        end = int(end)
+        chrom, start, end = parseRange(chromRange)
         byChrom[chrom].append( (start, end, offs, dataLen) )
 
     # sort by start
@@ -2586,10 +2590,11 @@ def metaReorderFilter(matrixFname, metaFname, fixedMetaFname, keepFields):
 
     # find fields that contain only a single value
     skipFields = set()
+    maxValCount = len(matrixSampleNames) - 100
     for fieldIdx, values in iterItems(fieldValues):
         #logging.debug("fieldIdx %d, values %s" % (fieldIdx, values))
+        fieldName = headers[fieldIdx]
         if len(values)==1:
-            fieldName = headers[fieldIdx]
             logging.info("Field %d, '%s', has only a single value. Removing this field from meta data." %
                     (fieldIdx, fieldName))
             if fieldName in keepFields:
@@ -2597,6 +2602,10 @@ def metaReorderFilter(matrixFname, metaFname, fixedMetaFname, keepFields):
                     "but check with submitter if this makes sense." % fieldName)
             else:
                 skipFields.add(fieldIdx)
+        elif len(values)>maxValCount:
+            logging.info("Field %d, '%s', has more than %d different values. Too many. Removing this field from meta data." %
+                    (fieldIdx, fieldName, maxValCount))
+            skipFields.add(fieldIdx)
 
     # write the header line, removing unused fields
     ofh.write("\t".join(sliceRow(headers, skipFields)))
@@ -3021,7 +3030,7 @@ def parseMarkerTable(filename, geneToSym):
 
     return data, newHeaders
 
-def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir):
+def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac):
     """ split .tsv on first field and create many files in outDir with columns 2-end.
         Returns the names of the clusters and a dict topMarkers with clusterName -> list of five top marker genes.
     """
@@ -3051,9 +3060,20 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir):
         for row in rows:
             row[2] = "%0.5E" % row[2] # limit score to 5 digits
             geneId = row[0]
-            if geneId not in matrixGeneIds:
-                missGeneIds.add(geneId)
-                continue
+            if isAtac:
+                chrom, findStart, findEnd = parseRange(geneId)
+                foundPeak = False
+                for start, end, offset, length in matrixGeneIds[chrom]:
+                    if findStart==start and findEnd==end:
+                        foundPeak = True
+                        break
+                if not foundPeak:
+                    errAbort("Cannot find peak %s in matrix" % geneId)
+                row[1] = "%s:%d-%d" % (chrom, start, end) # nicer for the display
+            else:
+                if geneId not in matrixGeneIds:
+                    missGeneIds.add(geneId)
+                    continue
 
             ofh.write("\t".join(row))
             ofh.write("\n")
@@ -4064,7 +4084,8 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, out
         markerDir = join(outDir, "markers", clusterName)
         makeDir(markerDir)
 
-        clusterNames, topMarkers = splitMarkerTable(markerFname, geneToSym, matrixGeneIds, markerDir)
+        isAtac = inConf.get("atacSearch")
+        clusterNames, topMarkers = splitMarkerTable(markerFname, geneToSym, matrixGeneIds, markerDir, isAtac)
         # only use the top markers of the first marker file
         if not topMarkersDone:
             outConf["topMarkers"] = topMarkers

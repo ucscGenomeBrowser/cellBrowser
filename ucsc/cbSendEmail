@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """
-Extract author emails from bioRxiv/medRxiv preprints.
+Extract author emails from bioRxiv/medRxiv preprints or PubMed articles.
 
-Gets author names and institution from bioRxiv API, then uses
-Claude API with web search to find email addresses for all authors.
+For bioRxiv/medRxiv DOIs: Gets metadata from bioRxiv API, then uses
+Claude API with web search to find email addresses for authors.
+
+For PubMed IDs (PMIDs): Gets metadata directly from PubMed. Uses the
+corresponding author email if found in PubMed data, otherwise prompts
+user to provide an email address.
+
+Accepts either a DOI or a PMID (PubMed ID) as input.
 """
 import sys
 import os
 import re
 import subprocess
 import time
+import xml.etree.ElementTree as ET
 import requests
 from urllib.parse import quote
 
@@ -27,31 +34,27 @@ FROM_EMAIL = "Max Haeussler <mhaeussl@ucsc.edu>"
 EMAIL_TEMPLATE = """
 Dear {author_first_name},
 
-I saw "{title}" through the Biorxiv updates
-which I manually go through every day to find new single cell datasets for
-our NIH-funded project, the UCSC Cell Browser (https://cells.ucsc.edu).
-If you're interested, we can set up a interactive browser for your
-data.
+I work for the UCSC Cell Browser, an NIH-funded academic project, and found your preprint about
+{SUMMARIZE THE ARTICLE IN A FEW WORDS}. If you're interested, we can add your dataset, and you would get an
+interactive browser for your single-cell dataset on https://cells.ucsc.edu.
 
 Our website allows researchers to explore your single cell data,
 including scRNA-seq, ATAC, spatial and multiomic data.
-Here is an example link: https://cortex-dev.cells.ucsc.edu.  You can color by any cell
-annotation, any gene or combinations of genes.  A quick
-tutorial should show up automatically, but it can also be found in the menu
-under Help > Tutorial. The original source data files can be downloaded, too.
+Here is an example link: https://cortex-dev.cells.ucsc.edu.
 
-For your datasets, we suggest the dataset name "$DATASET_NAME".
+{UCSC Genome Browser tracks note for ATAC-seq datasets}
+
+For your {DESCRIBE THE DATASET IN 2-5 WORDS} dataset, I suggest the dataset name "$DATASET_NAME".
 The full URL that you can add to your manuscript will then be $DATASET_NAME.cells.ucsc.edu
-once you give us permission to release the dataset.
+once you give us permission for release (usually after review or publication).
 
 You can upload your dataset here:
 https://cells-submit.gi.ucsc.edu?ds=$DATASET_NAME.  To hide the dataset
-now until publication, please select the option “Private dataset” on the submission
-website.
+until publication, select “Private dataset”.
 
 Feel free to email us if you have any questions. Once
-we have the dataset converted, you will receive another email with a testing link and if
-you like the result, we can release the dataset to the public site.
+we have the dataset converted, we will send you an email with a testing link and
+you can add the link to your manuscript and let us know when to make it public.
 
 Best regards,
 Maximilian Haeussler, PhD
@@ -61,6 +64,121 @@ UCSC Cell Browser Team
 
 BIO_RXIV_API = "https://api.biorxiv.org/details/biorxiv"
 MEDRXIV_API = "https://api.biorxiv.org/details/medrxiv"
+NCBI_EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+
+
+def is_pmid(identifier: str) -> bool:
+    """
+    Check if the identifier is a PMID (purely numeric) or a DOI.
+    PMIDs are numeric strings, DOIs typically start with "10."
+    """
+    return identifier.isdigit()
+
+
+def get_pubmed_record(pmid: str) -> dict:
+    """
+    Get paper metadata directly from PubMed using NCBI E-utilities API.
+    Returns a dict with keys similar to bioRxiv API response:
+    - title, abstract, authors, author_corresponding_institution, date, doi
+    - author_corresponding (last author name)
+    - corresponding_email (if found in affiliations)
+    """
+    params = {
+        "db": "pubmed",
+        "id": pmid,
+        "retmode": "xml"
+    }
+    resp = requests.get(NCBI_EFETCH_URL, params=params, timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"NCBI API returned status {resp.status_code}")
+
+    root = ET.fromstring(resp.text)
+
+    # Get title
+    title_elem = root.find(".//ArticleTitle")
+    title = title_elem.text if title_elem is not None else ""
+
+    # Get abstract
+    abstract_elem = root.find(".//AbstractText")
+    abstract = abstract_elem.text if abstract_elem is not None else ""
+
+    # Get DOI if available
+    doi = ""
+    for article_id in root.findall(".//ArticleId"):
+        if article_id.get("IdType") == "doi":
+            doi = article_id.text
+            break
+    if not doi:
+        for eloc in root.findall(".//ELocationID"):
+            if eloc.get("EIdType") == "doi":
+                doi = eloc.text
+                break
+
+    # Get publication date
+    pub_date = root.find(".//PubDate")
+    date = ""
+    if pub_date is not None:
+        year = pub_date.find("Year")
+        month = pub_date.find("Month")
+        day = pub_date.find("Day")
+        date_parts = []
+        if year is not None:
+            date_parts.append(year.text)
+        if month is not None:
+            date_parts.append(month.text)
+        if day is not None:
+            date_parts.append(day.text)
+        date = "-".join(date_parts)
+
+    # Get authors and affiliations
+    authors_list = []
+    corresponding_email = None
+    institution = ""
+
+    for author in root.findall(".//Author"):
+        last_name = author.find("LastName")
+        fore_name = author.find("ForeName")
+        initials = author.find("Initials")
+
+        if last_name is not None:
+            if fore_name is not None:
+                name = f"{fore_name.text} {last_name.text}"
+            elif initials is not None:
+                name = f"{initials.text} {last_name.text}"
+            else:
+                name = last_name.text
+            authors_list.append(name)
+
+        # Check affiliations for email addresses
+        for affil in author.findall(".//AffiliationInfo/Affiliation"):
+            if affil.text:
+                # Extract email if present (often at end of affiliation)
+                email_match = re.search(r'[\w.+-]+@[\w.-]+\.\w+', affil.text)
+                if email_match:
+                    corresponding_email = email_match.group(0)
+                # Use first affiliation as institution
+                if not institution:
+                    # Remove email from institution string if present
+                    inst_text = re.sub(r'\s*[\w.+-]+@[\w.-]+\.\w+\.?\s*$', '', affil.text)
+                    institution = inst_text.strip().rstrip('.')
+
+    # Format authors string like bioRxiv does: "Last1, F.; Last2, F. M."
+    authors_str = "; ".join(authors_list)
+
+    # Last author is typically the corresponding author
+    author_corresponding = authors_list[-1] if authors_list else ""
+
+    return {
+        "title": title,
+        "abstract": abstract,
+        "authors": authors_str,
+        "author_corresponding": author_corresponding,
+        "author_corresponding_institution": institution,
+        "date": date,
+        "doi": doi,
+        "corresponding_email": corresponding_email,
+        "category": ""  # PubMed doesn't have this field
+    }
 
 
 def parse_authors(authors_str: str) -> list:
@@ -196,6 +314,10 @@ def personalize_email_with_claude(template: str, record: dict, recipient_name: s
     category = record.get("category", "")
     date = record.get("date", "")
 
+    path = "/hive/data/inside/cells/datasets"
+    dsNames = [name for name in os.listdir(path) if os.path.isdir(os.path.join(path, name))]
+    dsNameString = ",".join(dsNames)
+
     paper_url = f"https://doi.org/{doi}" if doi else ""
 
     prompt = f"""You are helping to personalize an outreach email to a researcher about their preprint.
@@ -218,15 +340,18 @@ Here is the email template to personalize:
 {template}
 ---
 
-Please rewrite this email to make it specific to this paper. Reference specific aspects of their research (from the title/abstract) without praising the work, no sycophancy please. Keep the same overall structure and style.
+Please rewrite this email to make it specific to this paper. Reference specific aspects of their research (from the title/abstract) without praising the work, no sycophancy please. Keep the same overall structure and style of the template.
 
-Replace $DATASET_NAME with a suggested shortname of the dataset. A good dataset shortname is shorter than 25 characters. It should not include the word "human", as most datasets are human. It usually includes the organ and the disease, if these are important,
-or the cell line or condition that the paper focusses on. If the paper has mostly ATAC or spatial data, add -atac or -spatial to the dataset name. You can add the celltype if the paper focuses on a celltype. Abbreviate parts of the name to shorten the name if necessary. Only dashes are allowed in the name and lowercase characters. Example dataset names are: cortex-dev for a paper about the developing cortex, cortex-atac, for ATAC-seq on the cortex. Other examples: mouse-liver-scaring, ciona-regeneration, zebrafish-dev, hindbrain-dev, mouse-olig-dev. ms is usually multiple sclerosis, common acronyms for diseases are fine to use as acronyms. We do not usually abbreviate "organoid", so leave that as a word. 
-Try not to use more than three parts separated by dashes. If the dataset is from mouse or another non-human species, prefix
-the dataset with the name of the species.
+Replace $DATASET_NAME with a suggested shortname of the dataset. A good dataset shortname is shorter than 25 characters. Never include the word "human", as most datasets are human. Never include "singlecell" or "sc" into the name, as all datasets are from single cells. The name usually includes the organ and the disease, the most important one of the paper,
+or the cell line or condition that the paper focusses on. If the paper has mostly ATAC or spatial data, add -atac or -spatial to the dataset name. You can add the celltype if the paper focuses on a celltype. Abbreviate parts of the name to shorten the name if necessary. Only dashes are allowed in the name and lowercase characters. Example dataset names are: cortex-dev for a paper about the developing cortex, cortex-atac, for ATAC-seq on the cortex. Other examples: mouse-liver-scaring, ciona-regeneration, zebrafish-dev, hindbrain-dev, mouse-olig-dev. ms is usually multiple sclerosis, common acronyms for diseases are fine to use as acronyms. We do not usually abbreviate "organoid", so leave that as a word. Use an acronym if possible from the abstract, e.g. if the abstract mentions "HSC" as hematopoietic stem cells, then create a dataset with that acronym it, e.g. hsc-reprogram.
+Try to use one or two parts separated by dashes, and not to use more than three parts separated by dashes. If the dataset is from mouse or another non-human species, prefix the dataset with the name of the species.
+
+Here are example dataset names, as examples, do not use any of these literally, to avoid conflicts, but use them as inspiration: {dsNameString}
+
+If the abstract suggests that the paper contains ATAC-seq or Chip-Seq or "chromatin accessibility" data or other cis-regulatory data, replace the placeholder "UCSC Genome Browser tracks note for ATAC-seq datasets" with a text like the following: "Since your paper seems to include Chip-Seq or ATAC-seq data, note that we have support for this assay: You can send us your bigWig files and we convert them to UCSC Genome Browser Tracks, that can be loaded from the single cell browser or can be loaded via the UCSC Genome Browser public hubs page."
 
 IMPORTANT: Your response must be in this exact format with no other text:
-SUBJECT: [generated subject line here]
+SUBJECT: UCSC Cell browser for <summarize paper with 2-5 words> preprint
 BODY:
 [personalized email body here]
 """
@@ -296,11 +421,12 @@ Subject: {subject}
 
 def main():
     if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <biorxiv_DOI> [email1] [email2] ...", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} <DOI_or_PMID> [email1] [email2] ...", file=sys.stderr)
+        print(f"  Accepts either a bioRxiv/medRxiv DOI or a PubMed ID (PMID).", file=sys.stderr)
         print(f"  If email addresses are provided, skips the email search step.", file=sys.stderr)
         sys.exit(1)
 
-    doi = sys.argv[1].strip()
+    identifier = sys.argv[1].strip()
     provided_emails = [e.strip() for e in sys.argv[2:] if e.strip()]
 
     # Check for API key
@@ -308,43 +434,67 @@ def main():
         print("Error: ANTHROPIC_API_KEY environment variable not set", file=sys.stderr)
         sys.exit(1)
 
-    # Step 1: Get bioRxiv metadata
-    try:
-        record = get_biorxiv_record(doi)
-        authors_str = record.get("authors", "")
-        corr_inst = record.get("author_corresponding_institution")
-        paper_title = record.get("title", "")
+    # Step 1: Get metadata (from PubMed for PMID, from bioRxiv for DOI)
+    is_pmid_input = is_pmid(identifier)
 
-        if not authors_str:
-            print("Error: No authors found in bioRxiv metadata", file=sys.stderr)
+    if is_pmid_input:
+        print(f"PMID detected: {identifier}")
+        print("Fetching metadata from PubMed...")
+        try:
+            record = get_pubmed_record(identifier)
+        except Exception as e:
+            print(f"Error: Could not fetch PubMed metadata: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print(f"DOI detected: {identifier}")
+        print("Fetching metadata from bioRxiv/medRxiv...")
+        try:
+            record = get_biorxiv_record(identifier)
+        except Exception as e:
+            print(f"Error: Could not fetch bioRxiv metadata: {e}", file=sys.stderr)
             sys.exit(1)
 
-        if "author_corresponding" in record:
-            authors = [record["author_corresponding"]]
-        else:
-            authors = parse_authors(authors_str)
+    authors_str = record.get("authors", "")
+    corr_inst = record.get("author_corresponding_institution")
+    paper_title = record.get("title", "")
 
-        print(f"Paper: {paper_title[:80]}...")
-        print(f"Institution: {corr_inst or 'Unknown'}")
-        if len(authors) >= 2:
-            print(f"First author: {authors[0]}")
-            print(f"Last author: {authors[-1]}")
-        else:
-            print(f"Author: {authors[0]}")
-
-    except Exception as e:
-        print(f"Error: Could not fetch bioRxiv metadata: {e}", file=sys.stderr)
+    if not authors_str:
+        print("Error: No authors found in metadata", file=sys.stderr)
         sys.exit(1)
 
-    # Step 2: Get email addresses (either from command line or search with Claude)
+    if "author_corresponding" in record and record["author_corresponding"]:
+        authors = [record["author_corresponding"]]
+    else:
+        authors = parse_authors(authors_str)
+
+    print(f"Paper: {paper_title[:80]}...")
+    print(f"Institution: {corr_inst or 'Unknown'}")
+    if len(authors) >= 2:
+        print(f"First author: {authors[0]}")
+        print(f"Last author: {authors[-1]}")
+    else:
+        print(f"Author: {authors[0]}")
+
+    # Step 2: Get email addresses
     if provided_emails:
         # Use provided email addresses
         print(f"\nUsing provided email addresses:")
         for email in provided_emails:
             print(f"  {email}")
         email_list = provided_emails
+    elif is_pmid_input:
+        # For PMIDs, check if we found an email in PubMed data
+        pubmed_email = record.get("corresponding_email")
+        if pubmed_email:
+            print(f"\nFound corresponding author email in PubMed: {pubmed_email}")
+            email_list = [pubmed_email]
+        else:
+            print("\nNo email address found in PubMed metadata.")
+            print(f"Please rerun with an email address:")
+            print(f"  {sys.argv[0]} {identifier} <email@example.com>")
+            sys.exit(2)
     else:
-        # Search for emails with Claude
+        # For bioRxiv DOIs, search for emails with Claude
         print(f"Searching for emails...")
         try:
             emails = find_emails_with_claude(authors, corr_inst or "")
@@ -389,6 +539,7 @@ def main():
     # Collect all email addresses
     all_recipients = email_list.copy()
     all_recipients.append(FROM_EMAIL)
+    all_recipients.append("cells@ucsc.edu")
     to_line = ", ".join(all_recipients)
 
     # Display the email for user approval
@@ -409,7 +560,7 @@ def main():
 
     # Send the email to all recipients
     # XX ONLY FOR DEBUGGING - HARDCODED to my own address
-    #to_line = "mhaeussl@ucsc.edu"
+    # to_line = "mhaeussl@ucsc.edu"
     if send_email_via_sendmail(to_line, FROM_EMAIL,
                               personalized['subject'], personalized['body']):
         print(f"Sent to {to_line}")

@@ -4447,6 +4447,7 @@ var cellbrowser = function() {
             maxDig = 0
         }
 
+        var longLabel = null;
         var legLabel = "";
         if (binMax===0 && binMax===0)
             legLabel = "0";
@@ -4455,6 +4456,8 @@ var cellbrowser = function() {
         else if (binMin==="NaN")
             legLabel = "NaN";
         else if (binMin!==binMax) {
+            longLabel = binMin+' &ndash;'+binMax;
+
             if (Math.abs(binMin) > 1000000)
                 binMin = binMin.toPrecision(4);
             if (Math.abs(binMax) > 1000000)
@@ -4468,7 +4471,10 @@ var cellbrowser = function() {
         }
         else
             legLabel = binMin.toFixed(minDig);
-        return legLabel;
+
+        if (longLabel===null)
+           longLabel = legLabel;
+        return {"shortLabel":legLabel, "longLabel":longLabel};
     }
 
     function makeLegendRowsNumeric(binInfo) {
@@ -4498,7 +4504,8 @@ var cellbrowser = function() {
 
             var legendId = binIdx;
 
-            var legLabel = labelForBinMinMax(binMin, binMax, isAllInt);
+            var labelInfo = labelForBinMinMax(binMin, binMax, isAllInt);
+            var legLabel = labelInfo.shortLabel;
 
             var uniqueKey = legLabel;
 
@@ -4521,6 +4528,7 @@ var cellbrowser = function() {
                 "color": legColor,
                 "defColor":null,
                 "label":legLabel,
+                "longLabel":labelInfo.longLabel,
                 "count":count,
                 "intKey":binIdx,
                 "strKey":uniqueKey
@@ -4573,6 +4581,8 @@ var cellbrowser = function() {
                 subTitle = "Sum of "+geneSym.split("+").length+" genes";
             }
             gLegend.title = getGeneLabel()+": "+geneSym;
+            if (subTitle==geneSym)
+                subTitle=null;
         }
 
         gLegend.titleHover = mouseOver;
@@ -6263,7 +6273,7 @@ var cellbrowser = function() {
     }
 
     function onGeneExprGeneComboChange(ev) {
-        /* on the expr violin viewer: user selected a gene */
+        /* on the expr dot plot viewer: user selected a gene */
         var geneId = ev.target.value;
         if (geneId==="") // "" = user deleted the gene.
             return;
@@ -6677,7 +6687,7 @@ var cellbrowser = function() {
     }
 
     function exprDataRemoveGene(sym) {
-        /* remove a gene from the expr data */
+        /* remove a gene from the dot plot expr data */
         let exprData = db.exprData;
         let geneIdx = exprData.syms.indexOf(sym);
         exprData.syms.splice(geneIdx, 1); // remove the symbol
@@ -6986,6 +6996,7 @@ var cellbrowser = function() {
     }
 
     function loadGroupedExprData(exprData, geneIds, metaName, onGenesDone) {
+        /* load geneIds into exprData object, grouped by meta field */
 
         if (exprData===null) {
             exprData = {};
@@ -7021,6 +7032,7 @@ var cellbrowser = function() {
             geneIds = db.exprData.geneIds;
             db.exprData = null;
         }
+            //geneIds = db.exprData.geneIds.push(geneIds);
 
         if (geneIds.length>0)
             selectizeSetValue("tpGeneExprGeneCombo", geneIds[0].split("|")[0]);
@@ -7045,9 +7057,11 @@ var cellbrowser = function() {
         buildProgressBar('progressBarMeta');
 
         function onExprDataDone (exprData) { 
+            /* done loading expression data, now do the plotting */
             buildExprDotplot("tpExprViewPlot", exprData); 
+            db.exprData = exprData;
             // save into URL
-            let allGeneIdStr = db.exprData.geneIds.join(" ");
+            let allGeneIdStr = exprData.geneIds.join(" ");
             let urlOpts = { "exprGene" : allGeneIdStr, "exprMeta" : metaName };
             changeUrl(urlOpts);
         };
@@ -7121,7 +7135,7 @@ var cellbrowser = function() {
         htmls.push("<div id='tpExprView'>");
 
         htmls.push("<div id='tpExprViewTitle'>");
-        htmls.push("<b>Gene Expression Plots</b>");
+        htmls.push("<b>Dot Plots</b>");
         htmls.push("<span id='tpCloseButton' class='ui-button-icon ui-icon ui-icon-closethick' style='float:right'></span>");
         htmls.push("</div>"); //tpExprViewTitle
 
@@ -8559,7 +8573,7 @@ var cellbrowser = function() {
         var subTitle = gLegend.subTitle;
 
         htmls.push('<span id="tpLegendTitle" title="' +gLegend.titleHover+'">'+legTitle+"</span>");
-        if (subTitle)
+        if (subTitle && subTitle!==legTitle)
             htmls.push('<div id="tpLegendSubTitle" >'+subTitle+"</div>");
 
         htmls.push('<div class="tpHint">Click buttons to select '+gSampleDesc+'s</small></div>');
@@ -9094,9 +9108,6 @@ var cellbrowser = function() {
            const offset = childRect.top - containerRect.top + containerEl.scrollTop;
            containerEl.scrollTo({ top: offset});
         }
-
-           //newRow.scrollIntoView({"container":cont});
-            
     }
 
     function drawAndFattenCluster(clusterName, doScroll) {
