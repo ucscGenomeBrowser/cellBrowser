@@ -764,12 +764,14 @@ function MaxPlot(div, top, left, width, height, args) {
                 uniform float u_SelectedID;
                 uniform vec3 u_SelectedColor;
 
+                varying vec4 v_Position;
                 varying vec3 v_Color;
 
                 void main() {
                     float l_Depth = a_ColID == u_SelectedID ? 0.9 : a_Depth;
 
-                    gl_Position = vec4(a_Position, -l_Depth, 1.0) * u_Projection;
+                    v_Position = vec4(a_Position, -l_Depth, 1.0) * u_Projection;
+                    gl_Position = v_Position;
                     gl_PointSize = u_Radius;
 
                     if(u_SelectedID == -1.0) {
@@ -790,11 +792,30 @@ function MaxPlot(div, top, left, width, height, args) {
                 precision mediump float;
 
                 uniform float u_Alpha;
+                uniform float u_Radius;
 
+                uniform float u_CanvWidth;
+                uniform float u_CanvHeight;
+
+                varying vec4 v_Position;
                 varying vec3 v_Color;
 
                 void main() {
-                    gl_FragColor = vec4(v_Color, u_Alpha);
+                    // Find the pixel coordinate of the vertex
+                    vec2 l_VpxCoord = vec2((v_Position.x + 1.0) / 2.0 * u_CanvWidth, (v_Position.y + 1.0) / 2.0 * u_CanvHeight);
+
+                    // Standardize and simplify the fragment coordinate
+                    vec2 l_FragCoord = vec2(gl_FragCoord.x - 0.5, gl_FragCoord.y - 0.5);
+
+                    // Find the distance between the fragment and the vertex
+                    float l_Dist = distance(l_FragCoord, l_VpxCoord);
+
+                    // Discard fragments outside the radius to form a circle
+                    if(l_Dist > (u_Radius / 2.0)) {
+                        discard;
+                    } else {
+                        gl_FragColor = vec4(v_Color, u_Alpha);
+                    }
                 }
                 `;
                 const loadShader = (src, type) => {
@@ -886,6 +907,8 @@ function MaxPlot(div, top, left, width, height, args) {
                 self.u_SelectedColor = getUniform('u_SelectedColor');
 
                 self.u_Alpha = getUniform('u_Alpha');
+                self.u_CanvWidth = getUniform('u_CanvWidth');
+                self.u_CanvHeight = getUniform('u_CanvHeight');
 
                 break;
             default:
@@ -1826,7 +1849,10 @@ function MaxPlot(div, top, left, width, height, args) {
         ctx.uniformMatrix4fv(self.u_Projection, false, projection.elements);
         ctx.uniform1f(self.u_SelectedID, fatIdx ?? -1);
         ctx.uniform3f(self.u_SelectedColor, 0.0, 0.0, 1.0);
+
         ctx.uniform1f(self.u_Alpha, 1);
+        ctx.uniform1f(self.u_CanvWidth, self.canvas.width);
+        ctx.uniform1f(self.u_CanvHeight, self.canvas.height);
 
         // Draw
         if(WEBGL_DEBUG) {
