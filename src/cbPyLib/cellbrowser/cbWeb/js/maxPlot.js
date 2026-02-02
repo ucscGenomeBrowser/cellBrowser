@@ -772,7 +772,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
                     v_Position = vec4(a_Position, -l_Depth, 1.0) * u_Projection;
                     gl_Position = v_Position;
-                    gl_PointSize = u_Radius;
+                    gl_PointSize = u_Radius * 2.0;
 
                     if(u_SelectedID == -1.0) {
                         v_Color = a_Color;
@@ -811,7 +811,7 @@ function MaxPlot(div, top, left, width, height, args) {
                     float l_Dist = distance(l_FragCoord, l_VpxCoord);
 
                     // Discard fragments outside the radius to form a circle
-                    if(l_Dist > (u_Radius / 2.0)) {
+                    if(l_Dist > u_Radius) {
                         discard;
                     } else {
                         gl_FragColor = vec4(v_Color, u_Alpha);
