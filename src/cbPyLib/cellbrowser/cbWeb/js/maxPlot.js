@@ -2196,33 +2196,41 @@ function MaxPlot(div, top, left, width, height, args) {
         // Save the coordColors array for selection
         const colIDBuf = new Uint8Array(coordColors);
 
-        // Set attributes. These should not be changed
-        /**
-         * 
-         * @param {*} vec_size Number of elements in each attribute entry
-         * @param {*} attribute Location of the attribute
-         * @param {*} data Data to set in the attribute
-         * @param {*} normalize Whether or not to normalize the attribute
-         */
-        const bindBuffer = (vec_size, attribute, data, type, normalize = false) => {
-            const buffer = self.ctx.createBuffer();
-            self.ctx.bindBuffer(self.ctx.ARRAY_BUFFER, buffer);
-            self.ctx.bufferData(self.ctx.ARRAY_BUFFER, data, self.ctx.STATIC_DRAW);
-            self.ctx.vertexAttribPointer(attribute, vec_size, type, normalize, 0, 0);
-        }
         if(WEBGL_DEBUG) {
             self.ctx.finish();
             console.time("Bind Buffers");
         }
-        bindBuffer(2, self.a_Position, self.coords.gl, self.ctx.FLOAT);
-        bindBuffer(1, self.a_Depth, depthBuf, self.ctx.FLOAT);
-        bindBuffer(3, self.a_Color, colorBuf, self.ctx.UNSIGNED_BYTE, true);
-        bindBuffer(1, self.a_ColID, colIDBuf, self.ctx.UNSIGNED_BYTE);
+        self.bindBuffer(2, self.a_Position, self.coords.gl, self.ctx.FLOAT);
+        self.bindBuffer(1, self.a_Depth, depthBuf, self.ctx.FLOAT);
+        self.bindBuffer(3, self.a_Color, colorBuf, self.ctx.UNSIGNED_BYTE, true);
+        self.bindBuffer(1, self.a_ColID, colIDBuf, self.ctx.UNSIGNED_BYTE);
         if(WEBGL_DEBUG) console.timeEnd("Bind Buffers");
 
         // Initialize dynamic data
         self.calcRadius();
         self.scalingDone = true;
+    }
+
+    /**
+     * Bind the vertex buffer to the given attribute and populate it with the given data
+     * TODO: Find a way to not create new buffers every time
+     * 
+     * @param {Number} vec_size Number of elements in each attribute entry
+     * @param {*} attribute Location of the attribute
+     * @param {*} data Data to set in the attribute
+     * @param {*} type Type of data being sent
+     * @param {boolean} normalize Whether or not to normalize the data (only works with some types)
+     */
+    this.bindBuffer = (vec_size, attribute, data, type, normalize = false) => {
+        // Safety check: this only makes sense in WebGL space
+        if(!this.usesWebGL()) {
+            throw new Error("Error: Attempted to bind buffer outside of WebGL drawing mode");
+        }
+
+        const buffer = this.ctx.createBuffer();
+        this.ctx.bindBuffer(this.ctx.ARRAY_BUFFER, buffer);
+        this.ctx.bufferData(this.ctx.ARRAY_BUFFER, data, this.ctx.STATIC_DRAW);
+        this.ctx.vertexAttribPointer(attribute, vec_size, type, normalize, 0, 0);
     }
 
     this.readyToDraw = function() {
