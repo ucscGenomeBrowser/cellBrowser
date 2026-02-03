@@ -767,22 +767,22 @@ function MaxPlot(div, top, left, width, height, args) {
                 uniform float u_Radius;
                 uniform mat4 u_Projection;
                 
-                uniform float u_SelectedID;
+                uniform float u_FatID;
                 uniform vec3 u_SelectedColor;
 
                 varying vec4 v_Position;
                 varying vec3 v_Color;
 
                 void main() {
-                    float l_Depth = a_ColID == u_SelectedID ? 0.9 : a_Depth;
+                    float l_Depth = a_ColID == u_FatID ? 0.9 : a_Depth;
 
                     v_Position = vec4(a_Position, -l_Depth, 1.0) * u_Projection;
                     gl_Position = v_Position;
                     gl_PointSize = u_Radius * 2.0;
 
-                    if(u_SelectedID == -1.0) {
+                    if(u_FatID == -1.0) {
                         v_Color = a_Color;
-                    } else if(u_SelectedID == a_ColID) {
+                    } else if(u_FatID == a_ColID) {
                         v_Color = u_SelectedColor;
                     } else {
                         float l_Red = 0.08 + a_Color[0];
@@ -909,7 +909,7 @@ function MaxPlot(div, top, left, width, height, args) {
                 // Get uniforms
                 self.u_Radius = getUniform('u_Radius');
                 self.u_Projection = getUniform('u_Projection');
-                self.u_SelectedID = getUniform('u_SelectedID');
+                self.u_FatID = getUniform('u_FatID');
                 self.u_SelectedColor = getUniform('u_SelectedColor');
 
                 self.u_Alpha = getUniform('u_Alpha');
@@ -1850,7 +1850,7 @@ function MaxPlot(div, top, left, width, height, args) {
         // Set uniforms
         ctx.uniform1f(self.u_Radius, radius);
         ctx.uniformMatrix4fv(self.u_Projection, false, projection.elements);
-        ctx.uniform1f(self.u_SelectedID, fatIdx ?? -1);
+        ctx.uniform1f(self.u_FatID, fatIdx ?? -1);
         ctx.uniform3f(self.u_SelectedColor, 0.0, 0.0, 1.0);
 
         ctx.uniform1f(self.u_Alpha, 1);
