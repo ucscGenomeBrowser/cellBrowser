@@ -1847,9 +1847,6 @@ function MaxPlot(div, top, left, width, height, args) {
         // Clear canvas
         ctx.clear(ctx.COLOR_BUFFER_BIT);
 
-        // Test
-        const gray = hexToGrey(colors);
-
         // Set uniforms
         ctx.uniform1f(self.u_Radius, radius);
         ctx.uniformMatrix4fv(self.u_Projection, false, projection.elements);
