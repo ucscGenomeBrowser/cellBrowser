@@ -80,7 +80,7 @@ function MaxPlot(div, top, left, width, height, args) {
     const nonFatColorCircles = "BBBBBB"; // color used in fattening mode for all non-fat cell circles
 
     // Drawing mode
-    const defaultDrawMode = 1;
+    const defaultDrawMode = 2;
     if(args !== undefined && args !== null) {
         self.mode = getAttr(args, "drawMode", defaultDrawMode);
     } else {
@@ -769,23 +769,27 @@ function MaxPlot(div, top, left, width, height, args) {
                 uniform mat4 u_Projection;
                 
                 uniform float u_FatID;
-                uniform vec3 u_SelectedColor;
 
                 varying vec4 v_Position;
                 varying vec3 v_Color;
                 varying float v_Selected;
 
                 void main() {
-                    float l_Depth = a_ColID == u_FatID ? 0.9 : a_Depth;
+                    float l_Depth;
+                    if(a_Selected == 1.0) {
+                        l_Depth = 0.9;
+                    } else if(a_ColID == u_FatID) {
+                        l_Depth = 0.8;
+                    } else {
+                        l_Depth = a_Depth;
+                    }
 
                     v_Position = vec4(a_Position, -l_Depth, 1.0) * u_Projection;
                     gl_Position = v_Position;
                     gl_PointSize = u_Radius * 2.0;
 
-                    if(u_FatID == -1.0) {
+                    if(u_FatID == -1.0 || u_FatID == a_ColID || a_Selected == 1.0) {
                         v_Color = a_Color;
-                    } else if(u_FatID == a_ColID) {
-                        v_Color = u_SelectedColor;
                     } else {
                         float l_Red = 0.08 + a_Color[0];
                         float l_Green = 0.08 + a_Color[1];
@@ -823,7 +827,7 @@ function MaxPlot(div, top, left, width, height, args) {
                     // Discard fragments outside the radius to form a circle
                     if(l_Dist > u_Radius) {
                         discard;
-                    } else if(v_Selected == 1.0) {
+                    } else if(v_Selected == 1.0 && l_Dist > u_Radius - 2.0) {
                         gl_FragColor = vec4(0.0, 0.0, 0.0, u_Alpha);
                     } else {
                         gl_FragColor = vec4(v_Color, u_Alpha);
@@ -917,7 +921,6 @@ function MaxPlot(div, top, left, width, height, args) {
                 self.u_Radius = getUniform('u_Radius');
                 self.u_Projection = getUniform('u_Projection');
                 self.u_FatID = getUniform('u_FatID');
-                self.u_SelectedColor = getUniform('u_SelectedColor');
 
                 self.u_Alpha = getUniform('u_Alpha');
                 self.u_CanvWidth = getUniform('u_CanvWidth');
@@ -1863,7 +1866,6 @@ function MaxPlot(div, top, left, width, height, args) {
         ctx.uniform1f(self.u_Radius, radius);
         ctx.uniformMatrix4fv(self.u_Projection, false, projection.elements);
         ctx.uniform1f(self.u_FatID, fatIdx ?? -1);
-        ctx.uniform3f(self.u_SelectedColor, 0.0, 0.0, 1.0);
 
         ctx.uniform1f(self.u_Alpha, 1);
         ctx.uniform1f(self.u_CanvWidth, self.canvas.width);
