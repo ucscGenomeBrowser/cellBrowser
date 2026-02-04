@@ -763,6 +763,7 @@ function MaxPlot(div, top, left, width, height, args) {
                 attribute float a_Depth;
                 attribute vec3 a_Color;
                 attribute float a_ColID;
+                attribute float a_Selected;
                 
                 uniform float u_Radius;
                 uniform mat4 u_Projection;
@@ -772,6 +773,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
                 varying vec4 v_Position;
                 varying vec3 v_Color;
+                varying float v_Selected;
 
                 void main() {
                     float l_Depth = a_ColID == u_FatID ? 0.9 : a_Depth;
@@ -791,6 +793,7 @@ function MaxPlot(div, top, left, width, height, args) {
                         float l_Luminosity = 0.5 + ((0.2126 * l_Red + 0.7152 * l_Green + 0.0722 * l_Blue) * 0.5);
                         v_Color = vec3(l_Luminosity, l_Luminosity, l_Luminosity);
                     }
+                    v_Selected = a_Selected;
                 }
                 `;
                 // Fragemnt shader GLSL code
@@ -805,6 +808,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
                 varying vec4 v_Position;
                 varying vec3 v_Color;
+                varying float v_Selected;
 
                 void main() {
                     // Find the pixel coordinate of the vertex
@@ -819,6 +823,8 @@ function MaxPlot(div, top, left, width, height, args) {
                     // Discard fragments outside the radius to form a circle
                     if(l_Dist > u_Radius) {
                         discard;
+                    } else if(v_Selected == 1.0) {
+                        gl_FragColor = vec4(0.0, 0.0, 0.0, u_Alpha);
                     } else {
                         gl_FragColor = vec4(v_Color, u_Alpha);
                     }
@@ -905,6 +911,7 @@ function MaxPlot(div, top, left, width, height, args) {
                 self.a_Depth = getAttribute('a_Depth');
                 self.a_Color = getAttribute('a_Color');
                 self.a_ColID = getAttribute('a_ColID');
+                self.a_Selected = getAttribute('a_Selected');
 
                 // Get uniforms
                 self.u_Radius = getUniform('u_Radius');
@@ -1843,6 +1850,11 @@ function MaxPlot(div, top, left, width, height, args) {
      */
     function drawCirclesWebGL (ctx, coords, coordColors, colors, radius, alpha, selCells, fatIdx, projection) {
         if(WEBGL_DEBUG) console.time("drawCirclesWebGL");
+
+        // Convert the selected cell set to a buffer
+        // TODO: Do this outside the draw call
+        let selBuf = new Uint8Array(Array.from(coordColors, (_, i) => selCells.has(i) ? 1 : 0));
+        self.bindBuffer(1, self.a_Selected, selBuf, self.ctx.UNSIGNED_BYTE);
 
         // Clear canvas
         ctx.clear(ctx.COLOR_BUFFER_BIT);
