@@ -1856,11 +1856,6 @@ function MaxPlot(div, top, left, width, height, args) {
     function drawCirclesWebGL (ctx, coords, coordColors, colors, radius, alpha, selCells, fatIdx, projection) {
         if(WEBGL_DEBUG) console.time("drawCirclesWebGL");
 
-        // Convert the selected cell set to a buffer
-        // TODO: Do this outside the draw call
-        let selBuf = new Uint8Array(Array.from(coordColors, (_, i) => selCells.has(i) ? 1 : 0));
-        self.bindBuffer(1, self.a_Selected, selBuf, self.ctx.UNSIGNED_BYTE);
-
         // Clear canvas
         ctx.clear(ctx.COLOR_BUFFER_BIT);
 
@@ -2213,6 +2208,9 @@ function MaxPlot(div, top, left, width, height, args) {
         // Save the coordColors array for selection
         const colIDBuf = new Uint8Array(coordColors);
 
+        // Initialize all cells to be not selected
+        const selBuf = new Uint8Array(this.getCount());
+
         if(WEBGL_DEBUG) {
             self.ctx.finish();
             console.time("Bind Buffers");
@@ -2221,6 +2219,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.bindBuffer(1, self.a_Depth, depthBuf, self.ctx.FLOAT);
         self.bindBuffer(3, self.a_Color, colorBuf, self.ctx.UNSIGNED_BYTE, true);
         self.bindBuffer(1, self.a_ColID, colIDBuf, self.ctx.UNSIGNED_BYTE);
+        self.bindBuffer(1, self.a_Selected, selBuf, self.ctx.UNSIGNED_BYTE);
         if(WEBGL_DEBUG) console.timeEnd("Bind Buffers");
 
         // Initialize dynamic data
@@ -3091,6 +3090,14 @@ function MaxPlot(div, top, left, width, height, args) {
     this._selUpdate = function() {
         /* called after the selection has been updated, calls the onSelChange callback */
         setStatus(self.selCells.size + " " + self.gSampleDescription + "s selected");
+
+        // If we're using webGL, adjust the attribute buffer
+        if(self.usesWebGL()) {
+            // Convert the selected cell set to a buffer
+            const selBuf = new Uint8Array(Array.from({length: this.getCount()}, (_, i) => this.selCells.has(i) ? 1 : 0));
+            this.bindBuffer(1, this.a_Selected, selBuf, this.ctx.UNSIGNED_BYTE);
+        }
+
         if (self.onSelChange!==null)
             self.onSelChange(self.selCells);
     }
