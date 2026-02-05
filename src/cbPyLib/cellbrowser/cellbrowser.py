@@ -3399,6 +3399,11 @@ def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=No
                         copyImageFile(inDir, img, imageDir, doneNames, imageSetFnames)
 
 
+    if "hubUrl" in outConf and "hubUrl" not in summInfo:
+        summInfo['hubUrl'] = outConf["hubUrl"]
+    if "ucscDb" in outConf and "ucscDb" not in summInfo:
+        summInfo['ucscDb'] = outConf["ucscDb"]
+
     # if we have a desc.conf: with so much data now in other files, generate the md5 from the data
     # itself not just the desc.conf
     if "desc" in outConf["fileVersions"]:
@@ -4409,7 +4414,6 @@ def readOldSampleNames(datasetDir, lastConf):
         sampleNameFname = join(datasetDir, "metaFields", lastConf["metaFields"][0]["name"]+".bin.gz")
         logging.debug("Reading meta sample names from %s" % sampleNameFname)
 
-    # python3's gzip has 'text mode' but python2 doesn't have that so decode explicitly
     metaSampleNames = []
     if isfile(sampleNameFname):
         for line in openFile(sampleNameFname):
