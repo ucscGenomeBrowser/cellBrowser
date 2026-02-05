@@ -769,6 +769,7 @@ function MaxPlot(div, top, left, width, height, args) {
                 uniform mat4 u_Projection;
                 
                 uniform float u_FatID;
+                uniform float u_AnySelected;
 
                 varying vec4 v_Position;
                 varying vec3 v_Color;
@@ -788,7 +789,7 @@ function MaxPlot(div, top, left, width, height, args) {
                     gl_Position = v_Position;
                     gl_PointSize = u_Radius * 2.0;
 
-                    if(u_FatID == -1.0 || u_FatID == a_ColID || a_Selected == 1.0) {
+                    if((u_FatID == -1.0 && u_AnySelected == 0.0) || u_FatID == a_ColID || a_Selected == 1.0) {
                         v_Color = a_Color;
                     } else {
                         float l_Red = 0.08 + a_Color[0];
@@ -921,6 +922,7 @@ function MaxPlot(div, top, left, width, height, args) {
                 self.u_Radius = getUniform('u_Radius');
                 self.u_Projection = getUniform('u_Projection');
                 self.u_FatID = getUniform('u_FatID');
+                self.u_AnySelected = getUniform('u_AnySelected');
 
                 self.u_Alpha = getUniform('u_Alpha');
                 self.u_CanvWidth = getUniform('u_CanvWidth');
@@ -1866,6 +1868,7 @@ function MaxPlot(div, top, left, width, height, args) {
         ctx.uniform1f(self.u_Radius, radius);
         ctx.uniformMatrix4fv(self.u_Projection, false, projection.elements);
         ctx.uniform1f(self.u_FatID, fatIdx ?? -1);
+        ctx.uniform1f(self.u_AnySelected, selCells.size > 0 ? 1 : 0);
 
         ctx.uniform1f(self.u_Alpha, 1);
         ctx.uniform1f(self.u_CanvWidth, self.canvas.width);
