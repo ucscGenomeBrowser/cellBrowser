@@ -80,7 +80,7 @@ function MaxPlot(div, top, left, width, height, args) {
     const nonFatColorCircles = "BBBBBB"; // color used in fattening mode for all non-fat cell circles
 
     // Drawing mode
-    const defaultDrawMode = 2;
+    const defaultDrawMode = 1;
     if(args !== undefined && args !== null) {
         self.mode = getAttr(args, "drawMode", defaultDrawMode);
     } else {
@@ -218,6 +218,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.coords.labels    = null;   // cluster label positions in pixels, array of [x,y,text]
 
         self.coords.px   = null;   // coordinates of cells and labels as screen pixels or (HIDCOORD,HIDCOORD) if not shown
+        self.coords.gl   = null;   // coordinates of cells in WebGL space
         self.coords.labelBbox = null;   // cluster label bounding boxes, array of [x1,x2,x2,y2]
 
         self.col = {};
@@ -248,7 +249,192 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.activateMode(getAttr(args, "mode", "move"));
 
+        // If WebGL is being used to draw, initialize its program
+        if(this.usesWebGL()) {
+            this.initWebGLProgram();
+        }
     };
+
+    this.initWebGLProgram = function() {
+        // Set the canvas' clear color
+        self.ctx.clearColor(1, 1, 1, 1);
+
+        // Enable 3D Graphics
+        self.ctx.enable(self.ctx.DEPTH_TEST);
+
+        // Crate the GLSL shaders from the external source code
+        // Vertex shader GLSL code
+        const VERTEX_SHADER_SRC = `
+        precision mediump float;
+        attribute vec2 a_Position;
+        attribute float a_Depth;
+        attribute vec3 a_Color;
+        attribute float a_ColID;
+        attribute float a_Selected;
+        
+        uniform float u_Radius;
+        uniform mat4 u_Projection;
+        
+        uniform float u_FatID;
+        uniform float u_AnySelected;
+
+        varying vec4 v_Position;
+        varying vec3 v_Color;
+        varying float v_Selected;
+
+        void main() {
+            float l_Depth;
+            if(a_Selected == 1.0) {
+                l_Depth = 0.9;
+            } else if(a_ColID == u_FatID) {
+                l_Depth = 0.8;
+            } else {
+                l_Depth = a_Depth;
+            }
+
+            v_Position = vec4(a_Position, -l_Depth, 1.0) * u_Projection;
+            gl_Position = v_Position;
+            gl_PointSize = u_Radius * 2.0;
+
+            if((u_FatID == -1.0 && u_AnySelected == 0.0) || u_FatID == a_ColID || a_Selected == 1.0) {
+                v_Color = a_Color;
+            } else {
+                float l_Red = 0.08 + a_Color[0];
+                float l_Green = 0.08 + a_Color[1];
+                float l_Blue = 0.08 + a_Color[2];
+                float l_Luminosity = 0.5 + ((0.2126 * l_Red + 0.7152 * l_Green + 0.0722 * l_Blue) * 0.5);
+                v_Color = vec3(l_Luminosity, l_Luminosity, l_Luminosity);
+            }
+            v_Selected = a_Selected;
+        }
+        `;
+        // Fragemnt shader GLSL code
+        const FRAGMENT_SHADER_SRC = `
+        precision mediump float;
+
+        uniform float u_Alpha;
+        uniform float u_Radius;
+
+        uniform float u_CanvWidth;
+        uniform float u_CanvHeight;
+
+        varying vec4 v_Position;
+        varying vec3 v_Color;
+        varying float v_Selected;
+
+        void main() {
+            // Find the pixel coordinate of the vertex
+            vec2 l_VpxCoord = vec2((v_Position.x + 1.0) / 2.0 * u_CanvWidth, (v_Position.y + 1.0) / 2.0 * u_CanvHeight);
+
+            // Standardize and simplify the fragment coordinate
+            vec2 l_FragCoord = vec2(gl_FragCoord.x - 0.5, gl_FragCoord.y - 0.5);
+
+            // Find the distance between the fragment and the vertex
+            float l_Dist = distance(l_FragCoord, l_VpxCoord);
+
+            // Discard fragments outside the radius to form a circle
+            if(l_Dist > u_Radius) {
+                discard;
+            } else if(v_Selected == 1.0 && l_Dist > u_Radius - 2.0) {
+                gl_FragColor = vec4(0.0, 0.0, 0.0, u_Alpha);
+            } else {
+                gl_FragColor = vec4(v_Color, u_Alpha);
+            }
+        }
+        `;
+        const loadShader = (src, type) => {
+            // Figure out if this is the vertex or fragment shader
+            const shaderType = type === self.ctx.VERTEX_SHADER ? `vertex` : `fragment`
+
+            // Create the shader
+            const shader = self.ctx.createShader(type);
+            if (!shader) {
+                console.error(`Unable to create ${shaderType} shader`);
+            }
+
+            // Set the program
+            self.ctx.shaderSource(shader, src);
+
+            // Compile the program
+            self.ctx.compileShader(shader);
+            if (!self.ctx.getShaderParameter(shader, self.ctx.COMPILE_STATUS)) {
+                console.error(`Failed to compile ${shaderType} shader. Error: ${self.ctx.getShaderInfoLog(shader)}`);
+            }
+
+            // Return the shader
+            return shader;
+        }
+        const vertexShader = loadShader(VERTEX_SHADER_SRC, self.ctx.VERTEX_SHADER);
+        const fragmentShader = loadShader(FRAGMENT_SHADER_SRC, self.ctx.FRAGMENT_SHADER);
+
+        // Create the GLSL program
+        self.program = self.ctx.createProgram();
+        if (!self.program) {
+            console.error("Error: Unable to create program");
+        }
+        self.ctx.attachShader(self.program, vertexShader);
+        self.ctx.attachShader(self.program, fragmentShader);
+        self.ctx.linkProgram(self.program);
+        if (!self.ctx.getProgramParameter(self.program, self.ctx.LINK_STATUS)) {
+            console.error(`Failed to link shaders. Error: ${ctx.getProgramInfoLog(glProgram)}`);
+        }
+        self.ctx.useProgram(self.program);
+
+        // Create local references for GLSL variables
+        /**
+         * Gets the location of the specified GLSL attribute
+         * 
+         * @param {String} name Attribue name
+         * @returns Attribute location
+         */
+        const getAttribute = (name) => {
+            // Find attribute
+            let attribute = self.ctx.getAttribLocation(self.program, name);
+            if (attribute < 0) {
+            throw (`Failed to get storage location of ${name}`);
+            }
+
+            // Enable assignment to the attribute
+            self.ctx.enableVertexAttribArray(attribute);
+
+            // Return attribute for later usage
+            return attribute;
+        }
+
+        /**
+         * Gets the location of the specified GLSL uniform
+         * 
+         * @param {String} name Uniform name
+         * @returns Uniform location
+         */
+        const getUniform = (name) => {
+            // Find attribute
+            let uniform = self.ctx.getUniformLocation(self.program, name);
+            if (!uniform) {
+            throw (`Failed to get storage location of ${name}`);
+            }
+
+            // Return for later use
+            return uniform;
+        }
+
+        // Get attributes
+        self.a_Position = getAttribute('a_Position');
+        self.a_Depth = getAttribute('a_Depth');
+        self.a_Color = getAttribute('a_Color');
+        self.a_ColID = getAttribute('a_ColID');
+        self.a_Selected = getAttribute('a_Selected');
+
+        // Get uniforms
+        self.u_Radius = getUniform('u_Radius');
+        self.u_Projection = getUniform('u_Projection');
+        self.u_FatID = getUniform('u_FatID');
+        self.u_AnySelected = getUniform('u_AnySelected');
+
+        self.u_Alpha = getUniform('u_Alpha');
+        self.u_CanvWidth = getUniform('u_CanvWidth');
+        self.u_CanvHeight = getUniform('u_CanvHeight');
+    }
 
     this.clear = function() {
         clearCanvas(self.ctx, self.canvas.width, self.canvas.height);
@@ -748,186 +934,6 @@ function MaxPlot(div, top, left, width, height, args) {
                     console.error("WebGL 2 not supported");
                     return;
                 }
-
-                // Set the canvas' clear color
-                self.ctx.clearColor(1, 1, 1, 1);
-
-                // Enable 3D Graphics
-                self.ctx.enable(self.ctx.DEPTH_TEST);
-
-                // Crate the GLSL shaders from the external source code
-                // Vertex shader GLSL code
-                const VERTEX_SHADER_SRC = `
-                precision mediump float;
-                attribute vec2 a_Position;
-                attribute float a_Depth;
-                attribute vec3 a_Color;
-                attribute float a_ColID;
-                attribute float a_Selected;
-                
-                uniform float u_Radius;
-                uniform mat4 u_Projection;
-                
-                uniform float u_FatID;
-                uniform float u_AnySelected;
-
-                varying vec4 v_Position;
-                varying vec3 v_Color;
-                varying float v_Selected;
-
-                void main() {
-                    float l_Depth;
-                    if(a_Selected == 1.0) {
-                        l_Depth = 0.9;
-                    } else if(a_ColID == u_FatID) {
-                        l_Depth = 0.8;
-                    } else {
-                        l_Depth = a_Depth;
-                    }
-
-                    v_Position = vec4(a_Position, -l_Depth, 1.0) * u_Projection;
-                    gl_Position = v_Position;
-                    gl_PointSize = u_Radius * 2.0;
-
-                    if((u_FatID == -1.0 && u_AnySelected == 0.0) || u_FatID == a_ColID || a_Selected == 1.0) {
-                        v_Color = a_Color;
-                    } else {
-                        float l_Red = 0.08 + a_Color[0];
-                        float l_Green = 0.08 + a_Color[1];
-                        float l_Blue = 0.08 + a_Color[2];
-                        float l_Luminosity = 0.5 + ((0.2126 * l_Red + 0.7152 * l_Green + 0.0722 * l_Blue) * 0.5);
-                        v_Color = vec3(l_Luminosity, l_Luminosity, l_Luminosity);
-                    }
-                    v_Selected = a_Selected;
-                }
-                `;
-                // Fragemnt shader GLSL code
-                const FRAGMENT_SHADER_SRC = `
-                precision mediump float;
-
-                uniform float u_Alpha;
-                uniform float u_Radius;
-
-                uniform float u_CanvWidth;
-                uniform float u_CanvHeight;
-
-                varying vec4 v_Position;
-                varying vec3 v_Color;
-                varying float v_Selected;
-
-                void main() {
-                    // Find the pixel coordinate of the vertex
-                    vec2 l_VpxCoord = vec2((v_Position.x + 1.0) / 2.0 * u_CanvWidth, (v_Position.y + 1.0) / 2.0 * u_CanvHeight);
-
-                    // Standardize and simplify the fragment coordinate
-                    vec2 l_FragCoord = vec2(gl_FragCoord.x - 0.5, gl_FragCoord.y - 0.5);
-
-                    // Find the distance between the fragment and the vertex
-                    float l_Dist = distance(l_FragCoord, l_VpxCoord);
-
-                    // Discard fragments outside the radius to form a circle
-                    if(l_Dist > u_Radius) {
-                        discard;
-                    } else if(v_Selected == 1.0 && l_Dist > u_Radius - 2.0) {
-                        gl_FragColor = vec4(0.0, 0.0, 0.0, u_Alpha);
-                    } else {
-                        gl_FragColor = vec4(v_Color, u_Alpha);
-                    }
-                }
-                `;
-                const loadShader = (src, type) => {
-                    // Figure out if this is the vertex or fragment shader
-                    const shaderType = type === self.ctx.VERTEX_SHADER ? `vertex` : `fragment`
-
-                    // Create the shader
-                    const shader = self.ctx.createShader(type);
-                    if (!shader) {
-                        console.error(`Unable to create ${shaderType} shader`);
-                    }
-
-                    // Set the program
-                    self.ctx.shaderSource(shader, src);
-
-                    // Compile the program
-                    self.ctx.compileShader(shader);
-                    if (!self.ctx.getShaderParameter(shader, self.ctx.COMPILE_STATUS)) {
-                        console.error(`Failed to compile ${shaderType} shader. Error: ${self.ctx.getShaderInfoLog(shader)}`);
-                    }
-
-                    // Return the shader
-                    return shader;
-                }
-                const vertexShader = loadShader(VERTEX_SHADER_SRC, self.ctx.VERTEX_SHADER);
-                const fragmentShader = loadShader(FRAGMENT_SHADER_SRC, self.ctx.FRAGMENT_SHADER);
-
-                // Create the GLSL program
-                self.program = self.ctx.createProgram();
-                if (!self.program) {
-                    console.error("Error: Unable to create program");
-                }
-                self.ctx.attachShader(self.program, vertexShader);
-                self.ctx.attachShader(self.program, fragmentShader);
-                self.ctx.linkProgram(self.program);
-                if (!self.ctx.getProgramParameter(self.program, self.ctx.LINK_STATUS)) {
-                    console.error(`Failed to link shaders. Error: ${ctx.getProgramInfoLog(glProgram)}`);
-                }
-                self.ctx.useProgram(self.program);
-
-                // Create local references for GLSL variables
-                /**
-                 * Gets the location of the specified GLSL attribute
-                 * 
-                 * @param {String} name Attribue name
-                 * @returns Attribute location
-                 */
-                const getAttribute = (name) => {
-                    // Find attribute
-                    let attribute = self.ctx.getAttribLocation(self.program, name);
-                    if (attribute < 0) {
-                    throw (`Failed to get storage location of ${name}`);
-                    }
-
-                    // Enable assignment to the attribute
-                    self.ctx.enableVertexAttribArray(attribute);
-
-                    // Return attribute for later usage
-                    return attribute;
-                }
-
-                /**
-                 * Gets the location of the specified GLSL uniform
-                 * 
-                 * @param {String} name Uniform name
-                 * @returns Uniform location
-                 */
-                const getUniform = (name) => {
-                    // Find attribute
-                    let uniform = self.ctx.getUniformLocation(self.program, name);
-                    if (!uniform) {
-                    throw (`Failed to get storage location of ${name}`);
-                    }
-
-                    // Return for later use
-                    return uniform;
-                }
-
-                // Get attributes
-                self.a_Position = getAttribute('a_Position');
-                self.a_Depth = getAttribute('a_Depth');
-                self.a_Color = getAttribute('a_Color');
-                self.a_ColID = getAttribute('a_ColID');
-                self.a_Selected = getAttribute('a_Selected');
-
-                // Get uniforms
-                self.u_Radius = getUniform('u_Radius');
-                self.u_Projection = getUniform('u_Projection');
-                self.u_FatID = getUniform('u_FatID');
-                self.u_AnySelected = getUniform('u_AnySelected');
-
-                self.u_Alpha = getUniform('u_Alpha');
-                self.u_CanvWidth = getUniform('u_CanvWidth');
-                self.u_CanvHeight = getUniform('u_CanvHeight');
-
                 break;
             default:
                 console.error(`Error: Mode ${self.mode} not supported`);
