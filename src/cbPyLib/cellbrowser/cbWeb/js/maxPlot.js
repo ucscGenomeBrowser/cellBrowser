@@ -256,11 +256,15 @@ function MaxPlot(div, top, left, width, height, args) {
     };
 
     this.initWebGLProgram = function() {
+        // Fetch the rendering context for quick reference and typing
+        /** @type {WebGL2RenderingContext} */
+        const ctx = self.ctx;
+
         // Set the canvas' clear color
-        self.ctx.clearColor(1, 1, 1, 1);
+        ctx.clearColor(1, 1, 1, 1);
 
         // Enable 3D Graphics
-        self.ctx.enable(self.ctx.DEPTH_TEST);
+        ctx.enable(ctx.DEPTH_TEST);
 
         // Crate the GLSL shaders from the external source code
         // Vertex shader GLSL code
@@ -364,23 +368,23 @@ function MaxPlot(div, top, left, width, height, args) {
             // Return the shader
             return shader;
         }
-        const vertexShader = loadShader(VERTEX_SHADER_SRC, self.ctx.VERTEX_SHADER);
-        const fragmentShader = loadShader(FRAGMENT_SHADER_SRC, self.ctx.FRAGMENT_SHADER);
+        const vertexShader = loadShader(VERTEX_SHADER_SRC, ctx.VERTEX_SHADER);
+        const fragmentShader = loadShader(FRAGMENT_SHADER_SRC, ctx.FRAGMENT_SHADER);
 
         // Create the GLSL program
-        self.program = self.ctx.createProgram();
+        self.program = ctx.createProgram();
         if (!self.program) {
             console.error("Error: Unable to create program");
         }
-        self.ctx.attachShader(self.program, vertexShader);
-        self.ctx.attachShader(self.program, fragmentShader);
-        self.ctx.linkProgram(self.program);
-        if (!self.ctx.getProgramParameter(self.program, self.ctx.LINK_STATUS)) {
+        ctx.attachShader(self.program, vertexShader);
+        ctx.attachShader(self.program, fragmentShader);
+        ctx.linkProgram(self.program);
+        if (!ctx.getProgramParameter(self.program, ctx.LINK_STATUS)) {
             console.error(`Failed to link shaders. Error: ${ctx.getProgramInfoLog(glProgram)}`);
         }
-        self.ctx.useProgram(self.program);
+        ctx.useProgram(self.program);
 
-        // Create local references for GLSL variables
+        // Create local references for GLSL variables and set initial values
         /**
          * Gets the location of the specified GLSL attribute
          * 
@@ -389,13 +393,13 @@ function MaxPlot(div, top, left, width, height, args) {
          */
         const getAttribute = (name) => {
             // Find attribute
-            let attribute = self.ctx.getAttribLocation(self.program, name);
+            let attribute = ctx.getAttribLocation(self.program, name);
             if (attribute < 0) {
             throw (`Failed to get storage location of ${name}`);
             }
 
             // Enable assignment to the attribute
-            self.ctx.enableVertexAttribArray(attribute);
+            ctx.enableVertexAttribArray(attribute);
 
             // Return attribute for later usage
             return attribute;
@@ -409,7 +413,7 @@ function MaxPlot(div, top, left, width, height, args) {
          */
         const getUniform = (name) => {
             // Find attribute
-            let uniform = self.ctx.getUniformLocation(self.program, name);
+            let uniform = ctx.getUniformLocation(self.program, name);
             if (!uniform) {
             throw (`Failed to get storage location of ${name}`);
             }
@@ -1115,8 +1119,6 @@ function MaxPlot(div, top, left, width, height, args) {
      * 
      * @return Float32Array of [x, y] such that x and y fall into range [-1, 1]
      */
-
-
     function scaleCoordsWebGL(coords) {
         // Safety check
         if (coords === undefined || coords.length < 2 || coords.length % 2 != 0) return;
@@ -2177,56 +2179,19 @@ function MaxPlot(div, top, left, width, height, args) {
         self.scalingDone = true;
     }
 
-    this.initDataWebGL = function() {
-        /* Scale coords and labels to fit to WebGL clip space. Bind the results and other constant data to their buffers */
+    this.setCoordsWebGL = function() {
+        /* Scale coords and labels to fit to WebGL clip space. Bind the results to the a_Position attribute */
 
         // Scale coordiantes to clip space
         const coords = scaleCoordsWebGL(self.coords.orig);
         self.coords.gl = coords;
-        const coordColors = self.col.arr;
-        const colors = self.col.pal;
-
-        // Find out what points should be behind others
-        if(WEBGL_DEBUG) console.time("Parse Depth");
-        const depthBuf = Float32Array.from(coordColors, (col) => col === 0 ? -0.5 : Math.random() * 0.5);
-        if(WEBGL_DEBUG) console.timeEnd("Parse Depth");
-
-        // Parse colors array into something WebGL can use
-        if(WEBGL_DEBUG) console.time("Parse Colors");
-
-        // Convert all hex numbers to a format WebGL can use
-        const colorRGB = colors.map(function (hex) {
-            let intHex = parseInt(hex, 16);
-            let red = (intHex & 0xff0000) >> 16;
-            let green = (intHex & 0x00ff00) >> 8;
-            let blue = (intHex & 0x0000ff) >> 0;
-            return [red, green, blue];
-        });
-
-        // Now find the color of each point
-        let colorNumbers = [];
-        for(let colorIndex of coordColors) {
-            colorNumbers.push(colorRGB[colorIndex][0], colorRGB[colorIndex][1], colorRGB[colorIndex][2]);
-        }
-        const colorBuf = new Uint8Array(colorNumbers);
-        if(WEBGL_DEBUG) console.timeEnd("Parse Colors");
-
-        // Save the coordColors array for selection
-        const colIDBuf = new Uint8Array(coordColors);
-
-        // Initialize all cells to be not selected
-        const selBuf = new Uint8Array(this.getCount());
 
         if(WEBGL_DEBUG) {
             self.ctx.finish();
-            console.time("Bind Buffers");
+            console.time("Bind Position Buffer");
         }
         self.bindBuffer(2, self.a_Position, self.coords.gl, self.ctx.FLOAT);
-        self.bindBuffer(1, self.a_Depth, depthBuf, self.ctx.FLOAT);
-        self.bindBuffer(3, self.a_Color, colorBuf, self.ctx.UNSIGNED_BYTE, true);
-        self.bindBuffer(1, self.a_ColID, colIDBuf, self.ctx.UNSIGNED_BYTE);
-        self.bindBuffer(1, self.a_Selected, selBuf, self.ctx.UNSIGNED_BYTE);
-        if(WEBGL_DEBUG) console.timeEnd("Bind Buffers");
+        if(WEBGL_DEBUG) console.timeEnd("Bind Position Buffer");
 
         // Initialize dynamic data
         self.calcRadius();
@@ -2413,11 +2378,16 @@ function MaxPlot(div, top, left, width, height, args) {
        if (opts.lines)
            self._setLines(opts["lines"], opts);
     
-       if(self.usesWebGL()) {
-           self.initDataWebGL();
+        if(self.usesWebGL()) {
+            self.setCoordsWebGL();
+
+            // Initialize selection attribute since it depends on how many points there are
+            // (Not entirely sure where the best place to put this would be)
+            const selBuf = new Uint8Array(this.getCount());
+            self.bindBuffer(1, self.a_Selected, selBuf, self.ctx.UNSIGNED_BYTE);
         } else {
-           self.scaleData();
-       }
+            self.scaleData();
+        }
     };
 
     this.setLabelCoords = function(labelCoords) {
@@ -2430,6 +2400,43 @@ function MaxPlot(div, top, left, width, height, args) {
     this.setColorArr = function(colorArr) {
     /* set the color array, one array with one integer color-index per coordinate */
        self.col.arr = colorArr;
+
+        // When using WebGL, this involves calculating and binding the color buffer
+        if(this.usesWebGL()) {
+            const colors = self.col.pal;
+            if(WEBGL_DEBUG) console.time("Parse Colors");
+
+            // Convert all hex numbers to a format WebGL can use
+            const colorRGB = colors.map(function (hex) {
+                let intHex = parseInt(hex, 16);
+                let red = (intHex & 0xff0000) >> 16;
+                let green = (intHex & 0x00ff00) >> 8;
+                let blue = (intHex & 0x0000ff) >> 0;
+                return [red, green, blue];
+            });
+
+            // Now find the color of each point
+            let colorNumbers = [];
+            for(let colorIndex of colorArr) {
+                colorNumbers.push(colorRGB[colorIndex][0], colorRGB[colorIndex][1], colorRGB[colorIndex][2]);
+            }
+            if(WEBGL_DEBUG) console.timeEnd("Parse Colors");
+
+            const colorBuf = new Uint8Array(colorNumbers);
+
+            // Save the colorArr array for fattening
+            const colIDBuf = new Uint8Array(colorArr);
+
+            // Since some colors are drawn behind other colors, calculate which colors should be around which here
+            if(WEBGL_DEBUG) console.time("Parse Depth");
+            const depthBuf = Float32Array.from(colorArr, (col) => col === 0 ? -0.5 : Math.random() * 0.5);
+            if(WEBGL_DEBUG) console.timeEnd("Parse Depth");
+
+            // Bind all appropriate buffers
+            self.bindBuffer(3, self.a_Color, colorBuf, self.ctx.UNSIGNED_BYTE, true);
+            self.bindBuffer(1, self.a_ColID, colIDBuf, self.ctx.UNSIGNED_BYTE);
+            self.bindBuffer(1, self.a_Depth, depthBuf, self.ctx.FLOAT);
+        }
     };
 
     this.setColors = function(colors) {
