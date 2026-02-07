@@ -3334,9 +3334,6 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.timer!==null)
             clearTimeout(self.timer);
         self.timer = setTimeout(self.onNoMouseMove, 130);
-        // save mouse pos for onNoMouseMove timer handler
-        self.lastMouseX = ev.clientX;
-        self.lastMouseY = ev.clientY;
 
         // label hit check requires canvas coordinates x/y
         var clientX = ev.clientX;
@@ -3368,15 +3365,10 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.mouseDownX!==null) {
             // we're panning
             if (((ev.altKey || self.dragMode==="move")) && (self.usesWebGL() || self.panCopy!==null)) {
-                var xDiff = self.mouseDownX - clientX;
-                var yDiff = self.mouseDownY - clientY;
+                // Note: If using webGL, we transelate relatively not absolutely, so use the last movement position
+                const xDiff = (self.usesWebGL() ? self.lastMouseX : self.mouseDownX) - clientX;
+                const yDiff = (self.usesWebGL() ? self.lastMouseY : self.mouseDownY) - clientY;
                 self.panBy(xDiff, yDiff);
-
-                // If using webGL, reset mouse position since that translates relatively not absolutely
-                if(self.usesWebGL()) {
-                    self.mouseDownX = clientX;
-                    self.mouseDownY = clientY;
-                }
             }
             else  {
                // zooming or selecting
@@ -3387,6 +3379,10 @@ function MaxPlot(div, top, left, width, height, args) {
                self.drawMarquee(self.mouseDownX, self.mouseDownY, clientX, clientY, forceAspect);
             }
         }
+
+        // save mouse pos for onNoMouseMove timer handler and WebGL panning
+        self.lastMouseX = ev.clientX;
+        self.lastMouseY = ev.clientY;
     };
 
     this.onNoMouseMove = function() {
