@@ -2890,6 +2890,14 @@ function MaxPlot(div, top, left, width, height, args) {
         /* clear selection */
         self.selCells.clear();
         setStatus("");
+
+        // If we're using webGL, adjust the attribute buffer
+        if(self.usesWebGL()) {
+            // Convert the selected cell set to a buffer
+            const selBuf = new Uint8Array(Array.from({length: this.getCount()}, (_ => 0)));
+            this.bindBuffer(1, this.a_Selected, selBuf, this.ctx.UNSIGNED_BYTE);
+        }
+
         if (self.onSelChange!==null && skipNotify!==true)
             self.onSelChange(self.selCells);
     };
