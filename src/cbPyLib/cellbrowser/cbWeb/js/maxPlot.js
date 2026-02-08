@@ -2918,8 +2918,7 @@ function MaxPlot(div, top, left, width, height, args) {
     this.selectAll = function(cellIdx) {
         /* add all cells to selection */
         var selCells = self.selCells;
-        var pxCoords = self.coords.px;
-        for (var i = 0, I = pxCoords.length / 2; i < I; i++) {
+        for (let i = 0; i < this.getCount(); i++) {
             selCells.add(i);
         }
         self.selCells = selCells;
@@ -2930,11 +2929,15 @@ function MaxPlot(div, top, left, width, height, args) {
         /* add all visible cells to selection */
         var selCells = self.selCells;
         var pxCoords = self.coords.px;
-        for (var i = 0; i < pxCoords.length/2; i++) {
-            var pxX = pxCoords[2*i];
-            var pxY = pxCoords[2*i+1];
-            if (isHidden(pxX, pxY))
-               continue;
+        for (var i = 0; i < self.getCount(); i++) {
+            if(this.usesWebGL()) {
+                // TODO
+            } else {
+                var pxX = pxCoords[2*i];
+                var pxY = pxCoords[2*i+1];
+                if (isHidden(pxX, pxY))
+                continue;
+            }
             selCells.add(i);
         }
         self.selCells = selCells;
