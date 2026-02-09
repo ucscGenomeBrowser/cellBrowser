@@ -162,7 +162,10 @@ function MaxPlot(div, top, left, width, height, args) {
     function isHidden(x, y) {
         /* special coords are used for circles that are off-screen or otherwise not visible */
         if(self.usesWebGL()) {
-            return false;
+            // TODO: Handle hidden circles
+            /** @type {Matrix4} */
+            const projection = self.port.projection;
+            return (x < projection.left || x > projection.right || y < projection.bottom || y > projection.top);
         } else {
             return (x===HIDCOORD && y===HIDCOORD) // not shown (e.g. no coordinate or off-screen)
         }
@@ -2940,16 +2943,12 @@ function MaxPlot(div, top, left, width, height, args) {
     this.selectVisible = function() {
         /* add all visible cells to selection */
         var selCells = self.selCells;
-        var pxCoords = self.coords.px;
+        const coords = this.usesWebGL() ? self.coords.gl : self.coords.px;
         for (var i = 0; i < self.getCount(); i++) {
-            if(this.usesWebGL()) {
-                // TODO
-            } else {
-                var pxX = pxCoords[2*i];
-                var pxY = pxCoords[2*i+1];
-                if (isHidden(pxX, pxY))
+            var x = coords[2*i];
+            var y = coords[2*i+1];
+            if (isHidden(x, y))
                 continue;
-            }
             selCells.add(i);
         }
         self.selCells = selCells;
