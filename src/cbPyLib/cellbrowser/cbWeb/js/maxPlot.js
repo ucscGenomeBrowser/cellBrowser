@@ -161,7 +161,11 @@ function MaxPlot(div, top, left, width, height, args) {
 
     function isHidden(x, y) {
         /* special coords are used for circles that are off-screen or otherwise not visible */
-       return ((x===HIDCOORD && y===HIDCOORD)) // not shown (e.g. no coordinate or off-screen)
+        if(self.usesWebGL()) {
+            return false;
+        } else {
+            return (x===HIDCOORD && y===HIDCOORD) // not shown (e.g. no coordinate or off-screen)
+        }
     }
 
     function hexToGrey(hexColors) {
@@ -2999,10 +3003,10 @@ function MaxPlot(div, top, left, width, height, args) {
         var maxY = Math.max(y1, y2);
 
         if(DEBUG) console.time("select");
-        var pxCoords = self.coords.px;
-        for (var i = 0; i < pxCoords.length/2; i++) {
-            var pxX = pxCoords[2*i];
-            var pxY = pxCoords[2*i+1];
+        const coords = self.coords.px;
+        for (var i = 0; i < coords.length/2; i++) {
+            var pxX = coords[2*i];
+            var pxY = coords[2*i+1];
             if (isHidden(pxX, pxY))
                continue;
             if ((minX <= pxX) && (pxX <= maxX) && (minY <= pxY) && (pxY <= maxY)) {
@@ -3207,9 +3211,9 @@ function MaxPlot(div, top, left, width, height, args) {
         var possIds = [];
         var radius = self.port.radius;
         for (var i = 0; i < coords.length/2; i++) {
-           let pxX = coords[2*i];
-           let pxY = coords[2*i+1];
-            if (!this.usesWebGL() && isHidden(pxX, pxY))
+            let pxX = coords[2*i];
+            let pxY = coords[2*i+1];
+            if (isHidden(pxX, pxY))
                continue;
 
             // If webGL is being used, we have to translate the clip space coordiante to pixel space
