@@ -2990,26 +2990,38 @@ function MaxPlot(div, top, left, width, height, args) {
     };
 
     this.selectInRect = function(x1, y1, x2, y2) {
-        if(this.usesWebGL()) {
-            console.warn("Rect select not currently supported");
-            return;
-        }
-        
         /* find all cells within a rectangle and add them to the selection. */
-        var minX = Math.min(x1, x2);
-        var maxX = Math.max(x1, x2);
+        let minX = Math.min(x1, x2);
+        let maxX = Math.max(x1, x2);
 
-        var minY = Math.min(y1, y2);
-        var maxY = Math.max(y1, y2);
+        let minY = Math.min(y1, y2);
+        let maxY = Math.max(y1, y2);
+
+        // If webGL is being used, rescale to clip space
+        if(this.usesWebGL()) {
+            // Invert y coordinate (makes rescaling easier)
+            // Note: this does make minY ≥ maxY, but this will become moot soon
+            minY = this.canvas.height - minY;
+            maxY = this.canvas.height - maxY;
+
+            // 
+            const glMinX = minX / self.canvas.width * 2 - 1;
+            const glMaxX = maxX / self.canvas.width * 2 - 1;
+            const glMinY = maxY / self.canvas.height * 2 - 1;
+            const glMaxY = minY / self.canvas.height * 2 - 1;
+
+            [minX, minY] = this.port.projection.getCoordinates(glMinX, glMinY);
+            [maxX, maxY] = this.port.projection.getCoordinates(glMaxX, glMaxY);
+        }
 
         if(DEBUG) console.time("select");
-        const coords = self.coords.px;
-        for (var i = 0; i < coords.length/2; i++) {
-            var pxX = coords[2*i];
-            var pxY = coords[2*i+1];
-            if (isHidden(pxX, pxY))
+        const coords = this.usesWebGL() ? self.coords.gl : self.coords.px;
+        for (let i = 0; i < coords.length/2; i++) {
+            const x = coords[2*i];
+            const y = coords[2*i+1];
+            if (isHidden(x, y))
                continue;
-            if ((minX <= pxX) && (pxX <= maxX) && (minY <= pxY) && (pxY <= maxY)) {
+            if ((minX <= x) && (x <= maxX) && (minY <= y) && (y <= maxY)) {
                 self.selCells.add(i);
             }
 
