@@ -3201,22 +3201,30 @@ function MaxPlot(div, top, left, width, height, args) {
     this.cellsAt = function(x, y) {
         /* check which cell's bounding boxes contain (x, y), return a list of the cell IDs, sorted by distance */
         //if(DEBUG) console.time("cellSearch");
-        var pxCoords = self.coords.px;
-        if (pxCoords === null || pxCoords === undefined)
+        const coords = this.usesWebGL() ? this.coords.gl : this.coords.px;
+        if (coords === null || coords === undefined)
             return null;
         var possIds = [];
         var radius = self.port.radius;
-        for (var i = 0; i < pxCoords.length/2; i++) {
-           var pxX = pxCoords[2*i];
-           var pxY = pxCoords[2*i+1];
-            if (isHidden(pxX, pxY))
+        for (var i = 0; i < coords.length/2; i++) {
+           let pxX = coords[2*i];
+           let pxY = coords[2*i+1];
+            if (!this.usesWebGL() && isHidden(pxX, pxY))
                continue;
-            var x1 = pxX - radius;
-            var y1 = pxY - radius;
-            var x2 = pxX + radius;
-            var y2 = pxY + radius;
+
+            // If webGL is being used, we have to translate the clip space coordiante to pixel space
+            if(this.usesWebGL()) {
+                const [glX, glY] = self.port.projection.multiply(pxX, pxY);
+                pxX = (glX + 1) / 2 * self.canvas.width;
+                pxY = ((glY + 1) / 2 * -self.canvas.height) + self.canvas.height;
+            }
+
+            const x1 = pxX - radius;
+            const y1 = pxY - radius;
+            const x2 = pxX + radius;
+            const y2 = pxY + radius;
             if ((x >= x1) && (x <= x2) && (y >= y1) && (y <= y2)) {
-                var dist = Math.sqrt(Math.pow(x-pxX, 2) + Math.pow(y-pxY, 2));
+                const dist = Math.sqrt(Math.pow(x-pxX, 2) + Math.pow(y-pxY, 2));
                 possIds.push([dist, i]);
             }
         }
@@ -4001,5 +4009,15 @@ class Matrix4 {
     const u = (x === undefined || x === null) ? 0 : this.left + (this.width / 2) + ((this.width * x) / 2);
     const v = (y === undefined || y === null) ? 0 : this.bottom + (this.height / 2) + ((this.height * y) / 2);
     return [u, v];
+  }
+
+  /**
+   * Multiply the provided coordinates (-1 ≤ x, y ≤ 1) by this as a transformation
+   * 
+   * @param {Number} x 
+   * @param {Number} y 
+   */
+  multiply(x, y) {
+    return [(2*x - this.left - this.right) / this.width, (2*y - this.top - this.bottom) / this.height];
   }
 }
