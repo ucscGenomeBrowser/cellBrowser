@@ -159,10 +159,18 @@ function MaxPlot(div, top, left, width, height, args) {
         self.timer = null;
     }
 
-    function isHidden(x, y) {
+    function isHidden(x, y, i) {
         /* special coords are used for circles that are off-screen or otherwise not visible */
         if(self.usesWebGL()) {
-            // TODO: Handle hidden circles
+            // Check if current cell is hidden, if applicable
+            if(i !== undefined) {
+                /** @type {Uint8Array} */
+                const hidden = self.coords.hidden;
+                if(hidden[i] == 1) {
+                    return true;
+                }
+            }
+
             /** @type {Matrix4} */
             const projection = self.port.projection;
             return (x < projection.left || x > projection.right || y < projection.bottom || y > projection.top);
@@ -226,6 +234,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.coords.px   = null;   // coordinates of cells and labels as screen pixels or (HIDCOORD,HIDCOORD) if not shown
         self.coords.gl   = null;   // coordinates of cells in WebGL space
+        self.coords.hidden = null; // Hidden coordinates (used by WebGL drawing)
         self.coords.labelBbox = null;   // cluster label bounding boxes, array of [x1,x2,x2,y2]
 
         self.col = {};
@@ -282,6 +291,7 @@ function MaxPlot(div, top, left, width, height, args) {
         attribute vec3 a_Color;
         attribute float a_ColID;
         attribute float a_Selected;
+        attribute float a_Hidden;
         
         uniform float u_Radius;
         uniform mat4 u_Projection;
@@ -295,7 +305,9 @@ function MaxPlot(div, top, left, width, height, args) {
 
         void main() {
             float l_Depth;
-            if(a_Selected == 1.0) {
+            if(a_Hidden == 1.0) {
+                l_Depth = -2.0;
+            } else if(a_Selected == 1.0) {
                 l_Depth = 0.9;
             } else if(a_ColID == u_FatID) {
                 l_Depth = 0.8;
@@ -435,6 +447,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.a_Color = getAttribute('a_Color');
         self.a_ColID = getAttribute('a_ColID');
         self.a_Selected = getAttribute('a_Selected');
+        self.a_Hidden = getAttribute('a_Hidden');
 
         // Get uniforms
         self.u_Radius = getUniform('u_Radius');
@@ -2388,10 +2401,13 @@ function MaxPlot(div, top, left, width, height, args) {
         if(self.usesWebGL()) {
             self.setCoordsWebGL();
 
-            // Initialize selection attribute since it depends on how many points there are
+            // Initialize selection and hidden attributes since they depend on how many points there are
             // (Not entirely sure where the best place to put this would be)
             const selBuf = new Uint8Array(this.getCount());
             self.bindBuffer(1, self.a_Selected, selBuf, self.ctx.UNSIGNED_BYTE);
+
+            self.coords.hidden = new Uint8Array(this.getCount());
+            self.bindBuffer(1, self.a_Hidden, self.coords.hidden, self.ctx.UNSIGNED_BYTE);
         } else {
             self.scaleData();
         }
@@ -2901,7 +2917,7 @@ function MaxPlot(div, top, left, width, height, args) {
         // If we're using webGL, adjust the attribute buffer
         if(self.usesWebGL()) {
             // Convert the selected cell set to a buffer
-            const selBuf = new Uint8Array(Array.from({length: this.getCount()}, (_ => 0)));
+            const selBuf = new Uint8Array(this.getCount());
             this.bindBuffer(1, this.a_Selected, selBuf, this.ctx.UNSIGNED_BYTE);
         }
 
@@ -2947,7 +2963,7 @@ function MaxPlot(div, top, left, width, height, args) {
         for (var i = 0; i < self.getCount(); i++) {
             var x = coords[2*i];
             var y = coords[2*i+1];
-            if (isHidden(x, y))
+            if (isHidden(x, y, i))
                 continue;
             selCells.add(i);
         }
@@ -3018,7 +3034,7 @@ function MaxPlot(div, top, left, width, height, args) {
         for (let i = 0; i < coords.length/2; i++) {
             const x = coords[2*i];
             const y = coords[2*i+1];
-            if (isHidden(x, y))
+            if (isHidden(x, y, i))
                continue;
             if ((minX <= x) && (x <= maxX) && (minY <= y) && (y <= maxY)) {
                 self.selCells.add(i);
@@ -3068,10 +3084,25 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.coords.origAll===undefined)
             self.coords.origAll = cloneArray(self.coords.orig);
         var coords = self.coords.orig;
-        for (var i = 0; i < coords.length/2; i++) {
-            if (!selCells.has(i)) {
-                coords[2*i] = HIDCOORD;
-                coords[2*i+1] = HIDCOORD;
+
+        if(this.usesWebGL()){
+            // Add any non-selected cells to the hidden array
+            /** @type {Uint8Array} */
+            let hidden = this.coords.hidden;
+            for (var i = 0; i < this.getCount(); i++) {
+                if (!selCells.has(i)) {
+                    hidden[i] = 1;
+                }
+            }
+
+            // Rebind the hidden attribute
+            this.bindBuffer(1, this.a_Hidden, this.coords.hidden, self.ctx.UNSIGNED_BYTE);
+        } else {
+            for (var i = 0; i < coords.length/2; i++) {
+                if (!selCells.has(i)) {
+                    coords[2*i] = HIDCOORD;
+                    coords[2*i+1] = HIDCOORD;
+                }
             }
         }
         self.scaleData();
@@ -3087,25 +3118,45 @@ function MaxPlot(div, top, left, width, height, args) {
         var selCells = self.selCells;
         var coords = self.coords.orig;
 
-        for (var i = 0; i < coords.length/2; i++) {
-            if (selCells.has(i)) {
-                coords[2*i] = HIDCOORD;
-                coords[2*i+1] = HIDCOORD;
+        if(this.usesWebGL()) {
+            // Add any selected cells to the hidden array
+            /** @type {Uint8Array} */
+            let hidden = this.coords.hidden;
+            for(const selCell of selCells.values()) {
+                hidden[selCell] = 1;
             }
+
+            // Rebind the hidden attribute
+            this.bindBuffer(1, this.a_Hidden, this.coords.hidden, self.ctx.UNSIGNED_BYTE);
+        } else {
+            // Set all selected cells to HIDCOORD
+            for (var i = 0; i < coords.length/2; i++) {
+                if (selCells.has(i)) {
+                    coords[2*i] = HIDCOORD;
+                    coords[2*i+1] = HIDCOORD;
+                }
+            }
+
+            self.scaleData();
         }
 
-        self.scaleData();
+        // Unselect all cells
         self.selectSet([]);
         self._selUpdate();
     }   
 
     this.unhideAll = function() {
         /* undo the hide operation */
-        if (self.coords.origAll!==undefined) {
-            self.coords.orig = self.coords.origAll;
-            self.coords.origAll = undefined;
+        if(this.usesWebGL()) {
+            this.coords.hidden.fill(0);
+            this.bindBuffer(1, this.a_Hidden, this.coords.hidden, self.ctx.UNSIGNED_BYTE);
+        } else {
+            if (self.coords.origAll!==undefined) {
+                self.coords.orig = self.coords.origAll;
+                self.coords.origAll = undefined;
+            }
+            self.scaleData();
         }
-        self.scaleData();
     }
 
     this.getCount = function() {
@@ -3118,7 +3169,7 @@ function MaxPlot(div, top, left, width, height, args) {
         let count = 0;
         let coords = self.coords.orig;
         for (var i = 0; i < coords.length/2; i++) {
-            if (!isHidden(coords[2*i], coords[2*i+1]))
+            if (!isHidden(coords[2*i], coords[2*i+1], i))
                 count++;
         }
         return count;
@@ -3224,7 +3275,7 @@ function MaxPlot(div, top, left, width, height, args) {
         for (var i = 0; i < coords.length/2; i++) {
             let pxX = coords[2*i];
             let pxY = coords[2*i+1];
-            if (isHidden(pxX, pxY))
+            if (isHidden(pxX, pxY, i))
                continue;
 
             // If webGL is being used, we have to translate the clip space coordiante to pixel space
@@ -3569,7 +3620,7 @@ function MaxPlot(div, top, left, width, height, args) {
        for (var i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
            var pxY = pxCoords[2*i+1];
-           if (isHidden(pxX, pxY))
+           if (isHidden(pxX, pxY, i))
                continue;
            var col = colors[coordColors[i]];
 
@@ -3883,7 +3934,7 @@ function MaxPlot(div, top, left, width, height, args) {
             var x = coords[i * 2];
             var y = coords[i * 2 + 1];
 
-            if (isHidden(x, y))
+            if (isHidden(x, y, i))
                 continue;
 
             calc[label][0].push(x);
