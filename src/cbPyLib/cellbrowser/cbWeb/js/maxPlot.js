@@ -2426,39 +2426,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // When using WebGL, this involves calculating and binding the color buffer
         if(this.usesWebGL()) {
-            const colors = self.col.pal;
-            if(WEBGL_DEBUG) console.time("Parse Colors");
-
-            // Convert all hex numbers to a format WebGL can use
-            const colorRGB = colors.map(function (hex) {
-                let intHex = parseInt(hex, 16);
-                let red = (intHex & 0xff0000) >> 16;
-                let green = (intHex & 0x00ff00) >> 8;
-                let blue = (intHex & 0x0000ff) >> 0;
-                return [red, green, blue];
-            });
-
-            // Now find the color of each point
-            let colorNumbers = [];
-            for(let colorIndex of colorArr) {
-                colorNumbers.push(colorRGB[colorIndex][0], colorRGB[colorIndex][1], colorRGB[colorIndex][2]);
-            }
-            if(WEBGL_DEBUG) console.timeEnd("Parse Colors");
-
-            const colorBuf = new Uint8Array(colorNumbers);
-
-            // Save the colorArr array for fattening
-            const colIDBuf = new Uint8Array(colorArr);
-
-            // Since some colors are drawn behind other colors, calculate which colors should be around which here
-            if(WEBGL_DEBUG) console.time("Parse Depth");
-            const depthBuf = Float32Array.from(colorArr, (col) => col === 0 ? -0.5 : Math.random() * 0.5);
-            if(WEBGL_DEBUG) console.timeEnd("Parse Depth");
-
-            // Bind all appropriate buffers
-            self.bindBuffer(3, self.a_Color, colorBuf, self.ctx.UNSIGNED_BYTE, true);
-            self.bindBuffer(1, self.a_ColID, colIDBuf, self.ctx.UNSIGNED_BYTE);
-            self.bindBuffer(1, self.a_Depth, depthBuf, self.ctx.FLOAT);
+            this.bindColors();
         }
     };
 
@@ -2478,7 +2446,60 @@ function MaxPlot(div, top, left, width, height, args) {
            });
            $(self.flipBookEl).on("slidestart", onChangeFlipBook);
         }
+
+        if(this.usesWebGL()) {
+            this.bindColors();
+        }
     };
+
+    // If using webGL, calculates what points have what colors.
+    // Also calculates depth values, which are related to color
+    this.bindColors = function() {
+        if(!this.usesWebGL()) {
+            return;
+        }
+
+        const colors = self.col.pal;
+        const colorArr = self.col.arr;
+
+        // Safety check: Cannot parse colors if colors or colorArr have not been defined yet
+        if(colors === undefined || colors === null || colorArr === undefined || colorArr === null) {
+            return;
+        }
+
+        if(WEBGL_DEBUG) console.time("Parse Colors");
+
+        // Convert all hex numbers to a format WebGL can use
+        const colorRGB = colors.map(function (hex) {
+            let intHex = parseInt(hex, 16);
+            let red = (intHex & 0xff0000) >> 16;
+            let green = (intHex & 0x00ff00) >> 8;
+            let blue = (intHex & 0x0000ff) >> 0;
+            return [red, green, blue];
+        });
+
+        // Now find the color of each point
+        let colorNumbers = [];
+        for(let colorIndex of colorArr) {
+            colorNumbers.push(colorRGB[colorIndex][0], colorRGB[colorIndex][1], colorRGB[colorIndex][2]);
+        }
+        if(WEBGL_DEBUG) console.timeEnd("Parse Colors");
+
+        const colorBuf = new Uint8Array(colorNumbers);
+
+        // Save the colorArr array for fattening
+        const colIDBuf = new Uint8Array(colorArr);
+
+        // Since some colors are drawn behind other colors, calculate which colors should be around which here
+        if(WEBGL_DEBUG) console.time("Parse Depth");
+        const depthBuf = Float32Array.from(colorArr, (col) => col === 0 ? -0.5 : Math.random() * 0.5);
+        if(WEBGL_DEBUG) console.timeEnd("Parse Depth");
+
+        // Bind all appropriate buffers
+        self.bindBuffer(3, self.a_Color, colorBuf, self.ctx.UNSIGNED_BYTE, true);
+        self.bindBuffer(1, self.a_ColID, colIDBuf, self.ctx.UNSIGNED_BYTE);
+        self.bindBuffer(1, self.a_Depth, depthBuf, self.ctx.FLOAT);
+    }
 
     this.calcRadius = function() {
         /* calculate the radius from current zoom factor and set radius, alpha and zoomFact in self.port */
