@@ -3832,7 +3832,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var opts = cloneObj(self.globalOpts);
         opts.showClose = true;
 
-        var plot2 = new MaxPlot(newDiv, newTop, newLeft, newWidth, newHeight, {"showClose" : true, "showSliders" : false});
+        var plot2 = new MaxPlot(newDiv, newTop, newLeft, newWidth, newHeight, {drawMode: self.mode, "showClose" : true, "showSliders" : false});
 
         plot2.statusLine.style.display = "none";
 
@@ -3858,6 +3858,18 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.onLabelHover = self.onLabelHover;
         plot2.onNoLabelHover = self.onNoLabelHover;
         plot2.onActiveChange = self.onActiveChange;
+
+        if(this.usesWebGL()) {
+            // Initialiaze WebGL buffers on child plot
+            plot2.bindBuffer(2, plot2.a_Position, plot2.coords.gl, plot2.ctx.FLOAT);
+
+            plot2.bindColors();
+
+            const selBuf = new Uint8Array(Array.from({length: plot2.getCount()}, (_, i) => plot2.selCells.has(i) ? 1 : 0));
+            plot2.bindBuffer(1, plot2.a_Selected, selBuf, plot2.ctx.UNSIGNED_BYTE);
+
+            plot2.bindBuffer(1, plot2.a_Hidden, plot2.coords.hidden, plot2.ctx.UNSIGNED_BYTE);
+        }
 
         plot2.drawDots();
 
