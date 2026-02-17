@@ -102,8 +102,8 @@ function MaxPlot(div, top, left, width, height, args) {
         self.div = div;
 
         self.gSampleDescription = "cell";
-        self.ctx = null; // the canvas context
-        self.canvas = addCanvasToDiv(div, top, left, width, height-gStatusHeight );
+        [self.ctx, self.canvas] = addCanvasToDiv(div, top, left, width, height-gStatusHeight, 'mpCanvas', self.mode);
+        if(this.usesWebGL()) [self.labelCtx, self.labelCanvas] = addCanvasToDiv(div, top, left, width / 2, height-gStatusHeight, 'mpLabelCanvas', 1);
 
         self.interact = false;
 
@@ -915,14 +915,15 @@ function MaxPlot(div, top, left, width, height, args) {
        self.div.appendChild(div);
     }
 
-    function addCanvasToDiv(div, top, left, width, height) {
+    function addCanvasToDiv(div, top, left, width, height, id = 'mpCanvas', drawMode = self.mode) {
         /* add a canvas element to the body element of the current page and keep left/top/width/eight in self */
+        /** @type {HTMLCanvasElement} */
         var canv = document.createElement('canvas');
         self.canvasDiv = canv;
-        canv.id = 'mpCanvas';
+        canv.id = id;
         //canv.style.border = "1px solid #AAAAAA";
         canv.style.backgroundColor = "white";
-        canv.style.position = "relative";
+        canv.style.position = "absolute";
         canv.style.display = "block";
         canv.style.width = width+"px";
         canv.style.height = height+"px";
@@ -939,22 +940,22 @@ function MaxPlot(div, top, left, width, height, args) {
         self.left = left;
 
         div.appendChild(canv); // adds the canvas to the div element
-        self.canvas = canv;
 
         // Save the drawing context
         // Mode 0 and 1: CanvasRenderingContext2D
         // Mode 2: WebGLRenderingContext
-        switch(self.mode){
+        let ctx;
+        switch(drawMode){
             case 0:
             case 1:
                 // alpha:false recommended by https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Optimizing_canvas
-                self.ctx = self.canvas.getContext("2d", { alpha: false });
+                ctx = canv.getContext("2d", { alpha: false });
                 break;
             case 2:
                 // Find the canvas' webgl2 context
-                self.ctx = self.canvas.getContext("webgl2");
+                ctx = canv.getContext("webgl2");
 
-                if(!self.ctx) {
+                if(!ctx) {
                     console.error("WebGL 2 not supported");
                     return;
                 }
@@ -966,9 +967,9 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // by default, the canvas background is transparent+black
         // we use alpha=false, so we need to initialize the canvas with white pixels
-        clearCanvas(self.ctx, width, height);
+        clearCanvas(ctx, width, height, drawMode);
 
-        return canv;
+        return [ctx, canv];
     }
 
     function scaleLabels(labels, zoomRange, borderSize, winWidth, winHeight) {
@@ -997,7 +998,7 @@ function MaxPlot(div, top, left, width, height, args) {
             var y = annot[1];
             var text = annot[2];
             // XX ignore anything outside of current zoom range. Performance?
-            if (isHidden(x,y) || (x < minX) || (x > maxX) || (y < minY) || (y > maxY)) {
+            if ((isHidden(x,y) && !self.usesWebGL()) || (x < minX) || (x > maxX) || (y < minY) || (y > maxY)) {
                 pxLabels.push(null);
             }
             else {
@@ -1456,73 +1457,67 @@ function MaxPlot(div, top, left, width, height, args) {
             return undefined;
 
         if(DEBUG) console.time("labels");
-        if(!self.usesWebGL()) {
-            // Drawing mode uses CanvasRenderingContext2D
-            ctx.save();
-            ctx.font = "bold "+gTextSize+"px Sans-serif"
-            ctx.globalAlpha = 1.0;
+        ctx.save();
+        ctx.font = "bold "+gTextSize+"px Sans-serif"
+        ctx.globalAlpha = 1.0;
 
-            //ctx.strokeStyle = '#EEEEEE';
-            if (doGrey===undefined) {
-                ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
-                ctx.lineWidth = 5;
-                ctx.miterLimit =2;
-            }
-            //else
-                //ctx.strokeStyle = "rgba(20, 20, 20, 0.3)";
-
-            ctx.textBaseline = "top";
-
-            if (doGrey===undefined) {
-                ctx.fillStyle = "rgba(0,0,0,0.8)";
-                ctx.shadowBlur=6;
-                ctx.shadowColor="white";
-            }
-            else
-                ctx.fillStyle = "rgba(0,0,0,1.0)";
-
-            ctx.textAlign = "left";
-
-            var addMargin = 1; // how many pixels to extend the bbox around the text, make clicking easier
-            var bboxArr = []; // array of click hit boxes
-
-            for (var i=0; i < labelCoords.length; i++) {
-                var coord = labelCoords[i];
-                if (coord===null) { // outside of view range, push a null to avoid messing up the order of bboxArr
-                    bboxArr.push( null );
-                    continue;
-                }
-
-                var x = coord[0];
-                var y = coord[1];
-                var text = coord[2];
-
-                var textWidth = Math.round(ctx.measureText(text).width);
-                // move x to the left, so text is centered on x
-                x = x - Math.round(textWidth*0.5);
-
-                var textX1 = x;
-                var textY1 = y;
-                var textX2 = Math.round(x+textWidth);
-                var textY2 = y+gTextSize;
-
-                // don't draw labels where the midpoint is off-screen
-                if (x<0 || y<0 || x>winWidth || y>winHeight) {
-                    bboxArr.push( null );
-                    continue;
-                }
-
-
-                ctx.strokeText(text,x,y);
-                ctx.fillText(text,x,y);
-
-                bboxArr.push( [textX1-addMargin, textY1-addMargin, textX2+addMargin, textY2+addMargin] );
-            }
-            ctx.restore();
-        } else if(self.mode === 2) {
-            // Drawing mode uses WebGL2RenderingContext
-            console.warn("Drawing Labels Not Yet Supported for WebGL Drawing")
+        //ctx.strokeStyle = '#EEEEEE';
+        if (doGrey===undefined) {
+            ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+            ctx.lineWidth = 5;
+            ctx.miterLimit =2;
         }
+        //else
+            //ctx.strokeStyle = "rgba(20, 20, 20, 0.3)";
+
+        ctx.textBaseline = "top";
+
+        if (doGrey===undefined) {
+            ctx.fillStyle = "rgba(0,0,0,0.8)";
+            ctx.shadowBlur=6;
+            ctx.shadowColor="white";
+        }
+        else
+            ctx.fillStyle = "rgba(0,0,0,1.0)";
+
+        ctx.textAlign = "left";
+
+        var addMargin = 1; // how many pixels to extend the bbox around the text, make clicking easier
+        var bboxArr = []; // array of click hit boxes
+
+        for (var i=0; i < labelCoords.length; i++) {
+            var coord = labelCoords[i];
+            if (coord===null) { // outside of view range, push a null to avoid messing up the order of bboxArr
+                bboxArr.push( null );
+                continue;
+            }
+
+            var x = coord[0];
+            var y = coord[1];
+            var text = coord[2];
+
+            var textWidth = Math.round(ctx.measureText(text).width);
+            // move x to the left, so text is centered on x
+            x = x - Math.round(textWidth*0.5);
+
+            var textX1 = x;
+            var textY1 = y;
+            var textX2 = Math.round(x+textWidth);
+            var textY2 = y+gTextSize;
+
+            // don't draw labels where the midpoint is off-screen
+            if (x<0 || y<0 || x>winWidth || y>winHeight) {
+                bboxArr.push( null );
+                continue;
+            }
+
+
+            ctx.strokeText(text,x,y);
+            ctx.fillText(text,x,y);
+
+            bboxArr.push( [textX1-addMargin, textY1-addMargin, textX2+addMargin, textY2+addMargin] );
+        }
+        ctx.restore();
         if(DEBUG) console.timeEnd("labels");
         return bboxArr;
     }
@@ -2053,16 +2048,16 @@ function MaxPlot(div, top, left, width, height, args) {
         return obj; // not needed, but more explicit
     }
 
-    function clearCanvas(ctx, width, height) {
+    function clearCanvas(ctx, width, height, drawMode = self.mode) {
         /* clear with a white background */
-        switch(self.mode) {
+        switch(drawMode) {
             case 0:
             case 1:
                 // jsperf says this is fastest on Chrome, and still OK-ish in FF
                 //if(DEBUG) console.time("clear");
                 ctx.save();
                 ctx.globalAlpha = 1.0;
-                ctx.fillStyle = "rgb(255,255,255)";
+                ctx.fillStyle = "rgba(255,255,255)";
                 ctx.fillRect(0, 0, width, height);
                 ctx.restore();
                 //if(DEBUG) console.timeEnd("clear");
@@ -2666,7 +2661,7 @@ function MaxPlot(div, top, left, width, height, args) {
             self.canvas.height
         );
         self.coords.labelBbox = drawLabels(
-            self.ctx,
+            this.usesWebGL() ? this.labelCtx : self.ctx,
             self.coords.pxLabels,
             self.canvas.width,
             self.canvas.height,
@@ -2681,7 +2676,7 @@ function MaxPlot(div, top, left, width, height, args) {
             self.canvas.width,
             self.canvas.height
         );
-        drawLabels(self.ctx, self.coords.pxAnnots, self.canvas.width, self.canvas.height, self.port.zoomFact, true);
+        drawLabels(this.usesWebGL() ? this.labelCtx : self.ctx, self.coords.pxAnnots, self.canvas.width, self.canvas.height, self.port.zoomFact, true);
     };
 
     this.cellsAtPixel = function(x, y) {
@@ -3967,7 +3962,7 @@ function MaxPlot(div, top, left, width, height, args) {
             var x = coords[i * 2];
             var y = coords[i * 2 + 1];
 
-            if (isHidden(x, y, i))
+            if (isHidden(x, y, i) && !this.usesWebGL())
                 continue;
 
             calc[label][0].push(x);
