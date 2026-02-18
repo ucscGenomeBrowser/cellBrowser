@@ -2270,6 +2270,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
        // css and actual canvas sizes: these must be identical, otherwise canvas gets super slow
        self.canvas.style.width = width+"px";
+       if(this.usesWebGL()) self.labelCanvas.style.width = width+"px";
        self.width = width;
        self.height = height;
        //let canvHeight = height - gStatusHeight;
@@ -2278,6 +2279,11 @@ function MaxPlot(div, top, left, width, height, args) {
        self.canvas.height = canvHeight;
        self.canvas.width = width;
        self.canvas.style.height = canvHeight+"px";
+       if(this.usesWebGL()) {
+           self.labelCanvas.width = width;
+           self.labelCanvas.height = canvHeight;
+           self.labelCanvas.style.height = canvHeight+"px";
+       }
        self.zoomDiv.style.top = (height-gZoomFromBottom)+"px";
        self.zoomDiv.style.left = (gZoomFromLeft)+"px";
 
