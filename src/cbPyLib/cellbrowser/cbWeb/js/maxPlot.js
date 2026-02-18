@@ -2656,7 +2656,7 @@ function MaxPlot(div, top, left, width, height, args) {
         /* draw only the labels */
         self.coords.pxLabels = scaleLabels(
             self.coords.labels,
-            self.port.zoomRange,
+            this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
             self.port.radius,
             self.canvas.width,
             self.canvas.height
@@ -2672,7 +2672,7 @@ function MaxPlot(div, top, left, width, height, args) {
         // draw annotations - look like labels, but cannot be clicked
         self.coords.pxAnnots = scaleLabels(
             self.coords.coordInfo.annots,
-            self.port.zoomRange,
+            this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
             self.port.radius,
             self.canvas.width,
             self.canvas.height
@@ -3715,12 +3715,22 @@ function MaxPlot(div, top, left, width, height, args) {
         for (var i = 0; i<newLabels.length; i++)
             self.coords.labels[i][2] = newLabels[i];
 
-        self.coords.pxLabels = scaleLabels(self.coords.labels, self.port.zoomRange, self.port.radius,
-                                           self.canvas.width, self.canvas.height);
+        self.coords.pxLabels = scaleLabels(
+            self.coords.labels,
+            this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
+            self.port.radius,
+            self.canvas.width,
+            self.canvas.height
+        );
 
         if (self.coords.annots) {
-            let pxAnnots = scaleLabels(self.coords.annots, self.port.zoomRange, self.port.radius,
-                                           self.canvas.width, self.canvas.height);
+            let pxAnnots = scaleLabels(
+                self.coords.annots,
+                this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
+                self.port.radius,
+                self.canvas.width,
+                self.canvas.height
+            );
             for (let pxa of pxAnnots)
                 self.coords.labels.push(pxa);
         }
@@ -4115,5 +4125,38 @@ class Matrix4 {
    */
   multiply(x, y) {
     return [(2*x - this.left - this.right) / this.width, (2*y - this.top - this.bottom) / this.height];
+  }
+
+  /**
+   * Convert the current transformation to pixel space
+   * 
+   * @param {Object} zr The initial zoomrange
+   * @param {Number} canvWidth
+   * @param {Number} canvHeight
+   */
+  pxBounds(zr, canvWidth, canvHeight) {
+    const pxSpanX = zr.maxX - zr.minX;
+    const pxSpanY = zr.maxY - zr.minY;
+    const pxCenterX = zr.minX + pxSpanX / 2;
+    const pxCenterY = zr.minY + pxSpanY / 2;
+    const [glCenterX, glCenterY] = this.multiply(0, 0);
+
+    const [pxScaleFactorX, pxScaleFactorY] = [pxSpanX / canvWidth, pxSpanY / canvHeight]
+    const [glScaleFactorX, glScaleFactorY] = [this.width / 2, this.height / 2];
+
+    const newPxCenterX = pxCenterX - glCenterX * (canvWidth / 2) * pxScaleFactorX * glScaleFactorX;
+    const newPxCenterY = pxCenterY - glCenterY * (canvHeight / 2) * pxScaleFactorY * glScaleFactorY;
+
+    const newMinX = newPxCenterX - pxSpanX / 2 * glScaleFactorX;
+    const newMaxX = newPxCenterX + pxSpanX / 2 * glScaleFactorX;
+    const newMinY = newPxCenterY - pxSpanY / 2 * glScaleFactorY;
+    const newMaxY = newPxCenterY + pxSpanY / 2 * glScaleFactorY;
+
+    return {
+        minX: newMinX,
+        maxX: newMaxX,
+        minY: newMinY,
+        maxY: newMaxY
+    }
   }
 }
