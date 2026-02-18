@@ -462,6 +462,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.clear = function() {
         clearCanvas(self.ctx, self.canvas.width, self.canvas.height);
+        if(this.usesWebGL()) clearCanvas(this.labelCtx, this.labelCanvas.width, this.labelCanvas.height, true);
     };
 
     this.setTitle = function (text) {
@@ -966,7 +967,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // by default, the canvas background is transparent+black
         // we use alpha=false, so we need to initialize the canvas with white pixels
-        clearCanvas(ctx, width, height, drawMode);
+        clearCanvas(ctx, width, height, transparent);
 
         return [ctx, canv];
     }
@@ -2047,26 +2048,26 @@ function MaxPlot(div, top, left, width, height, args) {
         return obj; // not needed, but more explicit
     }
 
-    function clearCanvas(ctx, width, height, drawMode = self.mode) {
-        /* clear with a white background */
-        switch(drawMode) {
-            case 0:
-            case 1:
+    function clearCanvas(ctx, width, height, transparent = false) {
+        if(ctx instanceof CanvasRenderingContext2D){
                 // jsperf says this is fastest on Chrome, and still OK-ish in FF
                 //if(DEBUG) console.time("clear");
                 ctx.save();
-                // ctx.globalAlpha = 1.0;
-                // ctx.fillStyle = "rgba(255,255,255)";
-                // ctx.fillRect(0, 0, width, height);
-                ctx.clearRect(0, 0, width, height);
+
+                if(transparent) {
+                    ctx.clearRect(0, 0, width, height);
+                } else {
+                    ctx.globalAlpha = 1.0;
+                    ctx.fillStyle = "rgba(255,255,255)";
+                    ctx.fillRect(0, 0, width, height);
+                }
+
                 ctx.restore();
                 //if(DEBUG) console.timeEnd("clear");
-                break;
-            case 2:
+        } else if(ctx instanceof WebGL2RenderingContext){
                 ctx.clear(ctx.COLOR_BUFFER_BIT | ctx.DEPTH_BUFFER_BIT);
-                break;
-            default:
-                break;
+        } else {
+                console.error(`Unsupported Canvas Rendering Context: ${Object.prototype.toString(ctx)}`);
         }
     }
 
