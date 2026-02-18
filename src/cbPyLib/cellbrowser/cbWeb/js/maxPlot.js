@@ -102,8 +102,8 @@ function MaxPlot(div, top, left, width, height, args) {
         self.div = div;
 
         self.gSampleDescription = "cell";
-        [self.ctx, self.canvas] = addCanvasToDiv(div, top, left, width, height-gStatusHeight, 'mpCanvas', self.mode);
-        if(this.usesWebGL()) [self.labelCtx, self.labelCanvas] = addCanvasToDiv(div, top, left, width / 2, height-gStatusHeight, 'mpLabelCanvas', 1);
+        [self.ctx, self.canvas] = addCanvasToDiv(div, top, left, width, height-gStatusHeight, false, 'mpCanvas', self.mode);
+        if(this.usesWebGL()) [self.labelCtx, self.labelCanvas] = addCanvasToDiv(div, top, left, width, height-gStatusHeight, true, 'mpLabelCanvas', 1);
 
         self.interact = false;
 
@@ -915,14 +915,13 @@ function MaxPlot(div, top, left, width, height, args) {
        self.div.appendChild(div);
     }
 
-    function addCanvasToDiv(div, top, left, width, height, id = 'mpCanvas', drawMode = self.mode) {
+    function addCanvasToDiv(div, top, left, width, height, transparent = false, id = 'mpCanvas', drawMode = self.mode) {
         /* add a canvas element to the body element of the current page and keep left/top/width/eight in self */
         /** @type {HTMLCanvasElement} */
         var canv = document.createElement('canvas');
-        self.canvasDiv = canv;
         canv.id = id;
         //canv.style.border = "1px solid #AAAAAA";
-        canv.style.backgroundColor = "white";
+        canv.style.backgroundColor = transparent ? "transparent" : "white";
         canv.style.position = "absolute";
         canv.style.display = "block";
         canv.style.width = width+"px";
@@ -949,7 +948,7 @@ function MaxPlot(div, top, left, width, height, args) {
             case 0:
             case 1:
                 // alpha:false recommended by https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Optimizing_canvas
-                ctx = canv.getContext("2d", { alpha: false });
+                ctx = canv.getContext("2d", { alpha: transparent });
                 break;
             case 2:
                 // Find the canvas' webgl2 context
@@ -2056,9 +2055,10 @@ function MaxPlot(div, top, left, width, height, args) {
                 // jsperf says this is fastest on Chrome, and still OK-ish in FF
                 //if(DEBUG) console.time("clear");
                 ctx.save();
-                ctx.globalAlpha = 1.0;
-                ctx.fillStyle = "rgba(255,255,255)";
-                ctx.fillRect(0, 0, width, height);
+                // ctx.globalAlpha = 1.0;
+                // ctx.fillStyle = "rgba(255,255,255)";
+                // ctx.fillRect(0, 0, width, height);
+                ctx.clearRect(0, 0, width, height);
                 ctx.restore();
                 //if(DEBUG) console.timeEnd("clear");
                 break;
@@ -2884,7 +2884,7 @@ function MaxPlot(div, top, left, width, height, args) {
             self.panCopy = document.createElement('canvas'); // not added to DOM, will be gc'ed
             self.panCopy.width = self.canvas.width;
             self.panCopy.height = self.canvas.height;
-            var destCtx = self.panCopy.getContext("2d", { alpha: false });
+            var destCtx = self.panCopy.getContext("2d", { alpha: true });
             destCtx.drawImage(self.canvas, 0, 0);
        }
     }
@@ -3667,15 +3667,16 @@ function MaxPlot(div, top, left, width, height, args) {
     };
 
     this.setupMouse = function() {
+        const canvas = this.usesWebGL() ? this.labelCanvas : this.canvas;
        // setup the mouse callbacks
-       self.canvas.addEventListener('mousedown', self.onMouseDown);
-       self.canvas.addEventListener("mousemove", self.onMouseMove);
-       self.canvas.addEventListener("mouseup", self.onMouseUp);
+       canvas.addEventListener('mousedown', self.onMouseDown);
+       canvas.addEventListener("mousemove", self.onMouseMove);
+       canvas.addEventListener("mouseup", self.onMouseUp);
        // when the user moves the mouse, the mouse is often NOT on the canvas,
        // but on the marquee box, so connect this one, too.
        self.selectBox.addEventListener("mouseup", self.onMouseUp);
 
-       self.canvas.addEventListener("wheel", self.onWheel);
+       canvas.addEventListener("wheel", self.onWheel);
     };
 
     this.setShowLabels = function(trueOrFalse) {
