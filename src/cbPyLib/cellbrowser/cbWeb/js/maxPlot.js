@@ -102,8 +102,17 @@ function MaxPlot(div, top, left, width, height, args) {
         self.div = div;
 
         self.gSampleDescription = "cell";
-        [self.ctx, self.canvas] = addCanvasToDiv(div, top, left, width, height-gStatusHeight, false, 'mpCanvas', self.mode);
-        if(this.usesWebGL()) [self.labelCtx, self.labelCanvas] = addCanvasToDiv(div, top, left, width, height-gStatusHeight, true, 'mpLabelCanvas', 1);
+
+        let canvDiv = document.createElement('div');
+        canvDiv.id = 'mpCanvases';
+        canvDiv.style.position = "relative";
+        canvDiv.style.display = "block";
+        canvDiv.style.width = `${width}px`;
+        canvDiv.style.height = `${height - gStatusHeight}px`;
+        div.appendChild(canvDiv);
+
+        [self.ctx, self.canvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, false, 'mpCanvas', self.mode);
+        if(this.usesWebGL()) [self.labelCtx, self.labelCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, true, 'mpLabelCanvas', 1);
 
         self.interact = false;
 
@@ -2254,6 +2263,9 @@ function MaxPlot(div, top, left, width, height, args) {
        /* resize the canvas and move the status line, don't rescale or draw  */
        self.div.style.width = width+"px";
        self.div.style.height = height+"px";
+
+       self.canvDiv.style.width = width+"px";
+       self.canvDiv.style.height = height+"px";
 
        // if in split screen mode, pass on the message to the second window
        if (self.childPlot) {
