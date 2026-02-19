@@ -2388,14 +2388,19 @@ function MaxPlot(div, top, left, width, height, args) {
            self.coords.aspectRatio = coordInfo.aspectRatio;
 
        var count = 0;
-       for (var i = 0; i < coords.length/2; i++) {
-           var cellX = coords[i*2];
-           var cellY = coords[i*2+1];
-           if (!(isHidden(cellX, cellY)))
-               count++;
-       }
 
-       setStatus(count+ " visible " + self.gSampleDescription+"s loaded");
+        if(this.usesWebGL()) {
+            count = coords.length / 2;
+        } else {
+            for (var i = 0; i < coords.length/2; i++) {
+                var cellX = coords[i*2];
+                var cellY = coords[i*2+1];
+                if (!(isHidden(cellX, cellY)))
+                    count++;
+            }
+        }
+
+       setStatus(count+ (this.usesWebGL() ? " " : " visible ") + self.gSampleDescription+"s loaded");
 
        if (opts.lines)
            self._setLines(opts["lines"], opts);
