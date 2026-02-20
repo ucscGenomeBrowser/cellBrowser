@@ -286,10 +286,15 @@ function MaxPlot(div, top, left, width, height, args) {
         const ctx = self.ctx;
 
         // Set the canvas' clear color
-        ctx.clearColor(1, 1, 1, 1);
+        ctx.clearColor(0, 0, 0, 1);
 
         // Enable 3D Graphics
         ctx.enable(ctx.DEPTH_TEST);
+
+        // Enable blending and set blend equation
+        // Derived equation in CMY space: A_Src * Col_Src + (1 - A_Src) * A_Dst * Col_Dst
+        this.ctx.enable(this.ctx.BLEND);
+        this.ctx.blendFuncSeparate(this.ctx.SRC_ALPHA, this.ctx.ONE_MINUS_SRC_ALPHA, this.ctx.ONE, this.ctx.ONE);
 
         // Crate the GLSL shaders from the external source code
         // Vertex shader GLSL code
@@ -368,9 +373,9 @@ function MaxPlot(div, top, left, width, height, args) {
             if(l_Dist > u_Radius) {
                 discard;
             } else if(v_Selected == 1.0 && l_Dist > u_Radius - 2.0) {
-                gl_FragColor = vec4(0.0, 0.0, 0.0, u_Alpha);
+                gl_FragColor = vec4(1.0, 1.0, 1.0, u_Alpha);
             } else {
-                gl_FragColor = vec4(v_Color, u_Alpha);
+                gl_FragColor = vec4(vec3(1.0, 1.0, 1.0) - v_Color, u_Alpha);
             }
         }
         `;
@@ -931,7 +936,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var canv = document.createElement('canvas');
         canv.id = id;
         //canv.style.border = "1px solid #AAAAAA";
-        canv.style.backgroundColor = transparent ? "transparent" : "white";
+        canv.style.backgroundColor = transparent ? "transparent" : drawMode == 2 ? "black" : "white";
         canv.style.position = "absolute";
         canv.style.display = "block";
         canv.style.width = width+"px";
@@ -941,6 +946,11 @@ function MaxPlot(div, top, left, width, height, args) {
         // No scaling = one unit on screen is one pixel. Essential for speed.
         canv.width = width;
         canv.height = height;
+        
+        // To simulate subtractive blending, we invert the colors on WebGL canvases, then pass in inverted (CMY) colors
+        if(drawMode == 2) {
+            canv.style.filter = "invert(1)";
+        }
 
         // need to keep these as ints, need them all the time
         self.width = width;
@@ -1897,7 +1907,7 @@ function MaxPlot(div, top, left, width, height, args) {
         ctx.uniform1f(self.u_FatID, fatIdx ?? -1);
         ctx.uniform1f(self.u_AnySelected, selCells.size > 0 ? 1 : 0);
 
-        ctx.uniform1f(self.u_Alpha, 1);
+        ctx.uniform1f(self.u_Alpha, alpha);
         ctx.uniform1f(self.u_CanvWidth, self.canvas.width);
         ctx.uniform1f(self.u_CanvHeight, self.canvas.height);
 
