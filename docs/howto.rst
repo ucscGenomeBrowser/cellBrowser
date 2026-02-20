@@ -442,3 +442,100 @@ After all is set up, build your cell browser:
 ::
 
  cbBuild -o alpha
+
+How to convert your BioConductoR SpatialExperiment object into a SeuratObject
+^^^^
+
+Step 1: Install the SpatialExperiment package
+""""
+
+Launch the R REPL CLI and install these, if needed
+::
+
+  install.packages("BiocManager")
+  BiocManager::install("GenomeInfoDb")
+  BiocManager::install("SpatialExperiment")
+  library(GenomeInfoDb)
+  library(SpatialExperiment)
+  library(Seurat)
+
+
+Step 2: Import your SpatialExperiment .RDS object
+""""
+Manually extract the data elements we need
+::
+   spe <- readRDS("your_file.rds")
+
+   # Extract the pieces we need
+   counts <- counts(spe)
+   coords <- spatialCoords(spe)
+   metadata <- colData(spe)
+
+
+Step 3: Manually build a new SeuratObject
+""""
+We also need to wrangle the spatial coordinates
+::
+
+ # Create Seurat object
+ seurat_obj <- CreateSeuratObject(
+   counts = counts,
+   meta.data = as.data.frame(metadata)
+ )
+
+ # Add spatial coordinates
+ # Note: Seurat expects specific column names for spatial data
+ coords_df <- as.data.frame(coords)
+ colnames(coords_df) <- c("imagerow", "imagecol")  # Seurat's expected names
+
+ # Add to Seurat's images slot (this part depends on your spatial technology)
+ # For now, just add as metadata
+ seurat_obj@meta.data$imagerow <- coords_df[colnames(seurat_obj), "imagerow"]
+ seurat_obj@meta.data$imagecol <- coords_df[colnames(seurat_obj), "imagecol"]
+
+
+Step 5: Process the SeuratObject's Raw Imported Data
+""""
+These are standard steps in Seurat workflows:
+::
+   seurat_obj <- NormalizeData(seurat_obj)
+   seurat_obj <- FindVariableFeatures(seurat_obj)
+   seurat_obj <- ScaleData(seurat_obj)
+   seurat_obj <- RunPCA(seurat_obj)
+
+Step 5: Save the SeuratObject
+""""
+::
+   saveRDS(seurat_obj, "converted_seurat_object.rds")
+
+
+Step 5: Run cbImportSeurat
+""""
+The new spatial coordinates have been appended as two extra columns in the
+exported meta.tsv table, so after running cbImportSeurat you will need to
+create a separate spatial.coords.tsv table.
+::
+   # Check column names and column numbers
+   csvcut -n -t meta.tsv
+   # Use the last two columns of meta.tsv
+   cut -f 1,__,__ meta.tsv > spatial.coords.tsv
+
+Step 5: Edit cellbrowser.conf to include New Spatial Transcriptomics coords file
+""""
+Customize and insert this additional first line in the list of
+coords file:
+
+coords=[  {"file": "spatial.coords.tsv", "shortLabel": "Visium"},
+  {"file": "umap.coords.tsv", "shortLabel": "Seurat umap"},
+  {"file": "pca.coords.tsv", "shortLabel": "Seurat pca"}]
+
+
+
+
+
+
+
+
+
+
+ 
