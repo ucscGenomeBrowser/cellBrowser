@@ -315,6 +315,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         varying vec4 v_Position;
         varying vec3 v_Color;
+        varying float v_ColID;
         varying float v_Selected;
 
         void main() {
@@ -351,12 +352,14 @@ function MaxPlot(div, top, left, width, height, args) {
 
         uniform float u_Alpha;
         uniform float u_Radius;
+        uniform float u_FatID;
 
         uniform float u_CanvWidth;
         uniform float u_CanvHeight;
 
         varying vec4 v_Position;
         varying vec3 v_Color;
+        varying float v_ColID;
         varying float v_Selected;
 
         void main() {
@@ -373,9 +376,10 @@ function MaxPlot(div, top, left, width, height, args) {
             if(l_Dist > u_Radius) {
                 discard;
             } else if(v_Selected == 1.0 && l_Dist > u_Radius - 2.0) {
-                gl_FragColor = vec4(1.0, 1.0, 1.0, u_Alpha);
+                gl_FragColor = vec4(1.0, 1.0, 1.0, 0.7);
             } else {
-                gl_FragColor = vec4(vec3(1.0, 1.0, 1.0) - v_Color, u_Alpha);
+                float l_Alpha = (v_ColID == u_FatID || v_Selected == 1.0) ? 0.7 : u_Alpha;
+                gl_FragColor = vec4(vec3(1.0, 1.0, 1.0) - v_Color, l_Alpha);
             }
         }
         `;
