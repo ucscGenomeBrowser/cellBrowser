@@ -109,6 +109,7 @@ function MaxPlot(div, top, left, width, height, args) {
         canvDiv.style.display = "block";
         canvDiv.style.width = `${width}px`;
         canvDiv.style.height = `${height - gStatusHeight}px`;
+        this.canvDiv = canvDiv;
         div.appendChild(canvDiv);
 
         [self.ctx, self.canvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, false, 'mpCanvas', self.mode);
