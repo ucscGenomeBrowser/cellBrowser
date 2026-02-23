@@ -2973,7 +2973,13 @@ function MaxPlot(div, top, left, width, height, args) {
         if(self.usesWebGL()) {
             // Convert the selected cell set to a buffer
             const selBuf = new Uint8Array(this.getCount());
+
+            // Bind the buffer to the plots
             this.bindBuffer(1, this.a_Selected, selBuf, this.ctx.UNSIGNED_BYTE);
+            if (self.childPlot) {
+                const childPlot = self.childPlot;
+                childPlot.bindBuffer(1, childPlot.a_Selected, selBuf, childPlot.ctx.UNSIGNED_BYTE);
+            }
         }
 
         if (self.onSelChange!==null && skipNotify!==true)
@@ -3241,6 +3247,13 @@ function MaxPlot(div, top, left, width, height, args) {
             // Convert the selected cell set to a buffer
             const selBuf = new Uint8Array(Array.from({length: this.getCount()}, (_, i) => this.selCells.has(i) ? 1 : 0));
             this.bindBuffer(1, this.a_Selected, selBuf, this.ctx.UNSIGNED_BYTE);
+
+            // We need to do the same work on the child plot, if one exists
+            // Since the child plot's selected cells share a pointer 
+            if (self.childPlot) {
+                const childPlot = self.childPlot;
+                childPlot.bindBuffer(1, childPlot.a_Selected, selBuf, childPlot.ctx.UNSIGNED_BYTE);
+            }
         }
 
         if (self.onSelChange!==null)
