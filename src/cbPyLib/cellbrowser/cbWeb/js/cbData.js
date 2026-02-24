@@ -502,6 +502,9 @@ function CbDbFile(url) {
         var meta = null;
         var labelMids; // null means: no json file found
 
+        if (self.conf.coords.length===0) // heatmap-only datasets have no coords defined
+            return;
+
         var coordInfo = self.conf.coords[coordIdx];
         if (coordInfo===null) {
            alert("Could not find coordinates with name "+this.coordName);
@@ -616,6 +619,27 @@ function CbDbFile(url) {
 
         function onMetaDone(comprBytes, metaInfo) {
             self.metaCache[metaInfo.name] = comprBytes;
+
+            if (metaInfo.type==="uniqueString") {
+                var bytes = pako.ungzip(comprBytes);
+                var strings = String.fromCharCode.apply(String, bytes).split("\n");
+                let valCounts = [];
+                let arr = [];
+                let arrIdx = 0;
+                let shortLabels = []; // this wastes RAM... shortLabels always was a bad idea
+                for (let s of strings) {
+                    valCounts.push( [s, 1] );
+                    shortLabels.push(s);
+                    arr.push(arrIdx);
+                    arrIdx++;
+                }
+                metaInfo.valCounts = valCounts;
+                metaInfo.ui = {};
+                metaInfo.ui.shortLabels = shortLabels;
+                onDone(arr, metaInfo, otherInfo);
+                return;
+            }
+
             var ArrType = cbUtil.makeType(metaInfo.arrType);
 
             var bytes = comprBytes; // some Apache/InternetBrowser combinations silently uncompress
@@ -976,23 +1000,6 @@ function CbDbFile(url) {
      * is "cells". "none" switches off discretization.
      * */
 
-        var ArrType = cbUtil.makeType(self.conf.matrixArrType); // need this later
-        var sampleCount = self.conf.sampleCount;
-
-        var loadedRanges = []; // arr of objects with .name, .desc and .arr
-
-        let namesToLoad = [];
-        let updateOp = null;
-
-        if (locusName.startsWith("+") || locusName.startsWith("-")) {
-            updateOp = locusName.substring(0, 1);
-            namesToLoad = locusName.substring(1).split(updateOp); // strip the first character
-        } else {
-            //locusName = locusName.replace(" ", "+"); // common error: + is "space" in URLs
-            //Had to remove this because engraftable-hsc/adt has spaces in the gene names
-            namesToLoad = locusName.split("+");
-        }
-
         function allRangesDone() {
             /* sum/substract all arrays and call the callback */
             // create a summarized gene desc
@@ -1003,8 +1010,10 @@ function CbDbFile(url) {
                 if (r.desc!=="") {
                     let desc = r.name;
                     if (r.desc===r.name) {
-                        // try to get the symbol for a geneId
+                        // try to get the symbol for a geneId - this should not be needed anymore
                         desc = self.getGeneInfo(desc).sym;
+                    } else {
+                        desc = r.desc;
                     }
                     geneDescs.push(desc);
                 }
@@ -1089,6 +1098,24 @@ function CbDbFile(url) {
         }
 
         // start of function
+        var ArrType = cbUtil.makeType(self.conf.matrixArrType); // need this later
+        var sampleCount = self.conf.sampleCount;
+
+        var loadedRanges = []; // arr of objects with .name, .desc and .arr
+
+        let namesToLoad = [];
+        let updateOp = null;
+
+        if (locusName.startsWith("+") || locusName.startsWith("-")) {
+            updateOp = locusName.substring(0, 1);
+            namesToLoad = locusName.substring(1).split(updateOp); // strip the first character
+        } else {
+            if (locusName.endsWith("+")) // dev-metabolism+heatmaps+organoid has metabol names that end with +
+                namesToLoad = [locusName];
+            else
+                namesToLoad = locusName.split("+");
+        }
+
         let url = cbUtil.joinPaths([self.url, "exprMatrix.bin"]);
         let chunks = self.namesToChunks(namesToLoad);
         for (let ranges of chunks) {
@@ -1455,6 +1482,7 @@ function CbDbFile(url) {
         var newIdx = {};
         var geneIdx = self.geneOffsets;
         var geneSyns = [];
+        let geneCount = 0;
         for (var geneName in geneIdx) { // as of 2019, faster than Object.entries()
             // a geneName can be either a single symbol or a string like geneId|sym
             var offsets = geneIdx[geneName];
@@ -1462,9 +1490,11 @@ function CbDbFile(url) {
             var geneId = geneIdSym[0];
             var sym = geneIdSym[1];
             newIdx[geneId] = [offsets[0], offsets[1], sym];
+            geneCount++;
         }
-        self.geneOffsets=newIdx;
+        self.geneOffsets = newIdx;
         self.geneSyns = geneSyns;
+        self.geneCount = geneCount;
     }
 
     function searchGeneNames(geneSyns, searchStr) {
@@ -1502,9 +1532,19 @@ function CbDbFile(url) {
         return geneNameObjs;
     };
 
+    this.allGeneIds = function() {
+    /* return all gene IDs as an array */
+        //return Object.keys(self.geneOffsets);
+        let ids = [];
+        for (let g in self.geneOffsets)
+            if (g!=="_range")
+                ids.push(g);
+        return ids;
+    }
+
     this.findGenesExact = function(geneSym) {
         /* search the geneSyns (arr of [syn, geneId]) for matches. Return arr of geneIds 
-         * Used to resolve symbol to geneId (symToGene)*/
+         * Used to resolve symbol to geneId (symToGene). Ignores case.*/
         geneSym = geneSym.toLowerCase();
         var geneSyns = self.geneSyns;
         var foundIds = [];

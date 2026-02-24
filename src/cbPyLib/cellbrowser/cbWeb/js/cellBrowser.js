@@ -3125,8 +3125,11 @@ var cellbrowser = function() {
 
        var defaultMetaField = db.getDefaultColorField();
 
+       if (defaultMetaField===null)
+           return null;
+
        // internal field names cannot contain non-alpha chars, so tolerate user errors here
-       // otherwise throw an error
+       // otherwise display an error message
        if (metaInfo === null && fieldName!==undefined) {
            metaInfo = db.findMetaInfo(fieldName.replace(/[^0-9a-z]/gi, ''));
            if (metaInfo === null) {
@@ -3135,15 +3138,18 @@ var cellbrowser = function() {
            }
        }
 
-       if (metaInfo.type==="uniqueString") {
-           warn("This field contains a unique identifier. You cannot color on such a field. However, you can search for values in this field using 'Edit > Find by ID'.");
-           return null;
-       }
+       // when there are no umap at all, then a unique field can make sense for coloring, e.g. heatmaps
+       if (db.conf.coords.length!==0) {
+           if (metaInfo.type==="uniqueString") {
+               warn("This field contains a unique identifier. You cannot color on such a field. However, you can search for values in this field using 'Edit > Find by ID'.");
+               return null;
+           }
 
-       if (metaInfo.diffValCount > MAXCOLORCOUNT && metaInfo.type==="enum") {
-           warn("This field has "+metaInfo.diffValCount+" different values. Coloring on a field that has more than "+MAXCOLORCOUNT+" different values is not supported.");
-           return null;
-       }
+           if (metaInfo.diffValCount > MAXCOLORCOUNT && metaInfo.type==="enum") {
+               warn("This field has "+metaInfo.diffValCount+" different values. Coloring on a field that has more than "+MAXCOLORCOUNT+" different values is not supported.");
+               return null;
+           }
+        }
 
         if (fieldName===defaultMetaField)
            changeUrl({"meta":null, "gene":null});
@@ -3701,8 +3707,9 @@ var cellbrowser = function() {
 
    function colorByDefaultField(onDone, ignoreUrl) {
        /* get the default color field from the config or the URL and start coloring by it.
-        * Call onDone() when done. */
+        * Call onDone() when done. Returns false if coloring is not possible. */
        let defLabelField = getActiveLabelField();
+
        setLabelDropdown(defLabelField);
 
        var colorType = "meta";
@@ -3731,7 +3738,7 @@ var cellbrowser = function() {
         }
 
        gLegend = {};
-       if (colorType==="meta") {
+       if (colorType==="meta" && colorBy!==null) {
            colorByMetaField(colorBy, onDone);
            // update the meta field combo box
            var fieldIdx  = db.fieldNameToIndex(colorBy);
@@ -3754,6 +3761,7 @@ var cellbrowser = function() {
                colorByLocus(geneId, onDone);
            }
         }
+       return true;
    }
 
    function makeFullLabel(db) {
@@ -4016,7 +4024,10 @@ var cellbrowser = function() {
            db.loadGeneLocs(db.conf.atacSearch, db.conf.fileVersions.geneLocs, onLocsDone);
        } else {
            // in gene mode, we can start coloring right away
-           colorByDefaultField(doneOnePart);
+           if (db.conf.display==="heatmap")
+               switchToHeat();
+           else
+               colorByDefaultField(doneOnePart);
        }
 
        // pre-load the dataset description file, as the users will often go directly to the info dialog
@@ -5590,7 +5601,7 @@ var cellbrowser = function() {
     function buildLayoutCombo(coordLabel, htmls, files, id, left, top) {
         /* files is a list of elements with a shortLabel attribute. Build combobox for them. */
         if (!coordLabel)
-            coordLabel = "Layout";
+            coordLabel = "Embedding";
 
         //htmls.push('<div class="tpToolBarItem" style="position:absolute;left:'+left+'px;top:'+top+'px"><label for="'+id+'">');
         htmls.push('<div class="tpLeftSideItem"><label for="'+id+'">');
@@ -6198,12 +6209,13 @@ var cellbrowser = function() {
        $("#tpLegendBar").hide();
               
        var heatLeft = metaBarWidth+metaBarMargin;
-       var heatWidth = window.innerWidth - heatLeft;
-       var heatTop  = menuBarHeight - toolBarHeight;
+       var heatWidth = window.innerWidth - heatLeft - 3;
+       var heatTop  = menuBarHeight + toolBarHeight;
        var heatHeight  = window.innerHeight - heatTop;
 
        let divEl = document.createElement('div'); 
        divEl.style.position = "absolute";
+       divEl.style.overflow = "scroll";
        divEl.style.left = heatLeft+"px";
        divEl.style.top = heatTop+"px";
        divEl.style.width = heatWidth+"px";
@@ -6213,15 +6225,21 @@ var cellbrowser = function() {
        document.body.appendChild(divEl);
 
        let geneIds = [];
-       for (let qg of db.conf.quickGenes)
-           geneIds.push(qg[0]);
+       if (db.geneCount < 200)
+           geneIds = db.allGeneIds();
+       else {
+          if (db.conf.quickGenes) {
+              for (let qg of db.conf.quickGenes)
+                  geneIds.push(qg[0]);
+          }
+       }
 
-        if (!geneIds || geneIds.length===0) {
-            alert("No quick genes are defined. Heatmaps currently only work on pre-defined gene sets.");
-            return;
-        }
+       if (!geneIds || geneIds.length===0) {
+           alert("No quick genes are defined. Heatmaps currently only work on pre-defined gene sets.");
+           return;
+       }
 
-       let metaName = db.conf.activeColorField;
+       let metaName = getActiveColorField();
 
        var heatmap = new MaxHeat(divEl, {mainRenderer:renderer});
        db.heatmap = heatmap;
@@ -6921,9 +6939,9 @@ var cellbrowser = function() {
         }
 
 
-        let rows = exprData.rows;
-        for (let row of rows) {
-            for (let geneData of row) {
+        let geneExpr = exprData.rows;
+        for (let metaGeneArr of geneExpr) {
+            for (let geneData of metaGeneArr) {
                 let avg = geneData[1];
                 allAvgMax = Math.max(avg, allAvgMax);
                 allAvgMin = Math.min(avg, allAvgMin);
@@ -6932,6 +6950,73 @@ var cellbrowser = function() {
 
         exprData.allAvgMax = allAvgMax;
         exprData.allAvgMin = allAvgMin;
+    }
+
+    function buildGeneAnnotMatrix(rawAnnots) {
+        /* Build a geneAnnotMatrix from parsed annotation arrays.
+         * rawAnnots is [geneIdx] = array of annotation strings, or null if no annotations.
+         * Returns null if no annotations exist, otherwise returns an object like metaMatrix:
+         *   { fieldNames, annotBins, annotLabels, palettes }
+         */
+        var fieldNames = db.conf.geneAnnotFields;
+        if (!fieldNames || fieldNames.length === 0)
+            return null;
+
+        // check if any gene has annotations
+        var hasAny = false;
+        for (var i = 0; i < rawAnnots.length; i++) {
+            if (rawAnnots[i]) { hasAny = true; break; }
+        }
+        if (!hasAny)
+            return null;
+
+        var fieldCount = fieldNames.length;
+
+        // collect unique values per field and assign integer indices
+        var valToIdxArr = []; // [fieldIdx] = { value -> index }
+        var uniqueValsArr = []; // [fieldIdx] = [ value0, value1, ... ]
+        for (var fi = 0; fi < fieldCount; fi++) {
+            valToIdxArr.push({});
+            uniqueValsArr.push([]);
+        }
+
+        for (var gi = 0; gi < rawAnnots.length; gi++) {
+            var annots = rawAnnots[gi];
+            for (var fi = 0; fi < fieldCount; fi++) {
+                var val = (annots && annots[fi]) || "";
+                if (!(val in valToIdxArr[fi])) {
+                    valToIdxArr[fi][val] = uniqueValsArr[fi].length;
+                    uniqueValsArr[fi].push(val);
+                }
+            }
+        }
+
+        // build annotBins and annotLabels: [geneIdx][fieldIdx]
+        var annotBins = [];
+        var annotLabels = [];
+        for (var gi = 0; gi < rawAnnots.length; gi++) {
+            var annots = rawAnnots[gi];
+            var bins = [];
+            var labels = [];
+            for (var fi = 0; fi < fieldCount; fi++) {
+                var val = (annots && annots[fi]) || "";
+                bins.push(valToIdxArr[fi][val]);
+                labels.push(val);
+            }
+            annotBins.push(bins);
+            annotLabels.push(labels);
+        }
+
+        // generate a qualitative palette per field; use null color for empty strings
+        var palettes = [];
+        for (var fi = 0; fi < fieldCount; fi++) {
+            var pal = makeColorPalette(cDefQualPalette, uniqueValsArr[fi].length);
+            if ("" in valToIdxArr[fi])
+                pal[valToIdxArr[fi][""]] = cNullColor;
+            palettes.push(pal);
+        }
+
+        return { fieldNames: fieldNames, annotBins: annotBins, annotLabels: annotLabels, palettes: palettes };
     }
 
     function exprDataLoadGenes(geneIds, exprData, onDone) {
@@ -6959,14 +7044,28 @@ var cellbrowser = function() {
                 rows.push([]);
         }
 
-        // reformat input gene expression "geneData" to an array of gene symbols, an array of meta values, 
+        // reformat input gene expression "geneData" to an array of gene symbols, an array of meta values,
         // an array of cell counts (one per meta value) and
         // an array of [ [zeroPerc0, avg0], [zeroPerc1, avg1], ... ]
         Promise.all(promises).then( function(resArr) {
             let cellCountsDone = false; // we need to copy the cell counts only once, not for every gene again
+            if (!exprData._rawAnnots)
+                exprData._rawAnnots = [];
+
             for (let geneIdx = 0; geneIdx < resArr.length; geneIdx++) {
                 let geneData = resArr[geneIdx];
-                exprData.syms.push( geneData.geneDesc );
+                let geneDesc = geneData.geneDesc;
+
+                // geneAnnots: geneDesc is a JSON array like ["symbol", "annot1", ...]
+                if (geneDesc.charAt(0) === '[') {
+                    let parsed = JSON.parse(geneDesc);
+                    geneDesc = parsed[0];
+                    exprData._rawAnnots.push(parsed.slice(1));
+                } else {
+                    exprData._rawAnnots.push(null);
+                }
+
+                exprData.syms.push( geneDesc );
                 exprData.geneIds.push( geneData.geneId );
 
                 let dotRows = geneData.dotRows;
@@ -6986,13 +7085,66 @@ var cellbrowser = function() {
                 cellCountsDone = true;
             }
 
+            // build geneAnnotMatrix from all collected annotations
+            exprData.geneAnnotMatrix = buildGeneAnnotMatrix(exprData._rawAnnots);
+
             exprDataUpdateMinMax(exprData);
             onDone(exprData);
         });
     }
 
+    function computeMetaMatrix(groupingMetaInfo, otherMetaInfos) {
+        /* For each group and each enum field, find the mode (most common value) and its color.
+         * Returns { fieldNames, metaBins, metaLabels, palettes } */
+        var groupArr = groupingMetaInfo.arr;
+        var numGroups = groupingMetaInfo.valCounts.length;
+        var numCells = groupArr.length;
+
+        var fieldNames = [];
+        var metaBins = [];   // [groupIdx][fieldIdx] = value index (palette index)
+        var metaLabels = []; // [groupIdx][fieldIdx] = label string
+        var palettes = [];   // [fieldIdx] = array of hex colors
+
+        for (var g = 0; g < numGroups; g++) {
+            metaBins.push([]);
+            metaLabels.push([]);
+        }
+
+        for (var fi = 0; fi < otherMetaInfos.length; fi++) {
+            var metaInfo = otherMetaInfos[fi];
+            fieldNames.push(metaInfo.label || metaInfo.name);
+
+            var numValues = metaInfo.valCounts.length;
+            var fieldArr = metaInfo.arr;
+            var colors = getFieldColors(metaInfo);
+            palettes.push(colors);
+
+            var counts = [];
+            for (var g = 0; g < numGroups; g++)
+                counts.push(new Uint32Array(numValues));
+
+            for (var c = 0; c < numCells; c++)
+                counts[groupArr[c]][fieldArr[c]]++;
+
+            for (var g = 0; g < numGroups; g++) {
+                var bestVal = 0;
+                var bestCount = 0;
+                for (var v = 0; v < numValues; v++) {
+                    if (counts[g][v] > bestCount) {
+                        bestCount = counts[g][v];
+                        bestVal = v;
+                    }
+                }
+                metaBins[g].push(bestVal);
+                metaLabels[g].push(metaInfo.valCounts[bestVal][0]);
+            }
+        }
+
+        return { fieldNames: fieldNames, metaBins: metaBins, metaLabels: metaLabels, palettes: palettes };
+    }
+
     function loadGroupedExprData(exprData, geneIds, metaName, onGenesDone) {
-        /* load geneIds into exprData object, grouped by meta field */
+        /* load geneIds into exprData object, load expr data and summarize (average) by meta field */
 
         if (exprData===null) {
             exprData = {};
@@ -7006,9 +7158,32 @@ var cellbrowser = function() {
             exprData.allAvgMin = NaN;
         }
 
-        Promise.all([promiseMeta(metaName, geneExprOnProgress)]).then( function (resArr) {
+        // load grouping field + all other enum fields in parallel
+        var allFields = db.getMetaFields();
+        var metaPromises = [promiseMeta(metaName, geneExprOnProgress)];
+        var enumFieldIndices = [];
+
+        for (var i = 0; i < allFields.length; i++) {
+            var field = allFields[i];
+            if (field.type !== "enum" || field.name === metaName)
+                continue;
+            metaPromises.push(promiseMeta(field.name, geneExprOnProgress));
+            enumFieldIndices.push(metaPromises.length - 1);
+        }
+
+        Promise.all(metaPromises).then( function (resArr) {
             exprData.metaData = resArr[0];
             exprData.metaLabels = exprData.metaData.ui.shortLabels;
+
+            var otherMetaInfos = [];
+            for (var i = 0; i < enumFieldIndices.length; i++)
+                otherMetaInfos.push(resArr[enumFieldIndices[i]]);
+
+            if (otherMetaInfos.length > 0)
+                exprData.metaMatrix = computeMetaMatrix(exprData.metaData, otherMetaInfos);
+            else
+                exprData.metaMatrix = null;
+
             exprDataLoadGenes(geneIds, exprData, onGenesDone);
         });
     }
@@ -7269,7 +7444,7 @@ var cellbrowser = function() {
             //nextLeft += 80;
         }
 
-        if (coordInfo[coordInfo.length-1].shortLabel.length > 20)
+        if (coordInfo && coordInfo.length>0 && coordInfo[coordInfo.length-1].shortLabel.length > 20)
             //$('.chosen-drop').css({"width": "300px"});
             layoutComboWidth += 50
 
@@ -7911,7 +8086,7 @@ var cellbrowser = function() {
                 b = mix(255,   0, u);
             }
     
-            const hex = "#" + toHex(Math.round(r)) + toHex(Math.round(g)) + toHex(Math.round(b));
+            const hex = toHex(Math.round(r)) + toHex(Math.round(g)) + toHex(Math.round(b));
             colors.push(hex);
         }
     
@@ -8554,6 +8729,8 @@ var cellbrowser = function() {
     function buildLegendBar() {
     /* draws current legend as specified by gLegend.rows
      * */
+       if (db.conf.coords.length===0) 
+            return;
         if (gLegend.rows===undefined)
             return;
 
@@ -9294,17 +9471,23 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         //selectByColor
     }
 
-    function onHeatCellHover(rowIdx, colIdx, rowName, colName, value, cellCount, ev) {
+    function onHeatCellHover(rowIdx, colIdx, rowName, colName, value, cellCount, ev, metaHover) {
         /* user hovers over a cell on the heatmap */
         let htmls = [];
-        if (rowName)
-            htmls.push(rowName);
-        if (colName)
-            htmls.push(colName)
-        if (value!==null)
-            //htmls.push(" "+(value*10)+"-"+((value+1)*10)+"%");
-            htmls.push(" <b>Average</b>:"+parseFloat(value).toPrecision(3)+"<br>");
-        htmls.push(" <b>Cell Count</b>:"+cellCount+"<br>");
+        if (metaHover) {
+            if (rowName || colName)
+                htmls.push((rowName || colName) + "<br>");
+            htmls.push("<b>" + metaHover.fieldName + "</b>: " + metaHover.value);
+        } else {
+            if (rowName)
+                htmls.push(rowName);
+            if (colName)
+                htmls.push(colName)
+            if (value!==null)
+                htmls.push("<br><b>Average</b>:"+parseFloat(value).toPrecision(3)+"<br>");
+            if (cellCount!==null && cellCount!==undefined)
+                htmls.push(" <b>Cell Count</b>:"+cellCount+"<br>");
+        }
         showTooltip(ev.clientX+15, ev.clientY, htmls.join(" "));
     }
 
@@ -9313,7 +9496,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         */
         let heatmap = db.heatmap;
 
-        //var colors = makeColorPalette(cDefGradPaletteHeat, db.exprBinCount);
         var colors = makeColorPalette("blueWhiteRed", db.exprBinCount);
 
         let syms = exprData.syms;
@@ -9325,12 +9507,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
 
         let geneVals = convExprDataForHeatmap(exprData,  binCount);
 
-        heatmap.loadData(metaLabels, syms, colors, geneVals.rowBins, geneVals.rowAvgs, cellCounts);
+        let conf = { nullColor: cNullColor, doFlip: true };
+        heatmap.loadData(metaLabels, syms, colors, geneVals.rowBins, geneVals.rowAvgs, cellCounts, conf, exprData.metaMatrix, exprData.geneAnnotMatrix);
         heatmap.draw();
         heatmap.onCellHover = onHeatCellHover;
         heatmap.onClick = onHeatCellClick;
-
-
     }
 
     function removeHeatmap() {
