@@ -141,6 +141,9 @@ function MaxPlot(div, top, left, width, height, args) {
         let sliders = this.sliderDiv.children;
         for(let slider of sliders) {
             slider.style.background = self.isLight() ? gSliderBackground : gSliderDarkBackground;
+
+            const sliderBack = slider.children[1];
+            sliderBack.style.background = self.isLight() ? "white" : "black";
         }
 
         // Adjust status line color
@@ -671,6 +674,7 @@ function MaxPlot(div, top, left, width, height, args) {
         div.style.width = width+"px";
         div.style.height = height+"px";
         div.style.left = left+"px";
+        div.style.background = self.isLight() ? "white" : "black";
         return div;
     }
 
@@ -887,8 +891,6 @@ function MaxPlot(div, top, left, width, height, args) {
         radiusCont.id = "mpRadiusDiv";
         radiusCont.style.left = "0px"; 
         radiusCont.style.top = "0px";
-        radiusCont.appendChild(radiusSlider)
-
 
         var radiusLabel = document.createElement('span'); // contains the slider and the reset button, floats right
         radiusLabel.id = "radiusSliderLabel";
