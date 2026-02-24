@@ -4161,10 +4161,14 @@ var cellbrowser = function() {
             document.body.style.backgroundColor = "white";
             document.body.style.color = "black";
             $('#tpLegendHeader')[0].style.backgroundColor = "#EEE";
+            $('#tpTooltip')[0].style.backgroundColor = "rgba(255, 255, 255, 0.85)";
+            $('#tpTooltip')[0].style.borderColor = "black";
         } else {
             document.body.style.backgroundColor = "black";
             document.body.style.color = "white";
             $('#tpLegendHeader')[0].style.backgroundColor = "#222";
+            $('#tpTooltip')[0].style.backgroundColor = "rgba(0, 0, 0, 0.85)";
+            $('#tpTooltip')[0].style.borderColor = "white";
         }
     }
 
@@ -7732,11 +7736,11 @@ var cellbrowser = function() {
         //ttDiv.style.left = left+"px";
         //ttDiv.style.top = top+"px";
         ttDiv.style["padding"]="2px";
-        ttDiv.style["border"]="1px solid black";
+        ttDiv.style["border"]=`1px solid ${lightMode === 1 ? "black" : "white"}`;
         ttDiv.style["border-radius"]="2px";
         ttDiv.style["display"]="none";
         ttDiv.style["cursor"]="pointer";
-        ttDiv.style["background-color"]="rgba(255, 255, 255, 0.85)";
+        ttDiv.style["background-color"]=lightMode === 1 ? "rgba(255, 255, 255, 0.85)" : "rgba(0, 0, 0, 0.85)";
         ttDiv.style["box-shadow"]="0px 2px 4px rgba(0,0,0,0.3)";
         ttDiv.style["user-select"]="none";
         ttDiv.style["z-index"]="10";
