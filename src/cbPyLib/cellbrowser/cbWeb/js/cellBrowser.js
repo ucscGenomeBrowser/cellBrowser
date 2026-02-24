@@ -4151,6 +4151,17 @@ var cellbrowser = function() {
 
         // Adjust colors of all elements
         renderer.setLightMode(lightMode);
+        updateLightModeHTML(lightMode);
+    }
+
+    function updateLightModeHTML(lightMode) {
+        if(lightMode === 1) {
+            document.body.style.backgroundColor = "white";
+            document.body.style.color = "black";
+        } else {
+            document.body.style.backgroundColor = "black";
+            document.body.style.color = "white";
+        }
     }
 
     function onSizeClick(ev) {
@@ -9985,8 +9996,18 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
     function main(rootMd5) {
         /* start the data loaders, show first dataset. If in  */
         changeUrl({"nc":null});
-        if (redirectIfSubdomain())
+        if (redirectIfSubdomain()) {
             return;
+        }
+
+        // Set background and text color based on light mode
+        if(lightMode === 1) {
+            document.body.style.backgroundColor = "white";
+            document.body.style.color = "black";
+        } else {
+            document.body.style.backgroundColor = "black";
+            document.body.style.color = "white";
+        }
 
         setupKeyboard();
         buildMenuBar();
@@ -10000,6 +10021,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         var canvWidth = window.innerWidth - canvLeft - legendBarWidth;
         var canvHeight = window.innerHeight - menuBarHeight - toolBarHeight;
 
+        // Initialize renderer
         if (renderer===null) {
            var div = document.createElement('div');
            div.id = "tpMaxPlot";
@@ -10018,6 +10040,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
 
         buildEmptyLegendBar(metaBarWidth+metaBarMargin+renderer.width, toolBarHeight);
 
+        // Enable input
         renderer.setupMouse();
         $(window).resize(onWindowResize);
 
