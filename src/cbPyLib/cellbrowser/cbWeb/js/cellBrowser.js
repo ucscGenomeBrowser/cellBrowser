@@ -13,6 +13,9 @@
 var cellbrowser = function() {
     const DEBUG = false;
 
+    // 1 = light mode, 2 = dark mode, 0 = system setting (not yet implemented)
+    let lightMode = 2;
+
     var db = null; // the cbData object from cbData.js. Loads coords,
                    // annotations and gene expression vectors
 
@@ -9985,7 +9988,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
            div.id = "tpMaxPlot";
 
            const drawMode = parseInt(getVar("drawMode"));
-           renderer = new MaxPlot(div, canvTop, canvLeft, canvWidth, canvHeight, Number.isInteger(drawMode) ? {drawMode: drawMode} : undefined);
+           renderer = new MaxPlot(div, canvTop, canvLeft, canvWidth, canvHeight,  {lightMode: lightMode, drawMode: Number.isInteger(drawMode) ? drawMode: undefined});
            window.renderer = renderer; // XX undo this?
 
            document.body.appendChild(div);

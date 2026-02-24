@@ -79,6 +79,14 @@ function MaxPlot(div, top, left, width, height, args) {
     const nonFatColorRect = "DDDDDD"; // rectangle mode: color used in fattening mode for all non-fat cells
     const nonFatColorCircles = "BBBBBB"; // color used in fattening mode for all non-fat cell circles
 
+    // Light mode
+    const defaultLightMode = 1;
+    if(args !== undefined && args !== null) {
+        self.lightMode = getAttr(args, "lightMode", defaultLightMode);
+    } else {
+        self.lightMode = defaultLightMode;
+    }
+
     // Drawing mode
     const defaultDrawMode = 1;
     if(args !== undefined && args !== null) {
@@ -287,7 +295,13 @@ function MaxPlot(div, top, left, width, height, args) {
         const ctx = self.ctx;
 
         // Set the canvas' clear color
-        ctx.clearColor(0, 0, 0, 1);
+        if(this.lightMode === 1) {
+            // Light mode: clear color is black (inverts to white)
+            ctx.clearColor(0, 0, 0, 1);
+        } else {
+            // Dark mode: clear color is white (inverts to black)
+            ctx.clearColor(1, 1, 1, 1);
+        }
 
         // Enable 3D Graphics
         ctx.enable(ctx.DEPTH_TEST);
@@ -941,7 +955,9 @@ function MaxPlot(div, top, left, width, height, args) {
         var canv = document.createElement('canvas');
         canv.id = id;
         //canv.style.border = "1px solid #AAAAAA";
-        canv.style.backgroundColor = transparent ? "transparent" : drawMode == 2 ? "black" : "white";
+        canv.style.backgroundColor = transparent ? "transparent" : drawMode === 2
+                                                                 ? self.lightMode === 1 ? "black" : "white"
+                                                                 : self.lightMode === 1 ? "white" : "black";
         canv.style.position = "absolute";
         canv.style.display = "block";
         canv.style.width = width+"px";
@@ -2082,7 +2098,7 @@ function MaxPlot(div, top, left, width, height, args) {
                     ctx.clearRect(0, 0, width, height);
                 } else {
                     ctx.globalAlpha = 1.0;
-                    ctx.fillStyle = "rgba(255,255,255)";
+                    ctx.fillStyle = self.lightMode === 1 ? "rgb(255,255,255)" : "rgb(0, 0, 0)";
                     ctx.fillRect(0, 0, width, height);
                 }
 
