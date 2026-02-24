@@ -14,7 +14,7 @@ var cellbrowser = function() {
     const DEBUG = false;
 
     // 1 = light mode, 2 = dark mode, 0 = system setting (not yet implemented)
-    let lightMode = 2;
+    let lightMode = 1;
 
     var db = null; // the cbData object from cbData.js. Loads coords,
                    // annotations and gene expression vectors
@@ -2875,6 +2875,7 @@ var cellbrowser = function() {
          //htmls.push('<li><a href="#" id="tpFilterButton">Hide selected '+gSampleDesc+'s</a></li>');
          //htmls.push('<li><a href="#" id="tpShowAllButton">Show all '+gSampleDesc+'</a></li>');
          htmls.push('<li><a href="#" id="tpHideShowLabels"><span id="tpHideMenuEntry">Hide labels</span><span class="dropmenu-item-content">c l</span></a></li>');
+         htmls.push('<li><a href="#" id="tpToggleDarkMode"><span id="tpDarkMenuEntry">Enable Dark Mode</span><span class="dropmenu-item-content"></span></a></li>');
 
          htmls.push('</ul>'); // View dropdown-menu
          htmls.push('</li>'); // View dropdown container
@@ -2920,6 +2921,7 @@ var cellbrowser = function() {
        $('#tpZoomMinus').click( onZoomOutClick );
        //$('#tpShowAllButton').click( onShowAllClick );
        $('#tpHideShowLabels').click( onHideShowLabelsClick );
+       $('#tpToggleDarkMode').click( onToggleDarkModeClick );
        $('#tpExportIds').click( onExportIdsClick );
        $('#tpSelectById').click( onSelectByIdClick );
        $('#tpMark').click( onMarkClick );
@@ -4134,6 +4136,21 @@ var cellbrowser = function() {
         }
 
         renderer.drawDots();
+    }
+
+    function onToggleDarkModeClick(ev) {
+    /* user clicked the Toggle Dark Mode menu entry */
+        if (lightMode === 1) {
+            lightMode = 2;
+            $("#tpDarkMenuEntry").text("Enable Light Mode");
+        }
+        else {
+            lightMode = 1;
+            $("#tpDarkMenuEntry").text("Enable Dark Mode");
+        }
+
+        // Adjust colors of all elements
+        renderer.setLightMode(lightMode);
     }
 
     function onSizeClick(ev) {

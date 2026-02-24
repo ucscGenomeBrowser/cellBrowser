@@ -87,6 +87,39 @@ function MaxPlot(div, top, left, width, height, args) {
         self.lightMode = defaultLightMode;
     }
 
+    // Setter for changes
+    this.setLightMode = (mode) => {
+        if(mode !== 1 && mode !== 2) {
+            throw(`Error: Invalid light mode: ${mode}`);
+        }
+
+        // Set the new light mode
+        this.lightMode = mode;
+
+        // Adjust the canvas' colors and redraw
+        /** @type {HTMLCanvasElement} */
+        const canvas = this.canvas;
+        if(this.usesWebGL()) {
+            if(canvas.style.backgroundColor !== "transparent") {
+                canvas.style.backgroundColor = this.lightMode === 1 ? "black" : "white";
+            }
+
+            /** @type {WebGL2RenderingContext} */
+            const ctx = this.ctx;
+            if(this.lightMode === 1) {
+                // Light mode: clear color is black (inverts to white)
+                ctx.clearColor(0, 0, 0, 1);
+            } else {
+                // Dark mode: clear color is white (inverts to black)
+                ctx.clearColor(1, 1, 1, 1);
+            }
+        } else if(canvas.style.backgroundColor !== "transparent") {
+            canvas.style.backgroundColor = this.lightMode === 1 ? "white" : "black";
+        }
+
+        this.drawDots();
+    }
+
     // Drawing mode
     const defaultDrawMode = 1;
     if(args !== undefined && args !== null) {
