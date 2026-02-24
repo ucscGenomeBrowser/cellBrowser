@@ -13,8 +13,10 @@
 var cellbrowser = function() {
     const DEBUG = false;
 
-    // 1 = light mode, 2 = dark mode, 0 = system setting (not yet implemented)
-    let lightMode = 1;
+    // Src: https://stackoverflow.com/questions/56393880/how-do-i-detect-dark-mode-using-javascript
+    const darkModeMq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+    // 1 = light mode, 2 = dark mode
+    let lightMode = darkModeMq && darkModeMq.matches ? 2 : 1;
 
     var db = null; // the cbData object from cbData.js. Loads coords,
                    // annotations and gene expression vectors
@@ -2875,7 +2877,7 @@ var cellbrowser = function() {
          //htmls.push('<li><a href="#" id="tpFilterButton">Hide selected '+gSampleDesc+'s</a></li>');
          //htmls.push('<li><a href="#" id="tpShowAllButton">Show all '+gSampleDesc+'</a></li>');
          htmls.push('<li><a href="#" id="tpHideShowLabels"><span id="tpHideMenuEntry">Hide labels</span><span class="dropmenu-item-content">c l</span></a></li>');
-         htmls.push('<li><a href="#" id="tpToggleDarkMode"><span id="tpDarkMenuEntry">Enable Dark Mode</span><span class="dropmenu-item-content"></span></a></li>');
+         htmls.push(`<li><a href="#" id="tpToggleDarkMode"><span id="tpDarkMenuEntry">Enable ${lightMode === 1 ? "Dark" : "Light"} Mode</span><span class="dropmenu-item-content"></span></a></li>`);
 
          htmls.push('</ul>'); // View dropdown-menu
          htmls.push('</li>'); // View dropdown container
