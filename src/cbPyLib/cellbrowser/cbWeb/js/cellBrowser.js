@@ -4160,9 +4160,11 @@ var cellbrowser = function() {
         if(lightMode === 1) {
             document.body.style.backgroundColor = "white";
             document.body.style.color = "black";
+            $('#tpLegendHeader')[0].style.backgroundColor = "#EEE";
         } else {
             document.body.style.backgroundColor = "black";
             document.body.style.color = "white";
+            $('#tpLegendHeader')[0].style.backgroundColor = "#222";
         }
     }
 
@@ -8623,7 +8625,7 @@ var cellbrowser = function() {
         htmls.push("<button id='tpLegendColorChecked'>"+buttonText+"</button></small>");
 
         htmls.push("</div>"); // title
-        htmls.push('<div id="tpLegendHeader"><span id="tpLegendCol1"></span><span id="tpLegendCol2"></span></div>');
+        htmls.push(`<div id="tpLegendHeader"; style="background-color:${lightMode === 1 ? "#eee" : "#222"}"><span id="tpLegendCol1"></span><span id="tpLegendCol2"></span></div>`);
         htmls.push('<div id="tpLegendRows">');
 
         // get the sum of all, to calculate frequency
