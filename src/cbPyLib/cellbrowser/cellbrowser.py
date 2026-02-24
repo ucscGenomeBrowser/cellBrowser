@@ -926,6 +926,28 @@ def readGeneToSym(fname):
     logging.debug("Found symbols for %d genes" % len(d))
     return d
 
+def readGeneAnnots(fname):
+    " read a gene annotations TSV file. First column is gene identifier, remaining columns are annotations. "
+    " returns (annotHeaders, geneToAnnots) where annotHeaders is a list of column names "
+    " and geneToAnnots maps gene name -> list of annotation values "
+    logging.info("Reading gene annotations from %s" % fname)
+    geneToAnnots = {}
+    annotHeaders = None
+    firstRow = True
+
+    for row in lineFileNextRow(fname, headerIsRow=True):
+        if firstRow:
+            annotHeaders = list(row[1:])
+            firstRow = False
+            continue
+        gene = row[0]
+        annots = list(row[1:])
+        geneToAnnots[gene] = annots
+
+    logging.info("Read annotations for %d genes, %d annotation fields: %s" %
+        (len(geneToAnnots), len(annotHeaders), ", ".join(annotHeaders)))
+    return annotHeaders, geneToAnnots
+
 #def getDecilesList_np(values):
     #deciles = np.percentile( values, [0,10,20,30,40,50,60,70,80,90,100] )
     #return deciles
@@ -2144,7 +2166,7 @@ def indexAtacOffsetsByChrom(exprIndex):
     return dict(byChrom)
 
 def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJsonFname, \
-        metaSampleNames, matType=None, genesAreRanges=False):
+        metaSampleNames, matType=None, genesAreRanges=False, geneAnnots=None):
     """ convert gene expression vectors to vectors of deciles
         and make json gene symbol -> (file offset, line length)
     """
@@ -2200,6 +2222,8 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     allMin = 99999999
     noSymFound = 0
+    noAnnotCount = 0
+    noAnnotGenes = []
     for geneId, sym, exprArr in matReader.iterRows():
         geneCount += 1
 
@@ -2232,7 +2256,20 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
             else:
                 exprArr = [exprArr[i] for i in idxList]
 
-        exprStr, minVal = exprEncode(geneId, exprArr, matType)
+        geneDesc = geneId
+        if geneAnnots is not None:
+            annots = geneAnnots.get(sym) if sym else None
+            if annots is None:
+                annots = geneAnnots.get(geneId)
+            if annots:
+                geneDesc = json.dumps([geneId] + annots)
+            else:
+                geneDesc = json.dumps([geneId])
+                noAnnotCount += 1
+                if len(noAnnotGenes) < 10:
+                    noAnnotGenes.append(sym or geneId)
+
+        exprStr, minVal = exprEncode(geneDesc, exprArr, matType)
         exprIndex[key] = (ofh.tell(), len(exprStr))
         ofh.write(exprStr)
 
@@ -2247,6 +2284,10 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
     if noSymFound!=0:
         logging.warn("No symbol found for %d genes" % noSymFound)
 
+    if noAnnotCount > 0:
+        logging.warn("No gene annotations found for %d genes. First %d: %s" %
+            (noAnnotCount, len(noAnnotGenes), ", ".join(noAnnotGenes)))
+
     if genesAreRanges:
         logging.info("ATAC-mode is one. Assuming that genes are in format chrom:start-end or chrom_start_end or chrom-start-end")
         exprIndex = indexAtacOffsetsByChrom(exprIndex)
@@ -2256,7 +2297,7 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
                     " is not set. Please add this option or contact us if you are confused about this error.")
 
     if highCount==0:
-        logging.warn("No single value in the matrix is > 100. It looks like this "
+        logging.warn("No single value in the matrix is > 100. If this is an RNA-seq expression matrix, it looks like this "
         "matrix has been log'ed. Our recommendation for visual inspection is to not transform matrices")
 
     if len(exprIndex)==0:
@@ -2590,7 +2631,7 @@ def metaReorderFilter(matrixFname, metaFname, fixedMetaFname, keepFields):
 
     # find fields that contain only a single value
     skipFields = set()
-    maxValCount = len(matrixSampleNames) - 100
+    maxValCount = max(len(matrixSampleNames) - 100, int(len(matrixSampleNames) * 0.9))
     for fieldIdx, values in iterItems(fieldValues):
         #logging.debug("fieldIdx %d, values %s" % (fieldIdx, values))
         if fieldIdx==0:
@@ -3866,8 +3907,17 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
 
     genesAreRanges = (inConf.get("atacSearch")!=None)
 
+    # read gene annotations if configured
+    geneAnnots = None
+    if "geneAnnots" in inConf:
+        annotFname = getAbsPath(inConf, "geneAnnots")
+        geneAnnotHeaders, geneAnnots = readGeneAnnots(annotFname)
+        outConf["geneAnnotFields"] = geneAnnotHeaders
+        outConf["fileVersions"]["geneAnnots"] = getFileVersion(annotFname)
+
     matType = matrixToBin(outMatrixFname, geneToSym, binMat, binMatIndex, discretBinMat, \
-            discretMatrixIndex, metaSampleNames, matType=matType, genesAreRanges=genesAreRanges)
+            discretMatrixIndex, metaSampleNames, matType=matType, genesAreRanges=genesAreRanges,
+            geneAnnots=geneAnnots)
 
     # these are the Javascript type names, not the python ones (they are also better to read than the Python ones)
     if matType=="int" or matType=="forceInt":
@@ -3928,6 +3978,7 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
     useTwoBytes = False # to save space, coordinates are reduced to the range 0-65535
 
     hasLabels = False
+    labelVals = []
     if "labelField" in inConf and inConf["labelField"] is not None:
         hasLabels = True
         clusterLabelField = inConf["labelField"]
@@ -4720,6 +4771,20 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     doMatrix, sampleNames = matrixOrSamplesHaveChanged(datasetDir, inMatrixFname, outMatrixFname, outConf)
     doMeta = metaHasChanged(datasetDir, outMetaFname)
 
+    # check if geneAnnots file is new or has changed, requiring matrix rebuild
+    if not doMatrix and "geneAnnots" in inConf:
+        annotFname = getAbsPath(inConf, "geneAnnots")
+        if isfile(annotFname):
+            oldConfFname = join(datasetDir, "dataset.json")
+            if isfile(oldConfFname):
+                lastConf = readJson(oldConfFname)
+                oldFV = lastConf.get("fileVersions", {})
+                if "geneAnnots" not in oldFV or oldFV["geneAnnots"]["md5"] != getFileVersion(annotFname)["md5"]:
+                    logging.info("geneAnnots file is new or has changed, must rebuild matrix")
+                    doMatrix = True
+            else:
+                doMatrix = True
+
     geneToSym = -1 # -1 = "we have not read any", "None" would mean "there are no gene symbols to map to"
 
     if not doMeta:
@@ -4770,7 +4835,7 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         "clusterField", "defColorField", "xenaPhenoId", "xenaId", "hubUrl", "showLabels", "ucscDb",
         "unit", "violinField", "visibility", "coordLabel", "lineWidth", "hideDataset", "hideDownload",
         "metaBarWidth", "supplFiles", "defQuantPal", "defCatPal", "clusterPngDir", "wrangler", "shepherd",
-        "binStrategy", "split",
+        "binStrategy", "split", "display",
         "lineAlpha", "lineWidth", "lineColor",
         # the following are there only for old datasets, they are now nested under "facets"
         # they are just here for backwards-compatibility and will eventually get removed
@@ -6582,7 +6647,8 @@ def cbUpgrade(outDir, doData=True, doCode=False, devMode=False, port=None):
     if doCode or devMode:
         copyStatic(webDir, outDir)
 
-    makeIndexHtml(webDir, outDir, devMode=devMode)
+    if not devMode:
+        makeIndexHtml(webDir, outDir, devMode=devMode)
 
     if port:
         print("Interrupt this process, e.g. with Ctrl-C, to stop the webserver")
@@ -6598,7 +6664,11 @@ def cbUpgradeCli():
     if len(args)!=0:
         errAbort("This command does not accept arguments without options. Did you mean: -o <outDir> ? ")
 
-    cbUpgrade(outDir, doCode=options.addCode, devMode=options.devMode, port=options.port)
+    doData = True
+    if (options.addCode and options.devMode):
+        doData = False
+
+    cbUpgrade(outDir, doData=doData, doCode=options.addCode, devMode=options.devMode, port=options.port)
 
 def parseGeneLocs(db, geneType):
     """
