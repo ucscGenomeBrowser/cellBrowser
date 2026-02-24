@@ -120,6 +120,13 @@ function MaxPlot(div, top, left, width, height, args) {
                     break;
                 default:
             }
+
+            let img = button.firstChild;
+            if(this.isLight()) {
+                img.style.filter = "";
+            } else {
+                img.style.filter = "invert(1)";
+            }
         }
 
         /** @type {HTMLCollection} */
@@ -698,6 +705,11 @@ function MaxPlot(div, top, left, width, height, args) {
             if (paddingBottom)
                 img.style.paddingBottom = paddingBottom+"px";
             }
+
+            if(!self.isLight()) {
+                img.style.filter = "invert(1)";
+            }
+
             div.appendChild(img);
         }
         if (addSep===true)
