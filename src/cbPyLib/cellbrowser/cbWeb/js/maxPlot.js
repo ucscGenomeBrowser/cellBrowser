@@ -143,6 +143,13 @@ function MaxPlot(div, top, left, width, height, args) {
             slider.style.background = self.isLight() ? gSliderBackground : gSliderDarkBackground;
         }
 
+        // Adjust status line color
+        this.statusLine.style.backgroundColor = self.isLight() ? "rgb(240, 240, 240)" : "rgb(25, 25, 25)";
+        const borderColor = self.isLight() ? "#DDD" : "#333";
+        this.statusLine.style["border-left"]=`1px solid ${borderColor}`;
+        this.statusLine.style["border-right"]=`1px solid ${borderColor}`;
+        this.statusLine.style["border-top"]=`1px solid ${borderColor}`;
+
         // Adjust the canvas' colors
         /** @type {HTMLCanvasElement} */
         const canvas = this.canvas;
@@ -1003,15 +1010,17 @@ function MaxPlot(div, top, left, width, height, args) {
         /* add a status line div */
         var div = document.createElement('div');
         div.id = "mpStatus";
-        div.style.backgroundColor = "rgb(240, 240, 240)";
+        div.style.backgroundColor = self.isLight() ? "rgb(240, 240, 240)" : "rgb(25, 25, 25)";
         div.style.position = "absolute";
         div.style.top = top+"px";
         //div.style.left = left+"px";
         div.style.width = width+"px";
         div.style.height = height+"px";
-        div.style["border-left"]="1px solid #DDD";
-        div.style["border-right"]="1px solid #DDD";
-        div.style["border-top"]="1px solid #DDD";
+
+        const borderColor = self.isLight() ? "#DDD" : "#333";
+        div.style["border-left"]=`1px solid ${borderColor}`;
+        div.style["border-right"]=`1px solid ${borderColor}`;
+        div.style["border-top"]=`1px solid ${borderColor}`;
         div.style["font-size"]=(gStatusHeight-1)+"px";
         div.style["cursor"]="pointer";
         div.style["font-family"] = "sans-serif";
