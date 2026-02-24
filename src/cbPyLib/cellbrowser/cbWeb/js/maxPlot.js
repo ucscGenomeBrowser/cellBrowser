@@ -926,14 +926,14 @@ function MaxPlot(div, top, left, width, height, args) {
 
         var bSize = gZoomButtonSize;
 
-        var selectButton = createButton(bSize, bSize, "mpIconModeSelect", "Select mode. Keyboard: shift or s", null, "img/select.png", 0, 4, true, true);
+        var moveButton = createButton(bSize, bSize, "mpIconModeMove", "Move mode. Keyboard: Alt or m", null, "img/move.png", 4, 4, true);
+        moveButton.addEventListener('click', function() { self.activateMode("move");}, false);
+
+        var selectButton = createButton(bSize, bSize, "mpIconModeSelect", "Select mode. Keyboard: shift or s", null, "img/select.png", 0, 4, true);
         selectButton.addEventListener ('click',  function() { self.activateMode("select")}, false);
 
-        var zoomButton = createButton(bSize, bSize, "mpIconModeZoom", "Zoom-to-rectangle mode. Keyboard: Windows/Command or z", null, "img/zoom.png", 4, 4, true);
+        var zoomButton = createButton(bSize, bSize, "mpIconModeZoom", "Zoom-to-rectangle mode. Keyboard: Windows/Command or z", null, "img/zoom.png", 4, 4);
         zoomButton.addEventListener ('click', function() { self.activateMode("zoom")}, false);
-
-        var moveButton = createButton(bSize, bSize, "mpIconModeMove", "Move mode. Keyboard: Alt or m", null, "img/move.png", 4, 4);
-        moveButton.addEventListener('click', function() { self.activateMode("move");}, false);
 
         self.icons = {};
         self.icons["move"] = moveButton;
@@ -3901,10 +3901,10 @@ function MaxPlot(div, top, left, width, height, args) {
         self.resetMarquee();
 
         if (self.interact) {
-            self.icons["move"].style.backgroundColor = gButtonBackground;
-            self.icons["zoom"].style.backgroundColor = gButtonBackground;
-            self.icons["select"].style.backgroundColor = gButtonBackground;
-            self.icons[modeName].style.backgroundColor = gButtonBackgroundClicked;
+            self.icons["move"].style.backgroundColor = this.isLight() ? gButtonBackground : gButtonDarkBackground;
+            self.icons["zoom"].style.backgroundColor = this.isLight() ? gButtonBackground : gButtonDarkBackground;
+            self.icons["select"].style.backgroundColor = this.isLight() ? gButtonBackground : gButtonDarkBackground;
+            self.icons[modeName].style.backgroundColor = this.isLight() ? gButtonBackgroundClicked : gButtonDarkBackgroundClicked;
         }
         if (self.childPlot)
             self.childPlot.activateMode(modeName);
