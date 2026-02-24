@@ -300,7 +300,7 @@ input[type=checkbox], input[type=radio] {
 }
 
 
-.tpSidebarHeader { font-weight: bold; padding-left: 4px; font-size: 16px; padding-top: 4px; height: 25px; background-color: white; text-align: center}
+.tpSidebarHeader { font-weight: bold; padding-left: 4px; font-size: 16px; padding-top: 4px; height: 25px; text-align: center}
 
 #tpLeftSidebar { 
         border-right: 1px solid #D7D7D7; 
