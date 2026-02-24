@@ -75,6 +75,8 @@ function MaxPlot(div, top, left, width, height, args) {
     const gButtonDarkBackground = "rgba(75, 75, 75, 0.85)";
     const gButtonBackgroundClicked = "rgba(180, 180, 180, 0.6)"; // grey of buttons when clicked
     const gButtonDarkBackgroundClicked = "rgba(50, 50, 50, 0.6)";
+    const gSliderBackground = "rgba(255, 255, 255, 0.5)";
+    const gSliderDarkBackground = "rgba(0, 0, 0, 0.25)";
     const gButtonBackgrounds = [gButtonBackground, gButtonDarkBackground, gButtonBackgroundClicked, gButtonDarkBackgroundClicked];
     const gCloseButtonFromRight = 60; // distance of "close" button from right edge
 
@@ -99,13 +101,39 @@ function MaxPlot(div, top, left, width, height, args) {
         // Set the new light mode
         this.lightMode = mode;
 
-        // Adjust all button colors
+        // Adjust all interactable colors
+        /** @type {HTMLCollection} */
+        let toolDivButtons = this.toolDiv.children;
+        for(let button of toolDivButtons) {
+            switch(button.style.backgroundColor) {
+                case gButtonBackground:
+                    button.style.backgroundColor = gButtonDarkBackground;
+                    break;
+                case gButtonBackgroundClicked:
+                    button.style.backgroundColor = gButtonDarkBackgroundClicked;
+                    break;
+                case gButtonDarkBackground:
+                    button.style.backgroundColor = gButtonBackground;
+                    break;
+                case gButtonDarkBackgroundClicked:
+                    button.style.backgroundColor = gButtonBackgroundClicked;
+                    break;
+                default:
+            }
+        }
+
         /** @type {HTMLCollection} */
         let zoomDivButtons = this.zoomDiv.children;
         for(let button of zoomDivButtons) {
             if(gButtonBackgrounds.includes(button.style.backgroundColor)){
                 button.style.backgroundColor = self.isLight() ? gButtonBackground : gButtonDarkBackground;
             }
+        }
+
+        /** @type {HTMLCollection} */
+        let sliders = this.sliderDiv.children;
+        for(let slider of sliders) {
+            slider.style.background = self.isLight() ? gSliderBackground : gSliderDarkBackground;
         }
 
         // Adjust the canvas' colors
@@ -788,11 +816,14 @@ function MaxPlot(div, top, left, width, height, args) {
         alphaSlider.style.float = "left";
         //alphaSlider.style.top = "3px";
 
+        const backgroundColor = self.isLight() ? gSliderBackground : gSliderDarkBackground;
+
         // container for label + control elements
         var alphaCont = document.createElement('div');
         alphaCont.id = "mpAlphaCont";
         //alphaCont.style.left = "150px"; // cellbrowser.css defines grid widths: 45
         alphaCont.className = "sliderContainer";
+        alphaCont.style.background = backgroundColor;
         alphaCont.style.top = "15px"; 
         alphaCont.style.left = "0px";
 
@@ -833,6 +864,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         var radiusCont = document.createElement('span');
         radiusCont.className = "sliderContainer";
+        radiusCont.style.background = backgroundColor;
         radiusCont.id = "mpRadiusDiv";
         radiusCont.style.left = "0px"; 
         radiusCont.style.top = "0px";

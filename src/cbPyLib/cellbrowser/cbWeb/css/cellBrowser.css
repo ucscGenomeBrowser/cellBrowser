@@ -96,7 +96,6 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         position : absolute;
         display: grid;
         grid-template-columns: 45px 120px 15px;
-        background: rgba(255,255,255,0.5);
 }
 
 .sliderLabel {
