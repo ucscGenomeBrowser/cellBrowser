@@ -71,8 +71,11 @@ function MaxPlot(div, top, left, width, height, args) {
     const gZoomButtonSize = 30; // size of zoom buttons
     const gZoomFromLeft = 10;  // position of zoom buttons from left
     const gZoomFromBottom = 140;  // position of zoom buttons from bottom
-    const gButtonBackground = "rgb(230, 230, 230, 0.85)" // grey level of buttons
-    const gButtonBackgroundClicked = "rgb(180, 180, 180, 0.6)"; // grey of buttons when clicked
+    const gButtonBackground = "rgba(230, 230, 230, 0.85)" // grey level of buttons
+    const gButtonDarkBackground = "rgba(75, 75, 75, 0.85)";
+    const gButtonBackgroundClicked = "rgba(180, 180, 180, 0.6)"; // grey of buttons when clicked
+    const gButtonDarkBackgroundClicked = "rgba(50, 50, 50, 0.6)";
+    const gButtonBackgrounds = [gButtonBackground, gButtonDarkBackground, gButtonBackgroundClicked, gButtonDarkBackgroundClicked];
     const gCloseButtonFromRight = 60; // distance of "close" button from right edge
 
     const nonFatColor = "F9F9F9"; // color used in fattening mode for all non-fat cells
@@ -96,17 +99,26 @@ function MaxPlot(div, top, left, width, height, args) {
         // Set the new light mode
         this.lightMode = mode;
 
-        // Adjust the canvas' colors and redraw
+        // Adjust all button colors
+        /** @type {HTMLCollection} */
+        let zoomDivButtons = this.zoomDiv.children;
+        for(let button of zoomDivButtons) {
+            if(gButtonBackgrounds.includes(button.style.backgroundColor)){
+                button.style.backgroundColor = self.isLight() ? gButtonBackground : gButtonDarkBackground;
+            }
+        }
+
+        // Adjust the canvas' colors
         /** @type {HTMLCanvasElement} */
         const canvas = this.canvas;
         if(this.usesWebGL()) {
             if(canvas.style.backgroundColor !== "transparent") {
-                canvas.style.backgroundColor = this.lightMode === 1 ? "black" : "white";
+                canvas.style.backgroundColor = this.isLight() ? "black" : "white";
             }
 
             /** @type {WebGL2RenderingContext} */
             const ctx = this.ctx;
-            if(this.lightMode === 1) {
+            if(this.isLight()) {
                 // Light mode: clear color is black (inverts to white)
                 ctx.clearColor(0, 0, 0, 1);
             } else {
@@ -114,7 +126,7 @@ function MaxPlot(div, top, left, width, height, args) {
                 ctx.clearColor(1, 1, 1, 1);
             }
         } else if(canvas.style.backgroundColor !== "transparent") {
-            canvas.style.backgroundColor = this.lightMode === 1 ? "white" : "black";
+            canvas.style.backgroundColor = this.isLight() ? "white" : "black";
         }
 
         this.drawDots();
@@ -129,6 +141,8 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     self.usesWebGL = function() {return !(self.mode === 0 || self.mode === 1)}
+
+    this.isLight = function() {return this.lightMode === 1;}
 
     // the rest of the initialization is done at the end of this file,
     // because the init involves many functions that are not defined yet here
@@ -328,7 +342,7 @@ function MaxPlot(div, top, left, width, height, args) {
         const ctx = self.ctx;
 
         // Set the canvas' clear color
-        if(this.lightMode === 1) {
+        if(this.isLight()) {
             // Light mode: clear color is black (inverts to white)
             ctx.clearColor(0, 0, 0, 1);
         } else {
@@ -618,14 +632,14 @@ function MaxPlot(div, top, left, width, height, args) {
         return div;
     }
 
-    function createButton(width, height, id, title, text, imgFname, paddingTop, paddingBottom, addSep, addThickSep, fontSize) {
+    function createButton(width, height, id, title, text, imgFname, paddingTop, paddingBottom, addSep, addThickSep, fontSize, color) {
         /* make a light-grey div that behaves like a button, with text and/or an image on it
          * Images are hard to vertically center, so padding top can be specified.
          * */
         var div = document.createElement('div');
         div.id = id;
         div.className = "mpButton";
-        div.style.backgroundColor = gButtonBackground;
+        div.style.backgroundColor = color === undefined ? self.isLight() ? gButtonBackground : gButtonDarkBackground : color;
         div.style.width = width+"px";
         div.style.height = height+"px";
         div.style["z-index"]="10";
@@ -666,11 +680,11 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // make color dark grey when mouse is pressed
         div.addEventListener("mousedown", function() {
-                this.style.backgroundColor = gButtonBackgroundClicked;
+                this.style.backgroundColor = self.isLight() ? gButtonBackgroundClicked : gButtonDarkBackgroundClicked;
         });
 
         div.addEventListener("mouseup", function() {
-                this.style.backgroundColor = gButtonBackground;
+                this.style.backgroundColor = self.isLight() ? gButtonBackground : gButtonDarkBackground;
         });
         return div;
     }
@@ -795,8 +809,7 @@ function MaxPlot(div, top, left, width, height, args) {
         //alphaReset.style.marginLeft = "2px";
         //alphaReset.addEventListener ('click',  function() { self.resetAlpha(); self.drawDots();}, false);
 
-        var sliderReset = createButton(15, 15, "mpSliderReset", "Reset transparency and circle size", undoSvg, null, null, null, false, false, 10);
-        sliderReset.style.backgroundColor = "transparent";
+        var sliderReset = createButton(15, 15, "mpSliderReset", "Reset transparency and circle size", undoSvg, null, null, null, false, false, 10, "transparent");
         sliderReset.style.float = "right";
         //sliderReset.style.lineHeight = "16px";
         sliderReset.style.marginLeft = "10px";
@@ -989,8 +1002,8 @@ function MaxPlot(div, top, left, width, height, args) {
         canv.id = id;
         //canv.style.border = "1px solid #AAAAAA";
         canv.style.backgroundColor = transparent ? "transparent" : drawMode === 2
-                                                                 ? self.lightMode === 1 ? "black" : "white"
-                                                                 : self.lightMode === 1 ? "white" : "black";
+                                                                 ? self.isLight() ? "black" : "white"
+                                                                 : self.isLight() ? "white" : "black";
         canv.style.position = "absolute";
         canv.style.display = "block";
         canv.style.width = width+"px";
@@ -2131,7 +2144,7 @@ function MaxPlot(div, top, left, width, height, args) {
                     ctx.clearRect(0, 0, width, height);
                 } else {
                     ctx.globalAlpha = 1.0;
-                    ctx.fillStyle = self.lightMode === 1 ? "rgb(255,255,255)" : "rgb(0, 0, 0)";
+                    ctx.fillStyle = self.isLight() ? "rgb(255,255,255)" : "rgb(0, 0, 0)";
                     ctx.fillRect(0, 0, width, height);
                 }
 
