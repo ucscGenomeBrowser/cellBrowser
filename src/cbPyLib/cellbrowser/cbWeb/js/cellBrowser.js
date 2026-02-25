@@ -2819,7 +2819,7 @@ var cellbrowser = function() {
         /* draw the menubar at the top */
         var htmls = [];
         htmls.push("<div style='width:"+menuBarHeight+"px' id='tpMenuBar'>");
-        htmls.push(`<nav id="tpMenuNavBar" class="navbar navbar-xs" style="background-color: ${lightMode === 1 ? "#f8f8f8" : "#101010"}; border-color: ${lightMode === 1 ? "#e7e7e7" : "#323232"}">`);
+        htmls.push(`<nav class="navbar navbar-default navbar-xs"">`);
 
         htmls.push('<div class="container-fluid">');
 
@@ -2963,15 +2963,6 @@ var cellbrowser = function() {
                     $(this).addClass('open');
                 }
             });
-        
-        // Set the dropdown menu theme
-        if(lightMode === 1) {
-            $(".nav > .dropdown > .dropdown-menu").css("background-color", "#FFF");
-            $(".nav > .dropdown > .dropdown-menu > li > a").css("color", "#333");
-        } else {
-            $(".nav > .dropdown > .dropdown-menu").css("background-color", "#000");
-            $(".nav > .dropdown > .dropdown-menu > li > a").css("color", "#CCC");
-        }
 
         $(document).click ( function() { doHover= false; });
 
@@ -4174,21 +4165,21 @@ var cellbrowser = function() {
         if(lightMode === 1) {
             document.body.style.backgroundColor = "white";
             document.body.style.color = "black";
-            $('#tpLegendHeader')[0].style.backgroundColor = "#EEE";
-            $('#tpTooltip')[0].style.backgroundColor = "rgba(255, 255, 255, 0.85)";
-            $('#tpTooltip')[0].style.borderColor = "black";
-            $('#tpMenuNavBar')[0].style.backgroundColor = "#f8f8f8";
-            $('#tpMenuNavBar')[0].style.borderColor = "#e7e7e7";
+            $('#tpLegendHeader').css("background-color", "#EEE");
+            $('#tpTooltip').css("background-color", "rgba(255, 255, 255, 0.85)");
+            $('#tpTooltip').css("border-color", "black");
+            $('#tpMenuBar > nav').css("background-color", "#f8f8f8");
+            $('#tpMenuBar > nav').css("border-color", "#e7e7e7");
             $(".nav > .dropdown > .dropdown-menu").css("background-color", "#FFF");
             $(".nav > .dropdown > .dropdown-menu > li > a").css("color", "#333");
         } else {
             document.body.style.backgroundColor = "black";
             document.body.style.color = "white";
-            $('#tpLegendHeader')[0].style.backgroundColor = "#222";
-            $('#tpTooltip')[0].style.backgroundColor = "rgba(0, 0, 0, 0.85)";
-            $('#tpTooltip')[0].style.borderColor = "white";
-            $('#tpMenuNavBar')[0].style.backgroundColor = "#101010";
-            $('#tpMenuNavBar')[0].style.borderColor = "#323232";
+            $('#tpLegendHeader').css("background-color", "#222");
+            $('#tpTooltip').css("background-color", "rgba(0, 0, 0, 0.85)");
+            $('#tpTooltip').css("border-color", "white");
+            $('#tpMenuBar > nav').css("background-color", "#101010");
+            $('#tpMenuBar > nav').css("border-color", "#323232");
             $(".nav > .dropdown > .dropdown-menu").css("background-color", "#000");
             $(".nav > .dropdown > .dropdown-menu > li > a").css("color", "#CCC");
         }
@@ -8651,7 +8642,7 @@ var cellbrowser = function() {
         htmls.push("<button id='tpLegendColorChecked'>"+buttonText+"</button></small>");
 
         htmls.push("</div>"); // title
-        htmls.push(`<div id="tpLegendHeader"; style="background-color:${lightMode === 1 ? "#eee" : "#222"}"><span id="tpLegendCol1"></span><span id="tpLegendCol2"></span></div>`);
+        htmls.push(`<div id="tpLegendHeader"><span id="tpLegendCol1"></span><span id="tpLegendCol2"></span></div>`);
         htmls.push('<div id="tpLegendRows">');
 
         // get the sum of all, to calculate frequency
@@ -10030,15 +10021,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
             return;
         }
 
-        // Set background and text color based on light mode
-        if(lightMode === 1) {
-            document.body.style.backgroundColor = "white";
-            document.body.style.color = "black";
-        } else {
-            document.body.style.backgroundColor = "black";
-            document.body.style.color = "white";
-        }
-
         setupKeyboard();
         buildMenuBar();
 
@@ -10087,6 +10069,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         renderer.onSliderChange = onSliderChange;
 
         renderer.canvas.addEventListener("mouseleave", hideTooltip);
+
+        // Set light mode
+        updateLightModeHTML(lightMode);
 
         loadDataset(datasetName, false, rootMd5);
     }
