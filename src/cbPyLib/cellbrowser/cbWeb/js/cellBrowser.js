@@ -2819,7 +2819,7 @@ var cellbrowser = function() {
         /* draw the menubar at the top */
        var htmls = [];
        htmls.push("<div style='width:"+menuBarHeight+"px' id='tpMenuBar'>");
-       htmls.push('<nav class="navbar navbar-default navbar-xs">');
+       htmls.push(`<nav id="tpMenuNavBar" class="navbar navbar-xs" style="background-color: ${lightMode === 1 ? "#f8f8f8" : "#101010"}; border-color: ${lightMode === 1 ? "#e7e7e7" : "#323232"}">`);
 
        htmls.push('<div class="container-fluid">');
 
@@ -4163,12 +4163,16 @@ var cellbrowser = function() {
             $('#tpLegendHeader')[0].style.backgroundColor = "#EEE";
             $('#tpTooltip')[0].style.backgroundColor = "rgba(255, 255, 255, 0.85)";
             $('#tpTooltip')[0].style.borderColor = "black";
+            $('#tpMenuNavBar')[0].style.backgroundColor = "#f8f8f8";
+            $('#tpMenuNavBar')[0].style.borderColor = "#e7e7e7";
         } else {
             document.body.style.backgroundColor = "black";
             document.body.style.color = "white";
             $('#tpLegendHeader')[0].style.backgroundColor = "#222";
             $('#tpTooltip')[0].style.backgroundColor = "rgba(0, 0, 0, 0.85)";
             $('#tpTooltip')[0].style.borderColor = "white";
+            $('#tpMenuNavBar')[0].style.backgroundColor = "#101010";
+            $('#tpMenuNavBar')[0].style.borderColor = "#323232";
         }
     }
 
