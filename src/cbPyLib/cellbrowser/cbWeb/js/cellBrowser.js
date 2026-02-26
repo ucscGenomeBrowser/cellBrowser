@@ -4163,25 +4163,35 @@ var cellbrowser = function() {
 
     function updateLightModeHTML(lightMode) {
         if(lightMode === 1) {
-            document.body.style.backgroundColor = "white";
-            document.body.style.color = "black";
-            $('#tpLegendHeader').css("background-color", "#EEE");
-            $('#tpTooltip').css("background-color", "rgba(255, 255, 255, 0.85)");
-            $('#tpTooltip').css("border-color", "black");
-            $('#tpMenuBar > nav').css("background-color", "#f8f8f8");
-            $('#tpMenuBar > nav').css("border-color", "#e7e7e7");
-            $(".nav > .dropdown > .dropdown-menu").css("background-color", "#FFF");
-            $(".nav > .dropdown > .dropdown-menu > li > a").css("color", "#333");
+            document.body.style.backgroundColor = 'white';
+            document.body.style.color = 'black';
+            $('#tpLegendHeader').css('background-color', '#EEE');
+            $('#tpTooltip').css('background-color', 'rgba(255, 255, 255, 0.85)');
+            $('#tpTooltip').css('border-color', 'black');
+            $('#tpMenuBar > nav').css('background-color', '#f8f8f8');
+            $('#tpMenuBar > nav').css('border-color', '#e7e7e7');
+            $('.nav > .dropdown > .dropdown-menu').css('background-color', '#FFF');
+            $('.nav > .dropdown > .dropdown-menu > li > a').css('color', '#333');
+            $('.ui-widget-content').css('color', '#333');
+            $('#tpLeftTabs').css('background-color', 'white');
+            $('.tpMetaValue').css('background-color', "#EEE");
+            // $('.tpMetaSelect').css('background-color', '#DEDEDE');
+            // $('.tpMetaValueSelect').css('background-color', "#CCC");
         } else {
-            document.body.style.backgroundColor = "black";
-            document.body.style.color = "white";
-            $('#tpLegendHeader').css("background-color", "#222");
-            $('#tpTooltip').css("background-color", "rgba(0, 0, 0, 0.85)");
-            $('#tpTooltip').css("border-color", "white");
-            $('#tpMenuBar > nav').css("background-color", "#101010");
-            $('#tpMenuBar > nav').css("border-color", "#323232");
-            $(".nav > .dropdown > .dropdown-menu").css("background-color", "#000");
-            $(".nav > .dropdown > .dropdown-menu > li > a").css("color", "#CCC");
+            document.body.style.backgroundColor = 'black';
+            document.body.style.color = 'white';
+            $('#tpLegendHeader').css('background-color', '#222');
+            $('#tpTooltip').css('background-color', 'rgba(0, 0, 0, 0.85)');
+            $('#tpTooltip').css('border-color', 'white');
+            $('#tpMenuBar > nav').css('background-color', '#101010');
+            $('#tpMenuBar > nav').css('border-color', '#323232');
+            $('.nav > .dropdown > .dropdown-menu').css('background-color', '#000');
+            $('.nav > .dropdown > .dropdown-menu > li > a').css('color', '#CCC');
+            $('.ui-widget-content').css('color', '#CCC');
+            $('#tpLeftTabs').css('background-color', 'black');
+            $('.tpMetaValue').css('background-color', "#222");
+            // $('.tpMetaSelect').css('background-color', '#424242');
+            // $('.tpMetaValueSelect').css('background-color', "#333");
         }
     }
 
@@ -5324,8 +5334,8 @@ var cellbrowser = function() {
 
         // change style of this field a little
         var metaSel = "#tpMetaBox_"+metaInfo.index;
-        $(metaSel).addClass("tpMetaHover");
-        $(metaSel+" .tpMetaValue").addClass("tpMetaHover");
+        $(metaSel).addClass(lightMode === 1 ? "tpMetaHover-light" : "tpMetaHover-dark");
+        $(metaSel+" .tpMetaValue").addClass(lightMode === 1 ? "tpMetaHover-light" : "tpMetaHover-dark");
 
         $(".tpSameLink").remove();
 
@@ -5595,6 +5605,8 @@ var cellbrowser = function() {
                setTimeout(function(){ showIntro(true); }, 3000); // shown after 5 secs
         }
 
+        // Update newly-added elements with the light mode
+        updateLightModeHTML(lightMode);
     }
 
     function loadDataset(datasetName, resetVars, md5) {
@@ -7452,7 +7464,7 @@ var cellbrowser = function() {
                     "' data-field-name='"+metaInfo.name+"' id='tpMeta_" + i + "'>&nbsp;</div>");
             htmls.push("</div>"); // tpMetaBox
         }
-        htmls.push("<div style='background-color:white; float:right' id='tpMetaNote' style='display:none; height:1em'></div>");
+        htmls.push("<div style='float:right' id='tpMetaNote' style='display:none; height:1em'></div>");
     }
 
     function rebuildMetaPanel() {
@@ -7470,8 +7482,8 @@ var cellbrowser = function() {
         $(".tpMetaValue").on("mouseenter", onMetaMouseOver );
         $(".tpMetaValue").on ("mouseout", function() {
             $('#tpMetaTip').hide();
-            $('.tpMetaBox').removeClass("tpMetaHover");
-            $('.tpMetaBox .tpMetaValue').removeClass("tpMetaHover");
+            $('.tpMetaBox').removeClass(lightMode === 1 ? "tpMetaHover-light" : "tpMetaHover-dark");
+            $('.tpMetaBox .tpMetaValue').removeClass(lightMode === 1 ? "tpMetaHover-light" : "tpMetaHover-dark");
         } );
 
         // setup the right-click menu
@@ -10052,6 +10064,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
 
         buildEmptyLegendBar(metaBarWidth+metaBarMargin+renderer.width, toolBarHeight);
 
+        // Set light mode
+        updateLightModeHTML(lightMode);
+
         // Enable input
         renderer.setupMouse();
         $(window).resize(onWindowResize);
@@ -10070,9 +10085,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
 
         renderer.canvas.addEventListener("mouseleave", hideTooltip);
 
-        // Set light mode
-        updateLightModeHTML(lightMode);
-
+        // Load data
         loadDataset(datasetName, false, rootMd5);
     }
 
