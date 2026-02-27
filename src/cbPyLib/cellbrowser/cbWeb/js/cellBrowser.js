@@ -3754,7 +3754,7 @@ var cellbrowser = function() {
            }
 
            setColorByDropdown(colorBy);
-           $('#tpMetaBox_'+fieldIdx).addClass('tpMetaSelect');
+           $('#tpMetaBox_'+fieldIdx).addClass(`tpMetaSelect-${lightMode === 1 ? 'light' : 'dark'}`);
        }
        else {
            if (colorType==="locus") {
@@ -4174,9 +4174,14 @@ var cellbrowser = function() {
             $('.nav > .dropdown > .dropdown-menu > li > a').css('color', '#333');
             $('.ui-widget-content').css('color', '#333');
             $('#tpLeftTabs').css('background-color', 'white');
-            $('.tpMetaValue').css('background-color', "#EEE");
-            // $('.tpMetaSelect').css('background-color', '#DEDEDE');
-            // $('.tpMetaValueSelect').css('background-color', "#CCC");
+
+            $('.tpMetaValue').removeClass('tpMetaValue-dark');
+            $('.tpMetaValue').addClass('tpMetaValue-light');
+
+            $('.tpMetaSelect-dark').addClass('tpMetaSelect-light');
+            $('.tpMetaSelect-light').removeClass('tpMetaSelect-dark');
+            $('.tpMetaValueSelect-dark').addClass('tpMetaValueSelect-light');
+            $('.tpMetaValueSelect-light').removeClass('tpMetaValueSelect-dark');
         } else {
             document.body.style.backgroundColor = 'black';
             document.body.style.color = 'white';
@@ -4189,9 +4194,14 @@ var cellbrowser = function() {
             $('.nav > .dropdown > .dropdown-menu > li > a').css('color', '#CCC');
             $('.ui-widget-content').css('color', '#CCC');
             $('#tpLeftTabs').css('background-color', 'black');
-            $('.tpMetaValue').css('background-color', "#222");
-            // $('.tpMetaSelect').css('background-color', '#424242');
-            // $('.tpMetaValueSelect').css('background-color', "#333");
+            
+            $('.tpMetaValue').removeClass('tpMetaValue-light');
+            $('.tpMetaValue').addClass('tpMetaValue-dark');
+            
+            $('.tpMetaSelect-light').addClass('tpMetaSelect-dark');
+            $('.tpMetaSelect-dark').removeClass('tpMetaSelect-light');
+            $('.tpMetaValueSelect-light').addClass('tpMetaValueSelect-dark');
+            $('.tpMetaValueSelect-dark').removeClass('tpMetaValueSelect-light');
         }
     }
 
@@ -4684,7 +4694,7 @@ var cellbrowser = function() {
     /* user clicked on a gene in the gene table */
         var locusId = event.target.getAttribute("data-geneId"); // the geneId of the gene
         var locusLabel = event.target.textContent;
-        $('.tpMetaBox').removeClass('tpMetaSelect');
+        $('.tpMetaBox').removeClass(`tpMetaSelect-${lightMode === 1 ? 'light' : 'dark'}`);
         $('.tpGeneBarCell').removeClass("tpGeneBarCellSelected");
         // XX TODO: How find all the elements with this ID?
         var saneId = onlyAlphaNum(locusId)
@@ -5209,10 +5219,10 @@ var cellbrowser = function() {
             return;
 
         var metaIdx = db.fieldNameToIndex(metaInfo.name);
-        $('.tpMetaBox').removeClass('tpMetaSelect');
-        $('.tpMetaValue').removeClass('tpMetaValueSelect');
-        $('#tpMetaBox_'+metaIdx).addClass('tpMetaSelect');
-        $('#tpMeta_'+metaIdx).addClass('tpMetaValueSelect');
+        $('.tpMetaBox').removeClass(`tpMetaSelect-${lightMode === 1 ? 'light' : 'dark'}`);
+        $('.tpMetaValue').removeClass(`tpMetaValueSelect-${lightMode === 1 ? 'light' : 'dark'}`);
+        $('#tpMetaBox_'+metaIdx).addClass(`tpMetaSelect-${lightMode === 1 ? 'light' : 'dark'}`);
+        $('#tpMeta_'+metaIdx).addClass(`tpMetaValueSelect-${lightMode === 1 ? 'light' : 'dark'}`);
         $('.tpGeneBarCell').removeClass('tpGeneBarCellSelected');
         //$('#tpLegendTitle').text(legend.metaInfo.label.replace(/_/g, " "));
         legendSetTitle(legend.metaInfo.label.replace(/_/g, " "));
@@ -7460,7 +7470,7 @@ var cellbrowser = function() {
                     styleAdd = ";font-size:"+metaInfo.opt.fontSize;
             }
 
-            htmls.push("<div class='tpMetaValue' style='"+styleAdd+
+            htmls.push(`<div class='tpMetaValue tpMetaValue-${lightMode === 1 ? 'light' : 'dark'}' style='`+styleAdd+
                     "' data-field-name='"+metaInfo.name+"' id='tpMeta_" + i + "'>&nbsp;</div>");
             htmls.push("</div>"); // tpMetaBox
         }
