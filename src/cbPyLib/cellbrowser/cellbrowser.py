@@ -645,7 +645,7 @@ def cbScanpy_parseArgs():
             help="do not try to calculate cluster-specific marker genes. Only useful for the rare datasets where a bug in scanpy crashes the marker gene calculation.")
 
     parser.add_option("-f", "--matrixFormat", dest="matrixFormat", action="store",
-            help="Output matrix file format. 'mtx' or 'tsv'. default: tsv",)
+            help="Output matrix file format. 'mtx' or 'tsv'. default: mtx",)
 
     parser.add_option("", "--copyMatrix", dest="copyMatrix", action="store_true",
             help="Instead of reading the input matrix into scanpy and then writing it back out, just copy the input matrix. Only works if the input matrix is gzipped and in the right format and a tsv or csv file, not mtx or h5-based files.")
@@ -5467,11 +5467,11 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     mat = adata.X
     logging.info("Matrix has size (%d cells, %d genes)" % (mat.shape[0], mat.shape[1]))
 
-    if matrixFormat=="tsv" or matrixFormat is None:
+    if matrixFormat=="tsv":
         matFname = join(outDir, 'exprMatrix.tsv.gz')
         if not skipMatrix:
             anndataMatrixToTsv(adata, matFname)
-    elif matrixFormat=="mtx":
+    elif matrixFormat=="mtx" or matrixFormat is None:
         if not skipMatrix:
             anndataMatrixToMtx(adata, outDir)
         configData["exprMatrix"] = "matrix.mtx.gz"
