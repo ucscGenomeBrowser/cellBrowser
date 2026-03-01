@@ -4173,6 +4173,7 @@ var cellbrowser = function() {
             $('.nav > .dropdown > .dropdown-menu').css('background-color', '#FFF');
             $('.nav > .dropdown > .dropdown-menu > li > a').css('color', '#333');
             $('.ui-widget-content').css('color', '#333');
+            $('.ui-widget-header').css('background', 'white');
             $('#tpLeftTabs').css('background-color', 'white');
 
             $('.tpMetaValue').removeClass('tpMetaValue-dark');
@@ -4182,6 +4183,7 @@ var cellbrowser = function() {
             $('.tpMetaSelect-light').removeClass('tpMetaSelect-dark');
             $('.tpMetaValueSelect-dark').addClass('tpMetaValueSelect-light');
             $('.tpMetaValueSelect-light').removeClass('tpMetaValueSelect-dark');
+
         } else {
             document.body.style.backgroundColor = 'black';
             document.body.style.color = 'white';
@@ -4193,6 +4195,7 @@ var cellbrowser = function() {
             $('.nav > .dropdown > .dropdown-menu').css('background-color', '#000');
             $('.nav > .dropdown > .dropdown-menu > li > a').css('color', '#CCC');
             $('.ui-widget-content').css('color', '#CCC');
+            $('.ui-widget-header').css('background', 'black');
             $('#tpLeftTabs').css('background-color', 'black');
             
             $('.tpMetaValue').removeClass('tpMetaValue-light');

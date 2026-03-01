@@ -210,7 +210,6 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         text-align: left
 }
 
- .ui-widget-header { background: white} 
 .ui-state-active { background: green }
 
 .ui-progressbar { position: relative; }
