@@ -59,7 +59,7 @@ function MaxPlot(div, top, left, width, height, args) {
     this.hiddenCoord = HIDCOORD;
 
     const DEBUG = false;
-    const WEBGL_DEBUG = true;
+    const WEBGL_DEBUG = false;
 
     var self = this; // 'this' has two conflicting meanings in javascript.
     // I use 'self' to refer to object variables, so I can use 'this' to refer to the caller context
@@ -441,6 +441,7 @@ function MaxPlot(div, top, left, width, height, args) {
                 v_Color = vec3(l_Luminosity, l_Luminosity, l_Luminosity);
             }
             v_Selected = a_Selected;
+            v_ColID = a_ColID;
         }
         `;
         // Fragemnt shader GLSL code
