@@ -2028,13 +2028,12 @@ function MaxPlot(div, top, left, width, height, args) {
             ctx.finish();
             console.time("draw");
         }
-        ctx.drawArrays(self.ctx.POINTS, 0, coordColors.length);
+        ctx.drawArrays(self.ctx.POINTS, 0, self.getCount());
         if(WEBGL_DEBUG) {
             ctx.finish();
             console.timeEnd("draw");
         }
         
-        console.log(`${coordColors.length} points drawn`);
         if(WEBGL_DEBUG) console.timeEnd("drawCirclesWebGL");
     }
 
