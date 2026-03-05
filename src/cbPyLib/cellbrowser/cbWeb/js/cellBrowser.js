@@ -4190,15 +4190,23 @@ var cellbrowser = function() {
             const newTheme = lightMode === 1 ? "light" : "dark";
             const cssFName = `ext/${cssId}.${newTheme}.css`;
             let el = document.getElementById(cssId);
-            if (el)
+            if (el) {
                 el.href = cssFName;
+            } else {
+                console.warn(`Missing CSS element ${cssId}`);
+            }
         }
 
         // Update css/cellBrowser.css
-        if(lightMode === 1) {
-            document.getElementById('cellBrowser').href = "css/cellBrowser.light.css"
+        let cellBrowserCSS = document.getElementById('cellBrowser');
+        if(cellBrowserCSS) {
+            if(lightMode === 1) {
+                cellBrowserCSS.href = "css/cellBrowser.light.css"
+            } else {
+                cellBrowserCSS.href = "css/cellBrowser.dark.css"
+            }
         } else {
-            document.getElementById('cellBrowser').href = "css/cellBrowser.dark.css"
+            console.warn(`Missing CSS element cellBrowser`);
         }
     }
 
