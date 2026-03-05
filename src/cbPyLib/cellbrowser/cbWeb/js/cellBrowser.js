@@ -2817,140 +2817,140 @@ var cellbrowser = function() {
 
     function buildMenuBar() {
         /* draw the menubar at the top */
-        var htmls = [];
-        htmls.push("<div style='width:"+menuBarHeight+"px' id='tpMenuBar'>");
-        htmls.push(`<nav class="navbar navbar-default navbar-xs"">`);
+       var htmls = [];
+       htmls.push("<div style='width:"+menuBarHeight+"px' id='tpMenuBar'>");
+       htmls.push('<nav class="navbar navbar-default navbar-xs">');
 
-        htmls.push('<div class="container-fluid">');
+       htmls.push('<div class="container-fluid">');
 
-        htmls.push('<div class="navbar-header">');
-        htmls.push('<a class="navbar-brand" href="#">'+gTitle+'</a>');
-        htmls.push('</div>');
+         htmls.push('<div class="navbar-header">');
+           htmls.push('<a class="navbar-brand" href="#">'+gTitle+'</a>');
+         htmls.push('</div>');
 
-        htmls.push('<ul class="nav navbar-nav">');
+         htmls.push('<ul class="nav navbar-nav">');
 
-        htmls.push('<li class="dropdown">');
-        htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false">File</a>');
-        htmls.push('<ul class="dropdown-menu">');
-            htmls.push('<li><a href="#" id="tpOpenDatasetLink"><span class="dropmenu-item-label">Open dataset...</span><span class="dropmenu-item-content">o</span></a></li>');
-            //htmls.push('<li class="dropdown-submenu"><a tabindex="0" href="#">Download Data</a>');
-            //htmls.push('<ul class="dropdown-menu" id="tpDownloadMenu">');
-                //htmls.push('<li><a href="#" id="tpDownload_matrix">Gene Expression Matrix</a></li>');
-                //htmls.push('<li><a href="#" id="tpDownload_meta">Cell Metadata</a></li>');
-                //htmls.push('<li><a href="#" id="tpDownload_coords">Visible coordinates</a></li>');
-            //htmls.push('</ul>'); // Download sub-menu
-            htmls.push('<li><a href="#" id="tpSaveImage">Download bitmap image (PNG)</a></li>');
-            htmls.push('<li><a href="#" id="tpSaveImageSvg">Download vector image (SVG)</a></li>');
-            htmls.push('</li>');   // sub-menu container
+         htmls.push('<li class="dropdown">');
+           htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false">File</a>');
+           htmls.push('<ul class="dropdown-menu">');
+             htmls.push('<li><a href="#" id="tpOpenDatasetLink"><span class="dropmenu-item-label">Open dataset...</span><span class="dropmenu-item-content">o</span></a></li>');
+             //htmls.push('<li class="dropdown-submenu"><a tabindex="0" href="#">Download Data</a>');
+               //htmls.push('<ul class="dropdown-menu" id="tpDownloadMenu">');
+                 //htmls.push('<li><a href="#" id="tpDownload_matrix">Gene Expression Matrix</a></li>');
+                 //htmls.push('<li><a href="#" id="tpDownload_meta">Cell Metadata</a></li>');
+                 //htmls.push('<li><a href="#" id="tpDownload_coords">Visible coordinates</a></li>');
+               //htmls.push('</ul>'); // Download sub-menu
+             htmls.push('<li><a href="#" id="tpSaveImage">Download bitmap image (PNG)</a></li>');
+             htmls.push('<li><a href="#" id="tpSaveImageSvg">Download vector image (SVG)</a></li>');
+             htmls.push('</li>');   // sub-menu container
 
-        htmls.push('</ul>'); // File menu
-        htmls.push('</li>'); // File dropdown
+           htmls.push('</ul>'); // File menu
+         htmls.push('</li>'); // File dropdown
 
-        htmls.push('<li class="dropdown">');
-        htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false">Edit</a>');
-        htmls.push('<ul class="dropdown-menu">');
-        htmls.push('<li><a id="tpSelectAll" href="#"><span class="dropmenu-item-label">Select all visible</span><span class="dropmenu-item-content">s a</span></a></li>');
-        htmls.push('<li><a id="tpSelectNone" href="#"><span class="dropmenu-item-label">Select none</span><span class="dropmenu-item-content">s n</span></a></li>');
-        htmls.push('<li><a id="tpSelectInvert" href="#"><span class="dropmenu-item-label">Invert selection</span><span class="dropmenu-item-content">s i</span></a></li>');
-        htmls.push('<li><a id="tpSelectName" href="#"><span class="dropmenu-item-label">Name selection...</span><span class="dropmenu-item-content">s s</span></a></li>');
-        htmls.push('<li><a id="tpExportIds" href="#">Export selected...</a></li>');
-        htmls.push('<li><a id="tpSelectComplex" href="#"><span class="dropmenu-item-label">Find cells...</span><span class="dropmenu-item-content">f c</span></a></li>');
-        //htmls.push('<li><a id="tpMark" href="#"><span class="dropmenu-item-label">Mark selected</span><span class="dropmenu-item-content">h m</span></a></li>');
-        //htmls.push('<li><a id="tpMarkClear" href="#"><span class="dropmenu-item-label">Clear marks</span><span class="dropmenu-item-content">c m</span></a></li>');
-        htmls.push('<li><a id="tpSelectById" href="#">Find by ID...<span class="dropmenu-item-content">f i</span></a></li>');
-        htmls.push('</ul>'); // View dropdown
-        htmls.push('</li>'); // View dropdown
+         htmls.push('<li class="dropdown">');
+         htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false">Edit</a>');
+         htmls.push('<ul class="dropdown-menu">');
+         htmls.push('<li><a id="tpSelectAll" href="#"><span class="dropmenu-item-label">Select all visible</span><span class="dropmenu-item-content">s a</span></a></li>');
+         htmls.push('<li><a id="tpSelectNone" href="#"><span class="dropmenu-item-label">Select none</span><span class="dropmenu-item-content">s n</span></a></li>');
+         htmls.push('<li><a id="tpSelectInvert" href="#"><span class="dropmenu-item-label">Invert selection</span><span class="dropmenu-item-content">s i</span></a></li>');
+         htmls.push('<li><a id="tpSelectName" href="#"><span class="dropmenu-item-label">Name selection...</span><span class="dropmenu-item-content">s s</span></a></li>');
+         htmls.push('<li><a id="tpExportIds" href="#">Export selected...</a></li>');
+         htmls.push('<li><a id="tpSelectComplex" href="#"><span class="dropmenu-item-label">Find cells...</span><span class="dropmenu-item-content">f c</span></a></li>');
+         //htmls.push('<li><a id="tpMark" href="#"><span class="dropmenu-item-label">Mark selected</span><span class="dropmenu-item-content">h m</span></a></li>');
+         //htmls.push('<li><a id="tpMarkClear" href="#"><span class="dropmenu-item-label">Clear marks</span><span class="dropmenu-item-content">c m</span></a></li>');
+         htmls.push('<li><a id="tpSelectById" href="#">Find by ID...<span class="dropmenu-item-content">f i</span></a></li>');
+         htmls.push('</ul>'); // View dropdown
+         htmls.push('</li>'); // View dropdown
 
-        htmls.push('<li class="dropdown">');
-        htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false">View</a>');
-        htmls.push('<ul class="dropdown-menu">');
+         htmls.push('<li class="dropdown">');
+         htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false">View</a>');
+         htmls.push('<ul class="dropdown-menu">');
 
-        htmls.push('<li><a href="#" id="tpZoomPlus"><span class="dropmenu-item-label">Zoom in</span><span class="dropmenu-item-content">+</span></a></li>');
-        htmls.push('<li><a href="#" id="tpZoomMinus"><span class="dropmenu-item-label">Zoom out</span><span class="dropmenu-item-content">-</span></a></li>');
-        htmls.push('<li><a href="#" id="tpZoom100Menu"><span class="dropmenu-item-label">Zoom 100%</span><span class="dropmenu-item-content">space</span></a></li>');
-        htmls.push('<li><a href="#" id="tpSplitMenu"><span id="tpSplitMenuEntry" class="dropmenu-item-label">Split screen</span><span class="dropmenu-item-content">t</span></a></li>');
-        htmls.push('<li><a href="#" id="tpHeatMenu"><span id="tpHeatMenuEntry" class="dropmenu-item-label">Toggle Heatmap</span><span class="dropmenu-item-content">h</span></a></li>');
+         htmls.push('<li><a href="#" id="tpZoomPlus"><span class="dropmenu-item-label">Zoom in</span><span class="dropmenu-item-content">+</span></a></li>');
+         htmls.push('<li><a href="#" id="tpZoomMinus"><span class="dropmenu-item-label">Zoom out</span><span class="dropmenu-item-content">-</span></a></li>');
+         htmls.push('<li><a href="#" id="tpZoom100Menu"><span class="dropmenu-item-label">Zoom 100%</span><span class="dropmenu-item-content">space</span></a></li>');
+         htmls.push('<li><a href="#" id="tpSplitMenu"><span id="tpSplitMenuEntry" class="dropmenu-item-label">Split screen</span><span class="dropmenu-item-content">t</span></a></li>');
+         htmls.push('<li><a href="#" id="tpHeatMenu"><span id="tpHeatMenuEntry" class="dropmenu-item-label">Toggle Heatmap</span><span class="dropmenu-item-content">h</span></a></li>');
 
-        htmls.push('<li><hr class="half-rule"></li>');
+         htmls.push('<li><hr class="half-rule"></li>');
 
-        //htmls.push('<li><a href="#" id="tpOnlySelectedButton">Show only selected</a></li>');
-        //htmls.push('<li><a href="#" id="tpFilterButton">Hide selected '+gSampleDesc+'s</a></li>');
-        //htmls.push('<li><a href="#" id="tpShowAllButton">Show all '+gSampleDesc+'</a></li>');
-        htmls.push('<li><a href="#" id="tpHideShowLabels"><span id="tpHideMenuEntry">Hide labels</span><span class="dropmenu-item-content">c l</span></a></li>');
-        htmls.push(`<li><a href="#" id="tpToggleDarkMode"><span id="tpDarkMenuEntry">Enable ${lightMode === 1 ? "Dark" : "Light"} Mode</span><span class="dropmenu-item-content"></span></a></li>`);
+         //htmls.push('<li><a href="#" id="tpOnlySelectedButton">Show only selected</a></li>');
+         //htmls.push('<li><a href="#" id="tpFilterButton">Hide selected '+gSampleDesc+'s</a></li>');
+         //htmls.push('<li><a href="#" id="tpShowAllButton">Show all '+gSampleDesc+'</a></li>');
+         htmls.push('<li><a href="#" id="tpHideShowLabels"><span id="tpHideMenuEntry">Hide labels</span><span class="dropmenu-item-content">c l</span></a></li>');
+         htmls.push(`<li><a href="#" id="tpToggleDarkMode"><span id="tpDarkMenuEntry">Enable ${lightMode === 1 ? "Dark" : "Light"} Mode</span><span class="dropmenu-item-content"></span></a></li>`);
+         
+         htmls.push('</ul>'); // View dropdown-menu
+         htmls.push('</li>'); // View dropdown container
 
-        htmls.push('</ul>'); // View dropdown-menu
-        htmls.push('</li>'); // View dropdown container
-
-        htmls.push('<li class="dropdown">');
-        htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false">Tools</a>');
-        htmls.push('<ul class="dropdown-menu">');
-        //htmls.push('<li><a href="#" id="tpRenameClusters">Rename clusters...<span class="dropmenu-item-content"></span></a></li>');
-        htmls.push('<li><a href="#" id="tpCustomAnnots">Remove all custom annotations<span class="dropmenu-item-content"></span></a></li>');
-        //htmls.push('<li><a href="#" id="tpCluster">Run clustering...<span class="dropmenu-item-content"></span></a></li>');
-        htmls.push('<li class="disabled"><a href="#" id="tpSetBackground">Set as background cells<span class="dropmenu-item-content">b s</span></a></li>');
-        htmls.push('<li class="disabled"><a href="#" id="tpResetBackground">Reset background cells<span class="dropmenu-item-content">b r</span></a></li>');
-        htmls.push('</ul>'); // Tools dropdown-menu
-        htmls.push('</li>'); // Tools dropdown container
-
-
-        htmls.push('<li class="dropdown">');
-        htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false">Help</a>');
-        htmls.push('<ul class="dropdown-menu">');
-        htmls.push('<li><a href="#" id="tpAboutButton">About</a></li>');
-        htmls.push('<li><a href="https://cellbrowser.readthedocs.io/en/master/interface.html" target=_blank id="tpQuickstartButton">How to use this website</a></li>');
-        htmls.push('<li><a href="#" id="tpTutorialButton">Interactive Tutorial</a></li>');
-        htmls.push('<li><a target=_blank href="https://github.com/maximilianh/cellBrowser#readme" id="tpGithubButton">Setup your own cell browser</a></li>');
-        htmls.push('</ul>'); // Help dropdown-menu
-        htmls.push('</li>'); // Help dropdown container
-
-        htmls.push('</ul>'); // navbar-nav
-
-        htmls.push('</div>'); // container
-        htmls.push('</nav>'); // navbar
-        htmls.push('</div>'); // tpMenuBar
-
-        $(document.body).append(htmls.join(""));
-
-        $('#tpTransMenu li a').click( onTransClick );
-        $('#tpSizeMenu li a').click( onSizeClick );
-        //$('#tpFilterButton').click( onHideSelectedClick );
-        //$('#tpOnlySelectedButton').click( onShowOnlySelectedClick );
-        $('#tpZoom100Menu').click( onZoom100Click );
-        $('#tpSplitMenu').click( onSplitClick );
-        $('#tpHeatMenu').click( onHeatClick );
-        $('#tpZoomPlus').click( onZoomInClick );
-        $('#tpZoomMinus').click( onZoomOutClick );
-        //$('#tpShowAllButton').click( onShowAllClick );
-        $('#tpHideShowLabels').click( onHideShowLabelsClick );
-        $('#tpToggleDarkMode').click( onToggleDarkModeClick );
-        $('#tpExportIds').click( onExportIdsClick );
-        $('#tpSelectById').click( onSelectByIdClick );
-        $('#tpMark').click( onMarkClick );
-        $('#tpMarkClear').click( onMarkClearClick );
-        $('#tpTutorialButton').click( function()  { showIntro(false); } );
-        $('#tpAboutButton').click( onAboutClick );
-        $('#tpOpenDatasetLink').click( openCurrentDataset );
-        $('#tpSaveImage').click( onSaveAsClick );
-        $('#tpSaveImageSvg').click( onSaveAsSvgClick );
-        $('#tpSelectAll').click( onSelectAllClick );
-        $('#tpSelectNone').click( onSelectNoneClick );
-        $('#tpSelectInvert').click( onSelectInvertClick );
-        $('#tpSelectName').click( onSelectNameClick );
-        $('#tpSelectComplex').click( onFindCellsClick );
+         htmls.push('<li class="dropdown">');
+         htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false">Tools</a>');
+         htmls.push('<ul class="dropdown-menu">');
+         //htmls.push('<li><a href="#" id="tpRenameClusters">Rename clusters...<span class="dropmenu-item-content"></span></a></li>');
+         htmls.push('<li><a href="#" id="tpCustomAnnots">Remove all custom annotations<span class="dropmenu-item-content"></span></a></li>');
+         //htmls.push('<li><a href="#" id="tpCluster">Run clustering...<span class="dropmenu-item-content"></span></a></li>');
+         htmls.push('<li class="disabled"><a href="#" id="tpSetBackground">Set as background cells<span class="dropmenu-item-content">b s</span></a></li>');
+         htmls.push('<li class="disabled"><a href="#" id="tpResetBackground">Reset background cells<span class="dropmenu-item-content">b r</span></a></li>');
+         htmls.push('</ul>'); // Tools dropdown-menu
+         htmls.push('</li>'); // Tools dropdown container
 
 
-        $('#tpRenameClusters').click( onRenameClustersClick );
-        $('#tpCustomAnnots').click( onCustomAnnotationsClick );
-        $('#tpSetBackground').click( onBackgroudSetClick );
-        $('#tpResetBackground').click( onBackgroudResetClick );
-        //$('#tpCluster').click( onRunClusteringClick );
+         htmls.push('<li class="dropdown">');
+         htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false">Help</a>');
+         htmls.push('<ul class="dropdown-menu">');
+         htmls.push('<li><a href="#" id="tpAboutButton">About</a></li>');
+         htmls.push('<li><a href="https://cellbrowser.readthedocs.io/en/master/interface.html" target=_blank id="tpQuickstartButton">How to use this website</a></li>');
+         htmls.push('<li><a href="#" id="tpTutorialButton">Interactive Tutorial</a></li>');
+         htmls.push('<li><a target=_blank href="https://github.com/maximilianh/cellBrowser#readme" id="tpGithubButton">Setup your own cell browser</a></li>');
+         htmls.push('</ul>'); // Help dropdown-menu
+         htmls.push('</li>'); // Help dropdown container
 
-        // This version is more like OSX/Windows:
-        // - menus only open when you click on them
-        // - once you have clicked, they start to open on hover
-        // - a click anywhere else will stop the hovering
-        var doHover = false;
+       htmls.push('</ul>'); // navbar-nav
+
+       htmls.push('</div>'); // container
+       htmls.push('</nav>'); // navbar
+       htmls.push('</div>'); // tpMenuBar
+
+       $(document.body).append(htmls.join(""));
+
+       $('#tpTransMenu li a').click( onTransClick );
+       $('#tpSizeMenu li a').click( onSizeClick );
+       //$('#tpFilterButton').click( onHideSelectedClick );
+       //$('#tpOnlySelectedButton').click( onShowOnlySelectedClick );
+       $('#tpZoom100Menu').click( onZoom100Click );
+       $('#tpSplitMenu').click( onSplitClick );
+       $('#tpHeatMenu').click( onHeatClick );
+       $('#tpZoomPlus').click( onZoomInClick );
+       $('#tpZoomMinus').click( onZoomOutClick );
+       //$('#tpShowAllButton').click( onShowAllClick );
+       $('#tpHideShowLabels').click( onHideShowLabelsClick );
+       $('#tpToggleDarkMode').click( onToggleDarkModeClick );
+       $('#tpExportIds').click( onExportIdsClick );
+       $('#tpSelectById').click( onSelectByIdClick );
+       $('#tpMark').click( onMarkClick );
+       $('#tpMarkClear').click( onMarkClearClick );
+       $('#tpTutorialButton').click( function()  { showIntro(false); } );
+       $('#tpAboutButton').click( onAboutClick );
+       $('#tpOpenDatasetLink').click( openCurrentDataset );
+       $('#tpSaveImage').click( onSaveAsClick );
+       $('#tpSaveImageSvg').click( onSaveAsSvgClick );
+       $('#tpSelectAll').click( onSelectAllClick );
+       $('#tpSelectNone').click( onSelectNoneClick );
+       $('#tpSelectInvert').click( onSelectInvertClick );
+       $('#tpSelectName').click( onSelectNameClick );
+       $('#tpSelectComplex').click( onFindCellsClick );
+
+
+       $('#tpRenameClusters').click( onRenameClustersClick );
+       $('#tpCustomAnnots').click( onCustomAnnotationsClick );
+       $('#tpSetBackground').click( onBackgroudSetClick );
+       $('#tpResetBackground').click( onBackgroudResetClick );
+       //$('#tpCluster').click( onRunClusteringClick );
+
+       // This version is more like OSX/Windows:
+       // - menus only open when you click on them
+       // - once you have clicked, they start to open on hover
+       // - a click anywhere else will stop the hovering
+       var doHover = false;
         $(".nav > .dropdown").click(function(){
                 doHover = !doHover;
                 return true;
@@ -2964,12 +2964,12 @@ var cellbrowser = function() {
                 }
             });
 
-        $(document).click ( function() { doHover= false; });
+       $(document).click ( function() { doHover= false; });
 
-        // when user releases the mouse outside the canvas, remove the zooming marquee
-        $(document).mouseup ( function(ev) { if (ev.target.nodeName!=="canvas") { renderer.resetMarquee(); }} );
+       // when user releases the mouse outside the canvas, remove the zooming marquee
+       $(document).mouseup ( function(ev) { if (ev.target.nodeName!=="canvas") { renderer.resetMarquee(); }} );
 
-        $('[data-submenu]').submenupicker();
+       $('[data-submenu]').submenupicker();
 
     }
 
@@ -3754,7 +3754,7 @@ var cellbrowser = function() {
            }
 
            setColorByDropdown(colorBy);
-           $('#tpMetaBox_'+fieldIdx).addClass(`tpMetaSelect-${lightMode === 1 ? 'light' : 'dark'}`);
+           $('#tpMetaBox_'+fieldIdx).addClass('tpMetaSelect');
        }
        else {
            if (colorType==="locus") {
@@ -4162,49 +4162,29 @@ var cellbrowser = function() {
     }
 
     function updateLightModeHTML(lightMode) {
+        // Update ext CSS files
+        const extCssIdNames = [
+            "jquery-ui-1.12.1",
+            "spectrum-1.8.0",
+            "jquery.contextMenu",
+            "bootstrap.min",
+            "bootstrap-dropmenu.min",
+            "chosen.1.8.2.min",
+            "selectize.bootstrap3",
+            "theme.bootstrap_3"
+        ];
+        
+        for(let cssId of extCssIdNames) {
+            const newTheme = lightMode === 1 ? "light" : "dark";
+            const cssFName = `ext/${cssId}.${newTheme}.css`;
+            document.getElementById(cssId).href = cssFName;
+        }
+
+        // Update css/cellBrowser.css
         if(lightMode === 1) {
-            document.body.style.backgroundColor = 'white';
-            document.body.style.color = 'black';
-            $('#tpLegendHeader').css('background-color', '#EEE');
-            $('#tpTooltip').css('background-color', 'rgba(255, 255, 255, 0.85)');
-            $('#tpTooltip').css('border-color', 'black');
-            $('#tpMenuBar > nav').css('background-color', '#f8f8f8');
-            $('#tpMenuBar > nav').css('border-color', '#e7e7e7');
-            $('.nav > .dropdown > .dropdown-menu').css('background-color', '#FFF');
-            $('.nav > .dropdown > .dropdown-menu > li > a').css('color', '#333');
-            $('.ui-widget-content').css('color', '#333');
-            $('.ui-widget-header').css('background', 'white');
-            $('#tpLeftTabs').css('background-color', 'white');
-
-            $('.tpMetaValue').removeClass('tpMetaValue-dark');
-            $('.tpMetaValue').addClass('tpMetaValue-light');
-
-            $('.tpMetaSelect-dark').addClass('tpMetaSelect-light');
-            $('.tpMetaSelect-light').removeClass('tpMetaSelect-dark');
-            $('.tpMetaValueSelect-dark').addClass('tpMetaValueSelect-light');
-            $('.tpMetaValueSelect-light').removeClass('tpMetaValueSelect-dark');
-
+            document.getElementById('cellBrowser').href = "css/cellBrowser.light.css"
         } else {
-            document.body.style.backgroundColor = 'black';
-            document.body.style.color = 'white';
-            $('#tpLegendHeader').css('background-color', '#222');
-            $('#tpTooltip').css('background-color', 'rgba(0, 0, 0, 0.85)');
-            $('#tpTooltip').css('border-color', 'white');
-            $('#tpMenuBar > nav').css('background-color', '#101010');
-            $('#tpMenuBar > nav').css('border-color', '#323232');
-            $('.nav > .dropdown > .dropdown-menu').css('background-color', '#000');
-            $('.nav > .dropdown > .dropdown-menu > li > a').css('color', '#CCC');
-            $('.ui-widget-content').css('color', '#CCC');
-            $('.ui-widget-header').css('background', 'black');
-            $('#tpLeftTabs').css('background-color', 'black');
-            
-            $('.tpMetaValue').removeClass('tpMetaValue-light');
-            $('.tpMetaValue').addClass('tpMetaValue-dark');
-            
-            $('.tpMetaSelect-light').addClass('tpMetaSelect-dark');
-            $('.tpMetaSelect-dark').removeClass('tpMetaSelect-light');
-            $('.tpMetaValueSelect-light').addClass('tpMetaValueSelect-dark');
-            $('.tpMetaValueSelect-dark').removeClass('tpMetaValueSelect-light');
+            document.getElementById('cellBrowser').href = "css/cellBrowser.dark.css"
         }
     }
 
@@ -4697,7 +4677,7 @@ var cellbrowser = function() {
     /* user clicked on a gene in the gene table */
         var locusId = event.target.getAttribute("data-geneId"); // the geneId of the gene
         var locusLabel = event.target.textContent;
-        $('.tpMetaBox').removeClass(`tpMetaSelect-${lightMode === 1 ? 'light' : 'dark'}`);
+        $('.tpMetaBox').removeClass('tpMetaSelect');
         $('.tpGeneBarCell').removeClass("tpGeneBarCellSelected");
         // XX TODO: How find all the elements with this ID?
         var saneId = onlyAlphaNum(locusId)
@@ -5222,10 +5202,10 @@ var cellbrowser = function() {
             return;
 
         var metaIdx = db.fieldNameToIndex(metaInfo.name);
-        $('.tpMetaBox').removeClass(`tpMetaSelect-${lightMode === 1 ? 'light' : 'dark'}`);
-        $('.tpMetaValue').removeClass(`tpMetaValueSelect-${lightMode === 1 ? 'light' : 'dark'}`);
-        $('#tpMetaBox_'+metaIdx).addClass(`tpMetaSelect-${lightMode === 1 ? 'light' : 'dark'}`);
-        $('#tpMeta_'+metaIdx).addClass(`tpMetaValueSelect-${lightMode === 1 ? 'light' : 'dark'}`);
+        $('.tpMetaBox').removeClass('tpMetaSelect');
+        $('.tpMetaValue').removeClass('tpMetaValueSelect');
+        $('#tpMetaBox_'+metaIdx).addClass('tpMetaSelect');
+        $('#tpMeta_'+metaIdx).addClass('tpMetaValueSelect');
         $('.tpGeneBarCell').removeClass('tpGeneBarCellSelected');
         //$('#tpLegendTitle').text(legend.metaInfo.label.replace(/_/g, " "));
         legendSetTitle(legend.metaInfo.label.replace(/_/g, " "));
@@ -5347,8 +5327,8 @@ var cellbrowser = function() {
 
         // change style of this field a little
         var metaSel = "#tpMetaBox_"+metaInfo.index;
-        $(metaSel).addClass(lightMode === 1 ? "tpMetaHover-light" : "tpMetaHover-dark");
-        $(metaSel+" .tpMetaValue").addClass(lightMode === 1 ? "tpMetaHover-light" : "tpMetaHover-dark");
+        $(metaSel).addClass("tpMetaHover");
+        $(metaSel+" .tpMetaValue").addClass("tpMetaHover");
 
         $(".tpSameLink").remove();
 
@@ -5618,8 +5598,6 @@ var cellbrowser = function() {
                setTimeout(function(){ showIntro(true); }, 3000); // shown after 5 secs
         }
 
-        // Update newly-added elements with the light mode
-        updateLightModeHTML(lightMode);
     }
 
     function loadDataset(datasetName, resetVars, md5) {
@@ -7473,7 +7451,7 @@ var cellbrowser = function() {
                     styleAdd = ";font-size:"+metaInfo.opt.fontSize;
             }
 
-            htmls.push(`<div class='tpMetaValue tpMetaValue-${lightMode === 1 ? 'light' : 'dark'}' style='`+styleAdd+
+            htmls.push("<div class='tpMetaValue' style='"+styleAdd+
                     "' data-field-name='"+metaInfo.name+"' id='tpMeta_" + i + "'>&nbsp;</div>");
             htmls.push("</div>"); // tpMetaBox
         }
@@ -7495,8 +7473,8 @@ var cellbrowser = function() {
         $(".tpMetaValue").on("mouseenter", onMetaMouseOver );
         $(".tpMetaValue").on ("mouseout", function() {
             $('#tpMetaTip').hide();
-            $('.tpMetaBox').removeClass(lightMode === 1 ? "tpMetaHover-light" : "tpMetaHover-dark");
-            $('.tpMetaBox .tpMetaValue').removeClass(lightMode === 1 ? "tpMetaHover-light" : "tpMetaHover-dark");
+            $('.tpMetaBox').removeClass("tpMetaHover");
+            $('.tpMetaBox .tpMetaValue').removeClass("tpMetaHover");
         } );
 
         // setup the right-click menu
@@ -8667,7 +8645,7 @@ var cellbrowser = function() {
         htmls.push("<button id='tpLegendColorChecked'>"+buttonText+"</button></small>");
 
         htmls.push("</div>"); // title
-        htmls.push(`<div id="tpLegendHeader"><span id="tpLegendCol1"></span><span id="tpLegendCol2"></span></div>`);
+        htmls.push('<div id="tpLegendHeader"><span id="tpLegendCol1"></span><span id="tpLegendCol2"></span></div>');
         htmls.push('<div id="tpLegendRows">');
 
         // get the sum of all, to calculate frequency
@@ -10098,7 +10076,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
 
         renderer.canvas.addEventListener("mouseleave", hideTooltip);
 
-        // Load data
+       // Load data
         loadDataset(datasetName, false, rootMd5);
     }
 

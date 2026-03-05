@@ -6423,26 +6423,31 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
     ofh.write('<meta http-equiv="Expires" content="0" />')
     ofh.write('<title>UCSC Cell Browser</title>\n')
 
-    cssFnames = ["ext/jquery-ui-1.12.1.css", "ext/spectrum-1.8.0.css", "ext/jquery.contextMenu.css",
+    cssFnames = ["ext/jquery-ui-1.12.1.light.css", "ext/spectrum-1.8.0.light.css", "ext/jquery.contextMenu.light.css",
         "ext/slick.grid.css", "ext/slick.examples.css",
         #"ext/jquery-ui-1.11.3.custom.css",
-        "ext/jquery.tipsy.1.0.3.min.css", "ext/bootstrap.min.css",
+        "ext/jquery.tipsy.1.0.3.min.css", "ext/bootstrap.min.light.css",
         "ext/introjs.2.4.0.min.css", "ext/bootstrap-submenu.min.css",
-        "ext/bootstrap-dropmenu.min.css", "ext/font-awesome.css",
-        "ext/googleMaterialIcons.css", "ext/chosen.1.8.2.min.css",
+        "ext/bootstrap-dropmenu.min.light.css", "ext/font-awesome.css",
+        "ext/googleMaterialIcons.css", "ext/chosen.1.8.2.min.light.css",
         "ext/select2.4.0.4.min.css",
-        "ext/selectize.bootstrap3.css",
+        "ext/selectize.bootstrap3.light.css",
         #"ext/selectize.0.12.4.min.css",
         "ext/OverlayScrollbars.min.css", # 1.6.2, from https://cdnjs.com/libraries/overlayscrollbars
         #"ext/theme.default.css", #  tablesorter
-        "ext/theme.bootstrap_3.css", #  tablesorter
-        "css/cellBrowser.css"
+        "ext/theme.bootstrap_3.light.css", #  tablesorter
+        "css/cellBrowser.light.css"
         ]
 
     addVersion = not devMode
 
     for cssFname in cssFnames:
-        writeVersionedLink(ofh, '<link rel="stylesheet" href="%s">', baseDir, cssFname, addVersion=addVersion)
+        fNamePartition = cssFname[:-4].rpartition('.')
+        if fNamePartition[2] in ['light', 'dark']:
+            css_id = fNamePartition[0].partition('/')[2]
+            writeVersionedLink(ofh, f'<link id={css_id} rel="stylesheet" href="%s">', baseDir, cssFname, addVersion=addVersion)
+        else:
+            writeVersionedLink(ofh, f'<link rel="stylesheet" href="%s">', baseDir, cssFname, addVersion=addVersion)
 
     extJsFnames = ["ext/FileSaver.1.1.20151003.min.js", "ext/jquery.3.1.1.min.js",
         "ext/palette.js", "ext/spectrum.min.js", "ext/jsurl2.js",

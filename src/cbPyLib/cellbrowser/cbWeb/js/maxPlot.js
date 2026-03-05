@@ -75,8 +75,6 @@ function MaxPlot(div, top, left, width, height, args) {
     const gButtonDarkBackground = "rgba(75, 75, 75, 0.85)";
     const gButtonBackgroundClicked = "rgba(180, 180, 180, 0.6)"; // grey of buttons when clicked
     const gButtonDarkBackgroundClicked = "rgba(50, 50, 50, 0.6)";
-    const gSliderBackground = "rgba(255, 255, 255, 0.5)";
-    const gSliderDarkBackground = "rgba(0, 0, 0, 0.25)";
     const gButtonBackgrounds = [gButtonBackground, gButtonDarkBackground, gButtonBackgroundClicked, gButtonDarkBackgroundClicked];
     const gCloseButtonFromRight = 60; // distance of "close" button from right edge
 
@@ -135,15 +133,6 @@ function MaxPlot(div, top, left, width, height, args) {
             if(gButtonBackgrounds.includes(button.style.backgroundColor)){
                 button.style.backgroundColor = self.isLight() ? gButtonBackground : gButtonDarkBackground;
             }
-        }
-
-        /** @type {HTMLCollection} */
-        let sliders = this.sliderDiv.children;
-        for(let slider of sliders) {
-            slider.style.background = self.isLight() ? gSliderBackground : gSliderDarkBackground;
-
-            const sliderBack = slider.children[1];
-            sliderBack.style.background = self.isLight() ? "white" : "black";
         }
         $('#mpSliderReset').children()[0].style.fill = self.isLight() ? "black" : "white";
 
@@ -395,7 +384,7 @@ function MaxPlot(div, top, left, width, height, args) {
             // Dark mode: clear color is white (inverts to black)
             ctx.clearColor(1, 1, 1, 1);
         }
-
+        
         // Enable 3D Graphics
         ctx.enable(ctx.DEPTH_TEST);
 
@@ -675,18 +664,17 @@ function MaxPlot(div, top, left, width, height, args) {
         div.style.width = width+"px";
         div.style.height = height+"px";
         div.style.left = left+"px";
-        div.style.background = self.isLight() ? "white" : "black";
         return div;
     }
 
-    function createButton(width, height, id, title, text, imgFname, paddingTop, paddingBottom, addSep, addThickSep, fontSize, color) {
+    function createButton(width, height, id, title, text, imgFname, paddingTop, paddingBottom, addSep, addThickSep, fontSize) {
         /* make a light-grey div that behaves like a button, with text and/or an image on it
          * Images are hard to vertically center, so padding top can be specified.
          * */
         var div = document.createElement('div');
         div.id = id;
         div.className = "mpButton";
-        div.style.backgroundColor = color === undefined ? self.isLight() ? gButtonBackground : gButtonDarkBackground : color;
+        div.style.backgroundColor = self.isLight() ? gButtonBackground : gButtonDarkBackground;
         div.style.width = width+"px";
         div.style.height = height+"px";
         div.style["z-index"]="10";
@@ -840,14 +828,11 @@ function MaxPlot(div, top, left, width, height, args) {
         alphaSlider.style.float = "left";
         //alphaSlider.style.top = "3px";
 
-        const backgroundColor = self.isLight() ? gSliderBackground : gSliderDarkBackground;
-
         // container for label + control elements
         var alphaCont = document.createElement('div');
         alphaCont.id = "mpAlphaCont";
         //alphaCont.style.left = "150px"; // cellbrowser.css defines grid widths: 45
         alphaCont.className = "sliderContainer";
-        alphaCont.style.background = backgroundColor;
         alphaCont.style.top = "15px"; 
         alphaCont.style.left = "0px";
 
@@ -857,14 +842,15 @@ function MaxPlot(div, top, left, width, height, args) {
         alphaLabel.className = "sliderLabel";
 
         // reset button
-        var undoSvg = `<svg xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 512 512"><!--! Font Awesome Free 6.4.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2023 Fonticons, Inc. --><path d="M212.333 224.333H12c-6.627 0-12-5.373-12-12V12C0 5.373 5.373 0 12 0h48c6.627 0 12 5.373 12 12v78.112C117.773 39.279 184.26 7.47 258.175 8.007c136.906.994 246.448 111.623 246.157 248.532C504.041 393.258 393.12 504 256.333 504c-64.089 0-122.496-24.313-166.51-64.215-5.099-4.622-5.334-12.554-.467-17.42l33.967-33.967c4.474-4.474 11.662-4.717 16.401-.525C170.76 415.336 211.58 432 256.333 432c97.268 0 176-78.716 176-176 0-97.267-78.716-176-176-176-58.496 0-110.28 28.476-142.274 72.333h98.274c6.627 0 12 5.373 12 12v48c0 6.627-5.373 12-12 12z"/></svg>`;
+        var undoSvg = '<svg xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 512 512"><!--! Font Awesome Free 6.4.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2023 Fonticons, Inc. --><path d="M212.333 224.333H12c-6.627 0-12-5.373-12-12V12C0 5.373 5.373 0 12 0h48c6.627 0 12 5.373 12 12v78.112C117.773 39.279 184.26 7.47 258.175 8.007c136.906.994 246.448 111.623 246.157 248.532C504.041 393.258 393.12 504 256.333 504c-64.089 0-122.496-24.313-166.51-64.215-5.099-4.622-5.334-12.554-.467-17.42l33.967-33.967c4.474-4.474 11.662-4.717 16.401-.525C170.76 415.336 211.58 432 256.333 432c97.268 0 176-78.716 176-176 0-97.267-78.716-176-176-176-58.496 0-110.28 28.476-142.274 72.333h98.274c6.627 0 12 5.373 12 12v48c0 6.627-5.373 12-12 12z"/></svg>';
 
         //var alphaReset = createButton(15, 15, "mpAlphaReset", "Reset transparency", undoSvg, null, null, null, false, false, 10);
         //alphaReset.style.float = "right";
         //alphaReset.style.marginLeft = "2px";
         //alphaReset.addEventListener ('click',  function() { self.resetAlpha(); self.drawDots();}, false);
 
-        var sliderReset = createButton(15, 15, "mpSliderReset", "Reset transparency and circle size", undoSvg, null, null, null, false, false, 10, "transparent");
+        var sliderReset = createButton(15, 15, "mpSliderReset", "Reset transparency and circle size", undoSvg, null, null, null, false, false, 10);
+        sliderReset.style.backgroundColor = "transparent";
         sliderReset.style.float = "right";
         sliderReset.firstChild.style.fill = self.isLight() ? "black" : "white";
         //sliderReset.style.lineHeight = "16px";
@@ -889,10 +875,11 @@ function MaxPlot(div, top, left, width, height, args) {
 
         var radiusCont = document.createElement('span');
         radiusCont.className = "sliderContainer";
-        radiusCont.style.background = backgroundColor;
         radiusCont.id = "mpRadiusDiv";
         radiusCont.style.left = "0px"; 
         radiusCont.style.top = "0px";
+        radiusCont.appendChild(radiusSlider)
+
 
         var radiusLabel = document.createElement('span'); // contains the slider and the reset button, floats right
         radiusLabel.id = "radiusSliderLabel";
@@ -980,7 +967,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var ctrlDiv = makeCtrlContainer(top, left);
 
         var bSize = gZoomButtonSize;
-
+        
         var moveButton = createButton(bSize, bSize, "mpIconModeMove", "Move mode. Keyboard: Alt or m", null, "img/move.png", 4, 4, true);
         moveButton.addEventListener('click', function() { self.activateMode("move");}, false);
 
@@ -1020,7 +1007,7 @@ function MaxPlot(div, top, left, width, height, args) {
         //div.style.left = left+"px";
         div.style.width = width+"px";
         div.style.height = height+"px";
-
+        
         const borderColor = self.isLight() ? "#DDD" : "#333";
         div.style["border-left"]=`1px solid ${borderColor}`;
         div.style["border-right"]=`1px solid ${borderColor}`;
