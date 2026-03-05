@@ -4195,11 +4195,11 @@ var cellbrowser = function() {
         }
 
         // Update css/cellBrowser.css
-        if(lightMode === 1) {
-            document.getElementById('cellBrowser').href = "css/cellBrowser.light.css"
-        } else {
-            document.getElementById('cellBrowser').href = "css/cellBrowser.dark.css"
-        }
+        //if(lightMode === 1) {
+            //document.getElementById('cellBrowser').href = "css/cellBrowser.light.css"
+        //} else {
+            //document.getElementById('cellBrowser').href = "css/cellBrowser.dark.css"
+        //}
     }
 
     function onSizeClick(ev) {
