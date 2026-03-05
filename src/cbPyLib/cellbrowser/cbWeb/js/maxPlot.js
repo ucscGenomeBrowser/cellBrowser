@@ -454,6 +454,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         uniform float u_CanvWidth;
         uniform float u_CanvHeight;
+        uniform float u_LightMode;
 
         varying vec4 v_Position;
         varying vec3 v_Color;
@@ -474,7 +475,13 @@ function MaxPlot(div, top, left, width, height, args) {
             if(l_Dist > u_Radius) {
                 discard;
             } else if(v_Selected == 1.0 && l_Dist > u_Radius - 2.0) {
-                gl_FragColor = vec4(1.0, 1.0, 1.0, 0.7);
+                if(u_LightMode == 1.0) {
+                    // Light mode. Outline is black
+                    gl_FragColor = vec4(1.0, 1.0, 1.0, 0.7);
+                } else {
+                    // Dark mode. Outline is white
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.7);
+                }
             } else {
                 float l_Alpha = (v_ColID == u_FatID || v_Selected == 1.0) ? 0.7 : u_Alpha;
                 gl_FragColor = vec4(vec3(1.0, 1.0, 1.0) - v_Color, l_Alpha);
@@ -574,6 +581,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.u_Alpha = getUniform('u_Alpha');
         self.u_CanvWidth = getUniform('u_CanvWidth');
         self.u_CanvHeight = getUniform('u_CanvHeight');
+        self.u_LightMode = getUniform('u_LightMode');
     }
 
     this.clear = function() {
@@ -1384,7 +1392,7 @@ function MaxPlot(div, top, left, width, height, args) {
        // overdraw the selection as black rectangles on top
        //if (fatIdx===null) {
            ctx.globalAlpha = 0.7;
-           ctx.fillStyle="black";
+           ctx.fillStyle= self.isLight() ? "black" : "white";
             selCells.forEach(function(cellId) {
                let pxX = pxCoords[2*cellId];
                let pxY = pxCoords[2*cellId+1];
@@ -1734,10 +1742,10 @@ function MaxPlot(div, top, left, width, height, args) {
 
        }
 
-       // pre-render a black circle outline for the selection, quality of anti-aliasing?
+       // pre-render a circle outline for the selection, quality of anti-aliasing?
        var selImgId = colors.length;
        ctxOff.lineWidth=2;
-       ctxOff.strokeStyle="black";
+       ctxOff.strokeStyle= self.isLight() ? "black" : "white";
        ctxOff.beginPath();
        // args: arc(x, y, r, 0, 2*pi)
        ctxOff.arc((selImgId * tileWidth) + radius + 1, radius + 1, radius - 1, 0, 2 * Math.PI);
@@ -1920,7 +1928,7 @@ function MaxPlot(div, top, left, width, height, args) {
            let col = coordColors[cellId];
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
 
-           // and draw the black outline
+           // and draw the outline
            ctx.drawImage(off, selImgIdx * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
         });
 
@@ -2022,6 +2030,7 @@ function MaxPlot(div, top, left, width, height, args) {
         ctx.uniform1f(self.u_Alpha, alpha);
         ctx.uniform1f(self.u_CanvWidth, self.canvas.width);
         ctx.uniform1f(self.u_CanvHeight, self.canvas.height);
+        ctx.uniform1f(self.u_LightMode, self.lightMode);
 
         // Draw
         if(WEBGL_DEBUG) {
