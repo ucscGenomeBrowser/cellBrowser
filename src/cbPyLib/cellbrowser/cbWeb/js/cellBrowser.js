@@ -4189,7 +4189,9 @@ var cellbrowser = function() {
         for(let cssId of extCssIdNames) {
             const newTheme = lightMode === 1 ? "light" : "dark";
             const cssFName = `ext/${cssId}.${newTheme}.css`;
-            document.getElementById(cssId).href = cssFName;
+            let el = document.getElementById(cssId);
+            if (el)
+                el.href = cssFName;
         }
 
         // Update css/cellBrowser.css
