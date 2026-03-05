@@ -253,7 +253,7 @@ function MaxPlot(div, top, left, width, height, args) {
             addSliders();
 
         //if (args && args.flipBook)
-        self.addFlipbookSlider();
+            self.addFlipbookSlider();
 
         // timer that is reset on every mouse move
         self.timer = null;
@@ -4059,9 +4059,10 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.addFlipbookSlider = function() {
         var contDiv = document.createElement('div');
+        contDiv.style.width = "100%";
         contDiv.style.display = "none";
         contDiv.style.position = "absolute";
-        contDiv.style.bottom = "40px";
+        contDiv.style.bottom = "50px";
         contDiv.id = "mpFlipbookCont";
         let fromLeft = 55;
         contDiv.style.left = fromLeft+"px";
@@ -4074,6 +4075,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         var sliderDiv = document.createElement('div');
         sliderDiv.style.width = self.canvas.width-fromLeft+"px";
+        //sliderDiv.style.width = "100%";
         sliderDiv.style.height = "8px";
         sliderDiv.style.marginTop = "4px";
         sliderDiv.id = "mpFlipbook";

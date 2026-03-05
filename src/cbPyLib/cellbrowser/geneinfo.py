@@ -252,7 +252,7 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
             sym = sym.split(".")[0]
 
         # convert gene IDs to symbols
-        if geneToSym is -1:
+        if geneToSym == -1:
             geneToSym = readGeneSymbols(None, [sym])
         if geneToSym is not None:
             geneId = geneToSym.get(sym)

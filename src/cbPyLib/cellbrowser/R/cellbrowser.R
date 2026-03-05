@@ -12,7 +12,12 @@ findMatrices = function(object, slotNames ) {
   slotMatrices = list()
   slots <- list()
   for (slotName in slotNames) {
-      mat <- GetAssayData(object = object, slot = slotName)
+      # work around the pointless deprecation warning which triggers errors in Seurat5/R4.1 installs
+      if (packageVersion("Seurat") >= "5.0.0") {
+          mat <- LayerData(object = object, layer = slotName)
+        } else {
+          mat <- GetAssayData(object = object, slot = slotName)
+      }
       if (slotName == "scale.data")
           slotName <- "scale" #  dots in filenames are not good
       # do not use any prefixes if we export just a single matrix (stay compatible with old code)
