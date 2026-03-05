@@ -6427,7 +6427,7 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         "ext/slick.grid.css", "ext/slick.examples.css",
         #"ext/jquery-ui-1.11.3.custom.css",
         "ext/jquery.tipsy.1.0.3.min.css", "ext/bootstrap.min.light.css",
-        "ext/introjs.2.4.0.min.css", "ext/bootstrap-submenu.min.css",
+        "ext/introjs.2.4.0.min.light.css", "ext/bootstrap-submenu.min.css",
         "ext/bootstrap-dropmenu.min.light.css", "ext/font-awesome.css",
         "ext/googleMaterialIcons.css", "ext/chosen.1.8.2.min.light.css",
         "ext/select2.4.0.4.min.css",

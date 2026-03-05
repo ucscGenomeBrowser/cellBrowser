@@ -4168,6 +4168,7 @@ var cellbrowser = function() {
             "spectrum-1.8.0",
             "jquery.contextMenu",
             "bootstrap.min",
+            "introjs.2.4.0.min",
             "bootstrap-dropmenu.min",
             "chosen.1.8.2.min",
             "selectize.bootstrap3",
