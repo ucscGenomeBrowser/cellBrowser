@@ -6514,7 +6514,7 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
     addVersion = not devMode
 
     for cssFname in cssFnames:
-        writeVersionedLink(ofh, f'<link rel="stylesheet" href="%s">', baseDir, cssFname, addVersion=addVersion)
+        writeVersionedLink(ofh, '<link rel="stylesheet" href="%s">', baseDir, cssFname, addVersion=addVersion)
 
     extJsFnames = ["ext/FileSaver.1.1.20151003.min.js", "ext/jquery.3.1.1.min.js",
         "ext/palette.js", "ext/spectrum.min.js", "ext/jsurl2.js",
