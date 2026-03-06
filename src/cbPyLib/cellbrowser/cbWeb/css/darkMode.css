@@ -1163,7 +1163,7 @@ button.list-group-item:hover {
   border: 1px solid #555;
   background: #000;
   -webkit-box-shadow: 0 4px 5px rgba(1, 1, 1, .15);
-  box-shadow: 0 4px 5px rgba(1, 1, 1, .15)
+  box-shadow: 0 4px 5px rgba(226, 209, 209, 0.15)
 }
 
 .chosen-container .chosen-single .group-name,
@@ -1174,10 +1174,6 @@ button.list-group-item:hover {
 .chosen-container-single .chosen-single {
   border: 1px solid #555;
   background-color: #000;
-  background: -webkit-gradient(linear, left top, left bottom, color-stop(20%, #000), color-stop(50%, #090909), color-stop(52%, #111), to(#0b0b0b));
-  background: linear-gradient(#000 20%, #090909 50%, #111 52%, #0b0b0b 100%);
-  -webkit-box-shadow: 0 0 3px #fff inset, 0 1px 1px rgba(1, 1, 1, .1);
-  box-shadow: 0 0 3px #fff inset, 0 1px 1px rgba(1, 1, 1, .1);
   color: #bbb
 }
 
@@ -1239,6 +1235,7 @@ button.list-group-item:hover {
 }
 
 .chosen-container-active .chosen-single {
+  border: 1px solid #5897fb;
   -webkit-box-shadow: 0 0 5px rgba(1, 1, 1, .3);
   box-shadow: 0 0 5px rgba(1, 1, 1, .3)
 }
