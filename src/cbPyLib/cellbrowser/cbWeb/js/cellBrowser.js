@@ -4174,40 +4174,44 @@ var cellbrowser = function() {
 
     function updateLightModeHTML(lightMode) {
         // Update ext CSS files
-        const extCssIdNames = [
-            "jquery-ui-1.12.1",
-            "spectrum-1.8.0",
-            "jquery.contextMenu",
-            "bootstrap.min",
-            "introjs.2.4.0.min",
-            "bootstrap-dropmenu.min",
-            "chosen.1.8.2.min",
-            "selectize.bootstrap3",
-            "theme.bootstrap_3"
-        ];
+        // const extCssIdNames = [
+        //     "jquery-ui-1.12.1",
+        //     "spectrum-1.8.0",
+        //     "jquery.contextMenu",
+        //     "bootstrap.min",
+        //     "introjs.2.4.0.min",
+        //     "bootstrap-dropmenu.min",
+        //     "chosen.1.8.2.min",
+        //     "selectize.bootstrap3",
+        //     "theme.bootstrap_3"
+        // ];
         
-        for(let cssId of extCssIdNames) {
-            const newTheme = lightMode === 1 ? "light" : "dark";
-            const cssFName = `ext/${cssId}.${newTheme}.css`;
-            let el = document.getElementById(cssId);
-            if (el) {
-                el.href = cssFName;
-            } else {
-                console.warn(`Missing CSS element ${cssId}`);
-            }
-        }
+        // for(let cssId of extCssIdNames) {
+        //     const newTheme = lightMode === 1 ? "light" : "dark";
+        //     const cssFName = `ext/${cssId}.${newTheme}.css`;
+        //     let el = document.getElementById(cssId);
+        //     if (el) {
+        //         el.href = cssFName;
+        //     } else {
+        //         console.warn(`Missing CSS element ${cssId}`);
+        //     }
+        // }
 
-        // Update css/cellBrowser.css
-        let cellBrowserCSS = document.getElementById('cellBrowser');
-        if(cellBrowserCSS) {
-            if(lightMode === 1) {
-                cellBrowserCSS.href = "css/cellBrowser.light.css"
-            } else {
-                cellBrowserCSS.href = "css/cellBrowser.dark.css"
-            }
-        } else {
-            console.warn(`Missing CSS element cellBrowser`);
-        }
+        // // Update css/cellBrowser.css
+        // let cellBrowserCSS = document.getElementById('cellBrowser');
+        // if(cellBrowserCSS) {
+        //     if(lightMode === 1) {
+        //         cellBrowserCSS.href = "css/cellBrowser.light.css"
+        //     } else {
+        //         cellBrowserCSS.href = "css/cellBrowser.dark.css"
+        //     }
+        // } else {
+        //     console.warn(`Missing CSS element cellBrowser`);
+        // }
+
+        let darkModeCSS = document.getElementById('darkMode');
+        darkModeCSS.disabled = lightMode === 1;
+        // darkModeCSS.disabled = true;
     }
 
     function onSizeClick(ev) {
@@ -10246,6 +10250,14 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
        }
 
         buildEmptyLegendBar(metaBarWidth+metaBarMargin+renderer.width, toolBarHeight);
+
+        // Add the dark mode stylesheet
+        // TODO: Add this to cellbrowser.py
+        let darkStyle = document.createElement('link');
+        darkStyle.id = 'darkMode';
+        darkStyle.rel = 'stylesheet';
+        darkStyle.href = 'css/darkMode.css';
+        document.head.appendChild(darkStyle);
 
         // Set light mode
         updateLightModeHTML(lightMode);

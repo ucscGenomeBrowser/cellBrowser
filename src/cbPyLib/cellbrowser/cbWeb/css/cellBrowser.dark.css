@@ -1,7 +1,7 @@
 /* tsneViewer.js class definitions */
 /* * {padding: 0; margin: 0} */ /* important, otherwise precise placement is impossible */ 
 /* body { font-family: Roboto, sans-serif } */
-body { font-family: Arial,Helvetica,sans-serif; overflow:hidden; line-height:1.0}
+body { font-family: Arial,Helvetica,sans-serif; line-height:1.0; overflow:hidden }
 canvas { user-select: none }
 
 section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
