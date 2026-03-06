@@ -10259,6 +10259,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         darkStyle.href = 'css/darkMode.css';
         document.head.appendChild(darkStyle);
 
+        // Set buttons and other interactables to not inherit color by default (avoids changing ext/bootstrap.min.css)
+        let bootstrapSheetRules = [...[...document.styleSheets].find((sheet) => sheet.href && sheet.href.includes("bootstrap.min.css")).cssRules];
+        let interactableRule = bootstrapSheetRules.find((rule) => rule.selectorText == 'button, input, optgroup, select, textarea');
+        interactableRule.style.color = "revert";
+
         // Set light mode
         updateLightModeHTML(lightMode);
 
