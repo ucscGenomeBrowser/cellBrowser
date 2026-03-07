@@ -1562,3 +1562,7 @@ th[role=columnheader]:not(.no-sort):after {
 #tpOpenDialogTabs > ul > li  {
   border: 1px solid #282828 !important; 
 }
+
+.hasTooltip > svg {
+  filter: invert(1);
+}
