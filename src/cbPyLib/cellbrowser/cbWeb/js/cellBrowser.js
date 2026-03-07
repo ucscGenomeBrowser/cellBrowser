@@ -4212,6 +4212,14 @@ var cellbrowser = function() {
         let darkModeCSS = document.getElementById('darkMode');
         darkModeCSS.disabled = lightMode === 1;
         // darkModeCSS.disabled = true;
+
+        if(lightMode === 1) {
+            $('#tpTooltip').css('background-color', 'rgba(255, 255, 255, 0.85)');
+            $('#tpTooltip').css('border-color', 'black');
+        } else {
+            $('#tpTooltip').css('background-color', 'rgba(0, 0, 0, 0.85)');
+            $('#tpTooltip').css('border-color', 'white');
+        }
     }
 
     function onSizeClick(ev) {
