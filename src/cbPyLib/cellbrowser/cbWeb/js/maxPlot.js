@@ -2068,7 +2068,7 @@ function MaxPlot(div, top, left, width, height, args) {
             //ctx.drawImage(back.image, back.sx, back.sy, back.width, back.height, 0, 0, ctxWidth, ctxHeight);
             ctx.drawImage(back.image, back.sx, back.sy, back.sw, back.sh, back.dx, back.dy, back.dw, back.dh);
         } else if(self.mode == 2) {
-
+            console.warn("Background drawing not currently supported for WebGL drawing");
         }
 
         if(DEBUG) console.timeEnd("image");
