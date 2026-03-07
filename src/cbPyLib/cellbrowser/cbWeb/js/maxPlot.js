@@ -390,8 +390,8 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // Enable blending and set blend equation
         // Derived equation in CMY space: A_Src * Col_Src + (1 - A_Src) * A_Dst * Col_Dst
-        this.ctx.enable(this.ctx.BLEND);
-        this.ctx.blendFuncSeparate(this.ctx.SRC_ALPHA, this.ctx.ONE_MINUS_SRC_ALPHA, this.ctx.ONE, this.ctx.ONE);
+        ctx.enable(ctx.BLEND);
+        ctx.blendFuncSeparate(ctx.SRC_ALPHA, ctx.ONE_MINUS_SRC_ALPHA, ctx.ONE, ctx.ONE);
 
         // Crate the GLSL shaders from the external source code
         // Vertex shader GLSL code
