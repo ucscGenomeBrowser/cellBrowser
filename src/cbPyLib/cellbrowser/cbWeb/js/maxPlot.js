@@ -59,7 +59,7 @@ function MaxPlot(div, top, left, width, height, args) {
     this.hiddenCoord = HIDCOORD;
 
     const DEBUG = false;
-    const WEBGL_DEBUG = false;
+    const WEBGL_DEBUG = true;
 
     var self = this; // 'this' has two conflicting meanings in javascript.
     // I use 'self' to refer to object variables, so I can use 'this' to refer to the caller context
@@ -335,6 +335,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.coords.px   = null;   // coordinates of cells and labels as screen pixels or (HIDCOORD,HIDCOORD) if not shown
         self.coords.gl   = null;   // coordinates of cells in WebGL space
         self.coords.hidden = null; // Hidden coordinates (used by WebGL drawing)
+        self.coords.layers = null; // Coordinate layers (used by WebGL drawing)
         self.coords.labelBbox = null;   // cluster label bounding boxes, array of [x1,x2,x2,y2]
 
         self.col = {};
@@ -384,9 +385,6 @@ function MaxPlot(div, top, left, width, height, args) {
             // Dark mode: clear color is white (inverts to black)
             ctx.clearColor(1, 1, 1, 1);
         }
-        
-        // Enable 3D Graphics
-        ctx.enable(ctx.DEPTH_TEST);
 
         // Enable blending and set blend equation
         // Derived equation in CMY space: A_Src * Col_Src + (1 - A_Src) * A_Dst * Col_Dst
@@ -398,40 +396,38 @@ function MaxPlot(div, top, left, width, height, args) {
         const VERTEX_SHADER_SRC = `
         precision mediump float;
         attribute vec2 a_Position;
-        attribute float a_Depth;
         attribute vec3 a_Color;
         attribute float a_ColID;
-        attribute float a_Selected;
+        attribute float a_Layer;
         attribute float a_Hidden;
         
         uniform float u_Radius;
         uniform mat4 u_Projection;
+        uniform float u_Layer;
         
         uniform float u_FatID;
         uniform float u_AnySelected;
 
         varying vec4 v_Position;
         varying vec3 v_Color;
-        varying float v_ColID;
-        varying float v_Selected;
 
         void main() {
             float l_Depth;
-            if(a_Hidden == 1.0) {
+            if(u_Layer != a_Layer || a_Hidden == 1.0) {
                 l_Depth = -2.0;
-            } else if(a_Selected == 1.0) {
+            } else if(u_Layer == 2.0) {
                 l_Depth = 0.9;
-            } else if(a_ColID == u_FatID) {
+            } else if(u_Layer == 1.0) {
                 l_Depth = 0.8;
             } else {
-                l_Depth = a_Depth;
+                l_Depth = 0.0;
             }
 
             v_Position = vec4(a_Position, -l_Depth, 1.0) * u_Projection;
             gl_Position = v_Position;
             gl_PointSize = u_Radius * 2.0;
 
-            if((u_FatID == -1.0 && u_AnySelected == 0.0) || u_FatID == a_ColID || a_Selected == 1.0) {
+            if((u_FatID == -1.0 && u_AnySelected == 0.0) || !(u_Layer == 0.0 || u_Layer == -1.0)) {
                 v_Color = a_Color;
             } else {
                 float l_Red = 0.08 + a_Color[0];
@@ -440,8 +436,6 @@ function MaxPlot(div, top, left, width, height, args) {
                 float l_Luminosity = 0.5 + ((0.2126 * l_Red + 0.7152 * l_Green + 0.0722 * l_Blue) * 0.5);
                 v_Color = vec3(l_Luminosity, l_Luminosity, l_Luminosity);
             }
-            v_Selected = a_Selected;
-            v_ColID = a_ColID;
         }
         `;
         // Fragemnt shader GLSL code
@@ -450,16 +444,14 @@ function MaxPlot(div, top, left, width, height, args) {
 
         uniform float u_Alpha;
         uniform float u_Radius;
-        uniform float u_FatID;
 
         uniform float u_CanvWidth;
         uniform float u_CanvHeight;
+        uniform float u_Layer;
         uniform float u_LightMode;
 
         varying vec4 v_Position;
         varying vec3 v_Color;
-        varying float v_ColID;
-        varying float v_Selected;
 
         void main() {
             // Find the pixel coordinate of the vertex
@@ -474,7 +466,7 @@ function MaxPlot(div, top, left, width, height, args) {
             // Discard fragments outside the radius to form a circle
             if(l_Dist > u_Radius) {
                 discard;
-            } else if(v_Selected == 1.0 && l_Dist > u_Radius - 2.0) {
+            } else if(u_Layer == 2.0 && l_Dist > u_Radius - 2.0) {
                 if(u_LightMode == 1.0) {
                     // Light mode. Outline is black
                     gl_FragColor = vec4(1.0, 1.0, 1.0, 0.7);
@@ -483,7 +475,7 @@ function MaxPlot(div, top, left, width, height, args) {
                     gl_FragColor = vec4(0.0, 0.0, 0.0, 0.7);
                 }
             } else {
-                float l_Alpha = (v_ColID == u_FatID || v_Selected == 1.0) ? 0.7 : u_Alpha;
+                float l_Alpha = (u_Layer == 0.0 || u_Layer == -1.0) ? u_Alpha : 0.7;
                 gl_FragColor = vec4(vec3(1.0, 1.0, 1.0) - v_Color, l_Alpha);
             }
         }
@@ -566,16 +558,15 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // Get attributes
         self.a_Position = getAttribute('a_Position');
-        self.a_Depth = getAttribute('a_Depth');
         self.a_Color = getAttribute('a_Color');
-        self.a_ColID = getAttribute('a_ColID');
-        self.a_Selected = getAttribute('a_Selected');
+        self.a_Layer = getAttribute('a_Layer');
         self.a_Hidden = getAttribute('a_Hidden');
 
         // Get uniforms
         self.u_Radius = getUniform('u_Radius');
         self.u_Projection = getUniform('u_Projection');
         self.u_FatID = getUniform('u_FatID');
+        self.u_Layer = getUniform('u_Layer');
         self.u_AnySelected = getUniform('u_AnySelected');
 
         self.u_Alpha = getUniform('u_Alpha');
@@ -2037,6 +2028,13 @@ function MaxPlot(div, top, left, width, height, args) {
             ctx.finish();
             console.time("draw");
         }
+        ctx.uniform1f(self.u_Layer, -1);
+        ctx.drawArrays(self.ctx.POINTS, 0, self.getCount());
+        ctx.uniform1f(self.u_Layer, 0);
+        ctx.drawArrays(self.ctx.POINTS, 0, self.getCount());
+        ctx.uniform1f(self.u_Layer, 1);
+        ctx.drawArrays(self.ctx.POINTS, 0, self.getCount());
+        ctx.uniform1f(self.u_Layer, 2);
         ctx.drawArrays(self.ctx.POINTS, 0, self.getCount());
         if(WEBGL_DEBUG) {
             ctx.finish();
@@ -2550,10 +2548,10 @@ function MaxPlot(div, top, left, width, height, args) {
         if(self.usesWebGL()) {
             self.setCoordsWebGL();
 
-            // Initialize selection and hidden attributes since they depend on how many points there are
+            // Initialize layer and hidden attributes since they depend on how many points there are
             // (Not entirely sure where the best place to put this would be)
-            const selBuf = new Uint8Array(this.getCount());
-            self.bindBuffer(1, self.a_Selected, selBuf, self.ctx.UNSIGNED_BYTE);
+            self.coords.layers = new Int8Array(this.getCount());
+            this.bindLayers();
 
             self.coords.hidden = new Uint8Array(this.getCount());
             self.bindBuffer(1, self.a_Hidden, self.coords.hidden, self.ctx.UNSIGNED_BYTE);
@@ -2636,18 +2634,46 @@ function MaxPlot(div, top, left, width, height, args) {
 
         const colorBuf = new Uint8Array(colorNumbers);
 
-        // Save the colorArr array for fattening
-        const colIDBuf = new Uint8Array(colorArr);
-
-        // Since some colors are drawn behind other colors, calculate which colors should be around which here
-        if(WEBGL_DEBUG) console.time("Parse Depth");
-        const depthBuf = Float32Array.from(colorArr, (col) => col === 0 ? -0.5 : Math.random() * 0.5);
-        if(WEBGL_DEBUG) console.timeEnd("Parse Depth");
-
-        // Bind all appropriate buffers
+        // Bind color buffer
         self.bindBuffer(3, self.a_Color, colorBuf, self.ctx.UNSIGNED_BYTE, true);
-        self.bindBuffer(1, self.a_ColID, colIDBuf, self.ctx.UNSIGNED_BYTE);
-        self.bindBuffer(1, self.a_Depth, depthBuf, self.ctx.FLOAT);
+        
+        // Since some colors are drawn behind other colors, calculate which colors should be behind which here
+        // Pass in colorNumbers.length as the length since getCount() uses an array that may not have been defined yet
+        this.bindLayers(colorNumbers.length);
+    }
+
+    // When using WebGL, determine what layers each cell should be on.
+    // Based on color, fatID, and whether or not it's selected
+    this.bindLayers = function(length = this.getCount()) {
+        if(!this.usesWebGL()) {
+            return;
+        }
+
+        const selCells = this.selCells;
+        const colorArr = this.col.arr;
+
+        // Calculating layers requires color and coordinate knowledge. Only bind once both are known
+        if(colorArr === undefined || !this.coords.layers) {
+            return;
+        }
+
+        if(WEBGL_DEBUG) console.time("Parse Layers");
+        for(let i = 0; i < length; i++) {
+            if(selCells.has(i)) {
+                this.coords.layers[i] = 2;
+            } else {
+                const col = colorArr[i];
+                if(this.fatIdx !== null && this.fatIdx === col) {
+                    this.coords.layers[i] = 1;
+                } else if(col === 0) {
+                    this.coords.layers[i] = -1;
+                } else {
+                    this.coords.layers[i] = 0;
+                }
+            }
+        }
+        this.bindBuffer(1, this.a_Layer, this.coords.layers, this.ctx.BYTE);
+        if(WEBGL_DEBUG) console.timeEnd("Parse Layers");
     }
 
     this.calcRadius = function() {
@@ -3086,15 +3112,8 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // If we're using webGL, adjust the attribute buffer
         if(self.usesWebGL()) {
-            // Convert the selected cell set to a buffer
-            const selBuf = new Uint8Array(this.getCount());
-
-            // Bind the buffer to the plots
-            this.bindBuffer(1, this.a_Selected, selBuf, this.ctx.UNSIGNED_BYTE);
-            if (self.childPlot) {
-                const childPlot = self.childPlot;
-                childPlot.bindBuffer(1, childPlot.a_Selected, selBuf, childPlot.ctx.UNSIGNED_BYTE);
-            }
+            // Reset layers
+            this.bindLayers();
         }
 
         if (self.onSelChange!==null && skipNotify!==true)
@@ -3360,14 +3379,14 @@ function MaxPlot(div, top, left, width, height, args) {
         // If we're using webGL, adjust the attribute buffer
         if(self.usesWebGL()) {
             // Convert the selected cell set to a buffer
-            const selBuf = new Uint8Array(Array.from({length: this.getCount()}, (_, i) => this.selCells.has(i) ? 1 : 0));
-            this.bindBuffer(1, this.a_Selected, selBuf, this.ctx.UNSIGNED_BYTE);
+            this.bindLayers();
 
             // We need to do the same work on the child plot, if one exists
             // Since the child plot's selected cells share a pointer 
             if (self.childPlot) {
                 const childPlot = self.childPlot;
-                childPlot.bindBuffer(1, childPlot.a_Selected, selBuf, childPlot.ctx.UNSIGNED_BYTE);
+                childPlot.coods.layers = this.coords.layers;
+                childPlot.bindBuffer(1, childPlot.a_Layer, childPlot.coords.layers, childPlot.ctx.UNSIGNED_BYTE);
             }
         }
 
@@ -4038,8 +4057,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
             plot2.bindColors();
 
-            const selBuf = new Uint8Array(Array.from({length: plot2.getCount()}, (_, i) => plot2.selCells.has(i) ? 1 : 0));
-            plot2.bindBuffer(1, plot2.a_Selected, selBuf, plot2.ctx.UNSIGNED_BYTE);
+            plot2.bindBuffer(1, plot2.a_Layer, plot2.coords.layers, plot2.ctx.UNSIGNED_BYTE);
 
             plot2.bindBuffer(1, plot2.a_Hidden, plot2.coords.hidden, plot2.ctx.UNSIGNED_BYTE);
         }

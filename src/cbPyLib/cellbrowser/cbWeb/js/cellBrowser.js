@@ -9371,6 +9371,7 @@ var cellbrowser = function() {
         let legendRowIdx = legendLabelGetIntKey(gLegend, clusterName);
 
         renderer.fatIdx = legendRowIdx;
+        renderer.bindLayers();
         renderer.drawDots();
 
         legendHighlightRow(legendRowIdx, doScroll);
@@ -9381,6 +9382,7 @@ var cellbrowser = function() {
         if (renderer.fatIdx!==null) {
             $(".tpLegendHl").removeClass("tpLegendHl");
             renderer.fatIdx = null;
+            renderer.bindLayers();
             renderer.drawDots();
         }
     }
