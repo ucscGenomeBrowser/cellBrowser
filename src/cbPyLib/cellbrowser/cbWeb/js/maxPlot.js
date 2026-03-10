@@ -2064,7 +2064,7 @@ function MaxPlot(div, top, left, width, height, args) {
             //ctx.drawImage(back.image, a.sx, a.sy, back.width, back.height, a.dx, a.dy, a.dw, a.dh);
             if(DEBUG) console.log("drawImage sx, sy, sw, sh, dx, dy, dw, dh", back.sx, back.sy, back.sw, back.sh, back.dx,back.dy, back.dw, back.dh);
             //ctx.drawImage(back.image, back.sx, back.sy, back.width, back.height, 0, 0, ctxWidth, ctxHeight);
-            ctx.drawImage(back.image, back.sx, back.sy, back.sw, back.sh, back.dx, back.dy, back.dw, back.dh);
+            ctx.drawImage(back.image, /*back.sx, back.sy, back.sw, back.sh,*/ back.dx, back.dy, back.dw, back.dh);
         } else if(self.mode == 2) {
             console.warn("Background drawing not currently supported for WebGL drawing");
         }
@@ -2256,61 +2256,46 @@ function MaxPlot(div, top, left, width, height, args) {
         if (!background) 
             return;
 
-        var width = background.image.width; // source image width
-        var height = background.image.height; // source image height
+        // Find the size of the source image
+        const width = background.image.width;
+        const height = background.image.height;
  
-        var ctxWidth  = self.canvas.width;
-        var ctxHeight = self.canvas.height;
+        // Find the size of the drawing canvas
+        const canvWidth  = self.canvas.width;
+        const canvHeight = self.canvas.height;
 
-        var coordHeight = dataRange.maxY-dataRange.minY;
-        var coordWidth = dataRange.maxX-dataRange.minX;
+        const coordHeight = dataRange.maxY-dataRange.minY;
+        const coordWidth = dataRange.maxX-dataRange.minX;
 
-        var scaleX = width / coordWidth; // this is px/dataUnit to convert background image pixels to canvas pixels
-        var scaleY = height / coordHeight;
+        const scaleX = width / coordWidth; // this is px/dataUnit to convert background image pixels to canvas pixels
+        const scaleY = height / coordHeight;
 
-        var sx1 = zoomRange.minX * scaleX; // sx = x position on source image
-        var sx2 = zoomRange.maxX * scaleX;
+        const sx1 = zoomRange.minX * scaleX; // sx = x position on source image
+        const sx2 = zoomRange.maxX * scaleX;
 
-        var sy1 = (coordHeight - zoomRange.maxY) * scaleY; // Y-positions must be subtracted from coordHeight - y axis is flipped!
-        var sy2 = (coordHeight - zoomRange.minY) * scaleY; // Our y-axis is always flipped!
+        const sy1 = (coordHeight - zoomRange.maxY) * scaleY; // Y-positions must be subtracted from coordHeight - y axis is flipped!
+        const sy2 = (coordHeight - zoomRange.minY) * scaleY; // Our y-axis is always flipped!
 
-        var sw = sx2 - sx1; // size of slice of background image that is currently shown, in source pixels
-        var sh = sy2 - sy1;
+        const sWidth = sx2 - sx1; // size of slice of background image that is currently shown, in source pixels
+        const sHeight = sy2 - sy1;
 
-        // lame: since I wasn't able to figure out how to transform negative sx, sy to corrected dx, dy, coords - safari doesn't 
-        // understand negative sx/sy - I simply use the scaleData function
-        // somehow https://gist.github.com/Kaiido/ca9c837382d89b9d0061e96181d1d862 didn't work for me
-        //var coords = [0.0, 0.0, dataRange.maxX, dataRange.maxY];
-        //var newCoords = scaleCoords(coords, 0, zoomRange, ctxWidth, ctxHeight, [])
+        // To keep the original image aspect ratio, scale the less restrictive canvas dimension to match the more restrictive one
+        const [canvScaleX, canvScaleY] = [width / canvWidth, height / canvHeight];
 
-        var dx = 0;
-        var dy = 0;
-        var dw = ctxWidth;
-        var dh = ctxHeight;
-
-        //if (sx1 < 0) {
-            //sx1 = 0;
-            //sw = width;
-            //dx = newCoords[0];
-            //dw = newCoords[2] - dx;
-        //}
-
-        //if (sy1 < 0) {
-            //sy1 = 0;
-            //sh = height;
-            //dy = newCoords[1];
-            //dh = newCoords[3] - dy;
-        //}
+        const dWidth = canvScaleX > canvScaleY ? canvWidth : canvHeight * width / height;
+        const dHeight = canvScaleX < canvScaleY ? canvHeight : canvWidth * height / width;
+        const dx = canvScaleX > canvScaleY ? 0 : (canvWidth - dWidth) / 2;
+        const dy = canvScaleX < canvScaleY ? 0 : (canvHeight - dHeight) / 2;
 
         background.sx = sx1;
         background.sy = sy1;
-        background.sw = sw;
-        background.sh = sh;
+        background.sw = sWidth;
+        background.sh = sHeight;
 
         background.dx = dx;
         background.dy = dy;
-        background.dw = dw;
-        background.dh = dh;
+        background.dw = dWidth;
+        background.dh = dHeight;
     }
 
     this.scaleData = function() {
