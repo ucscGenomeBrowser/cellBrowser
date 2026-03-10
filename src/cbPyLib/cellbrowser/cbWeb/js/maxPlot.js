@@ -2653,7 +2653,7 @@ function MaxPlot(div, top, left, width, height, args) {
         const colorArr = this.col.arr;
 
         // Calculating layers requires color and coordinate knowledge. Only bind once both are known
-        if(colorArr === undefined || !this.coords.layers) {
+        if(!colorArr || !this.coords.layers) {
             return;
         }
 
