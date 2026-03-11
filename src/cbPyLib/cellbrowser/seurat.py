@@ -502,7 +502,8 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
         cmds.append("names <- load('%s')" % inFname)
         cmds.append("sobj <- get(names[1])")
 
-    cmds.append("if (class(sobj)!='seurat' && class(sobj)[1]!='Seurat') { stop('The input .rds file does not seem to contain a Seurat object') }")
+    cmds.append("if ('SpatialExperiment' %in% class(sobj)) { sobj <- SpatialExperimentToSeurat(sobj) }")
+    cmds.append("if (class(sobj)!='seurat' && class(sobj)[1]!='Seurat') { stop('The input .rds file does not seem to contain a Seurat or SpatialExperiment object') }")
     skipStr = str(skipMatrix).upper()
     skipMarkerStr = str(skipMarkers).upper()
 
