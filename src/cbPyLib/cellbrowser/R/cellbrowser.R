@@ -28,7 +28,7 @@ SpatialExperimentToSeurat <- function(spe) {
 }
 
 .xeniumSpeToSeurat <- function(spe) {
-    counts_mat    <- SummarizedExperiment::counts(spe)
+    counts_mat    <- SummarizedExperiment::assay(spe, "counts")
     metadata      <- SummarizedExperiment::colData(spe)
     coords        <- SpatialExperiment::spatialCoords(spe)
 
@@ -65,7 +65,7 @@ SpatialExperimentToSeurat <- function(spe) {
 }
 
 .visiumSpeToSeurat <- function(spe) {
-    counts_mat <- SummarizedExperiment::counts(spe)
+    counts_mat <- SummarizedExperiment::assay(spe, "counts")
     coords     <- SpatialExperiment::spatialCoords(spe)
     metadata   <- SummarizedExperiment::colData(spe)
 
