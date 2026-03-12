@@ -148,17 +148,8 @@ function MaxPlot(div, top, left, width, height, args) {
         const canvas = this.canvas;
         if(this.usesWebGL()) {
             if(canvas.style.backgroundColor !== "transparent") {
+                // All webGL canvas should be transparent, so this should not be called
                 canvas.style.backgroundColor = this.isLight() ? "black" : "white";
-            }
-
-            /** @type {WebGL2RenderingContext} */
-            const ctx = this.ctx;
-            if(this.isLight()) {
-                // Light mode: clear color is black (inverts to white)
-                ctx.clearColor(0, 0, 0, 1);
-            } else {
-                // Dark mode: clear color is white (inverts to black)
-                ctx.clearColor(1, 1, 1, 1);
             }
         } else if(canvas.style.backgroundColor !== "transparent") {
             canvas.style.backgroundColor = this.isLight() ? "white" : "black";
@@ -202,7 +193,8 @@ function MaxPlot(div, top, left, width, height, args) {
         this.canvDiv = canvDiv;
         div.appendChild(canvDiv);
 
-        [self.ctx, self.canvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, false, 'mpCanvas', self.mode);
+        if(this.usesWebGL()) [self.bgCtx, self.bgCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, false, 'mpBackgroundCanvas', 1);
+        [self.ctx, self.canvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, self.usesWebGL(), 'mpCanvas', self.mode);
         if(this.usesWebGL()) [self.labelCtx, self.labelCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, true, 'mpLabelCanvas', 1);
 
         self.interact = false;
@@ -378,13 +370,7 @@ function MaxPlot(div, top, left, width, height, args) {
         const ctx = self.ctx;
 
         // Set the canvas' clear color
-        if(this.isLight()) {
-            // Light mode: clear color is black (inverts to white)
-            ctx.clearColor(0, 0, 0, 1);
-        } else {
-            // Dark mode: clear color is white (inverts to black)
-            ctx.clearColor(1, 1, 1, 1);
-        }
+        ctx.clearColor(0, 0, 0, 0);
 
         // Enable blending and set blend equation
         // Derived equation in CMY space: A_Src * Col_Src + (1 - A_Src) * A_Dst * Col_Dst
@@ -576,7 +562,8 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     this.clear = function() {
-        clearCanvas(self.ctx, self.canvas.width, self.canvas.height);
+        if(this.usesWebGL()) clearCanvas(this.bgCtx, this.bgCanvas.width, this.bgCanvas.height, false);
+        clearCanvas(self.ctx, self.canvas.width, self.canvas.height, this.usesWebGL());
         if(this.usesWebGL()) clearCanvas(this.labelCtx, this.labelCanvas.width, this.labelCanvas.height, true);
     };
 
@@ -2050,24 +2037,20 @@ function MaxPlot(div, top, left, width, height, args) {
             return;
         if(DEBUG) console.time("image");
 
-        if(!self.usesWebGL()){
-            //var ctxWidth = ctx.canvas.width; // size of the canvas on the screen in pixels
-            //var ctxHeight = ctx.canvas.height;
+        //var ctxWidth = ctx.canvas.width; // size of the canvas on the screen in pixels
+        //var ctxHeight = ctx.canvas.height;
 
-            //var clipWidth = backuwidth;
-            //var clipHeight = back.height;
+        //var clipWidth = backuwidth;
+        //var clipHeight = back.height;
 
-            // arguments are: (imgObject, x/y coord on image for clipping, width / height of clipped image, where to place the image, width/height of image)
-            //var a = getSafeRect(back.image.width, back.image.height, back.clipX, back.clipY, back.image.width, back.image.height, 0, 0, ctxWidth, ctxHeight);
-            //if(DEBUG) console.log("drawing fixed coords", a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
-            //ctx.drawImage(back.image, a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
-            //ctx.drawImage(back.image, a.sx, a.sy, back.width, back.height, a.dx, a.dy, a.dw, a.dh);
-            if(DEBUG) console.log("drawImage sx, sy, sw, sh, dx, dy, dw, dh", back.sx, back.sy, back.sw, back.sh, back.dx,back.dy, back.dw, back.dh);
-            //ctx.drawImage(back.image, back.sx, back.sy, back.width, back.height, 0, 0, ctxWidth, ctxHeight);
-            ctx.drawImage(back.image, back.sx, back.sy, back.sw, back.sh, back.dx, back.dy, back.dw, back.dh);
-        } else if(self.mode == 2) {
-            console.warn("Background drawing not currently supported for WebGL drawing");
-        }
+        // arguments are: (imgObject, x/y coord on image for clipping, width / height of clipped image, where to place the image, width/height of image)
+        //var a = getSafeRect(back.image.width, back.image.height, back.clipX, back.clipY, back.image.width, back.image.height, 0, 0, ctxWidth, ctxHeight);
+        //if(DEBUG) console.log("drawing fixed coords", a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
+        //ctx.drawImage(back.image, a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
+        //ctx.drawImage(back.image, a.sx, a.sy, back.width, back.height, a.dx, a.dy, a.dw, a.dh);
+        if(DEBUG) console.log("drawImage sx, sy, sw, sh, dx, dy, dw, dh", back.sx, back.sy, back.sw, back.sh, back.dx,back.dy, back.dw, back.dh);
+        //ctx.drawImage(back.image, back.sx, back.sy, back.width, back.height, 0, 0, ctxWidth, ctxHeight);
+        ctx.drawImage(back.image, back.sx, back.sy, back.sw, back.sh, back.dx, back.dy, back.dw, back.dh);
 
         if(DEBUG) console.timeEnd("image");
     }
@@ -2324,6 +2307,12 @@ function MaxPlot(div, top, left, width, height, args) {
         background.dy = dy;
         background.dw = dWidth;
         background.dh = dHeight;
+
+        // If we're using WebGL, we only need to redraw the background when we rescale it, so we'll do that here
+        // if(this.usesWebGL()) {
+        //     clearCanvas(this.bgCtx, this.bgCanvas.width, this.bgCanvas.height);
+        //     drawBackground(this.bgCtx, background);
+        // }
     }
 
     this.scaleData = function() {
@@ -2423,7 +2412,6 @@ function MaxPlot(div, top, left, width, height, args) {
 
        // css and actual canvas sizes: these must be identical, otherwise canvas gets super slow
        self.canvas.style.width = width+"px";
-       if(this.usesWebGL()) self.labelCanvas.style.width = width+"px";
        self.width = width;
        self.height = height;
        //let canvHeight = height - gStatusHeight;
@@ -2433,8 +2421,14 @@ function MaxPlot(div, top, left, width, height, args) {
        self.canvas.width = width;
        self.canvas.style.height = canvHeight+"px";
        if(this.usesWebGL()) {
+           self.bgCanvas.width = width;
+           self.bgCanvas.height = canvHeight;
+           self.bgCanvas.style.width = width+"px";
+           self.bgCanvas.style.height = canvHeight+"px";
+
            self.labelCanvas.width = width;
            self.labelCanvas.height = canvHeight;
+           self.labelCanvas.style.width = width+"px";
            self.labelCanvas.style.height = canvHeight+"px";
        }
        self.zoomDiv.style.top = (height-gZoomFromBottom)+"px";
@@ -2788,7 +2782,7 @@ function MaxPlot(div, top, left, width, height, args) {
             return;
         }
 
-        drawBackground(self.ctx, self.background)
+        drawBackground(this.usesWebGL() ? self.bgCtx : self.ctx, self.background);
 
         // if the labels are not shown, fattening should not be active
         if (self.fatIdx && !self.doDrawLabels)
