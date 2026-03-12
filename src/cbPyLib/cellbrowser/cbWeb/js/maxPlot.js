@@ -2256,61 +2256,74 @@ function MaxPlot(div, top, left, width, height, args) {
         if (!background) 
             return;
 
-        var width = background.image.width; // source image width
-        var height = background.image.height; // source image height
+        // Find the size of the source image
+        const width = background.image.width;
+        const height = background.image.height;
  
-        var ctxWidth  = self.canvas.width;
-        var ctxHeight = self.canvas.height;
+        // Find the size of the drawing canvas
+        const canvWidth  = self.canvas.width;
+        const canvHeight = self.canvas.height;
 
-        var coordHeight = dataRange.maxY-dataRange.minY;
-        var coordWidth = dataRange.maxX-dataRange.minX;
+        // To keep the original image aspect ratio, scale the less restrictive canvas dimension to match the more restrictive one
+        const [canvScaleX, canvScaleY] = [width / canvWidth, height / canvHeight];
+        
+        const dx = 0;
+        const dy = 0;
+        const dWidth = canvWidth;
+        const dHeight = canvHeight;
+        
+        // Since the points should match the background, adjust the zoom range's aspect ratio to match the canvas
+        const viewWidth = zoomRange.maxX - zoomRange.minX;
+        const viewHeight = zoomRange.maxY - zoomRange.minY;
+        
+        if (canvScaleX > canvScaleY) {
+            // Extend zoom range height to match width
+            const newViewHeight = viewWidth * canvHeight / canvWidth;
+            const viewYMidpoint = (zoomRange.maxY + zoomRange.minY) / 2;
 
-        var scaleX = width / coordWidth; // this is px/dataUnit to convert background image pixels to canvas pixels
-        var scaleY = height / coordHeight;
+            const newMinY = viewYMidpoint - newViewHeight / 2;
+            const newMaxY = viewYMidpoint + newViewHeight / 2;
 
-        var sx1 = zoomRange.minX * scaleX; // sx = x position on source image
-        var sx2 = zoomRange.maxX * scaleX;
+            zoomRange.minY = newMinY;
+            zoomRange.maxY = newMaxY;
+        } else {
+            // Extend zoom range width to match height
+            const newViewWidth = viewHeight * canvWidth / canvHeight;
+            const viewXMidpoint = (zoomRange.maxX + zoomRange.minX) / 2;
 
-        var sy1 = (coordHeight - zoomRange.maxY) * scaleY; // Y-positions must be subtracted from coordHeight - y axis is flipped!
-        var sy2 = (coordHeight - zoomRange.minY) * scaleY; // Our y-axis is always flipped!
+            const newMinX = viewXMidpoint - newViewWidth / 2;
+            const newMaxX = viewXMidpoint + newViewWidth / 2;
 
-        var sw = sx2 - sx1; // size of slice of background image that is currently shown, in source pixels
-        var sh = sy2 - sy1;
+            zoomRange.minX = newMinX;
+            zoomRange.maxX = newMaxX;
+        }
 
-        // lame: since I wasn't able to figure out how to transform negative sx, sy to corrected dx, dy, coords - safari doesn't 
-        // understand negative sx/sy - I simply use the scaleData function
-        // somehow https://gist.github.com/Kaiido/ca9c837382d89b9d0061e96181d1d862 didn't work for me
-        //var coords = [0.0, 0.0, dataRange.maxX, dataRange.maxY];
-        //var newCoords = scaleCoords(coords, 0, zoomRange, ctxWidth, ctxHeight, [])
+        // Find the size of the data
+        const coordHeight = dataRange.maxY - dataRange.minY;
+        const coordWidth = dataRange.maxX - dataRange.minX;
 
-        var dx = 0;
-        var dy = 0;
-        var dw = ctxWidth;
-        var dh = ctxHeight;
+        const scaleX = width / coordWidth; // this is px/dataUnit to convert background image pixels to canvas pixels
+        const scaleY = height / coordHeight;
 
-        //if (sx1 < 0) {
-            //sx1 = 0;
-            //sw = width;
-            //dx = newCoords[0];
-            //dw = newCoords[2] - dx;
-        //}
+        const sx1 = zoomRange.minX * scaleX; // sx = x position on source image
+        const sx2 = zoomRange.maxX * scaleX;
 
-        //if (sy1 < 0) {
-            //sy1 = 0;
-            //sh = height;
-            //dy = newCoords[1];
-            //dh = newCoords[3] - dy;
-        //}
+        const sy1 = (coordHeight - zoomRange.maxY) * scaleY; // Y-positions must be subtracted from coordHeight - y axis is flipped!
+        const sy2 = (coordHeight - zoomRange.minY) * scaleY; // Our y-axis is always flipped!
+
+        const sWidth = sx2 - sx1; // size of slice of background image that is currently shown, in source pixels
+        const sHeight = sy2 - sy1;
+        
 
         background.sx = sx1;
         background.sy = sy1;
-        background.sw = sw;
-        background.sh = sh;
+        background.sw = sWidth;
+        background.sh = sHeight;
 
         background.dx = dx;
         background.dy = dy;
-        background.dw = dw;
-        background.dh = dh;
+        background.dw = dWidth;
+        background.dh = dHeight;
     }
 
     this.scaleData = function() {
@@ -2325,10 +2338,10 @@ function MaxPlot(div, top, left, width, height, args) {
 
         let w = self.canvas.width;
         let h = self.canvas.height;
+        self.scaleBackground(self.background, self.port.initZoom, self.port.zoomRange);
         self.coords.px = scaleCoords(self.coords.orig, borderMargin, self.port.zoomRange, w, h, self.coords.aspectRatio);
         if (self.coords.lines)
             self.coords.pxLines = scaleLines(self.coords.lines, self.port.zoomRange, self.canvas.width, self.canvas.height);
-        self.scaleBackground(self.background, self.port.initZoom, self.port.zoomRange);
         self.scalingDone = true;
     }
 
