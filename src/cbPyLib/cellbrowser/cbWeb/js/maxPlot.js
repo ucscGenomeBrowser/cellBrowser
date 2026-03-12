@@ -2213,7 +2213,7 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.background===undefined || self.background===null)
             self.background = {};
         self.background.image = img;
-        self.scaleBackground(self.background, self.port.initZoom, self.port.zoomRange);
+        self.scaleBackground(self.background, self.port.initZoom, this.usesWebGL() ? self.port.projection :self.port.zoomRange);
         if (self.childPlot)
             self.childPlot.setBackground(img);
     };
@@ -2266,29 +2266,57 @@ function MaxPlot(div, top, left, width, height, args) {
         const dHeight = canvHeight;
         
         // Since the points should match the background, adjust the zoom range's aspect ratio to match the canvas
-        const viewWidth = zoomRange.maxX - zoomRange.minX;
-        const viewHeight = zoomRange.maxY - zoomRange.minY;
-        
-        if (canvScaleX > canvScaleY) {
-            // Extend zoom range height to match width
-            const newViewHeight = viewWidth * canvHeight / canvWidth;
-            const viewYMidpoint = (zoomRange.maxY + zoomRange.minY) / 2;
+        // Since WebGL uses a projection matrix, this is determined differently depending on draw mode, but we will need the pixel range for later.
+        let zr;
+        if(zoomRange instanceof Matrix4) {
+            if(canvScaleX > canvScaleY) {
+                // Extend zoom range height to match width
+                const newViewHeight = zoomRange.width * canvHeight / canvWidth;
+                const viewYMidpoint = (zoomRange.top + zoomRange.bottom) / 2;
 
-            const newMinY = viewYMidpoint - newViewHeight / 2;
-            const newMaxY = viewYMidpoint + newViewHeight / 2;
+                const newBottom = viewYMidpoint - newViewHeight / 2;
+                const newTop = viewYMidpoint + newViewHeight / 2;
 
-            zoomRange.minY = newMinY;
-            zoomRange.maxY = newMaxY;
+                zoomRange.setBounds(zoomRange.left, zoomRange.right, newTop, newBottom, false);
+            } else {
+                // Extend zoom range width to match height
+                const newViewWidth = zoomRange.height * canvWidth / canvHeight;
+                const viewXMidpoint = (zoomRange.right + zoomRange.left) / 2;
+
+                const newLeft = viewXMidpoint - newViewWidth / 2;
+                const newRight = viewXMidpoint + newViewWidth / 2;
+
+                zoomRange.setBounds(newLeft, newRight, zoomRange.top, zoomRange.bottom, false);
+            }
+
+            zr = zoomRange.pxBounds(dataRange, canvWidth, canvHeight);
         } else {
-            // Extend zoom range width to match height
-            const newViewWidth = viewHeight * canvWidth / canvHeight;
-            const viewXMidpoint = (zoomRange.maxX + zoomRange.minX) / 2;
+            const viewWidth = zoomRange.maxX - zoomRange.minX;
+            const viewHeight = zoomRange.maxY - zoomRange.minY;
+            
+            if (canvScaleX > canvScaleY) {
+                // Extend zoom range height to match width
+                const newViewHeight = viewWidth * canvHeight / canvWidth;
+                const viewYMidpoint = (zoomRange.maxY + zoomRange.minY) / 2;
 
-            const newMinX = viewXMidpoint - newViewWidth / 2;
-            const newMaxX = viewXMidpoint + newViewWidth / 2;
+                const newMinY = viewYMidpoint - newViewHeight / 2;
+                const newMaxY = viewYMidpoint + newViewHeight / 2;
 
-            zoomRange.minX = newMinX;
-            zoomRange.maxX = newMaxX;
+                zoomRange.minY = newMinY;
+                zoomRange.maxY = newMaxY;
+            } else {
+                // Extend zoom range width to match height
+                const newViewWidth = viewHeight * canvWidth / canvHeight;
+                const viewXMidpoint = (zoomRange.maxX + zoomRange.minX) / 2;
+
+                const newMinX = viewXMidpoint - newViewWidth / 2;
+                const newMaxX = viewXMidpoint + newViewWidth / 2;
+
+                zoomRange.minX = newMinX;
+                zoomRange.maxX = newMaxX;
+            }
+
+            zr = zoomRange;
         }
 
         // Find the size of the data
@@ -2298,11 +2326,11 @@ function MaxPlot(div, top, left, width, height, args) {
         const scaleX = width / coordWidth; // this is px/dataUnit to convert background image pixels to canvas pixels
         const scaleY = height / coordHeight;
 
-        const sx1 = zoomRange.minX * scaleX; // sx = x position on source image
-        const sx2 = zoomRange.maxX * scaleX;
+        const sx1 = zr.minX * scaleX; // sx = x position on source image
+        const sx2 = zr.maxX * scaleX;
 
-        const sy1 = (coordHeight - zoomRange.maxY) * scaleY; // Y-positions must be subtracted from coordHeight - y axis is flipped!
-        const sy2 = (coordHeight - zoomRange.minY) * scaleY; // Our y-axis is always flipped!
+        const sy1 = (coordHeight - zr.maxY) * scaleY; // Y-positions must be subtracted from coordHeight - y axis is flipped!
+        const sy2 = (coordHeight - zr.minY) * scaleY; // Our y-axis is always flipped!
 
         const sWidth = sx2 - sx1; // size of slice of background image that is currently shown, in source pixels
         const sHeight = sy2 - sy1;
@@ -2792,7 +2820,14 @@ function MaxPlot(div, top, left, width, height, args) {
             return;
         }
 
-        drawBackground(this.usesWebGL() ? self.bgCtx : self.ctx, self.background);
+        // Draw background
+        // When using WebGL, we use a different canvas and different viewport
+        if(this.usesWebGL()) {
+            this.scaleBackground(self.background, self.port.initZoom, self.port.projection);
+            drawBackground(self.bgCtx, self.background);
+        } else {
+            drawBackground(self.ctx, self.background);
+        }
 
         // if the labels are not shown, fattening should not be active
         if (self.fatIdx && !self.doDrawLabels)
@@ -4290,13 +4325,21 @@ class Matrix4 {
   }
 
   // Resize the viewport to the given bounds
-  setBounds(l, r, t, b) {
+  setBounds(l, r, t, b, rescale = true) {
     // Safety check
     if(l > r || b > t) throw new Error(`Invalid Bounds:\nleft: ${l}\tright: ${r}\ntop: ${t}\tbottom: ${b}`);
 
-    // Find each set of coordinates in space
-    const [sl, sb] = this.getCoordinates(l, b);
-    const [sr, st] = this.getCoordinates(r, t);
+    let sl, sb, sr, st;
+    if(rescale) {
+        // If requested, find each set of coordinates in space
+        // (By default, assumes provided coordinates are relative to canvas, not clip space)
+        [sl, sb] = this.getCoordinates(l, b);
+        [sr, st] = this.getCoordinates(r, t);
+    } else {
+        // No rescale requested. Just use given coordiantes
+        [sl, sb] = [l, b];
+        [sr, st] = [r, t];
+    }
 
     // Set the new bounds and recalculate
     this.left = sl;
