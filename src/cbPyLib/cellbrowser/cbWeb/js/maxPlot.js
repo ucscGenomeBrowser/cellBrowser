@@ -1266,30 +1266,40 @@ function MaxPlot(div, top, left, width, height, args) {
 
         if(DEBUG) console.time("scale");
 
-        // Find the extreme x and y values in the coords
+        // Find the coord range
+        const zoomRange = self.port.zoomRange;
         let minX, minY, maxX, maxY;
-        for (let i = 0; i < coords.length / 2; i++) {
-            const x = coords[i*2];
-            const y = coords[i*2 + 1];
+        if(zoomRange) {
+            [minX, minY, maxX, maxY] = [zoomRange.minX, zoomRange.minY, zoomRange.maxX, zoomRange.maxY];
+        } else {
+            // Backup: if zoomRange isn't defined, use the extreme values of the dataset
+            for (let i = 0; i < coords.length / 2; i++) {
+                const x = coords[i*2];
+                const y = coords[i*2 + 1];
 
-            if(minX === undefined || minX > x) minX = x;
-            if(minY === undefined || minY > y) minY = y;
-            if(maxX === undefined || maxX < x) maxX = x;
-            if(maxY === undefined || maxY < y) maxY = y;
+                if(minX === undefined || minX > x) minX = x;
+                if(minY === undefined || minY > y) minY = y;
+                if(maxX === undefined || maxX < x) maxX = x;
+                if(maxY === undefined || maxY < y) maxY = y;
+            }
         }
 
         // Find the span of x and y
         const spanX = maxX - minX;
         const spanY = maxY - minY;
 
-        // Scale coordiantes to fit [-1, 1]
+        // Scale coordiantes to fit [-1, 1] (accounting for the radius)
+        const margin = self.port.radius;
+        const canvas = self.canvas;
+        const trueHalfSpanX = 1 - ((2 * margin) / canvas.width);
+        const trueHalfSpanY = 1 - ((2 * margin) / canvas.height);
         let scaledCoords = new Float32Array(coords.length);
         for(let i = 0; i < coords.length / 2; i++) {
             const x = coords[i*2];
             const y = coords[i*2 + 1];
 
-            scaledCoords[2*i] = (x - minX) / (spanX / 2) - 1;
-            scaledCoords[2*i+1] = (y - minY) / (spanY / 2) - 1;
+            scaledCoords[2*i] = ((x - minX) / (spanX / 2) - 1) * trueHalfSpanX;
+            scaledCoords[2*i+1] = ((y - minY) / (spanY / 2) - 1) * trueHalfSpanY;
         }
 
         if(DEBUG) console.timeEnd("scale");
