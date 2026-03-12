@@ -59,7 +59,7 @@ function MaxPlot(div, top, left, width, height, args) {
     this.hiddenCoord = HIDCOORD;
 
     const DEBUG = false;
-    const WEBGL_DEBUG = true;
+    const WEBGL_DEBUG = false;
 
     var self = this; // 'this' has two conflicting meanings in javascript.
     // I use 'self' to refer to object variables, so I can use 'this' to refer to the caller context
@@ -1604,8 +1604,9 @@ function MaxPlot(div, top, left, width, height, args) {
             ctx.shadowBlur=6;
             ctx.shadowColor="white";
         }
-        else
-            ctx.fillStyle = "rgba(0,0,0,1.0)";
+        else {
+            ctx.fillStyle = self.isLight() ? "rgba(0,0,0,1.0)" : "rgba(255,255,255,1.0)";
+        }
 
         ctx.textAlign = "left";
 
