@@ -3414,7 +3414,7 @@ function MaxPlot(div, top, left, width, height, args) {
     this.getVisibleCount = function() {
         /* return number of cells that are visible */
         let count = 0;
-        let coords = self.coords.orig;
+        let coords = this.usesWebGL() ? self.coords.gl : self.coords.orig;
         for (var i = 0; i < coords.length/2; i++) {
             if (!isHidden(coords[2*i], coords[2*i+1], i))
                 count++;
