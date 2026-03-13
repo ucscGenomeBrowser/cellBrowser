@@ -276,14 +276,12 @@ function MaxPlot(div, top, left, width, height, args) {
         for (let i = 0; i < hexColors.length; i++) {
             // Extract red, green, and blue components
             let hexColor = hexColors[i];
-            const maxCol = 200;
-            const addCol = 20;
-            const red = Math.min(maxCol, addCol+parseInt(hexColor.slice(1, 3), 16));
-            const green = Math.min(maxCol, addCol+parseInt(hexColor.slice(3, 5), 16));
-            const blue = Math.min(maxCol, addCol+parseInt(hexColor.slice(5, 7), 16));
+            const red = parseInt(hexColor.slice(0, 2), 16);
+            const green = parseInt(hexColor.slice(2, 4), 16);
+            const blue = parseInt(hexColor.slice(4, 6), 16);
 
             // Calculate the grayscale value using the luminosity method
-            const gray = Math.min(255, 128+(0.5*Math.round(0.2126 * red + 0.7152 * green + 0.0722 * blue)));
+            const gray = Math.min(255, (self.isLight() ? 128 : 64) + Math.round(0.5 * (0.2126 * red + 0.7152 * green + 0.0722 * blue)));
 
             // Convert the grayscale value to a two-character hex string
             const grayHex = gray.toString(16).padStart(2, '0');
@@ -390,6 +388,7 @@ function MaxPlot(div, top, left, width, height, args) {
         uniform float u_Radius;
         uniform mat4 u_Projection;
         uniform float u_Layer;
+        uniform float u_LightMode;
         
         uniform float u_FatID;
         uniform float u_AnySelected;
@@ -419,7 +418,7 @@ function MaxPlot(div, top, left, width, height, args) {
                 float l_Red = 0.08 + a_Color[0];
                 float l_Green = 0.08 + a_Color[1];
                 float l_Blue = 0.08 + a_Color[2];
-                float l_Luminosity = 0.5 + ((0.2126 * l_Red + 0.7152 * l_Green + 0.0722 * l_Blue) * 0.5);
+                float l_Luminosity = ((0.2126 * l_Red + 0.7152 * l_Green + 0.0722 * l_Blue) * 0.5) + (u_LightMode == 1.0 ? 0.5 : 0.25);
                 v_Color = vec3(l_Luminosity, l_Luminosity, l_Luminosity);
             }
         }
