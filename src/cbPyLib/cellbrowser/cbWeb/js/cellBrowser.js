@@ -35,6 +35,7 @@ var cellbrowser = function() {
     var gOtherLegend = null;
 
     var renderer = null;
+    var mainRenderer = null; // the renderer with sliders, always the left panel in split mode
 
     var background = null;
 
@@ -3172,6 +3173,8 @@ var cellbrowser = function() {
         var idx = 0;
         if (name==="gene")
             idx = 1;
+        if (name==="layout")
+            idx = 2;
 
         $( "#tpLeftTabs" ).tabs( "option", "active", idx );
     }
@@ -3601,8 +3604,9 @@ var cellbrowser = function() {
     }
 
 
-    function gotCoords(coords, info, clusterInfo, newRadius) {
+    function gotCoords(coords, info, clusterInfo, newRadius, rend) {
         /* called when the coordinates have been loaded */
+        rend = rend || renderer;
         if (coords.length===0)
             alert("cellBrowser.js/gotCoords: coords.bin seems to be empty");
         var opts = {};
@@ -3623,7 +3627,7 @@ var cellbrowser = function() {
             for (var i = 0; i < clusterMids.length; i++) {
                 origLabels.push(clusterMids[i][2]);
             }
-            renderer.origLabels = origLabels;
+            rend.origLabels = origLabels;
          }
 
         if (clusterInfo && clusterInfo.lines) {
@@ -3633,22 +3637,23 @@ var cellbrowser = function() {
             opts["lineAlpha"] = db.conf.lineAlpha;
         }
 
-        renderer.setCoords(coords, clusterMids, info, opts);
-        buildWatermark(renderer);
+        rend.setCoords(coords, clusterMids, info, opts);
+        buildWatermark(rend);
     }
 
-    function computeAndSetLabels(values, metaInfo) {
+    function computeAndSetLabels(values, metaInfo, rend) {
         /* recompute the label positions and redraw everything. Updates the dropdown. */
+        rend = rend || renderer;
         var labelCoords;
 
-        var coords = renderer.coords.orig;
+        var coords = rend.coords.orig;
         var names = null;
         if (metaInfo.type !== "float" && metaInfo.type !== "int") {
             var names = metaInfo.ui.shortLabels;
         }
 
         console.time("cluster centers");
-        var calc = renderer.calcMedian(coords, values, names, metaInfo.origVals);
+        var calc = rend.calcMedian(coords, values, names, metaInfo.origVals);
 
         labelCoords = [];
         for (var label in calc) {
@@ -3659,17 +3664,19 @@ var cellbrowser = function() {
         }
         console.timeEnd("cluster centers");
 
-        renderer.setLabelCoords(labelCoords);
-        renderer.setLabelField(metaInfo.name);
+        rend.setLabelCoords(labelCoords);
+        rend.setLabelField(metaInfo.name);
 
-        setLabelDropdown(metaInfo.name);
+        if (rend === renderer)
+            setLabelDropdown(metaInfo.name);
     }
 
-    function setLabelField(labelField) {
+    function setLabelField(labelField, targetRenderer) {
         /* updates the UI: change the field that is used for drawing the labels. 'null' means hide labels. Do not redraw. */
+        var rend = targetRenderer || renderer;
         if (labelField===null) {
-            renderer.setLabelField(null);
-            setLabelDropdown(null);
+            rend.setLabelField(null);
+            if (!targetRenderer) setLabelDropdown(null);
         }
         else {
             var metaInfo = db.findMetaInfo(labelField);
@@ -3677,14 +3684,14 @@ var cellbrowser = function() {
                 let valCount = metaInfo.valCounts.length;
                 alert("Error: This field contains "+valCount+" different values. "+
                     "The limit is "+MAXLABELCOUNT+". Too many labels overload the screen.");
-                renderer.setLabelField(null);
-                setLabelDropdown(null);
+                rend.setLabelField(null);
+                if (!targetRenderer) setLabelDropdown(null);
                 return;
             }
             if (metaInfo.arr) // preloaded
-                computeAndSetLabels(metaInfo.arr, metaInfo);
+                computeAndSetLabels(metaInfo.arr, metaInfo, rend);
             else
-                db.loadMetaVec(metaInfo, computeAndSetLabels);
+                db.loadMetaVec(metaInfo, function(values, mi) { computeAndSetLabels(values, mi, rend); });
         }
     }
 
@@ -3928,7 +3935,7 @@ var cellbrowser = function() {
                    //buildWatermark();
                    //buildWatermark();
                    activateSplit();
-                   configureRenderer(splitOpts);
+                   configureRenderer(splitOpts, renderer.childPlot);
                    $("#splitJoinDiv").show();
                    $("#splitJoinBox").prop("checked", true);
                    //buildWatermark();
@@ -5348,30 +5355,40 @@ var cellbrowser = function() {
         htmls.push('</select>');
     }
 
-    function loadCoordSet(coordIdx, labelFieldName) {
+    function loadCoordSet(coordIdx, labelFieldName, targetRenderer, targetLabelField) {
         /* load coordinates and color by meta data */
+        var rend = targetRenderer || renderer;
         var newRadius = db.conf.coords[coordIdx].radius;
         var colorOnMetaField = db.conf.coords[coordIdx].colorOnMeta;
-        renderer.background = null; // remove the background image
+        rend.background = null; // remove the background image
 
         db.loadCoords(coordIdx,
                 function(coords, info, clusterMids) {
-                    gotCoords(coords,info,clusterMids, newRadius);
+                    gotCoords(coords, info, clusterMids, newRadius, rend);
 
-                    setLabelField(labelFieldName);
+                    if (targetRenderer)
+                        setLabelField(targetLabelField, rend);
+                    else
+                        setLabelField(labelFieldName);
 
                     if (colorOnMetaField!==undefined) {
                         setColorByDropdown(colorOnMetaField);
                         colorByMetaField(colorOnMetaField, undefined);
                     }
                     else
-                        renderer.drawDots();
+                        rend.drawDots();
                 },
-                gotSpatial,
+                function(img) {
+                    rend.setBackground(img);
+                    if (rend.readyToDraw())
+                        rend.drawDots();
+                    else
+                        console.log("got spatial, but cannot draw yet");
+                },
                 onProgress);
     }
 
-    function changeLayout(coordIdx, doNotUpdateUrl) {
+    function changeLayout(coordIdx, doNotUpdateUrl, targetRenderer, targetLabelField) {
         /* activate a set of coordinates, given the index of a coordinate set */
         var labelFieldName = null;
         var labelFieldVal = $("#tpLabelCombo").val();
@@ -5383,12 +5400,13 @@ var cellbrowser = function() {
             }
         }
 
-        loadCoordSet(coordIdx, labelFieldName);
+        loadCoordSet(coordIdx, labelFieldName, targetRenderer, targetLabelField);
 
-        changeUrl({"layout":coordIdx, "zoom":null});
+        if (!targetRenderer)
+            changeUrl({"layout":coordIdx, "zoom":null});
     }
 
-    function changeLayoutByName(coordName) {
+    function changeLayoutByName(coordName, targetRenderer, targetLabelField) {
         /* activate a set of coordinates, given the shortLabel of a coordinate set */
         if (coordName===undefined)
             return;
@@ -5396,19 +5414,20 @@ var cellbrowser = function() {
        if (coordIdx===undefined)
            alert("Coordinateset with name "+coordName+" does not exist");
         else
-           changeLayout(coordIdx);
+           changeLayout(coordIdx, undefined, targetRenderer, targetLabelField);
     }
 
-    function configureRenderer(opts) {
+    function configureRenderer(opts, targetRenderer) {
        /* given an obj with .coords, .meta or .gene, configure the current renderer */
+       var targetLabelField = ('labelField' in opts) ? opts.labelField : undefined;
        if (opts.coords)
-           changeLayoutByName(opts.coords);
+           changeLayoutByName(opts.coords, targetRenderer, targetLabelField);
+       else if (targetLabelField !== undefined)
+           setLabelField(targetLabelField, targetRenderer);
        if (opts.gene)
            colorByLocus(opts.gene);
        if (opts.meta)
            colorByMetaField(opts.meta);
-       if (opts.labelField)
-           setLabelField(opts.labelField);
     }
 
     function onLayoutChange(ev, params) {
@@ -9205,6 +9224,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         renderer.legend = gLegend;
         renderer = otherRend;
         gLegend = otherRend.legend;
+        if (mainRenderer) {
+            mainRenderer.sliderTarget = otherRend;
+            if (mainRenderer.sliderDiv)
+                otherRend.div.appendChild(mainRenderer.sliderDiv);
+        }
         let coordIdx = db.findCoordIdx(otherRend.coords.coordInfo.shortLabel);
         chosenSetValue("tpLayoutCombo", coordIdx);
         buildLegendBar();
@@ -9221,7 +9245,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
             renderer = renderer.childPlot;
             renderer.activatePlot();
         }
+        if (mainRenderer && mainRenderer.sliderDiv)
+            mainRenderer.div.appendChild(mainRenderer.sliderDiv);
         renderer.unsplit();
+        mainRenderer = null;
         $("#tpSplitMenuEntry").text("Split Screen");
         renderer.drawDots();
         $("#tpSplitOnGene").text(splitButtonLabel(true));
@@ -9237,6 +9264,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         renderer.legend = gLegend;
         renderer.isMain = true;
 
+        mainRenderer = renderer;
         let rend2 = renderer.split();
         buildWatermark(rend2, true);
 

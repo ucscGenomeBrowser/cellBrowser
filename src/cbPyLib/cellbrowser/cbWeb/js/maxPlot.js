@@ -64,7 +64,7 @@ function MaxPlot(div, top, left, width, height, args) {
     const gTextSize = 16; // size of cluster labels
     const gTitleSize = 18; // size of title text
     const gStatusHeight = 14; // height of status bar
-    const gSliderFromBottom = 45; // distance from buttom to top of slider div
+    const gSliderFromBottom = 56; // distance from bottom to top of slider div
     const gZoomButtonSize = 30; // size of zoom buttons
     const gZoomFromLeft = 10;  // position of zoom buttons from left
     const gZoomFromBottom = 140;  // position of zoom buttons from bottom
@@ -125,6 +125,7 @@ function MaxPlot(div, top, left, width, height, args) {
             self.onNoLabelHover = null; // called when mouse does not hover over a label
             self.onLineHover = null; // called when mouse over a trajectory line
             self.onRadiusAlphaChange = null; // called when user changes radius or alpha
+            self.sliderTarget = null;        // if set, sliders control this renderer instead of self
             // self.onZoom100Click: called when user clicks the zoom100 button. Implemented below.
             self.selectBox = selectDiv; // we need this later
             self.setupMouse();
@@ -450,10 +451,11 @@ function MaxPlot(div, top, left, width, height, args) {
             2 : 1.5,
             1 : 1.8
         }
-        self.port.alphaMult = multMap[sliderVal];
-        console.log("alphaMult: "+self.port.alphaMult);
-        self.calcRadius();
-        self.drawDots();
+        var target = self.sliderTarget || self;
+        target.port.alphaMult = multMap[sliderVal];
+        console.log("alphaMult: "+target.port.alphaMult);
+        target.calcRadius();
+        target.drawDots();
     }
 
     function onChangeRadius(ev, ui) {
@@ -468,9 +470,10 @@ function MaxPlot(div, top, left, width, height, args) {
             6 : 2.0,
             7 : 3.0
         }
-        self.port.radiusMult = multMap[sliderVal];
-        self.calcRadius();
-        self.drawDots();
+        var target = self.sliderTarget || self;
+        target.port.radiusMult = multMap[sliderVal];
+        target.calcRadius();
+        target.drawDots();
     }
 
     function addSliders() {
@@ -489,7 +492,7 @@ function MaxPlot(div, top, left, width, height, args) {
         alphaCont.id = "mpAlphaCont";
         //alphaCont.style.left = "150px"; // cellbrowser.css defines grid widths: 45
         alphaCont.className = "sliderContainer";
-        alphaCont.style.top = "15px"; 
+        alphaCont.style.top = "18px";
         alphaCont.style.left = "0px";
 
         var alphaLabel = document.createElement('div'); // contains the slider and the reset button, floats right
@@ -550,7 +553,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // add both to the big container div that holds all three slider elements
         var sliderDiv = document.createElement('span');
-        sliderDiv.style.bottom = "28px";
+        sliderDiv.style.bottom = "42px";
         sliderDiv.style.right = "200px";
         sliderDiv.style.position = "absolute";
         sliderDiv.style.zIndex = "10";
@@ -1881,6 +1884,12 @@ function MaxPlot(div, top, left, width, height, args) {
        if (self.sliderDiv)
            self.sliderDiv.style.top = (height-gStatusHeight-gSliderFromBottom)+"px";
 
+       var flipCont = document.getElementById("mpFlipbookCont");
+       if (flipCont) {
+           flipCont.style.bottom = "";
+           flipCont.style.top = (height-gStatusHeight-gSliderFromBottom-45)+"px";
+       }
+
     }
 
     this.setPos = function(top, left) {
@@ -2133,8 +2142,7 @@ function MaxPlot(div, top, left, width, height, args) {
             console.timeEnd("draw lines");
         }
 
-        if ((self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined)
-            || self.coords.coordInfo.annots!==undefined) {
+        if (self.doDrawLabels || self.coords.coordInfo.annots!==undefined) {
             self.drawLabels();
         }
 
@@ -2152,20 +2160,22 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.drawLabels = function() {
         /* draw only the labels */
-        self.coords.pxLabels = scaleLabels(
-            self.coords.labels,
-            self.port.zoomRange,
-            self.port.radius,
-            self.canvas.width,
-            self.canvas.height
-        );
-        self.coords.labelBbox = drawLabels(
-            self.ctx,
-            self.coords.pxLabels,
-            self.canvas.width,
-            self.canvas.height,
-            self.port.zoomFact
-        );
+        if (self.doDrawLabels) {
+            self.coords.pxLabels = scaleLabels(
+                self.coords.labels,
+                self.port.zoomRange,
+                self.port.radius,
+                self.canvas.width,
+                self.canvas.height
+            );
+            self.coords.labelBbox = drawLabels(
+                self.ctx,
+                self.coords.pxLabels,
+                self.canvas.width,
+                self.canvas.height,
+                self.port.zoomFact
+            );
+        }
 
         // draw annotations - look like labels, but cannot be clicked
         self.coords.pxAnnots = scaleLabels(
@@ -3209,6 +3219,7 @@ function MaxPlot(div, top, left, width, height, args) {
             plot2.setBackground (self.background.image);
 
         self.setSize(newWidth, newHeight, false); // will call scaleData(), but not redraw.
+        self.statusLine.style.width = (newWidth * 2) + "px"; // span both panels
 
         plot2.onLabelClick = self.onLabelClick;
         plot2.onCellClick = self.onCellClick;
@@ -3237,7 +3248,7 @@ function MaxPlot(div, top, left, width, height, args) {
         contDiv.style.width = "100%";
         contDiv.style.display = "none";
         contDiv.style.position = "absolute";
-        contDiv.style.bottom = "50px";
+        contDiv.style.bottom = "48px";
         contDiv.id = "mpFlipbookCont";
         let fromLeft = 55;
         contDiv.style.left = fromLeft+"px";
@@ -3249,8 +3260,6 @@ function MaxPlot(div, top, left, width, height, args) {
         labelDiv.textContent = "Quickflip through annotations:"
 
         var sliderDiv = document.createElement('div');
-        sliderDiv.style.width = self.canvas.width-fromLeft+"px";
-        //sliderDiv.style.width = "100%";
         sliderDiv.style.height = "8px";
         sliderDiv.style.marginTop = "4px";
         sliderDiv.id = "mpFlipbook";
