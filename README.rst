@@ -14,29 +14,36 @@ you can always use tsv/csv files to import your data. The exporters are part of 
 
 Here are a few datasets that demonstrate these features:
 
-- A simple gene expression dataset: https://cells.ucsc.edu/?ds=cortex-dev
+- A simple gene expression dataset: https://cortex-dev.cells.ucsc.edu
+- ATAC support https://cortex-atac.cells.ucsc.edu
 - Spatial transcriptomics support https://ms-subcortical-lesions.cells.ucsc.edu
 - Split screen mode to display both the spatial and snRNA-seq data side by side https://cells.ucsc.edu/?ds=dup15q-cortex-organoids+spatial+control
-- Cell trajectories from monocle https://cells-test.gi.ucsc.edu/?ds=pre-postnatal-cortex+ex-neu+rna
-- Cell trajectories from URD https://cells.ucsc.edu/?ds=cardiac-differentiation+trajectory+cm-combined-trajectory
+- Pseudotime cell trajectories from Monocle3 https://cells-test.gi.ucsc.edu/?ds=pre-postnatal-cortex+ex-neu+rna
+- Tree-like cell trajectories from URD https://cells.ucsc.edu/?ds=cardiac-differentiation+trajectory+cm-combined-trajectory
 - Clone lineage tracing support: color by the field CellTag, select tags in the legend, then click "recolor checked": https://cells.ucsc.edu/?ds=gbm-nvp+nvp-celltag
 - Brain lipidomics https://cells.ucsc.edu/?ds=brain-lipids
 
-To show all our > 200 single cell datasets, see http://cells.ucsc.edu
+To show all our > 300 single cell datasets, see http://cells.ucsc.edu
 
-To setup your own cell browser, from Cellranger, Seurat, Scanpy or text files 
+To upload datasets for the cells.ucsc.edu website, use https://cells-submit.gi.ucsc.edu. Or email us at cells@ucsc.edu. We reply usually on the same day.
+
+Most users prefer uploading their datasets to us rather than hosting them on their own webserver.
+Our webserver is reliable, fast and we take care
+of adding new features and keeping the data online. 
+But, if you really want to make your own website, to setup your own cell
+browser, on your own web server, from Cellranger, Seurat, Scanpy or text files
 (tsv/csv), or just a single cell expression matrix, read the documentation
-at http://cellbrowser.rtfd.io. If you use the UCSC Cell Browser in your research, please cite
+at http://cellbrowser.rtfd.io.
+
+If you use the UCSC Cell Browser in your research, please cite
 `our Bioinformatics paper <https://dx.doi.org/10.1093/bioinformatics/btab503>`_.
 If you are also using data from a specific dataset we host, please also cite
 the original authors of that dataset (visible under 'Info & Download' while viewing that dataset).
 
-If you want us to add a single cell dataset to the website http://cells.ucsc.edu, 
-please contact us at cells@ucsc.edu. We are happy to add any dataset.
-
 This is a viewer for a static, precomputed layout. If you're looking for an interative layout, where you can 
 move the cells around and run some algorithms interactively, try Chan-Zuckerberg's own cellxgene or Spring.
-A website with both datasets and some analysis is `Scope <http://scope.aertslab.org/>`_.
+Another website with both datasets and some analysis is `Scope <http://scope.aertslab.org/>`_. There are many other
+similar websites now, usually with a few dozen datasets.
 
 Many labs host their data at cells.ucsc.edu by sending it to us, but some groups have setup their own cell browsers:
 
@@ -58,8 +65,7 @@ Many labs host their data at cells.ucsc.edu by sending it to us, but some groups
 * Paul Gontarz, WUSTL, http://regmedsrv1.wustl.edu/Public_SPACE/pgontarz/Public_html/cellbrower/Exp1/
 * Dylan Farnsworth, U Oregon, https://pages.uoregon.edu/drf/browser/lens_230620/
 
-
-These papers have cell browsers made at UCSC:
+These are some papers that reference cell browsers made at UCSC but there are many more, search for "cells.ucsc.edu" in Google Scholar to find more:
 
 * organoidatlas: https://www.sciencedirect.com/science/article/pii/S221112472030053X
 * dros-brain: https://elifesciences.org/articles/50354
@@ -69,8 +75,9 @@ These papers have cell browsers made at UCSC:
 
 Before judging this project by the number of issue tickets or PRs, note that at UCSC we use an internal
 ticket system with more features and that a lot of communication with wetlab users is by email at cells@ucsc.edu, as we 
-do not require a Github account for feedback. But we do reply to issues here, as you can see from the Github 
-account and also use Github for source control.
+do not require a Github account for feedback, as our submitters are biologists, not computer scientists.
+But we do reply to issues here, as you can see from the Github account and also use Github for source control, and 
+we get emails every day. The project is much more active than the Github issues suggest.
 
 Install and use
 ---------------
@@ -82,9 +89,9 @@ Install and use
 * Galaxy: there is a Galaxy tool for UCSC CellBrowser, which can be installed on any Galaxy instance via its `Galaxy Toolshed entry <https://toolshed.g2.bx.psu.edu/view/ebi-gxa/ucsc_cell_browser>`_ or it can be directly used by users at the `Human Cell Atlas Galaxy instance <https://humancellatlas.usegalaxy.eu/root?tool_id=toolshed.g2.bx.psu.edu/repos/ebi-gxa/ucsc_cell_browser/ucsc_cell_browser>`_ or as part of the example workflows, such as the `Human Cell Atlas / Scanpy CellBrowser workflow <https://humancellatlas.usegalaxy.eu/u/pmoreno/w/humancellatlas-scanpy-cellbrowser>`_ or the `EBI Single Cell Expression Atlas / Scanpy / CellBrowser workflow <https://humancellatlas.usegalaxy.eu/u/pmoreno/w/atlas-scanpy-cellbrowser-imported-from-uploaded-file>`_
 
 This project was funded by the California Institute of Regenerative Medicine and the
-Chan-Zuckerberg Initiative https://www.chanzuckerberg.com/. In 2020, it was funded through a supplement to the NHGRI Genome Browser grant. Since 2023, it is funded by a grant from NIMH BRAIN.
+Chan-Zuckerberg Initiative https://www.chanzuckerberg.com/. In 2020, it was funded through a supplement to the NHGRI Genome Browser grant. Since 2023, it is funded by a grant from NIMH BRAIN and a DISC0 from CIRM.
 
-This is early research software. You are likely to find bugs. Please open a Github
+This is early research software. It may contain bugs. Please open a Github
 ticket or email us at cells@ucsc.edu, we can usually fix them quickly.
 
 Citation
