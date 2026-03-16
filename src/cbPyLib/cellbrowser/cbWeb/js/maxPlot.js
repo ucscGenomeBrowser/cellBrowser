@@ -135,6 +135,7 @@ function MaxPlot(div, top, left, width, height, args) {
             }
         }
         $('#mpSliderReset').children()[0].style.fill = self.isLight() ? "black" : "white";
+        $(`#${this.div.id} > #tpWatermark`).css('color', this.isLight() ? 'black' : 'white');
 
         // Adjust status line color
         this.statusLine.style.backgroundColor = self.isLight() ? "rgb(240, 240, 240)" : "rgb(25, 25, 25)";
@@ -153,6 +154,11 @@ function MaxPlot(div, top, left, width, height, args) {
             }
         } else if(canvas.style.backgroundColor !== "transparent") {
             canvas.style.backgroundColor = this.isLight() ? "white" : "black";
+        }
+
+        if (this.childPlot) {
+            this.canvas.style["border"] = `2px solid ${this.isLight() ? "black" : "white"}`;
+            this.childPlot.setLightMode(mode);
         }
 
         this.drawDots();
@@ -601,7 +607,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         var elem = document.createElement('div');
         elem.id = "tpWatermark";
-        elem.style.cssText = 'pointer-events: none;position: absolute; width: 1000px; opacity: 0.8; top: 10px; left: 45px; text-align: left; vertical-align: top; color: black; font-size: 20px; font-weight:bold; font-style:oblique';
+        elem.style.cssText = `pointer-events: none;position: absolute; width: 1000px; opacity: 0.8; top: 10px; left: 45px; text-align: left; vertical-align: top; color: ${this.isLight() ? 'black' : 'white'}; font-size: 20px; font-weight:bold; font-style:oblique`;
         elem.textContent = text;
         self.div.appendChild(elem);
         self.watermark = elem;
@@ -3604,8 +3610,8 @@ function MaxPlot(div, top, left, width, height, args) {
             return false;
 
         // only need to do something if we're not already the active plot
-        self.canvas.style["border"] = "2px solid black";
-        self.parentPlot.canvas.style["border"] = "2px solid white";
+        self.canvas.style["border"] = `2px solid ${this.isLight() ? "black" : "white"}`;
+        self.parentPlot.canvas.style["border"] = "2px solid transparent";
 
         // flip the parent/child relationship
         self.childPlot = self.parentPlot;
@@ -4076,7 +4082,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var opts = cloneObj(self.globalOpts);
         opts.showClose = true;
 
-        var plot2 = new MaxPlot(newDiv, newTop, newLeft, newWidth, newHeight, {drawMode: self.mode, "showClose" : true, "showSliders" : false});
+        var plot2 = new MaxPlot(newDiv, newTop, newLeft, newWidth, newHeight, {drawMode: self.mode, lightMode: self.lightMode, "showClose" : true, "showSliders" : false});
 
         plot2.statusLine.style.display = "none";
 
@@ -4120,7 +4126,7 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.parentPlot = self;
 
         // add a thick border and hide the menus in the child
-        self.canvas.style["border"] = "2px solid black";
+        self.canvas.style["border"] = `2px solid ${this.isLight() ? "black" : "white"}`;
         self.childPlot.zoomDiv.style.display = "none";
         self.childPlot.toolDiv.style.display = "none";
 
