@@ -2900,6 +2900,7 @@ var cellbrowser = function() {
          htmls.push('<li><a href="#" id="tpAboutButton">About</a></li>');
          htmls.push('<li><a href="https://cellbrowser.readthedocs.io/en/master/interface.html" target=_blank id="tpQuickstartButton">How to use this website</a></li>');
          htmls.push('<li><a href="#" id="tpTutorialButton">Interactive Tutorial</a></li>');
+         htmls.push('<li><a target=_blank href="https://cells-submit.gi.ucsc.edu" id="tpSubmitButton">Upload your own data</a></li>');
          htmls.push('<li><a target=_blank href="https://github.com/ucscGenomeBrowser/cellBrowser#readme" id="tpGithubButton">Setup your own cell browser</a></li>');
          htmls.push('</ul>'); // Help dropdown-menu
          htmls.push('</li>'); // Help dropdown container
