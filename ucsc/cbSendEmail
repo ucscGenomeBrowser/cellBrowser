@@ -348,6 +348,10 @@ Try to use one or two parts separated by dashes, and not to use more than three 
 
 Here are example dataset names, as examples, do not use any of these literally, to avoid conflicts, but use them as inspiration: {dsNameString}
 
+Do not use these words in dataset names:
+    - homo
+    - hetero
+
 If the abstract suggests that the paper contains ATAC-seq or Chip-Seq or "chromatin accessibility" data or other cis-regulatory data, replace the placeholder "UCSC Genome Browser tracks note for ATAC-seq datasets" with a text like the following: "Since your paper seems to include Chip-Seq or ATAC-seq data, note that we have support for this assay: You can send us your bigWig files and we convert them to UCSC Genome Browser Tracks, that can be loaded from the single cell browser or can be loaded via the UCSC Genome Browser public hubs page."
 
 IMPORTANT: Your response must be in this exact format with no other text:

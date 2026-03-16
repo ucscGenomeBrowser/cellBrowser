@@ -1,0 +1,793 @@
+/* Dark mode overrides for Cell Browser */
+/* This stylesheet is toggled on/off via the darkMode <link> element in JS */
+
+/* ===== Global / Body ===== */
+body {
+    background-color: #1a1a1a;
+    color: #d4d4d4;
+}
+
+/* ===== jQuery UI ===== */
+.ui-selectable-helper {
+    border: 1px dotted white;
+}
+
+.ui-widget.ui-widget-content {
+    border: 1px solid #3a3a3a;
+}
+
+.ui-widget-content {
+    border: 1px solid #222;
+    background: #1a1a1a;
+    color: #ccc;
+}
+
+.ui-widget-content a {
+    color: #ccc;
+}
+
+.ui-widget-header {
+    border: 1px solid #222;
+    background: #161616;
+    color: #ccc;
+}
+
+.ui-widget-header a {
+    color: #ccc;
+}
+
+.ui-state-default,
+.ui-widget-content .ui-state-default,
+.ui-widget-header .ui-state-default,
+.ui-button,
+html .ui-button.ui-state-disabled:hover,
+html .ui-button.ui-state-disabled:active {
+    border: 1px solid #3a3a3a;
+    background: #090909;
+    color: #bbb;
+}
+
+.ui-state-default a,
+.ui-state-default a:link,
+.ui-state-default a:visited,
+a.ui-button,
+a:link.ui-button,
+a:visited.ui-button,
+.ui-button {
+    color: #bbb;
+}
+
+.ui-state-hover,
+.ui-widget-content .ui-state-hover,
+.ui-widget-header .ui-state-hover,
+.ui-state-focus,
+.ui-widget-content .ui-state-focus,
+.ui-widget-header .ui-state-focus,
+.ui-button:hover,
+.ui-button:focus {
+    border: 1px solid #333;
+    background: #121212;
+    color: #d4d4d4;
+}
+
+.ui-state-hover a,
+.ui-state-hover a:hover,
+.ui-state-hover a:link,
+.ui-state-hover a:visited,
+.ui-state-focus a,
+.ui-state-focus a:hover,
+.ui-state-focus a:link,
+.ui-state-focus a:visited,
+a.ui-button:hover,
+a.ui-button:focus {
+    color: #d4d4d4;
+}
+
+.ui-state-active,
+.ui-widget-content .ui-state-active,
+.ui-widget-header .ui-state-active,
+a.ui-button:active,
+.ui-button:active,
+.ui-button.ui-state-active:hover {
+    border: 1px solid #003eff;
+    background: #007fff;
+    color: #fff;
+}
+
+.ui-state-active a,
+.ui-state-active a:link,
+.ui-state-active a:visited {
+    color: #fff;
+}
+
+.ui-state-highlight,
+.ui-widget-content .ui-state-highlight,
+.ui-widget-header .ui-state-highlight {
+    border: 1px solid #333;
+    background: #222;
+    color: #ccc;
+}
+
+.ui-state-error,
+.ui-widget-content .ui-state-error,
+.ui-widget-header .ui-state-error {
+    border: 1px solid #5c1a1a;
+    background: #3a1010;
+    color: #e8a0a0;
+}
+
+.ui-dialog .ui-dialog-titlebar {
+    background: #222;
+    color: #ccc;
+    border-bottom: 1px solid #333;
+}
+
+.ui-dialog .ui-dialog-content {
+    background: #1a1a1a;
+    color: #ccc;
+}
+
+.ui-dialog .ui-dialog-buttonpane {
+    background: #1a1a1a;
+    border-top: 1px solid #333;
+}
+
+.ui-progressbar-value {
+    background-color: #555;
+}
+
+.ui-tooltip {
+    background: #222;
+    color: #ccc;
+    border: 1px solid #444;
+}
+
+.ui-menu {
+    background: #1a1a1a;
+    border: 1px solid #333;
+}
+
+.ui-menu .ui-menu-item-wrapper {
+    color: #ccc;
+}
+
+.ui-menu .ui-menu-item-wrapper:hover,
+.ui-menu .ui-state-focus {
+    background: #333;
+    color: #fff;
+}
+
+.ui-tabs .ui-tabs-panel {
+    border-color: #444;
+}
+
+.ui-resizable-handle:hover {
+    background-color: #666;
+}
+
+/* ===== Spectrum (color picker) ===== */
+.sp-container {
+    background-color: #222;
+    border-color: #444;
+}
+
+.sp-palette-container {
+    border-color: #444;
+}
+
+.sp-input {
+    background: #1a1a1a;
+    color: #ccc;
+    border-color: #444;
+}
+
+.sp-replacer {
+    background-color: #1a1a1a;
+}
+
+/* ===== Context Menu ===== */
+.context-menu-list {
+    background: #222;
+    border-color: #444;
+}
+
+.context-menu-item {
+    color: #ccc;
+}
+
+.context-menu-item:hover {
+    background-color: #333;
+}
+
+.context-menu-separator {
+    border-bottom-color: #444;
+}
+
+/* ===== Bootstrap overrides ===== */
+.btn-default {
+    background: linear-gradient(#2a2a2a 20%, #222 60%, #1e1e1e 100%);
+    color: #ccc;
+    border-color: #444;
+}
+
+.btn-default:hover,
+.btn-default:focus {
+    background: #333;
+    color: #ddd;
+    border-color: #555;
+}
+
+.dropdown-menu {
+    background-color: #222;
+    border-color: #444;
+}
+
+.dropdown-menu > li > a {
+    color: #ccc;
+}
+
+.dropdown-menu > li > a:hover,
+.dropdown-menu > li > a:focus {
+    background-color: #333;
+    color: #fff;
+}
+
+.dropdown-menu .divider {
+    background-color: #444;
+}
+
+.modal-content {
+    background-color: #1a1a1a;
+    border-color: #444;
+    color: #ccc;
+}
+
+.modal-header {
+    border-bottom-color: #333;
+}
+
+.modal-footer {
+    border-top-color: #333;
+}
+
+.list-group-item {
+    background-color: #222;
+    border-color: #333;
+    color: #ccc;
+}
+
+a.list-group-item {
+    background-color: #222;
+    color: #8ab4f8;
+}
+
+a.list-group-item:hover,
+a.list-group-item:focus {
+    background-color: #2a2a2a;
+    color: #aac8ff;
+}
+
+.list-group-item.active {
+    background-color: #2a5db0;
+    border-color: #2a5db0;
+}
+
+.list-group-item.active > .badge {
+    background-color: #666;
+    color: #fff;
+}
+
+.panel,
+.panel-default {
+    border-color: #333;
+    background-color: #1a1a1a;
+}
+
+.panel-default > .panel-heading {
+    background-color: #222;
+    border-color: #333;
+    color: #ccc;
+}
+
+.form-control {
+    background-color: #222;
+    border-color: #444;
+    color: #ccc;
+}
+
+.form-control:focus {
+    border-color: #007fff;
+}
+
+.input-group-addon {
+    background-color: #2a2a2a;
+    border-color: #444;
+    color: #ccc;
+}
+
+.nav-tabs > li > a {
+    background-color: #222;
+    color: #ccc;
+    border-color: #333;
+}
+
+.nav-tabs > li > a:hover {
+    background-color: #2a2a2a;
+    color: #ddd;
+}
+
+.nav-tabs > li.active > a,
+.nav-tabs > li.active > a:hover,
+.nav-tabs > li.active > a:focus {
+    background-color: #2a5db0;
+    color: #fff;
+    border-color: #2a5db0;
+}
+
+.nav-tabs {
+    border-bottom-color: #333;
+}
+
+.tab-pane {
+    border-color: #444;
+}
+
+.tooltip .tooltip-inner {
+    background-color: #333;
+    color: #ddd;
+}
+
+.tooltip.top .tooltip-arrow {
+    border-top-color: #333;
+}
+
+.tooltip.bottom .tooltip-arrow {
+    border-bottom-color: #333;
+}
+
+.badge {
+    background-color: #555;
+    color: #ddd;
+}
+
+.navbar-default {
+    background-color: #1a1a1a;
+    border-color: #333;
+}
+
+.navbar-default .navbar-nav > li > a {
+    color: #ccc;
+}
+
+.navbar-default .navbar-brand {
+    color: #ccc;
+}
+
+/* ===== Bootstrap Dropmenu ===== */
+.dropmenu {
+    background-color: #222;
+    border-color: #444;
+}
+
+.dropmenu li a {
+    color: #ccc;
+}
+
+.dropmenu li a:hover {
+    background-color: #333;
+    color: #fff;
+}
+
+/* ===== Chosen ===== */
+.chosen-container-single .chosen-single {
+    background: none;
+    background-color: #2a2a2a;
+    color: #ccc;
+    border-color: #444;
+}
+
+.chosen-container .chosen-results {
+    background: #222;
+    color: #ccc;
+}
+
+.chosen-container .chosen-results li {
+    color: #ccc;
+}
+
+.chosen-container .chosen-results li.highlighted {
+    background-color: #2a5db0;
+    color: #fff;
+}
+
+.chosen-container .chosen-drop {
+    background: #222;
+    border-color: #444;
+}
+
+.chosen-container-single .chosen-search input[type="text"] {
+    background: #1a1a1a;
+    color: #ccc;
+    border-color: #444;
+}
+
+/* ===== Selectize ===== */
+.selectize-input {
+    background: none;
+    background-color: #2a2a2a;
+    color: #ccc;
+    border-color: #444;
+}
+
+.selectize-input.focus {
+    border-color: #007fff;
+}
+
+.selectize-control.single .selectize-input {
+    background: none;
+    background-color: #2a2a2a;
+}
+
+.selectize-dropdown {
+    background: #222;
+    border-color: #444;
+    color: #ccc;
+}
+
+.selectize-dropdown .active {
+    background-color: #2a5db0;
+    color: #fff;
+}
+
+.selectize-dropdown-content {
+    background: #222;
+}
+
+/* ===== Select2 ===== */
+.select2-container .select2-selection--single {
+    background: #2a2a2a;
+    border-color: #444;
+    color: #ccc;
+}
+
+.select2-dropdown {
+    background-color: #222;
+    border-color: #444;
+    color: #ccc;
+}
+
+.select2-results__option--highlighted {
+    background-color: #2a5db0 !important;
+    color: #fff !important;
+}
+
+/* ===== Intro.js ===== */
+.introjs-tooltip {
+    background-color: #222;
+    color: #ccc;
+}
+
+.introjs-button {
+    background-color: #333;
+    color: #ccc;
+    border-color: #444;
+}
+
+.introjs-button:hover {
+    background-color: #444;
+}
+
+/* ===== SlickGrid ===== */
+.slick-header-columns {
+    background: #222;
+    border-bottom-color: #444;
+}
+
+.slick-header-column {
+    background: #222;
+    border-right-color: #333;
+    color: #ccc;
+}
+
+.slick-row {
+    color: #ccc;
+}
+
+.slick-row.odd {
+    background: #1e1e1e;
+}
+
+.slick-row.even {
+    background: #1a1a1a;
+}
+
+.slick-cell {
+    border-color: #333;
+}
+
+/* ===== Tablesorter (theme.bootstrap_3) ===== */
+.tablesorter-bootstrap .tablesorter-header {
+    background-color: #222;
+    color: #ccc;
+}
+
+.tablesorter-bootstrap tbody td {
+    color: #ccc;
+}
+
+.tablesorter-bootstrap tbody tr:nth-child(odd) {
+    background-color: #1e1e1e;
+}
+
+.tablesorter-bootstrap tbody tr:nth-child(even) {
+    background-color: #1a1a1a;
+}
+
+/* ===== OverlayScrollbars ===== */
+.os-theme-dark > .os-scrollbar > .os-scrollbar-track > .os-scrollbar-handle {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* ===== cellBrowser.css overrides ===== */
+
+/* Expression view */
+#tpExprViewTitle {
+    background-color: #222;
+    color: #ccc;
+}
+
+#tpExprView {
+    background-color: #1a1a1a;
+    border-color: #444;
+}
+
+/* Legend */
+#tpLegendBar {
+    border-left-color: #444;
+}
+
+.tpLegend {
+    color: #ccc;
+}
+
+.tpLegendHl {
+    background-color: #444;
+    color: #fff;
+}
+
+#tpLegendHeader {
+    background-color: #222;
+    color: #999;
+}
+
+.tpLegendCount {
+    color: #777;
+}
+
+.tpLegendSelect {
+    outline: 2px solid #ccc;
+}
+
+.tpGrey {
+    color: #555;
+}
+
+/* Dataset pane */
+.tpDatasetPane {
+    color: #ccc;
+}
+
+.tpDatasetPane a,
+.link {
+    color: #8ab4f8;
+}
+
+.tpSameLink {
+    color: #777;
+}
+
+/* Buttons */
+.tpButton {
+    background-color: #2a2a2a;
+    border-color: #444;
+    color: #ccc;
+}
+
+.tpButton:hover {
+    background-color: #333;
+}
+
+.tpButton:active {
+    background-color: #555;
+}
+
+.tpButtonInactive {
+    background-color: #222;
+    color: #555;
+}
+
+.tpRibbonButton {
+    background-color: #333;
+    color: #ccc;
+    border-color: #444;
+}
+
+.tpClicked,
+.tpClicked:hover {
+    background-color: #555;
+}
+
+.tpIconButton {
+    color: #ccc;
+}
+
+/* Sidebar */
+.tpSidebarHeader {
+    background-color: #1a1a1a;
+    color: #ccc;
+}
+
+#tpLeftSidebar {
+    border-right-color: #444;
+}
+
+#tpMetaPanel {
+    background-color: #1a1a1a;
+}
+
+#tpGeneTab,
+#tpAnnotTab,
+#tpLayoutTab {
+    border-top-color: #444;
+}
+
+/* Meta boxes */
+.tpMetaBox {
+    color: #ccc;
+}
+
+.tpMetaHover {
+    color: #fff;
+    background-color: #444 !important;
+}
+
+.tpMetaLabelGrey {
+    color: #999;
+}
+
+.tpMetaMultiVal {
+    color: #888;
+}
+
+.tpMetaHistLabel {
+    color: #8ab4f8;
+}
+
+.tpMetaValue {
+    background-color: #222;
+}
+
+.tpMetaSelect {
+    outline: 2px solid #ccc;
+    background-color: #2a2a2a;
+}
+
+.tpMetaValueSelect {
+    background-color: #333;
+}
+
+.tpMetaPerc {
+    color: #777;
+}
+
+#tpMetaTip {
+    background: #222;
+    border-color: #555;
+    color: #ccc;
+}
+
+.tpMetaTipBar {
+    background-color: #666;
+}
+
+/* Peak list */
+#tpPeakList {
+    border-color: #444;
+    background-color: #222;
+}
+
+#tpPeakList > div {
+    background-color: #222;
+}
+
+/* Gene bar */
+.tpGeneBarCell {
+    color: #ccc;
+    border-color: #555;
+    background: #222;
+}
+
+.tpGeneBarCellSelected {
+    outline: 1px solid #ccc;
+}
+
+/* Menus */
+.tpMenu {
+    background: #222;
+    border: 1px solid #444;
+}
+
+/* Toolbar */
+.gradientBackground {
+    background-color: #2a2a2a;
+}
+
+#tpToolBar {
+    color: #ccc;
+}
+
+/* Slider */
+.sliderContainer {
+    background: rgba(30, 30, 30, 0.7);
+}
+
+.sliderLabel {
+    color: #ccc;
+}
+
+/* Open dataset dialog tabs */
+#tpOpenDialogTabs > ul > li {
+    border-color: #444 !important;
+}
+
+.ui-widget-content .tab-content a {
+    color: #8ab4f8 !important;
+}
+
+/* Sorttable column header arrow */
+th[role=columnheader]:not(.no-sort):after {
+    border-color: #ccc transparent;
+}
+
+/* Scrollbar styling for dark mode */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Input elements */
+input[type="text"],
+input[type="search"],
+textarea {
+    background-color: #222;
+    color: #ccc;
+    border-color: #444;
+}
+
+select {
+    background-color: #222;
+    color: #ccc;
+    border-color: #444;
+}
+
+/* Table elements */
+table {
+    color: #ccc;
+}
+
+th {
+    color: #ddd;
+}

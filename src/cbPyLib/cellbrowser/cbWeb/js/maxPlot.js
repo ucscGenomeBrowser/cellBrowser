@@ -58,6 +58,9 @@ function MaxPlot(div, top, left, width, height, args) {
     // export this special value so other part of the code can use it
     this.hiddenCoord = HIDCOORD;
 
+    const DEBUG = false;
+    const WEBGL_DEBUG = false;
+
     var self = this; // 'this' has two conflicting meanings in javascript.
     // I use 'self' to refer to object variables, so I can use 'this' to refer to the caller context
 
@@ -68,17 +71,108 @@ function MaxPlot(div, top, left, width, height, args) {
     const gZoomButtonSize = 30; // size of zoom buttons
     const gZoomFromLeft = 10;  // position of zoom buttons from left
     const gZoomFromBottom = 140;  // position of zoom buttons from bottom
-    const gButtonBackground = "rgb(230, 230, 230, 0.85)" // grey level of buttons
-    const gButtonBackgroundClicked = "rgb(180, 180, 180, 0.6)"; // grey of buttons when clicked
+    const gButtonBackground = "rgba(230, 230, 230, 0.85)" // grey level of buttons
+    const gButtonDarkBackground = "rgba(75, 75, 75, 0.85)";
+    const gButtonBackgroundClicked = "rgba(180, 180, 180, 0.6)"; // grey of buttons when clicked
+    const gButtonDarkBackgroundClicked = "rgba(50, 50, 50, 0.6)";
+    const gButtonBackgrounds = [gButtonBackground, gButtonDarkBackground, gButtonBackgroundClicked, gButtonDarkBackgroundClicked];
     const gCloseButtonFromRight = 60; // distance of "close" button from right edge
 
     const nonFatColor = "F9F9F9"; // color used in fattening mode for all non-fat cells
     const nonFatColorRect = "DDDDDD"; // rectangle mode: color used in fattening mode for all non-fat cells
     const nonFatColorCircles = "BBBBBB"; // color used in fattening mode for all non-fat cell circles
 
+    // Light mode
+    const defaultLightMode = 1;
+    if(args !== undefined && args !== null) {
+        self.lightMode = getAttr(args, "lightMode", defaultLightMode);
+    } else {
+        self.lightMode = defaultLightMode;
+    }
+
+    // Setter for changes
+    this.setLightMode = (mode) => {
+        if(mode !== 1 && mode !== 2) {
+            throw(`Error: Invalid light mode: ${mode}`);
+        }
+
+        // Set the new light mode
+        this.lightMode = mode;
+
+        // Adjust all interactable colors
+        /** @type {HTMLCollection} */
+        let toolDivButtons = this.toolDiv.children;
+        for(let button of toolDivButtons) {
+            switch(button.style.backgroundColor) {
+                case gButtonBackground:
+                    button.style.backgroundColor = gButtonDarkBackground;
+                    break;
+                case gButtonBackgroundClicked:
+                    button.style.backgroundColor = gButtonDarkBackgroundClicked;
+                    break;
+                case gButtonDarkBackground:
+                    button.style.backgroundColor = gButtonBackground;
+                    break;
+                case gButtonDarkBackgroundClicked:
+                    button.style.backgroundColor = gButtonBackgroundClicked;
+                    break;
+                default:
+            }
+
+            let img = button.firstChild;
+            if(this.isLight()) {
+                img.style.filter = "";
+            } else {
+                img.style.filter = "invert(1)";
+            }
+        }
+
+        /** @type {HTMLCollection} */
+        let zoomDivButtons = this.zoomDiv.children;
+        for(let button of zoomDivButtons) {
+            if(gButtonBackgrounds.includes(button.style.backgroundColor)){
+                button.style.backgroundColor = self.isLight() ? gButtonBackground : gButtonDarkBackground;
+            }
+        }
+        $('#mpSliderReset').children()[0].style.fill = self.isLight() ? "black" : "white";
+
+        // Adjust status line color
+        this.statusLine.style.backgroundColor = self.isLight() ? "rgb(240, 240, 240)" : "rgb(25, 25, 25)";
+        const borderColor = self.isLight() ? "#DDD" : "#333";
+        this.statusLine.style["border-left"]=`1px solid ${borderColor}`;
+        this.statusLine.style["border-right"]=`1px solid ${borderColor}`;
+        this.statusLine.style["border-top"]=`1px solid ${borderColor}`;
+
+        // Adjust the canvas' colors
+        /** @type {HTMLCanvasElement} */
+        const canvas = this.canvas;
+        if(this.usesWebGL()) {
+            if(canvas.style.backgroundColor !== "transparent") {
+                // All webGL canvas should be transparent, so this should not be called
+                canvas.style.backgroundColor = this.isLight() ? "black" : "white";
+            }
+        } else if(canvas.style.backgroundColor !== "transparent") {
+            canvas.style.backgroundColor = this.isLight() ? "white" : "black";
+        }
+
+        this.drawDots();
+    }
+
+    // Drawing mode
+    const defaultDrawMode = 1;
+    if(args !== undefined && args !== null) {
+        self.mode = getAttr(args, "drawMode", defaultDrawMode);
+    } else {
+        self.mode = defaultDrawMode;
+    }
+
+    self.usesWebGL = function() {return !(self.mode === 0 || self.mode === 1)}
+
+    this.isLight = function() {return this.lightMode === 1;}
+
     // the rest of the initialization is done at the end of this file,
     // because the init involves many functions that are not defined yet here
-
+    
     this.initCanvas = function (div, top, left, width, height, args) {
         /* initialize a new Canvas */
 
@@ -89,8 +183,19 @@ function MaxPlot(div, top, left, width, height, args) {
         self.div = div;
 
         self.gSampleDescription = "cell";
-        self.ctx = null; // the canvas context
-        self.canvas = addCanvasToDiv(div, top, left, width, height-gStatusHeight );
+
+        let canvDiv = document.createElement('div');
+        canvDiv.id = 'mpCanvases';
+        canvDiv.style.position = "relative";
+        canvDiv.style.display = "block";
+        canvDiv.style.width = `${width}px`;
+        canvDiv.style.height = `${height - gStatusHeight}px`;
+        this.canvDiv = canvDiv;
+        div.appendChild(canvDiv);
+
+        if(this.usesWebGL()) [self.bgCtx, self.bgCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, false, 'mpBackgroundCanvas', 1);
+        [self.ctx, self.canvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, self.usesWebGL(), 'mpCanvas', self.mode);
+        if(this.usesWebGL()) [self.labelCtx, self.labelCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, true, 'mpLabelCanvas', 1);
 
         self.interact = false;
 
@@ -147,9 +252,24 @@ function MaxPlot(div, top, left, width, height, args) {
         self.timer = null;
     }
 
-    function isHidden(x, y) {
+    function isHidden(x, y, i) {
         /* special coords are used for circles that are off-screen or otherwise not visible */
-       return ((x===HIDCOORD && y===HIDCOORD)) // not shown (e.g. no coordinate or off-screen)
+        if(self.usesWebGL()) {
+            // Check if current cell is hidden, if applicable
+            if(i !== undefined) {
+                /** @type {Uint8Array} */
+                const hidden = self.coords.hidden;
+                if(hidden[i] == 1) {
+                    return true;
+                }
+            }
+
+            /** @type {Matrix4} */
+            const projection = self.port.projection;
+            return (x < projection.left || x > projection.right || y < projection.bottom || y > projection.top);
+        } else {
+            return (x===HIDCOORD && y===HIDCOORD) // not shown (e.g. no coordinate or off-screen)
+        }
     }
 
     function hexToGrey(hexColors) {
@@ -157,14 +277,12 @@ function MaxPlot(div, top, left, width, height, args) {
         for (let i = 0; i < hexColors.length; i++) {
             // Extract red, green, and blue components
             let hexColor = hexColors[i];
-            const maxCol = 200;
-            const addCol = 20;
-            const red = Math.min(maxCol, addCol+parseInt(hexColor.slice(1, 3), 16));
-            const green = Math.min(maxCol, addCol+parseInt(hexColor.slice(3, 5), 16));
-            const blue = Math.min(maxCol, addCol+parseInt(hexColor.slice(5, 7), 16));
+            const red = parseInt(hexColor.slice(0, 2), 16);
+            const green = parseInt(hexColor.slice(2, 4), 16);
+            const blue = parseInt(hexColor.slice(4, 6), 16);
 
             // Calculate the grayscale value using the luminosity method
-            const gray = Math.min(255, 128+(0.5*Math.round(0.2126 * red + 0.7152 * green + 0.0722 * blue)));
+            const gray = Math.min(255, (self.isLight() ? 128 : 64) + Math.round(0.5 * (0.2126 * red + 0.7152 * green + 0.0722 * blue)));
 
             // Convert the grayscale value to a two-character hex string
             const grayHex = gray.toString(16).padStart(2, '0');
@@ -180,8 +298,10 @@ function MaxPlot(div, top, left, width, height, args) {
     this.initPort = function(args) {
         /* init all viewport related state (zoom, radius, alpha) */
         self.port = {};
-        self.port.zoomRange = {}; // object with keys minX, , maxX, minY, maxY, in data units
         self.port.radius     = getAttr(args, "radius", null);    // current radius of the circles, 0=one pixel dots
+        self.port.zoomRange = {}; // object with keys minX, , maxX, minY, maxY, in data units
+
+        self.port.projection = new Matrix4();
 
         // we keep a copy of the 'initial' arguments at 100% zoom
         self.port.initZoom   = {};
@@ -198,14 +318,15 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.globalOpts = args;
 
-        self.mode = 1;   // drawing mode
-
         // everything related to circle coordinates
         self.coords = {};
         self.coords.orig = null;   // coordinates of cells in original coordinates
         self.coords.labels    = null;   // cluster label positions in pixels, array of [x,y,text]
 
         self.coords.px   = null;   // coordinates of cells and labels as screen pixels or (HIDCOORD,HIDCOORD) if not shown
+        self.coords.gl   = null;   // coordinates of cells in WebGL space
+        self.coords.hidden = null; // Hidden coordinates (used by WebGL drawing)
+        self.coords.layers = null; // Coordinate layers (used by WebGL drawing)
         self.coords.labelBbox = null;   // cluster label bounding boxes, array of [x1,x2,x2,y2]
 
         self.col = {};
@@ -236,10 +357,214 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.activateMode(getAttr(args, "mode", "move"));
 
+        // If WebGL is being used to draw, initialize its program
+        if(this.usesWebGL()) {
+            this.initWebGLProgram();
+        }
     };
 
+    this.initWebGLProgram = function() {
+        // Fetch the rendering context for quick reference and typing
+        /** @type {WebGL2RenderingContext} */
+        const ctx = self.ctx;
+
+        // Set the canvas' clear color
+        ctx.clearColor(0, 0, 0, 0);
+
+        // Enable blending and set blend equation
+        // Derived equation in CMY space: A_Src * Col_Src + (1 - A_Src) * A_Dst * Col_Dst
+        ctx.enable(ctx.BLEND);
+        ctx.blendFuncSeparate(ctx.SRC_ALPHA, ctx.ONE_MINUS_SRC_ALPHA, ctx.ONE, ctx.ONE);
+
+        // Crate the GLSL shaders from the external source code
+        // Vertex shader GLSL code
+        const VERTEX_SHADER_SRC = `
+        precision mediump float;
+        attribute vec2 a_Position;
+        attribute vec3 a_Color;
+        attribute float a_ColID;
+        attribute float a_Layer;
+        attribute float a_Hidden;
+        
+        uniform float u_Radius;
+        uniform mat4 u_Projection;
+        uniform float u_Layer;
+        uniform float u_LightMode;
+        
+        uniform float u_FatID;
+        uniform float u_AnySelected;
+
+        varying vec4 v_Position;
+        varying vec3 v_Color;
+
+        void main() {
+            float l_Depth;
+            if(u_Layer != a_Layer || a_Hidden == 1.0) {
+                l_Depth = -2.0;
+            } else if(u_Layer == 2.0) {
+                l_Depth = 0.9;
+            } else if(u_Layer == 1.0) {
+                l_Depth = 0.8;
+            } else {
+                l_Depth = 0.0;
+            }
+
+            v_Position = vec4(a_Position, -l_Depth, 1.0) * u_Projection;
+            gl_Position = v_Position;
+            gl_PointSize = u_Radius * 2.0;
+
+            if((u_FatID == -1.0 && u_AnySelected == 0.0) || !(u_Layer == 0.0 || u_Layer == -1.0)) {
+                v_Color = a_Color;
+            } else {
+                float l_Red = 0.08 + a_Color[0];
+                float l_Green = 0.08 + a_Color[1];
+                float l_Blue = 0.08 + a_Color[2];
+                float l_Luminosity = ((0.2126 * l_Red + 0.7152 * l_Green + 0.0722 * l_Blue) * 0.5) + (u_LightMode == 1.0 ? 0.5 : 0.25);
+                v_Color = vec3(l_Luminosity, l_Luminosity, l_Luminosity);
+            }
+        }
+        `;
+        // Fragemnt shader GLSL code
+        const FRAGMENT_SHADER_SRC = `
+        precision mediump float;
+
+        uniform float u_Alpha;
+        uniform float u_Radius;
+
+        uniform float u_CanvWidth;
+        uniform float u_CanvHeight;
+        uniform float u_Layer;
+        uniform float u_LightMode;
+
+        varying vec4 v_Position;
+        varying vec3 v_Color;
+
+        void main() {
+            // Find the pixel coordinate of the vertex
+            vec2 l_VpxCoord = vec2((v_Position.x + 1.0) / 2.0 * u_CanvWidth, (v_Position.y + 1.0) / 2.0 * u_CanvHeight);
+
+            // Standardize and simplify the fragment coordinate
+            vec2 l_FragCoord = vec2(gl_FragCoord.x - 0.5, gl_FragCoord.y - 0.5);
+
+            // Find the distance between the fragment and the vertex
+            float l_Dist = distance(l_FragCoord, l_VpxCoord);
+
+            // Discard fragments outside the radius to form a circle
+            if(l_Dist > u_Radius) {
+                discard;
+            } else if(u_Layer == 2.0 && l_Dist > u_Radius - 2.0) {
+                if(u_LightMode == 1.0) {
+                    // Light mode. Outline is black
+                    gl_FragColor = vec4(1.0, 1.0, 1.0, 0.7);
+                } else {
+                    // Dark mode. Outline is white
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.7);
+                }
+            } else {
+                float l_Alpha = (u_Layer == 0.0 || u_Layer == -1.0) ? u_Alpha : 0.7;
+                gl_FragColor = vec4(vec3(1.0, 1.0, 1.0) - v_Color, l_Alpha);
+            }
+        }
+        `;
+        const loadShader = (src, type) => {
+            // Figure out if this is the vertex or fragment shader
+            const shaderType = type === self.ctx.VERTEX_SHADER ? `vertex` : `fragment`
+
+            // Create the shader
+            const shader = self.ctx.createShader(type);
+            if (!shader) {
+                console.error(`Unable to create ${shaderType} shader`);
+            }
+
+            // Set the program
+            self.ctx.shaderSource(shader, src);
+
+            // Compile the program
+            self.ctx.compileShader(shader);
+            if (!self.ctx.getShaderParameter(shader, self.ctx.COMPILE_STATUS)) {
+                console.error(`Failed to compile ${shaderType} shader. Error: ${self.ctx.getShaderInfoLog(shader)}`);
+            }
+
+            // Return the shader
+            return shader;
+        }
+        const vertexShader = loadShader(VERTEX_SHADER_SRC, ctx.VERTEX_SHADER);
+        const fragmentShader = loadShader(FRAGMENT_SHADER_SRC, ctx.FRAGMENT_SHADER);
+
+        // Create the GLSL program
+        self.program = ctx.createProgram();
+        if (!self.program) {
+            console.error("Error: Unable to create program");
+        }
+        ctx.attachShader(self.program, vertexShader);
+        ctx.attachShader(self.program, fragmentShader);
+        ctx.linkProgram(self.program);
+        if (!ctx.getProgramParameter(self.program, ctx.LINK_STATUS)) {
+            console.error(`Failed to link shaders. Error: ${ctx.getProgramInfoLog(glProgram)}`);
+        }
+        ctx.useProgram(self.program);
+
+        // Create local references for GLSL variables and set initial values
+        /**
+         * Gets the location of the specified GLSL attribute
+         * 
+         * @param {String} name Attribue name
+         * @returns Attribute location
+         */
+        const getAttribute = (name) => {
+            // Find attribute
+            let attribute = ctx.getAttribLocation(self.program, name);
+            if (attribute < 0) {
+            throw (`Failed to get storage location of ${name}`);
+            }
+
+            // Enable assignment to the attribute
+            ctx.enableVertexAttribArray(attribute);
+
+            // Return attribute for later usage
+            return attribute;
+        }
+
+        /**
+         * Gets the location of the specified GLSL uniform
+         * 
+         * @param {String} name Uniform name
+         * @returns Uniform location
+         */
+        const getUniform = (name) => {
+            // Find attribute
+            let uniform = ctx.getUniformLocation(self.program, name);
+            if (!uniform) {
+            throw (`Failed to get storage location of ${name}`);
+            }
+
+            // Return for later use
+            return uniform;
+        }
+
+        // Get attributes
+        self.a_Position = getAttribute('a_Position');
+        self.a_Color = getAttribute('a_Color');
+        self.a_Layer = getAttribute('a_Layer');
+        self.a_Hidden = getAttribute('a_Hidden');
+
+        // Get uniforms
+        self.u_Radius = getUniform('u_Radius');
+        self.u_Projection = getUniform('u_Projection');
+        self.u_FatID = getUniform('u_FatID');
+        self.u_Layer = getUniform('u_Layer');
+        self.u_AnySelected = getUniform('u_AnySelected');
+
+        self.u_Alpha = getUniform('u_Alpha');
+        self.u_CanvWidth = getUniform('u_CanvWidth');
+        self.u_CanvHeight = getUniform('u_CanvHeight');
+        self.u_LightMode = getUniform('u_LightMode');
+    }
+
     this.clear = function() {
-        clearCanvas(self.ctx, self.canvas.width, self.canvas.height);
+        if(this.usesWebGL()) clearCanvas(this.bgCtx, this.bgCanvas.width, this.bgCanvas.height, false);
+        clearCanvas(self.ctx, self.canvas.width, self.canvas.height, this.usesWebGL());
+        if(this.usesWebGL()) clearCanvas(this.labelCtx, this.labelCanvas.width, this.labelCanvas.height, true);
     };
 
     this.setTitle = function (text) {
@@ -336,7 +661,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var div = document.createElement('div');
         div.id = id;
         div.className = "mpButton";
-        div.style.backgroundColor = gButtonBackground;
+        div.style.backgroundColor = self.isLight() ? gButtonBackground : gButtonDarkBackground;
         div.style.width = width+"px";
         div.style.height = height+"px";
         div.style["z-index"]="10";
@@ -367,6 +692,11 @@ function MaxPlot(div, top, left, width, height, args) {
             if (paddingBottom)
                 img.style.paddingBottom = paddingBottom+"px";
             }
+
+            if(!self.isLight()) {
+                img.style.filter = "invert(1)";
+            }
+
             div.appendChild(img);
         }
         if (addSep===true)
@@ -377,11 +707,11 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // make color dark grey when mouse is pressed
         div.addEventListener("mousedown", function() {
-                this.style.backgroundColor = gButtonBackgroundClicked;
+                this.style.backgroundColor = self.isLight() ? gButtonBackgroundClicked : gButtonDarkBackgroundClicked;
         });
 
         div.addEventListener("mouseup", function() {
-                this.style.backgroundColor = gButtonBackground;
+                this.style.backgroundColor = self.isLight() ? gButtonBackground : gButtonDarkBackground;
         });
         return div;
     }
@@ -440,7 +770,7 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     function onChangeAlpha(ev, ui) {
-        console.log("alpha: "+ui.value);
+        if(DEBUG) console.log("alpha: "+ui.value);
         var sliderVal = ui.value; // 1-7
         var multMap = {
             7 : 0.15,
@@ -453,13 +783,13 @@ function MaxPlot(div, top, left, width, height, args) {
         }
         var target = self.sliderTarget || self;
         target.port.alphaMult = multMap[sliderVal];
-        console.log("alphaMult: "+target.port.alphaMult);
+        if(DEBUG) console.log("alphaMult: "+target.port.alphaMult);
         target.calcRadius();
         target.drawDots();
     }
 
     function onChangeRadius(ev, ui) {
-        //console.log("radius: "+ui.value);
+        //if(DEBUG) console.log("radius: "+ui.value);
         var sliderVal = ui.value; // 1-7
         var multMap = {
             1 : 1/3,
@@ -511,6 +841,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var sliderReset = createButton(15, 15, "mpSliderReset", "Reset transparency and circle size", undoSvg, null, null, null, false, false, 10);
         sliderReset.style.backgroundColor = "transparent";
         sliderReset.style.float = "right";
+        sliderReset.firstChild.style.fill = self.isLight() ? "black" : "white";
         //sliderReset.style.lineHeight = "16px";
         sliderReset.style.marginLeft = "10px";
         sliderReset.style.top = "0px";
@@ -625,15 +956,15 @@ function MaxPlot(div, top, left, width, height, args) {
         var ctrlDiv = makeCtrlContainer(top, left);
 
         var bSize = gZoomButtonSize;
+        
+        var moveButton = createButton(bSize, bSize, "mpIconModeMove", "Move mode. Keyboard: Alt or m", null, "img/move.png", 4, 4, true);
+        moveButton.addEventListener('click', function() { self.activateMode("move");}, false);
 
-        var selectButton = createButton(bSize, bSize, "mpIconModeSelect", "Select mode. Keyboard: shift or s", null, "img/select.png", 0, 4, true, true);
+        var selectButton = createButton(bSize, bSize, "mpIconModeSelect", "Select mode. Keyboard: shift or s", null, "img/select.png", 0, 4, true);
         selectButton.addEventListener ('click',  function() { self.activateMode("select")}, false);
 
-        var zoomButton = createButton(bSize, bSize, "mpIconModeZoom", "Zoom-to-rectangle mode. Keyboard: Windows/Command or z", null, "img/zoom.png", 4, 4, true);
+        var zoomButton = createButton(bSize, bSize, "mpIconModeZoom", "Zoom-to-rectangle mode. Keyboard: Windows/Command or z", null, "img/zoom.png", 4, 4);
         zoomButton.addEventListener ('click', function() { self.activateMode("zoom")}, false);
-
-        var moveButton = createButton(bSize, bSize, "mpIconModeMove", "Move mode. Keyboard: Alt or m", null, "img/move.png", 4, 4);
-        moveButton.addEventListener('click', function() { self.activateMode("move");}, false);
 
         self.icons = {};
         self.icons["move"] = moveButton;
@@ -659,15 +990,17 @@ function MaxPlot(div, top, left, width, height, args) {
         /* add a status line div */
         var div = document.createElement('div');
         div.id = "mpStatus";
-        div.style.backgroundColor = "rgb(240, 240, 240)";
+        div.style.backgroundColor = self.isLight() ? "rgb(240, 240, 240)" : "rgb(25, 25, 25)";
         div.style.position = "absolute";
         div.style.top = top+"px";
         //div.style.left = left+"px";
         div.style.width = width+"px";
         div.style.height = height+"px";
-        div.style["border-left"]="1px solid #DDD";
-        div.style["border-right"]="1px solid #DDD";
-        div.style["border-top"]="1px solid #DDD";
+        
+        const borderColor = self.isLight() ? "#DDD" : "#333";
+        div.style["border-left"]=`1px solid ${borderColor}`;
+        div.style["border-right"]=`1px solid ${borderColor}`;
+        div.style["border-top"]=`1px solid ${borderColor}`;
         div.style["font-size"]=(gStatusHeight-1)+"px";
         div.style["cursor"]="pointer";
         div.style["font-family"] = "sans-serif";
@@ -695,14 +1028,16 @@ function MaxPlot(div, top, left, width, height, args) {
        self.div.appendChild(div);
     }
 
-    function addCanvasToDiv(div, top, left, width, height) {
+    function addCanvasToDiv(div, top, left, width, height, transparent = false, id = 'mpCanvas', drawMode = self.mode) {
         /* add a canvas element to the body element of the current page and keep left/top/width/eight in self */
+        /** @type {HTMLCanvasElement} */
         var canv = document.createElement('canvas');
-        self.canvasDiv = canv;
-        canv.id = 'mpCanvas';
+        canv.id = id;
         //canv.style.border = "1px solid #AAAAAA";
-        canv.style.backgroundColor = "white";
-        canv.style.position = "relative";
+        canv.style.backgroundColor = transparent ? "transparent" : drawMode === 2
+                                                                 ? self.isLight() ? "black" : "white"
+                                                                 : self.isLight() ? "white" : "black";
+        canv.style.position = "absolute";
         canv.style.display = "block";
         canv.style.width = width+"px";
         canv.style.height = height+"px";
@@ -711,6 +1046,11 @@ function MaxPlot(div, top, left, width, height, args) {
         // No scaling = one unit on screen is one pixel. Essential for speed.
         canv.width = width;
         canv.height = height;
+        
+        // To simulate subtractive blending, we invert the colors on WebGL canvases, then pass in inverted (CMY) colors
+        if(drawMode == 2) {
+            canv.style.filter = "invert(1)";
+        }
 
         // need to keep these as ints, need them all the time
         self.width = width;
@@ -719,14 +1059,36 @@ function MaxPlot(div, top, left, width, height, args) {
         self.left = left;
 
         div.appendChild(canv); // adds the canvas to the div element
-        self.canvas = canv;
-        // alpha:false recommended by https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Optimizing_canvas
-        self.ctx = self.canvas.getContext("2d", { alpha: false });
+
+        // Save the drawing context
+        // Mode 0 and 1: CanvasRenderingContext2D
+        // Mode 2: WebGLRenderingContext
+        let ctx;
+        switch(drawMode){
+            case 0:
+            case 1:
+                // alpha:false recommended by https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Optimizing_canvas
+                ctx = canv.getContext("2d", { alpha: transparent });
+                break;
+            case 2:
+                // Find the canvas' webgl2 context
+                ctx = canv.getContext("webgl2");
+
+                if(!ctx) {
+                    console.error("WebGL 2 not supported");
+                    return;
+                }
+                break;
+            default:
+                console.error(`Error: Mode ${self.mode} not supported`);
+                break;
+        }
+
         // by default, the canvas background is transparent+black
         // we use alpha=false, so we need to initialize the canvas with white pixels
-        clearCanvas(self.ctx, width, height);
+        clearCanvas(ctx, width, height, transparent);
 
-        return canv;
+        return [ctx, canv];
     }
 
     function scaleLabels(labels, zoomRange, borderSize, winWidth, winHeight) {
@@ -755,7 +1117,7 @@ function MaxPlot(div, top, left, width, height, args) {
             var y = annot[1];
             var text = annot[2];
             // XX ignore anything outside of current zoom range. Performance?
-            if (isHidden(x,y) || (x < minX) || (x > maxX) || (y < minY) || (y > maxY)) {
+            if ((isHidden(x,y) && !self.usesWebGL()) || (x < minX) || (x > maxX) || (y < minY) || (y > maxY)) {
                 pxLabels.push(null);
             }
             else {
@@ -822,6 +1184,17 @@ function MaxPlot(div, top, left, width, height, args) {
         return pxLines;
     }
 
+    /**
+     * 
+     * @param {Array} coords 
+     * @param {*} borderSize 
+     * @param {*} zoomRange 
+     * @param {*} winWidth 
+     * @param {*} winHeight 
+     * @param {*} annots 
+     * @param {*} aspectRatio 
+     * @returns 
+     */
     function scaleCoords(coords, borderSize, zoomRange, winWidth, winHeight, annots, aspectRatio) {
     /* scale list of [x (float),y (float)] to integer pixels on screen and
      * annots is an array with on-screen annotations in the format (x, y,
@@ -832,7 +1205,7 @@ function MaxPlot(div, top, left, width, height, args) {
      * */
         if (coords===null)
             return;
-        console.time("scale");
+        if(DEBUG) console.time("scale");
         var minX = zoomRange.minX;
         var maxX = zoomRange.maxX;
         var minY = zoomRange.minY;
@@ -874,8 +1247,65 @@ function MaxPlot(div, top, left, width, height, args) {
             }
         }
 
-        console.timeEnd("scale");
+        if(DEBUG) console.timeEnd("scale");
         return pixelCoords;
+    }
+
+    /**
+     * Scale a list of coords to fit to the range [-1, 1], allowing them to be seen
+     * at the default zoom and position for a webGL draw
+     * 
+     * @param {num[]} coords
+     * 
+     * @return Float32Array of [x, y] such that x and y fall into range [-1, 1]
+     */
+    function scaleCoordsWebGL(coords) {
+        // Safety check
+        if (coords === undefined || coords.length < 2 || coords.length % 2 != 0) return;
+
+        // Special case: if there's only 1 point, set it to [0, 0]
+        if(coords.length == 2) return new Float32Array([0, 0]);
+
+        if(DEBUG) console.time("scale");
+
+        // Find the coord range
+        const zoomRange = self.port.zoomRange;
+        let minX, minY, maxX, maxY;
+        if(zoomRange) {
+            [minX, minY, maxX, maxY] = [zoomRange.minX, zoomRange.minY, zoomRange.maxX, zoomRange.maxY];
+        } else {
+            // Backup: if zoomRange isn't defined, use the extreme values of the dataset
+            for (let i = 0; i < coords.length / 2; i++) {
+                const x = coords[i*2];
+                const y = coords[i*2 + 1];
+
+                if(minX === undefined || minX > x) minX = x;
+                if(minY === undefined || minY > y) minY = y;
+                if(maxX === undefined || maxX < x) maxX = x;
+                if(maxY === undefined || maxY < y) maxY = y;
+            }
+        }
+
+        // Find the span of x and y
+        const spanX = maxX - minX;
+        const spanY = maxY - minY;
+
+        // Scale coordiantes to fit [-1, 1] (accounting for the radius)
+        const margin = self.port.radius;
+        const canvas = self.canvas;
+        const trueHalfSpanX = 1 - ((2 * margin) / canvas.width);
+        const trueHalfSpanY = 1 - ((2 * margin) / canvas.height);
+        let scaledCoords = new Float32Array(coords.length);
+        for(let i = 0; i < coords.length / 2; i++) {
+            const x = coords[i*2];
+            const y = coords[i*2 + 1];
+
+            scaledCoords[2*i] = ((x - minX) / (spanX / 2) - 1) * trueHalfSpanX;
+            scaledCoords[2*i+1] = ((y - minY) / (spanY / 2) - 1) * trueHalfSpanY;
+        }
+
+        if(DEBUG) console.timeEnd("scale");
+        return scaledCoords;
     }
 
     function drawRect(ctx, pxCoords, coordColors, colors, radius, alpha, selCells, fatIdx) {
@@ -952,7 +1382,7 @@ function MaxPlot(div, top, left, width, height, args) {
        // overdraw the selection as black rectangles on top
        //if (fatIdx===null) {
            ctx.globalAlpha = 0.7;
-           ctx.fillStyle="black";
+           ctx.fillStyle= self.isLight() ? "black" : "white";
             selCells.forEach(function(cellId) {
                let pxX = pxCoords[2*cellId];
                let pxY = pxCoords[2*cellId+1];
@@ -1014,28 +1444,33 @@ function MaxPlot(div, top, left, width, height, args) {
          * color is a CSS name, so usually prefixed by # if a hexcode
          * width is the width in pixels.
          * */
-        ctx.save();
-        //ctx.globalAlpha = 1.0;
 
-        ctx.strokeStyle = attrs.lineColor || "#888888";
-        ctx.lineWidth = attrs.lineWidth || 3;
-        ctx.globalAlpha = attrs.lineAlpha || 0.5;
-        //ctx.miterLimit =2;
-        //ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+        if (!self.usesWebGL()) {
+            ctx.save();
+            //ctx.globalAlpha = 1.0;
 
-        for (var i=0; i < pxLines.length; i++) {
-            var line = pxLines[i];
-            var x1 = line[0];
-            var y1 = line[1];
-            var x2 = line[2];
-            var y2 = line[3];
+            ctx.strokeStyle = attrs.lineColor || "#888888";
+            ctx.lineWidth = attrs.lineWidth || 3;
+            ctx.globalAlpha = attrs.lineAlpha || 0.5;
+            //ctx.miterLimit =2;
+            //ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
 
-            ctx.beginPath();
-            ctx.moveTo(x1, y1);
-            ctx.lineTo(x2, y2);
-            ctx.stroke();
+            for (var i=0; i < pxLines.length; i++) {
+                var line = pxLines[i];
+                var x1 = line[0];
+                var y1 = line[1];
+                var x2 = line[2];
+                var y2 = line[3];
+
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            }
+            ctx.restore();
+        } else if (self.mode === 2) {
+
         }
-        ctx.restore();
     }
 
     function drawLabelsSvg(svgLines, labelCoords, winWidth, winHeight, zoomFact) {
@@ -1150,7 +1585,7 @@ function MaxPlot(div, top, left, width, height, args) {
         if (labelCoords===undefined)
             return undefined;
 
-        console.time("labels");
+        if(DEBUG) console.time("labels");
         ctx.save();
         ctx.font = "bold "+gTextSize+"px Sans-serif"
         ctx.globalAlpha = 1.0;
@@ -1171,8 +1606,9 @@ function MaxPlot(div, top, left, width, height, args) {
             ctx.shadowBlur=6;
             ctx.shadowColor="white";
         }
-        else
-            ctx.fillStyle = "rgba(0,0,0,1.0)";
+        else {
+            ctx.fillStyle = self.isLight() ? "rgba(0,0,0,1.0)" : "rgba(255,255,255,1.0)";
+        }
 
         ctx.textAlign = "left";
 
@@ -1212,7 +1648,7 @@ function MaxPlot(div, top, left, width, height, args) {
             bboxArr.push( [textX1-addMargin, textY1-addMargin, textX2+addMargin, textY2+addMargin] );
         }
         ctx.restore();
-        console.timeEnd("labels");
+        if(DEBUG) console.timeEnd("labels");
         return bboxArr;
     }
 
@@ -1297,10 +1733,10 @@ function MaxPlot(div, top, left, width, height, args) {
 
        }
 
-       // pre-render a black circle outline for the selection, quality of anti-aliasing?
+       // pre-render a circle outline for the selection, quality of anti-aliasing?
        var selImgId = colors.length;
        ctxOff.lineWidth=2;
-       ctxOff.strokeStyle="black";
+       ctxOff.strokeStyle= self.isLight() ? "black" : "white";
        ctxOff.beginPath();
        // args: arc(x, y, r, 0, 2*pi)
        ctxOff.arc((selImgId * tileWidth) + radius + 1, radius + 1, radius - 1, 0, 2 * Math.PI);
@@ -1483,7 +1919,7 @@ function MaxPlot(div, top, left, width, height, args) {
            let col = coordColors[cellId];
            ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
 
-           // and draw the black outline
+           // and draw the outline
            ctx.drawImage(off, selImgIdx * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
         });
 
@@ -1558,11 +1994,62 @@ function MaxPlot(div, top, left, width, height, args) {
        }
     }
 
+    /**
+     * 
+     * @param {WebGL2RenderingContext} ctx 
+     * @param {Float32Array} coords 
+     * @param {Uint8Array} coordColors 
+     * @param {string[]} colors 
+     * @param {int|float} radius 
+     * @param {float} alpha 
+     * @param {Set} selCells 
+     * @param {int|null} fatIdx 
+     * @param {Matrix4} projection
+     */
+    function drawCirclesWebGL (ctx, coords, coordColors, colors, radius, alpha, selCells, fatIdx, projection) {
+        if(WEBGL_DEBUG) console.time("drawCirclesWebGL");
+
+        // Clear canvas
+        ctx.clear(ctx.COLOR_BUFFER_BIT);
+
+        // Set uniforms
+        ctx.uniform1f(self.u_Radius, radius);
+        ctx.uniformMatrix4fv(self.u_Projection, false, projection.elements);
+        ctx.uniform1f(self.u_FatID, fatIdx ?? -1);
+        ctx.uniform1f(self.u_AnySelected, selCells.size > 0 ? 1 : 0);
+
+        ctx.uniform1f(self.u_Alpha, alpha);
+        ctx.uniform1f(self.u_CanvWidth, self.canvas.width);
+        ctx.uniform1f(self.u_CanvHeight, self.canvas.height);
+        ctx.uniform1f(self.u_LightMode, self.lightMode);
+
+        // Draw
+        if(WEBGL_DEBUG) {
+            ctx.finish();
+            console.time("draw");
+        }
+        ctx.uniform1f(self.u_Layer, -1);
+        ctx.drawArrays(self.ctx.POINTS, 0, self.getCount());
+        ctx.uniform1f(self.u_Layer, 0);
+        ctx.drawArrays(self.ctx.POINTS, 0, self.getCount());
+        ctx.uniform1f(self.u_Layer, 1);
+        ctx.drawArrays(self.ctx.POINTS, 0, self.getCount());
+        ctx.uniform1f(self.u_Layer, 2);
+        ctx.drawArrays(self.ctx.POINTS, 0, self.getCount());
+        if(WEBGL_DEBUG) {
+            ctx.finish();
+            console.timeEnd("draw");
+        }
+        
+        if(WEBGL_DEBUG) console.timeEnd("drawCirclesWebGL");
+    }
+
     function drawBackground(ctx, back) {
         /* draw the background image onto the canvas ctx */
         if (!back)
             return;
-        console.time("image");
+        if(DEBUG) console.time("image");
+
         //var ctxWidth = ctx.canvas.width; // size of the canvas on the screen in pixels
         //var ctxHeight = ctx.canvas.height;
 
@@ -1571,16 +2058,15 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // arguments are: (imgObject, x/y coord on image for clipping, width / height of clipped image, where to place the image, width/height of image)
         //var a = getSafeRect(back.image.width, back.image.height, back.clipX, back.clipY, back.image.width, back.image.height, 0, 0, ctxWidth, ctxHeight);
-        //console.log("drawing fixed coords", a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
-        //self.ctx.drawImage(back.image, a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
-        //self.ctx.drawImage(back.image, a.sx, a.sy, back.width, back.height, a.dx, a.dy, a.dw, a.dh);
-        console.log("drawImage sx, sy, sw, sh, dx, dy, dw, dh", back.sx, back.sy, back.sw, back.sh, back.dx,back.dy, back.dw, back.dh);
-        //self.ctx.drawImage(back.image, back.sx, back.sy, back.width, back.height, 0, 0, ctxWidth, ctxHeight);
-        self.ctx.drawImage(back.image, back.sx, back.sy, back.sw, back.sh, back.dx, back.dy, back.dw, back.dh);
+        //if(DEBUG) console.log("drawing fixed coords", a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
+        //ctx.drawImage(back.image, a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
+        //ctx.drawImage(back.image, a.sx, a.sy, back.width, back.height, a.dx, a.dy, a.dw, a.dh);
+        if(DEBUG) console.log("drawImage sx, sy, sw, sh, dx, dy, dw, dh", back.sx, back.sy, back.sw, back.sh, back.dx,back.dy, back.dw, back.dh);
+        //ctx.drawImage(back.image, back.sx, back.sy, back.width, back.height, 0, 0, ctxWidth, ctxHeight);
+        ctx.drawImage(back.image, back.sx, back.sy, back.sw, back.sh, back.dx, back.dy, back.dw, back.dh);
 
-        console.timeEnd("image");
+        if(DEBUG) console.timeEnd("image");
     }
-
 
     function drawPixels(ctx, width, height, pxCoords, coordColors, colors, alpha, selCells, fatIdx) {
         /* draw single pixels into a pixel buffer and copy the buffer into a canvas */
@@ -1665,7 +2151,7 @@ function MaxPlot(div, top, left, width, height, args) {
             })
         }
 
-       self.ctx.putImageData(canvasData, 0, 0);
+       ctx.putImageData(canvasData, 0, 0);
        return count;
     }
 
@@ -1695,16 +2181,27 @@ function MaxPlot(div, top, left, width, height, args) {
         return obj; // not needed, but more explicit
     }
 
-    function clearCanvas(ctx, width, height) {
-    /* clear with a white background */
-        // jsperf says this is fastest on Chrome, and still OK-ish in FF
-        //console.time("clear");
-        ctx.save();
-        ctx.globalAlpha = 1.0;
-        ctx.fillStyle = "rgb(255,255,255)";
-        ctx.fillRect(0, 0, width, height);
-        ctx.restore();
-        //console.timeEnd("clear");
+    function clearCanvas(ctx, width, height, transparent = false) {
+        if(ctx instanceof CanvasRenderingContext2D){
+                // jsperf says this is fastest on Chrome, and still OK-ish in FF
+                //if(DEBUG) console.time("clear");
+                ctx.save();
+
+                if(transparent) {
+                    ctx.clearRect(0, 0, width, height);
+                } else {
+                    ctx.globalAlpha = 1.0;
+                    ctx.fillStyle = self.isLight() ? "rgb(255,255,255)" : "rgb(0, 0, 0)";
+                    ctx.fillRect(0, 0, width, height);
+                }
+
+                ctx.restore();
+                //if(DEBUG) console.timeEnd("clear");
+        } else if(ctx instanceof WebGL2RenderingContext){
+                ctx.clear(ctx.COLOR_BUFFER_BIT | ctx.DEPTH_BUFFER_BIT);
+        } else {
+                console.error(`Unsupported Canvas Rendering Context: ${Object.prototype.toString(ctx)}`);
+        }
     }
 
     // -- object methods (=access the self object)
@@ -1719,7 +2216,7 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.background===undefined || self.background===null)
             self.background = {};
         self.background.image = img;
-        self.scaleBackground(self.background, self.port.initZoom, self.port.zoomRange);
+        self.scaleBackground(self.background, self.port.initZoom, this.usesWebGL() ? self.port.projection :self.port.zoomRange);
         if (self.childPlot)
             self.childPlot.setBackground(img);
     };
@@ -1755,61 +2252,108 @@ function MaxPlot(div, top, left, width, height, args) {
         if (!background) 
             return;
 
-        var width = background.image.width; // source image width
-        var height = background.image.height; // source image height
+        // Find the size of the source image
+        const width = background.image.width;
+        const height = background.image.height;
  
-        var ctxWidth  = self.canvas.width;
-        var ctxHeight = self.canvas.height;
+        // Find the size of the drawing canvas
+        const canvWidth  = self.canvas.width;
+        const canvHeight = self.canvas.height;
 
-        var coordHeight = dataRange.maxY-dataRange.minY;
-        var coordWidth = dataRange.maxX-dataRange.minX;
+        // To keep the original image aspect ratio, scale the less restrictive canvas dimension to match the more restrictive one
+        const [canvScaleX, canvScaleY] = [width / canvWidth, height / canvHeight];
+        
+        const dx = 0;
+        const dy = 0;
+        const dWidth = canvWidth;
+        const dHeight = canvHeight;
+        
+        // Since the points should match the background, adjust the zoom range's aspect ratio to match the canvas
+        // Since WebGL uses a projection matrix, this is determined differently depending on draw mode, but we will need the pixel range for later.
+        let zr;
+        if(zoomRange instanceof Matrix4) {
+            if(canvScaleX > canvScaleY) {
+                // Extend zoom range height to match width
+                const newViewHeight = zoomRange.width * canvHeight / canvWidth;
+                const viewYMidpoint = (zoomRange.top + zoomRange.bottom) / 2;
 
-        var scaleX = width / coordWidth; // this is px/dataUnit to convert background image pixels to canvas pixels
-        var scaleY = height / coordHeight;
+                const newBottom = viewYMidpoint - newViewHeight / 2;
+                const newTop = viewYMidpoint + newViewHeight / 2;
 
-        var sx1 = zoomRange.minX * scaleX; // sx = x position on source image
-        var sx2 = zoomRange.maxX * scaleX;
+                zoomRange.setBounds(zoomRange.left, zoomRange.right, newTop, newBottom, false);
+            } else {
+                // Extend zoom range width to match height
+                const newViewWidth = zoomRange.height * canvWidth / canvHeight;
+                const viewXMidpoint = (zoomRange.right + zoomRange.left) / 2;
 
-        var sy1 = (coordHeight - zoomRange.maxY) * scaleY; // Y-positions must be subtracted from coordHeight - y axis is flipped!
-        var sy2 = (coordHeight - zoomRange.minY) * scaleY; // Our y-axis is always flipped!
+                const newLeft = viewXMidpoint - newViewWidth / 2;
+                const newRight = viewXMidpoint + newViewWidth / 2;
 
-        var sw = sx2 - sx1; // size of slice of background image that is currently shown, in source pixels
-        var sh = sy2 - sy1;
+                zoomRange.setBounds(newLeft, newRight, zoomRange.top, zoomRange.bottom, false);
+            }
 
-        // lame: since I wasn't able to figure out how to transform negative sx, sy to corrected dx, dy, coords - safari doesn't 
-        // understand negative sx/sy - I simply use the scaleData function
-        // somehow https://gist.github.com/Kaiido/ca9c837382d89b9d0061e96181d1d862 didn't work for me
-        //var coords = [0.0, 0.0, dataRange.maxX, dataRange.maxY];
-        //var newCoords = scaleCoords(coords, 0, zoomRange, ctxWidth, ctxHeight, [])
+            zr = zoomRange.pxBounds(dataRange, canvWidth, canvHeight);
+        } else {
+            const viewWidth = zoomRange.maxX - zoomRange.minX;
+            const viewHeight = zoomRange.maxY - zoomRange.minY;
+            
+            if (canvScaleX > canvScaleY) {
+                // Extend zoom range height to match width
+                const newViewHeight = viewWidth * canvHeight / canvWidth;
+                const viewYMidpoint = (zoomRange.maxY + zoomRange.minY) / 2;
 
-        var dx = 0;
-        var dy = 0;
-        var dw = ctxWidth;
-        var dh = ctxHeight;
+                const newMinY = viewYMidpoint - newViewHeight / 2;
+                const newMaxY = viewYMidpoint + newViewHeight / 2;
 
-        //if (sx1 < 0) {
-            //sx1 = 0;
-            //sw = width;
-            //dx = newCoords[0];
-            //dw = newCoords[2] - dx;
-        //}
+                zoomRange.minY = newMinY;
+                zoomRange.maxY = newMaxY;
+            } else {
+                // Extend zoom range width to match height
+                const newViewWidth = viewHeight * canvWidth / canvHeight;
+                const viewXMidpoint = (zoomRange.maxX + zoomRange.minX) / 2;
 
-        //if (sy1 < 0) {
-            //sy1 = 0;
-            //sh = height;
-            //dy = newCoords[1];
-            //dh = newCoords[3] - dy;
-        //}
+                const newMinX = viewXMidpoint - newViewWidth / 2;
+                const newMaxX = viewXMidpoint + newViewWidth / 2;
+
+                zoomRange.minX = newMinX;
+                zoomRange.maxX = newMaxX;
+            }
+
+            zr = zoomRange;
+        }
+
+        // Find the size of the data
+        const coordHeight = dataRange.maxY - dataRange.minY;
+        const coordWidth = dataRange.maxX - dataRange.minX;
+
+        const scaleX = width / coordWidth; // this is px/dataUnit to convert background image pixels to canvas pixels
+        const scaleY = height / coordHeight;
+
+        const sx1 = zr.minX * scaleX; // sx = x position on source image
+        const sx2 = zr.maxX * scaleX;
+
+        const sy1 = (coordHeight - zr.maxY) * scaleY; // Y-positions must be subtracted from coordHeight - y axis is flipped!
+        const sy2 = (coordHeight - zr.minY) * scaleY; // Our y-axis is always flipped!
+
+        const sWidth = sx2 - sx1; // size of slice of background image that is currently shown, in source pixels
+        const sHeight = sy2 - sy1;
+        
 
         background.sx = sx1;
         background.sy = sy1;
-        background.sw = sw;
-        background.sh = sh;
+        background.sw = sWidth;
+        background.sh = sHeight;
 
         background.dx = dx;
         background.dy = dy;
-        background.dw = dw;
-        background.dh = dh;
+        background.dw = dWidth;
+        background.dh = dHeight;
+
+        // If we're using WebGL, we only need to redraw the background when we rescale it, so we'll do that here
+        // if(this.usesWebGL()) {
+        //     clearCanvas(this.bgCtx, this.bgCanvas.width, this.bgCanvas.height);
+        //     drawBackground(this.bgCtx, background);
+        // }
     }
 
     this.scaleData = function() {
@@ -1817,16 +2361,59 @@ function MaxPlot(div, top, left, width, height, args) {
        if (!self.coords) // window resize can call this before coordinates are loaded.
            return;
 
-       var borderMargin = self.port.radius;
-       self.calcRadius();
+        if(self.usesWebGL()) return;
 
-       let w = self.canvas.width;
-       let h = self.canvas.height;
-       self.coords.px = scaleCoords(self.coords.orig, borderMargin, self.port.zoomRange, w, h, self.coords.aspectRatio);
-       if (self.coords.lines)
-           self.coords.pxLines = scaleLines(self.coords.lines, self.port.zoomRange, self.canvas.width, self.canvas.height);
-       self.scaleBackground(self.background, self.port.initZoom, self.port.zoomRange);
-       self.scalingDone = true;
+        var borderMargin = self.port.radius;
+        self.calcRadius();
+
+        let w = self.canvas.width;
+        let h = self.canvas.height;
+        self.scaleBackground(self.background, self.port.initZoom, self.port.zoomRange);
+        self.coords.px = scaleCoords(self.coords.orig, borderMargin, self.port.zoomRange, w, h, self.coords.aspectRatio);
+        if (self.coords.lines)
+            self.coords.pxLines = scaleLines(self.coords.lines, self.port.zoomRange, self.canvas.width, self.canvas.height);
+        self.scalingDone = true;
+    }
+
+    this.setCoordsWebGL = function() {
+        /* Scale coords and labels to fit to WebGL clip space. Bind the results to the a_Position attribute */
+
+        // Scale coordiantes to clip space
+        const coords = scaleCoordsWebGL(self.coords.orig);
+        self.coords.gl = coords;
+
+        if(WEBGL_DEBUG) {
+            self.ctx.finish();
+            console.time("Bind Position Buffer");
+        }
+        self.bindBuffer(2, self.a_Position, self.coords.gl, self.ctx.FLOAT);
+        if(WEBGL_DEBUG) console.timeEnd("Bind Position Buffer");
+
+        // Initialize dynamic data
+        self.calcRadius();
+        self.scalingDone = true;
+    }
+
+    /**
+     * Bind the vertex buffer to the given attribute and populate it with the given data
+     * TODO: Find a way to not create new buffers every time
+     * 
+     * @param {Number} vec_size Number of elements in each attribute entry
+     * @param {*} attribute Location of the attribute
+     * @param {*} data Data to set in the attribute
+     * @param {*} type Type of data being sent
+     * @param {boolean} normalize Whether or not to normalize the data (only works with some types)
+     */
+    this.bindBuffer = (vec_size, attribute, data, type, normalize = false) => {
+        // Safety check: this only makes sense in WebGL space
+        if(!this.usesWebGL()) {
+            throw new Error("Error: Attempted to bind buffer outside of WebGL drawing mode");
+        }
+
+        const buffer = this.ctx.createBuffer();
+        this.ctx.bindBuffer(this.ctx.ARRAY_BUFFER, buffer);
+        this.ctx.bufferData(this.ctx.ARRAY_BUFFER, data, this.ctx.STATIC_DRAW);
+        this.ctx.vertexAttribPointer(attribute, vec_size, type, normalize, 0, 0);
     }
 
     this.readyToDraw = function() {
@@ -1847,6 +2434,9 @@ function MaxPlot(div, top, left, width, height, args) {
        /* resize the canvas and move the status line, don't rescale or draw  */
        self.div.style.width = width+"px";
        self.div.style.height = height+"px";
+
+       self.canvDiv.style.width = width+"px";
+       self.canvDiv.style.height = height+"px";
 
        // if in split screen mode, pass on the message to the second window
        if (self.childPlot) {
@@ -1871,6 +2461,17 @@ function MaxPlot(div, top, left, width, height, args) {
        self.canvas.height = canvHeight;
        self.canvas.width = width;
        self.canvas.style.height = canvHeight+"px";
+       if(this.usesWebGL()) {
+           self.bgCanvas.width = width;
+           self.bgCanvas.height = canvHeight;
+           self.bgCanvas.style.width = width+"px";
+           self.bgCanvas.style.height = canvHeight+"px";
+
+           self.labelCanvas.width = width;
+           self.labelCanvas.height = canvHeight;
+           self.labelCanvas.style.width = width+"px";
+           self.labelCanvas.style.height = canvHeight+"px";
+       }
        self.zoomDiv.style.top = (height-gZoomFromBottom)+"px";
        self.zoomDiv.style.left = (gZoomFromLeft)+"px";
 
@@ -1905,17 +2506,23 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     this.setSize = function(width, height, doRedraw) {
-       /* resize canvas on the page re-scale the data and re-draw, unless doRedraw is false */
-       if (width===null)
-           width = self.div.getBoundingClientRect().width;
+        /* resize canvas on the page re-scale the data and re-draw, unless doRedraw is false */
+        if (width===null) {
+            width = self.div.getBoundingClientRect().width;
+        }
 
-       self.quickResize(width, height);
+        self.quickResize(width, height);
 
-       if (self.coords)
-           self.scaleData();
+        if(this.usesWebGL()) {
+            // If we're drawing using WebGL, we have to reset the viewport
+            this.ctx.viewport(0, 0, this.canvas.width, this.canvas.height);
+        }else {
+            // If we're drawing using CanvasRenderingContext2D, coordinate pixels must be recalculated
+            if (self.coords) self.scaleData();
+        }
 
-       if (doRedraw===undefined || doRedraw===true)
-           self.drawDots();
+        //    if (doRedraw===undefined || doRedraw===true)
+        self.drawDots();
     };
 
     this.setCoords = function(coords, clusterLabels, coordInfo, opts) {
@@ -1975,18 +2582,36 @@ function MaxPlot(div, top, left, width, height, args) {
            self.coords.aspectRatio = coordInfo.aspectRatio;
 
        var count = 0;
-       for (var i = 0; i < coords.length/2; i++) {
-           var cellX = coords[i*2];
-           var cellY = coords[i*2+1];
-           if (!(isHidden(cellX, cellY)))
-               count++;
-       }
 
-       setStatus(count+ " visible " + self.gSampleDescription+"s loaded");
+        if(this.usesWebGL()) {
+            count = coords.length / 2;
+        } else {
+            for (var i = 0; i < coords.length/2; i++) {
+                var cellX = coords[i*2];
+                var cellY = coords[i*2+1];
+                if (!(isHidden(cellX, cellY)))
+                    count++;
+            }
+        }
+
+       setStatus(count+ (this.usesWebGL() ? " " : " visible ") + self.gSampleDescription+"s loaded");
 
        if (opts.lines)
            self._setLines(opts["lines"], opts);
-       self.scaleData();
+    
+        if(self.usesWebGL()) {
+            self.setCoordsWebGL();
+
+            // Initialize layer and hidden attributes since they depend on how many points there are
+            // (Not entirely sure where the best place to put this would be)
+            self.coords.layers = new Int8Array(this.getCount());
+            this.bindLayers();
+
+            self.coords.hidden = new Uint8Array(this.getCount());
+            self.bindBuffer(1, self.a_Hidden, self.coords.hidden, self.ctx.UNSIGNED_BYTE);
+        } else {
+            self.scaleData();
+        }
     };
 
     this.setLabelCoords = function(labelCoords) {
@@ -1999,6 +2624,11 @@ function MaxPlot(div, top, left, width, height, args) {
     this.setColorArr = function(colorArr) {
     /* set the color array, one array with one integer color-index per coordinate */
        self.col.arr = colorArr;
+
+        // When using WebGL, this involves calculating and binding the color buffer
+        if(this.usesWebGL()) {
+            this.bindColors();
+        }
     };
 
     this.setColors = function(colors) {
@@ -2017,18 +2647,110 @@ function MaxPlot(div, top, left, width, height, args) {
            });
            $(self.flipBookEl).on("slidestart", onChangeFlipBook);
         }
+
+        if(this.usesWebGL()) {
+            this.bindColors();
+        }
     };
+
+    // If using webGL, calculates what points have what colors.
+    // Also calculates depth values, which are related to color
+    this.bindColors = function() {
+        if(!this.usesWebGL()) {
+            return;
+        }
+
+        const colors = self.col.pal;
+        const colorArr = self.col.arr;
+
+        // Safety check: Cannot parse colors if colors or colorArr have not been defined yet
+        if(colors === undefined || colors === null || colorArr === undefined || colorArr === null) {
+            return;
+        }
+
+        if(WEBGL_DEBUG) console.time("Parse Colors");
+
+        // Convert all hex numbers to a format WebGL can use
+        const colorRGB = colors.map(function (hex) {
+            let intHex = parseInt(hex, 16);
+            let red = (intHex & 0xff0000) >> 16;
+            let green = (intHex & 0x00ff00) >> 8;
+            let blue = (intHex & 0x0000ff) >> 0;
+            return [red, green, blue];
+        });
+
+        // Now find the color of each point
+        let colorNumbers = [];
+        for(let colorIndex of colorArr) {
+            colorNumbers.push(colorRGB[colorIndex][0], colorRGB[colorIndex][1], colorRGB[colorIndex][2]);
+        }
+        if(WEBGL_DEBUG) console.timeEnd("Parse Colors");
+
+        const colorBuf = new Uint8Array(colorNumbers);
+
+        // Bind color buffer
+        self.bindBuffer(3, self.a_Color, colorBuf, self.ctx.UNSIGNED_BYTE, true);
+        
+        // Since some colors are drawn behind other colors, calculate which colors should be behind which here
+        // Pass in colorNumbers.length as the length since getCount() uses an array that may not have been defined yet
+        this.bindLayers(colorNumbers.length);
+    }
+
+    // When using WebGL, determine what layers each cell should be on.
+    // Based on color, fatID, and whether or not it's selected
+    this.bindLayers = function(length = this.getCount()) {
+        if(!this.usesWebGL()) {
+            return;
+        }
+
+        const selCells = this.selCells;
+        const colorArr = this.col.arr;
+
+        // Calculating layers requires color and coordinate knowledge. Only bind once both are known
+        if(!colorArr || !this.coords.layers) {
+            return;
+        }
+
+        if(WEBGL_DEBUG) console.time("Parse Layers");
+        for(let i = 0; i < length; i++) {
+            if(selCells.has(i)) {
+                this.coords.layers[i] = 2;
+            } else {
+                const col = colorArr[i];
+                if(this.fatIdx !== null && this.fatIdx === col) {
+                    this.coords.layers[i] = 1;
+                } else if(col === 0) {
+                    this.coords.layers[i] = -1;
+                } else {
+                    this.coords.layers[i] = 0;
+                }
+            }
+        }
+        this.bindBuffer(1, this.a_Layer, this.coords.layers, this.ctx.BYTE);
+        if(WEBGL_DEBUG) console.timeEnd("Parse Layers");
+    }
 
     this.calcRadius = function() {
         /* calculate the radius from current zoom factor and set radius, alpha and zoomFact in self.port */
         // make the circles a bit smaller than expected
-        var zr = self.port.zoomRange;
-        var iz = self.port.initZoom;
-        var initAlpha = self.port.initAlpha;
-        var initSpan = iz.maxX-iz.minX;
-        var currentSpan = zr.maxX-zr.minX;
-        var zoomFact = initSpan/currentSpan;
 
+        // Zoom factor is calculated differently depending on whether or not WebGL is being used
+        let zoomFact;
+
+        if(this.usesWebGL()) {
+            const p = self.port.projection;
+            const initSpan = 2;
+            const currentSpan = p.width;
+            zoomFact = initSpan / currentSpan;
+        } else {
+            var zr = self.port.zoomRange;
+            var iz = self.port.initZoom;
+            var initSpan = iz.maxX-iz.minX;
+            var currentSpan = zr.maxX-zr.minX;
+            zoomFact = initSpan/currentSpan;
+        }
+        var initAlpha = self.port.initAlpha;
+        
         // both radius and alpha can be change by a 'multiplier'
         var alphaMult = self.port.alphaMult || 1.0;
         var radiusMult = self.port.radiusMult || 1.0;
@@ -2036,7 +2758,9 @@ function MaxPlot(div, top, left, width, height, args) {
         var baseRadius = self.port.initRadius;
         if (baseRadius===0)
             baseRadius = 0.7;
-        var radius = Math.floor(baseRadius * Math.sqrt(zoomFact) * radiusMult);
+
+        const newRadius = baseRadius * Math.sqrt(zoomFact) * radiusMult;
+        const radius = this.usesWebGL() ? newRadius : Math.floor(newRadius);
 
         // the higher the zoom factor, the higher the alpha value
         var zoomFrac = Math.min(1.0, zoomFact/100.0); // zoom as fraction, max is 1.0
@@ -2081,14 +2805,14 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.drawDots = function(doSvg) {
         /* draw coordinates to canvas with current colors */
-        console.time("draw");
+        if(DEBUG) console.time("draw");
 
         self.clear();
 
         var radius = self.port.radius;
         var alpha = self.port.alpha;
         var zoomFact = self.port.zoomFact;
-        var coords = self.coords.px;
+        var coords = self.usesWebGL() ? self.coords.gl : self.coords.px;
         var pal = self.col.pal;
         var colArr = self.col.arr;
         var count = 0;
@@ -2105,18 +2829,25 @@ function MaxPlot(div, top, left, width, height, args) {
             return;
         }
 
-        drawBackground(self.ctx, self.background)
+        // Draw background
+        // When using WebGL, we use a different canvas and different viewport
+        if(this.usesWebGL()) {
+            this.scaleBackground(self.background, self.port.initZoom, self.port.projection);
+            drawBackground(self.bgCtx, self.background);
+        } else {
+            drawBackground(self.ctx, self.background);
+        }
 
         // if the labels are not shown, fattening should not be active
         if (self.fatIdx && !self.doDrawLabels)
             self.fatIdx = null;
 
-        if (radius===0) {
+        if (!self.usesWebGL() && radius===0) {
             count = drawPixels(self.ctx, self.canvas.width, self.canvas.height, coords,
                 colArr, pal, alpha, self.selCells, self.fatIdx);
         }
 
-        else if (radius===1 || radius===2) {
+        else if (!self.usesWebGL() && (radius===1 || radius===2)) {
             count = drawRect(self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
         }
         else {
@@ -2128,18 +2859,20 @@ function MaxPlot(div, top, left, width, height, args) {
                     count = drawCirclesDrawImage(self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx);
                     break;
                 case 2:
+                    count = drawCirclesWebGL    (self.ctx, coords, colArr, pal, radius, alpha, self.selCells, self.fatIdx, self.port.projection);
+                default:
                     break;
             }
         }
 
         self.count = count;
 
-        console.timeEnd("draw");
+        if(DEBUG) console.timeEnd("draw");
 
         if (self.coords.pxLines) {
-            console.time("draw lines");
+            if(DEBUG) console.time("draw lines");
             drawLines(self.ctx, self.coords.pxLines, self.canvas.width, self.canvas.height, self.coords.lineAttrs);
-            console.timeEnd("draw lines");
+            if(DEBUG) console.timeEnd("draw lines");
         }
 
         if (self.doDrawLabels || self.coords.coordInfo.annots!==undefined) {
@@ -2163,13 +2896,13 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.doDrawLabels) {
             self.coords.pxLabels = scaleLabels(
                 self.coords.labels,
-                self.port.zoomRange,
+                this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
                 self.port.radius,
                 self.canvas.width,
                 self.canvas.height
             );
             self.coords.labelBbox = drawLabels(
-                self.ctx,
+                this.usesWebGL() ? this.labelCtx : self.ctx,
                 self.coords.pxLabels,
                 self.canvas.width,
                 self.canvas.height,
@@ -2180,12 +2913,12 @@ function MaxPlot(div, top, left, width, height, args) {
         // draw annotations - look like labels, but cannot be clicked
         self.coords.pxAnnots = scaleLabels(
             self.coords.coordInfo.annots,
-            self.port.zoomRange,
+            this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
             self.port.radius,
             self.canvas.width,
             self.canvas.height
         );
-        drawLabels(self.ctx, self.coords.pxAnnots, self.canvas.width, self.canvas.height, self.port.zoomFact, true);
+        drawLabels(this.usesWebGL() ? this.labelCtx : self.ctx, self.coords.pxAnnots, self.canvas.width, self.canvas.height, self.port.zoomFact, true);
     };
 
     this.cellsAtPixel = function(x, y) {
@@ -2234,10 +2967,15 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.zoom100 = function() {
        /* zoom to 100% and redraw */
-       copyObj(self.port.initZoom, self.port.zoomRange);
-       self.resetAlpha();
-       self.resetRadius();
-       self.scaleData();
+       if(self.usesWebGL()) {
+            self.port.projection.reset();
+        } else {
+            copyObj(self.port.initZoom, self.port.zoomRange);
+            self.scaleData();
+        }
+
+        self.resetAlpha();
+        self.resetRadius();
     };
 
     this.zoomToTest = function(x1, y1, x2, y2) {
@@ -2246,37 +2984,59 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     this.zoomTo = function(x1, y1, x2, y2) {
-       /* zoom to rectangle defined by two pixel points */
-       // make sure that x1<x2 and y1<y2 - can happen if mouse movement was upwards
-       debug("Zooming to pixels: ", x1, y1, x2, y2);
-       var pxMinX = Math.min(x1, x2);
-       var pxMaxX = Math.max(x1, x2);
+        /* zoom to rectangle defined by two pixel points */
+        // make sure that x1<x2 and y1<y2 - can happen if mouse movement was upwards
+        debug("Zooming to pixels: ", x1, y1, x2, y2);
+        var pxMinX = Math.min(x1, x2);
+        var pxMaxX = Math.max(x1, x2);
 
-       var pxMinY = Math.min(y1, y2);
-       var pxMaxY = Math.max(y1, y2);
+        var pxMinY = Math.min(y1, y2);
+        var pxMaxY = Math.max(y1, y2);
 
-       var zoomRange = self.port.zoomRange;
-       // window size in data coordinates
-       var spanX = zoomRange.maxX - zoomRange.minX;
-       var spanY = zoomRange.maxY - zoomRange.minY;
+        // This is calculated differently depending on if we're using a WebGL canvas
+        if(this.usesWebGL()) {
+            // Convert the pixel coordinates to clip space
+            const glMinX = pxMinX / self.canvas.width * 2 - 1;
+            const glMaxX = pxMaxX / self.canvas.width * 2 - 1;
+            const glMinY = pxMinY / self.canvas.height * 2 - 1;
+            const glMaxY = pxMaxY / self.canvas.height * 2 - 1;
 
-       // multiplier to convert from pixels to data coordinates
-       var xMult = spanX / self.canvas.width; // multiplier dataRange/pixel
-       var yMult = spanY / self.canvas.height;
+            // Fetch the projection matrix
+            /** @type {Matrix4} */
+            let p = self.port.projection;
 
-       var oldMinX = zoomRange.minX;
-       var oldMinY = zoomRange.minY;
+            // Set the new bounds
+            p.setBounds(glMinX, glMaxX, glMaxY, glMinY);
 
-       zoomRange.minX = oldMinX + (pxMinX * xMult);
-       zoomRange.minY = oldMinY + (pxMinY * yMult);
+            // Recalculate radius
+            this.calcRadius();
 
-       zoomRange.maxX = oldMinX + (pxMaxX * xMult);
-       zoomRange.maxY = oldMinY + (pxMaxY * yMult);
+            // Redraw
+            this.drawDots();
+        } else {
+            var zoomRange = self.port.zoomRange;
+            // window size in data coordinates
+            var spanX = zoomRange.maxX - zoomRange.minX;
+            var spanY = zoomRange.maxY - zoomRange.minY;
 
-       self.port.zoomRange = zoomRange;
-       debug("Marquee zoom window: "+JSON.stringify(self.port.zoomRange));
+            // multiplier to convert from pixels to data coordinates
+            var xMult = spanX / self.canvas.width; // multiplier dataRange/pixel
+            var yMult = spanY / self.canvas.height;
 
-       self.scaleData();
+            var oldMinX = zoomRange.minX;
+            var oldMinY = zoomRange.minY;
+
+            zoomRange.minX = oldMinX + (pxMinX * xMult);
+            zoomRange.minY = oldMinY + (pxMinY * yMult);
+
+            zoomRange.maxX = oldMinX + (pxMaxX * xMult);
+            zoomRange.maxY = oldMinY + (pxMaxY * yMult);
+
+            self.port.zoomRange = zoomRange;
+            debug("Marquee zoom window: "+JSON.stringify(self.port.zoomRange));
+
+            self.scaleData();
+        }
     };
 
     this.zoomBy = function(zoomFact, xPx, yPx) {
@@ -2284,47 +3044,61 @@ function MaxPlot(div, top, left, width, height, args) {
      * zoomFact = 1.2 means zoom +20%
      * zoomFact = 0.8 means zoom -20%
      * */
-        var zr = self.port.zoomRange;
-        var iz = self.port.initZoom;
 
-        var xRange = Math.abs(zr.maxX-zr.minX);
-        var yRange = Math.abs(zr.maxY-zr.minY);
+        // This is calculated differently depending on if the draw program uses WebGL
+        if(this.usesWebGL()) {
+            // Calculate where xPx and yPx exist relative to the canvas
+            const x = (xPx !== undefined && xPx !== null) ? xPx / self.canvas.width * 2 - 1 : 0;
+            const y = (yPx !== undefined && yPx !== null) ? -(yPx / self.canvas.height * 2 - 1) : 0;
 
-        var minWeightX = 0.5; // how zooming should be distributed between min/max
-        var minWeightY = 0.5;
-        if (xPx!==undefined) {
-            minWeightX = (xPx/self.width);
-            minWeightY = (yPx/self.canvas.height);
+            // Scale the matrix accordingly
+            self.port.projection.scale(zoomFact, x, y);
+
+            // Resize the radius accordingly
+            this.calcRadius();
+        } else {
+            var zr = self.port.zoomRange;
+            var iz = self.port.initZoom;
+
+            var xRange = Math.abs(zr.maxX-zr.minX);
+            var yRange = Math.abs(zr.maxY-zr.minY);
+
+            var minWeightX = 0.5; // how zooming should be distributed between min/max
+            var minWeightY = 0.5;
+            if (xPx!==undefined) {
+                minWeightX = (xPx/self.width);
+                minWeightY = (yPx/self.canvas.height);
+            }
+            var scale = (1.0-zoomFact);
+
+            var newRange = {};
+            newRange.minX = zr.minX - (xRange*scale*minWeightX);
+            newRange.maxX = zr.maxX + (xRange*scale*(1-minWeightX));
+
+            // inversed, because we flip the Y axis (flipY)
+            newRange.minY = zr.minY - (yRange*scale*(1-minWeightY));
+            newRange.maxY = zr.maxY + (yRange*scale*(minWeightY));
+
+            // extreme zoom factors don't make sense, at some point we reach
+            // the limit of the floating point numbers
+            var newZoom = ((iz.maxX-iz.minX)/(newRange.maxX-newRange.minX));
+            if (newZoom < 0.01 || newZoom > 1500)
+                return zr;
+
+            debug("x min max "+zr.minX+" "+zr.maxX);
+            debug("y min max "+zr.minY+" "+zr.maxY);
+
+            self.port.zoomRange = newRange;
+
+            self.scaleData();
         }
-        var scale = (1.0-zoomFact);
-
-        var newRange = {};
-        newRange.minX = zr.minX - (xRange*scale*minWeightX);
-        newRange.maxX = zr.maxX + (xRange*scale*(1-minWeightX));
-
-        // inversed, because we flip the Y axis (flipY)
-        newRange.minY = zr.minY - (yRange*scale*(1-minWeightY));
-        newRange.maxY = zr.maxY + (yRange*scale*(minWeightY));
-
-        // extreme zoom factors don't make sense, at some point we reach
-        // the limit of the floating point numbers
-        var newZoom = ((iz.maxX-iz.minX)/(newRange.maxX-newRange.minX));
-        if (newZoom < 0.01 || newZoom > 1500)
-            return zr;
-
-        debug("x min max "+zr.minX+" "+zr.maxX);
-        debug("y min max "+zr.minY+" "+zr.maxY);
-
-        self.port.zoomRange = newRange;
-
-        self.scaleData();
 
         // a special case for connected plots that are not sharing our pixel coordinates
         if (self.childPlot && self.coords===self.childPlot.coords) {
             self.childPlot.zoomBy(zoomFact, xPx, yPx);
         }
 
-        return newRange;
+        return self.usesWebGL() ? self.port.projection : newRange;
     };
 
     this.movePerc = function(xDiffFrac, yDiffFrac) {
@@ -2347,32 +3121,48 @@ function MaxPlot(div, top, left, width, height, args) {
     };
 
     this.panStart = function() {
-       /* called when starting a panning sequence, makes a snapshop of the current image */
-       self.panCopy = document.createElement('canvas'); // not added to DOM, will be gc'ed
-       self.panCopy.width = self.canvas.width;
-       self.panCopy.height = self.canvas.height;
-       var destCtx = self.panCopy.getContext("2d", { alpha: false });
-       destCtx.drawImage(self.canvas, 0, 0);
+       /* called when starting a panning sequence, makes a snapshop of the current image. Not used with WebGL modes */
+       if(!self.usesWebGL()) {
+            self.panCopy = document.createElement('canvas'); // not added to DOM, will be gc'ed
+            self.panCopy.width = self.canvas.width;
+            self.panCopy.height = self.canvas.height;
+            var destCtx = self.panCopy.getContext("2d", { alpha: true });
+            destCtx.drawImage(self.canvas, 0, 0);
+       }
     }
 
     this.panBy = function(xDiff, yDiff) {
         /* pan current image by x/y pixels */
         debug('panning by '+xDiff+' '+yDiff);
 
-       //var srcCtx = self.panCopy.getContext("2d", { alpha: false });
-       clearCanvas(self.ctx, self.canvas.width, self.canvas.height);
-       self.ctx.drawImage(self.panCopy, -xDiff, -yDiff);
-       // keep these for panEnd
-       self.panDiffX = xDiff;
-       self.panDiffY = yDiff;
+        if(self.usesWebGL()) {
+            // Scale distance relative to canvas
+            const x = 2 * xDiff / self.canvas.width;
+            const y = 2 * yDiff / self.canvas.height;
+            
+            // Translate the projection matrix
+            self.port.projection.translate(-x, y);
+
+            self.drawDots();
+        } else {
+            //var srcCtx = self.panCopy.getContext("2d", { alpha: false });
+            clearCanvas(self.ctx, self.canvas.width, self.canvas.height);
+            self.ctx.drawImage(self.panCopy, -xDiff, -yDiff);
+        }
+
+        // keep these for panEnd
+        self.panDiffX = xDiff;
+        self.panDiffY = yDiff;
     }
 
     this.panEnd = function() {
-        /* end a sequence of panBy calls, called when the mouse is released */
-        self.moveBy(self.panDiffX, -self.panDiffY); // -1 because of flipY
-        self.panCopy = null;
-        self.panDiffX = null;
-        self.panDiffY = null;
+        /* end a sequence of panBy calls, called when the mouse is released. Not used with WebGL modes */
+        if(!self.usesWebGL()) {
+            self.moveBy(self.panDiffX, -self.panDiffY); // -1 because of flipY
+            self.panCopy = null;
+            self.panDiffX = null;
+            self.panDiffY = null;
+        }
     }
 
     // BEGIN SELECTION METHODS (could be an object?)
@@ -2381,6 +3171,13 @@ function MaxPlot(div, top, left, width, height, args) {
         /* clear selection */
         self.selCells.clear();
         setStatus("");
+
+        // If we're using webGL, adjust the attribute buffer
+        if(self.usesWebGL()) {
+            // Reset layers
+            this.bindLayers();
+        }
+
         if (self.onSelChange!==null && skipNotify!==true)
             self.onSelChange(self.selCells);
     };
@@ -2397,20 +3194,19 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.selectAdd = function(cellIdx) {
         /* add a single cell to the selection. If it already exists, remove it. */
-        console.time("selectAdd");
+        if(DEBUG) console.time("selectAdd");
         if (self.selCells.has(cellIdx))
             self.selCells.delete(cellIdx);
         else
             self.selCells.add(cellIdx);
-        console.time("selectAdd");
+        if(DEBUG) console.time("selectAdd");
         self._selUpdate();
     };
 
     this.selectAll = function(cellIdx) {
         /* add all cells to selection */
         var selCells = self.selCells;
-        var pxCoords = self.coords.px;
-        for (var i = 0, I = pxCoords.length / 2; i < I; i++) {
+        for (let i = 0; i < this.getCount(); i++) {
             selCells.add(i);
         }
         self.selCells = selCells;
@@ -2420,12 +3216,12 @@ function MaxPlot(div, top, left, width, height, args) {
     this.selectVisible = function() {
         /* add all visible cells to selection */
         var selCells = self.selCells;
-        var pxCoords = self.coords.px;
-        for (var i = 0; i < pxCoords.length/2; i++) {
-            var pxX = pxCoords[2*i];
-            var pxY = pxCoords[2*i+1];
-            if (isHidden(pxX, pxY))
-               continue;
+        const coords = this.usesWebGL() ? self.coords.gl : self.coords.px;
+        for (var i = 0; i < self.getCount(); i++) {
+            var x = coords[2*i];
+            var y = coords[2*i+1];
+            if (isHidden(x, y, i))
+                continue;
             selCells.add(i);
         }
         self.selCells = selCells;
@@ -2467,25 +3263,42 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.selectInRect = function(x1, y1, x2, y2) {
         /* find all cells within a rectangle and add them to the selection. */
-        var minX = Math.min(x1, x2);
-        var maxX = Math.max(x1, x2);
+        let minX = Math.min(x1, x2);
+        let maxX = Math.max(x1, x2);
 
-        var minY = Math.min(y1, y2);
-        var maxY = Math.max(y1, y2);
+        let minY = Math.min(y1, y2);
+        let maxY = Math.max(y1, y2);
 
-        console.time("select");
-        var pxCoords = self.coords.px;
-        for (var i = 0; i < pxCoords.length/2; i++) {
-            var pxX = pxCoords[2*i];
-            var pxY = pxCoords[2*i+1];
-            if (isHidden(pxX, pxY))
+        // If webGL is being used, rescale to clip space
+        if(this.usesWebGL()) {
+            // Invert y coordinate (makes rescaling easier)
+            // Note: this does make minY ≥ maxY, but this will become moot soon
+            minY = this.canvas.height - minY;
+            maxY = this.canvas.height - maxY;
+
+            // 
+            const glMinX = minX / self.canvas.width * 2 - 1;
+            const glMaxX = maxX / self.canvas.width * 2 - 1;
+            const glMinY = maxY / self.canvas.height * 2 - 1;
+            const glMaxY = minY / self.canvas.height * 2 - 1;
+
+            [minX, minY] = this.port.projection.getCoordinates(glMinX, glMinY);
+            [maxX, maxY] = this.port.projection.getCoordinates(glMaxX, glMaxY);
+        }
+
+        if(DEBUG) console.time("select");
+        const coords = this.usesWebGL() ? self.coords.gl : self.coords.px;
+        for (let i = 0; i < coords.length/2; i++) {
+            const x = coords[2*i];
+            const y = coords[2*i+1];
+            if (isHidden(x, y, i))
                continue;
-            if ((minX <= pxX) && (pxX <= maxX) && (minY <= pxY) && (pxY <= maxY)) {
+            if ((minX <= x) && (x <= maxX) && (minY <= y) && (y <= maxY)) {
                 self.selCells.add(i);
             }
 
         }
-        console.timeEnd("select");
+        if(DEBUG) console.timeEnd("select");
         self._selUpdate();
     };
 
@@ -2528,10 +3341,25 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.coords.origAll===undefined)
             self.coords.origAll = cloneArray(self.coords.orig);
         var coords = self.coords.orig;
-        for (var i = 0; i < coords.length/2; i++) {
-            if (!selCells.has(i)) {
-                coords[2*i] = HIDCOORD;
-                coords[2*i+1] = HIDCOORD;
+
+        if(this.usesWebGL()){
+            // Add any non-selected cells to the hidden array
+            /** @type {Uint8Array} */
+            let hidden = this.coords.hidden;
+            for (var i = 0; i < this.getCount(); i++) {
+                if (!selCells.has(i)) {
+                    hidden[i] = 1;
+                }
+            }
+
+            // Rebind the hidden attribute
+            this.bindBuffer(1, this.a_Hidden, this.coords.hidden, self.ctx.UNSIGNED_BYTE);
+        } else {
+            for (var i = 0; i < coords.length/2; i++) {
+                if (!selCells.has(i)) {
+                    coords[2*i] = HIDCOORD;
+                    coords[2*i+1] = HIDCOORD;
+                }
             }
         }
         self.scaleData();
@@ -2547,25 +3375,45 @@ function MaxPlot(div, top, left, width, height, args) {
         var selCells = self.selCells;
         var coords = self.coords.orig;
 
-        for (var i = 0; i < coords.length/2; i++) {
-            if (selCells.has(i)) {
-                coords[2*i] = HIDCOORD;
-                coords[2*i+1] = HIDCOORD;
+        if(this.usesWebGL()) {
+            // Add any selected cells to the hidden array
+            /** @type {Uint8Array} */
+            let hidden = this.coords.hidden;
+            for(const selCell of selCells.values()) {
+                hidden[selCell] = 1;
             }
+
+            // Rebind the hidden attribute
+            this.bindBuffer(1, this.a_Hidden, this.coords.hidden, self.ctx.UNSIGNED_BYTE);
+        } else {
+            // Set all selected cells to HIDCOORD
+            for (var i = 0; i < coords.length/2; i++) {
+                if (selCells.has(i)) {
+                    coords[2*i] = HIDCOORD;
+                    coords[2*i+1] = HIDCOORD;
+                }
+            }
+
+            self.scaleData();
         }
 
-        self.scaleData();
+        // Unselect all cells
         self.selectSet([]);
         self._selUpdate();
     }   
 
     this.unhideAll = function() {
         /* undo the hide operation */
-        if (self.coords.origAll!==undefined) {
-            self.coords.orig = self.coords.origAll;
-            self.coords.origAll = undefined;
+        if(this.usesWebGL()) {
+            this.coords.hidden.fill(0);
+            this.bindBuffer(1, this.a_Hidden, this.coords.hidden, self.ctx.UNSIGNED_BYTE);
+        } else {
+            if (self.coords.origAll!==undefined) {
+                self.coords.orig = self.coords.origAll;
+                self.coords.origAll = undefined;
+            }
+            self.scaleData();
         }
-        self.scaleData();
     }
 
     this.getCount = function() {
@@ -2576,9 +3424,9 @@ function MaxPlot(div, top, left, width, height, args) {
     this.getVisibleCount = function() {
         /* return number of cells that are visible */
         let count = 0;
-        let coords = self.coords.orig;
+        let coords = this.usesWebGL() ? self.coords.gl : self.coords.orig;
         for (var i = 0; i < coords.length/2; i++) {
-            if (!isHidden(coords[2*i], coords[2*i+1]))
+            if (!isHidden(coords[2*i], coords[2*i+1], i))
                 count++;
         }
         return count;
@@ -2589,6 +3437,21 @@ function MaxPlot(div, top, left, width, height, args) {
     this._selUpdate = function() {
         /* called after the selection has been updated, calls the onSelChange callback */
         setStatus(self.selCells.size + " " + self.gSampleDescription + "s selected");
+
+        // If we're using webGL, adjust the attribute buffer
+        if(self.usesWebGL()) {
+            // Convert the selected cell set to a buffer
+            this.bindLayers();
+
+            // We need to do the same work on the child plot, if one exists
+            // Since the child plot's selected cells share a pointer 
+            if (self.childPlot) {
+                const childPlot = self.childPlot;
+                childPlot.coods.layers = this.coords.layers;
+                childPlot.bindBuffer(1, childPlot.a_Layer, childPlot.coords.layers, childPlot.ctx.UNSIGNED_BYTE);
+            }
+        }
+
         if (self.onSelChange!==null)
             self.onSelChange(self.selCells);
     }
@@ -2617,7 +3480,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.labelAt = function(x, y) {
         /* return the index and the text of the label at position x,y or null if nothing there */
-        //console.time("labelCheck");
+        //if(DEBUG) console.time("labelCheck");
         var clusterLabels = self.coords.labels;
         if (clusterLabels===null || clusterLabels===undefined)
             return null;
@@ -2639,12 +3502,12 @@ function MaxPlot(div, top, left, width, height, args) {
             var x2 = box[2];
             var y2 = box[3];
             if ((x >= x1) && (x <= x2) && (y >= y1) && (y <= y2)) {
-                //console.timeEnd("labelCheck");
+                //if(DEBUG) console.timeEnd("labelCheck");
                 var labelText = clusterLabels[i][2];
                 return [labelText, i];
             }
         }
-        //console.timeEnd("labelCheck");
+        //if(DEBUG) console.timeEnd("labelCheck");
         return null;
     };
 
@@ -2667,28 +3530,36 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.cellsAt = function(x, y) {
         /* check which cell's bounding boxes contain (x, y), return a list of the cell IDs, sorted by distance */
-        //console.time("cellSearch");
-        var pxCoords = self.coords.px;
-        if (pxCoords===null)
+        //if(DEBUG) console.time("cellSearch");
+        const coords = this.usesWebGL() ? this.coords.gl : this.coords.px;
+        if (coords === null || coords === undefined)
             return null;
         var possIds = [];
         var radius = self.port.radius;
-        for (var i = 0; i < pxCoords.length/2; i++) {
-           var pxX = pxCoords[2*i];
-           var pxY = pxCoords[2*i+1];
-            if (isHidden(pxX, pxY))
+        for (var i = 0; i < coords.length/2; i++) {
+            let pxX = coords[2*i];
+            let pxY = coords[2*i+1];
+            if (isHidden(pxX, pxY, i))
                continue;
-            var x1 = pxX - radius;
-            var y1 = pxY - radius;
-            var x2 = pxX + radius;
-            var y2 = pxY + radius;
+
+            // If webGL is being used, we have to translate the clip space coordiante to pixel space
+            if(this.usesWebGL()) {
+                const [glX, glY] = self.port.projection.multiply(pxX, pxY);
+                pxX = (glX + 1) / 2 * self.canvas.width;
+                pxY = ((glY + 1) / 2 * -self.canvas.height) + self.canvas.height;
+            }
+
+            const x1 = pxX - radius;
+            const y1 = pxY - radius;
+            const x2 = pxX + radius;
+            const y2 = pxY + radius;
             if ((x >= x1) && (x <= x2) && (y >= y1) && (y <= y2)) {
-                var dist = Math.sqrt(Math.pow(x-pxX, 2) + Math.pow(y-pxY, 2));
+                const dist = Math.sqrt(Math.pow(x-pxX, 2) + Math.pow(y-pxY, 2));
                 possIds.push([dist, i]);
             }
         }
 
-        //console.timeEnd("cellSearch");
+        //if(DEBUG) console.timeEnd("cellSearch");
         if (possIds.length===0)
             return null;
         else {
@@ -2812,9 +3683,6 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.timer!==null)
             clearTimeout(self.timer);
         self.timer = setTimeout(self.onNoMouseMove, 130);
-        // save mouse pos for onNoMouseMove timer handler
-        self.lastMouseX = ev.clientX;
-        self.lastMouseY = ev.clientY;
 
         // label hit check requires canvas coordinates x/y
         var clientX = ev.clientX;
@@ -2845,9 +3713,10 @@ function MaxPlot(div, top, left, width, height, args) {
 
         if (self.mouseDownX!==null) {
             // we're panning
-            if (((ev.altKey || self.dragMode==="move")) && self.panCopy!==null) {
-                var xDiff = self.mouseDownX - clientX;
-                var yDiff = self.mouseDownY - clientY;
+            if (((ev.altKey || self.dragMode==="move")) && (self.usesWebGL() || self.panCopy!==null)) {
+                // Note: If using webGL, we transelate relatively not absolutely, so use the last movement position
+                const xDiff = (self.usesWebGL() ? self.lastMouseX : self.mouseDownX) - clientX;
+                const yDiff = (self.usesWebGL() ? self.lastMouseY : self.mouseDownY) - clientY;
                 self.panBy(xDiff, yDiff);
             }
             else  {
@@ -2859,6 +3728,10 @@ function MaxPlot(div, top, left, width, height, args) {
                self.drawMarquee(self.mouseDownX, self.mouseDownY, clientX, clientY, forceAspect);
             }
         }
+
+        // save mouse pos for onNoMouseMove timer handler and WebGL panning
+        self.lastMouseX = ev.clientX;
+        self.lastMouseY = ev.clientY;
     };
 
     this.onNoMouseMove = function() {
@@ -3011,7 +3884,7 @@ function MaxPlot(div, top, left, width, height, args) {
        for (var i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
            var pxY = pxCoords[2*i+1];
-           if (isHidden(pxX, pxY))
+           if (isHidden(pxX, pxY, i))
                continue;
            var col = colors[coordColors[i]];
 
@@ -3042,15 +3915,16 @@ function MaxPlot(div, top, left, width, height, args) {
     };
 
     this.setupMouse = function() {
+        const canvas = this.usesWebGL() ? this.labelCanvas : this.canvas;
        // setup the mouse callbacks
-       self.canvas.addEventListener('mousedown', self.onMouseDown);
-       self.canvas.addEventListener("mousemove", self.onMouseMove);
-       self.canvas.addEventListener("mouseup", self.onMouseUp);
+       canvas.addEventListener('mousedown', self.onMouseDown);
+       canvas.addEventListener("mousemove", self.onMouseMove);
+       canvas.addEventListener("mouseup", self.onMouseUp);
        // when the user moves the mouse, the mouse is often NOT on the canvas,
        // but on the marquee box, so connect this one, too.
        self.selectBox.addEventListener("mouseup", self.onMouseUp);
 
-       self.canvas.addEventListener("wheel", self.onWheel);
+       canvas.addEventListener("wheel", self.onWheel);
     };
 
     this.setShowLabels = function(trueOrFalse) {
@@ -3088,12 +3962,22 @@ function MaxPlot(div, top, left, width, height, args) {
         for (var i = 0; i<newLabels.length; i++)
             self.coords.labels[i][2] = newLabels[i];
 
-        self.coords.pxLabels = scaleLabels(self.coords.labels, self.port.zoomRange, self.port.radius,
-                                           self.canvas.width, self.canvas.height);
+        self.coords.pxLabels = scaleLabels(
+            self.coords.labels,
+            this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
+            self.port.radius,
+            self.canvas.width,
+            self.canvas.height
+        );
 
         if (self.coords.annots) {
-            let pxAnnots = scaleLabels(self.coords.annots, self.port.zoomRange, self.port.radius,
-                                           self.canvas.width, self.canvas.height);
+            let pxAnnots = scaleLabels(
+                self.coords.annots,
+                this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
+                self.port.radius,
+                self.canvas.width,
+                self.canvas.height
+            );
             for (let pxa of pxAnnots)
                 self.coords.labels.push(pxa);
         }
@@ -3151,10 +4035,10 @@ function MaxPlot(div, top, left, width, height, args) {
         self.resetMarquee();
 
         if (self.interact) {
-            self.icons["move"].style.backgroundColor = gButtonBackground;
-            self.icons["zoom"].style.backgroundColor = gButtonBackground;
-            self.icons["select"].style.backgroundColor = gButtonBackground;
-            self.icons[modeName].style.backgroundColor = gButtonBackgroundClicked;
+            self.icons["move"].style.backgroundColor = this.isLight() ? gButtonBackground : gButtonDarkBackground;
+            self.icons["zoom"].style.backgroundColor = this.isLight() ? gButtonBackground : gButtonDarkBackground;
+            self.icons["select"].style.backgroundColor = this.isLight() ? gButtonBackground : gButtonDarkBackground;
+            self.icons[modeName].style.backgroundColor = this.isLight() ? gButtonBackgroundClicked : gButtonDarkBackgroundClicked;
         }
         if (self.childPlot)
             self.childPlot.activateMode(modeName);
@@ -3178,9 +4062,9 @@ function MaxPlot(div, top, left, width, height, args) {
 	self.setColors(["FF0000", "00FF00", "0000FF", "CC00CC", "008800"]);
 	self.setColorArr(randomArray(Uint8Array, n, 4));
 
-        console.time("draw");
+        if(DEBUG) console.time("draw");
         self.drawDots();
-        console.timeEnd("draw");
+        if(DEBUG) console.timeEnd("draw");
         return self;
     };
 
@@ -3202,7 +4086,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var opts = cloneObj(self.globalOpts);
         opts.showClose = true;
 
-        var plot2 = new MaxPlot(newDiv, newTop, newLeft, newWidth, newHeight, {"showClose" : true, "showSliders" : false});
+        var plot2 = new MaxPlot(newDiv, newTop, newLeft, newWidth, newHeight, {drawMode: self.mode, "showClose" : true, "showSliders" : false});
 
         plot2.statusLine.style.display = "none";
 
@@ -3229,6 +4113,17 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.onLabelHover = self.onLabelHover;
         plot2.onNoLabelHover = self.onNoLabelHover;
         plot2.onActiveChange = self.onActiveChange;
+
+        if(this.usesWebGL()) {
+            // Initialiaze WebGL buffers on child plot
+            plot2.bindBuffer(2, plot2.a_Position, plot2.coords.gl, plot2.ctx.FLOAT);
+
+            plot2.bindColors();
+
+            plot2.bindBuffer(1, plot2.a_Layer, plot2.coords.layers, plot2.ctx.UNSIGNED_BYTE);
+
+            plot2.bindBuffer(1, plot2.a_Hidden, plot2.coords.hidden, plot2.ctx.UNSIGNED_BYTE);
+        }
 
         plot2.drawDots();
 
@@ -3326,7 +4221,7 @@ function MaxPlot(div, top, left, width, height, args) {
             var x = coords[i * 2];
             var y = coords[i * 2 + 1];
 
-            if (isHidden(x, y))
+            if (isHidden(x, y, i) && !this.usesWebGL())
                 continue;
 
             calc[label][0].push(x);
@@ -3339,4 +4234,184 @@ function MaxPlot(div, top, left, width, height, args) {
     // object constructor code
     self.initCanvas(div, top, left, width, height, args);
     self.initPlot(args);
+}
+
+/**
+ * Orthographic Projection Matrix
+ * src: scratchapixel.com
+ * 2 / (r - l)      0      0 -(r + l) / (r - l)
+ *      0      2 / (t - b) 0 -(t + b) / (t - b)
+ *      0           0      1          0
+ *      0           0      0          1
+ */
+class Matrix4 {
+  constructor() {
+    this.elements = new Float32Array(16);
+    this.reset();
+  }
+
+  reset() {
+    this.left = -1;
+    this.right = 1;
+    this.top = 1;
+    this.bottom = -1;
+
+    for(let i = 0; i < 16; i++) {
+      this.elements[i] = i % 5 == 0 ? 1 : 0;
+    }
+  }
+
+  get width() {return this.right - this.left;}
+  get height() {return this.top - this.bottom;}
+
+  // Given the values of left, right, top, and bottom,
+  // find the values of the matrix
+  calculate() {
+    this.elements[0] = 2 / (this.right - this.left);
+    this.elements[3] = - (this.right + this.left) / (this.right - this.left);
+
+    this.elements[5] = 2 / (this.top - this.bottom);
+    this.elements[7] = - (this.top + this.bottom) / (this.top - this.bottom);
+  }
+
+  print() {
+    let output = "";
+    for(let i = 0; i < 16; i++) {
+      output += this.elements[i];
+
+      if(i % 4 == 3) {
+        if(i != 15) {
+          output += "\n";
+        }
+      } else {
+        output += ", "
+      }
+    }
+
+    console.log(output);
+    console.log(this.left, this.right, this.top, this.bottom);
+  }
+
+  // Translate: Shift borders by -u and -v (so that points move x and y relative to the canvas)
+  translate(x, y) {
+    // Safety check
+    if(x === undefined || x === null) x = 0;
+    if(y === undefined || y === null) y = 0;
+
+    // Scale x and y relative to the canvas
+    const u = x * this.width / 2;
+    const v = y * this.height / 2;
+
+    this.left -= u;
+    this.right -= u;
+    this.top -= v;
+    this.bottom -= v;
+    this.calculate();
+  }
+
+  // Scale:
+  scale(zoomFactor, x, y) {
+    // Safety check
+    if(zoomFactor === undefined || zoomFactor === null || zoomFactor == 1 || zoomFactor <= 0) return;
+    if(x === undefined || x === null) x = 0;
+    if(y === undefined || y === null) y = 0;
+
+    if(x < -1) x = -1;
+    if (x > 1) x = 1;
+    if (y < -1) y = -1;
+    if (y > 1) y = 1;
+
+    // x and y are relative to the box. Find the coordinates in space
+    const [u, v] = this.getCoordinates(x, y);
+
+    // Now calculate the new boundary positions
+    this.left = u - (u - this.left) / zoomFactor;
+    this.right = u + (this.right - u) / zoomFactor;
+    this.top = v + (this.top - v) / zoomFactor;
+    this.bottom = v - (v - this.bottom) / zoomFactor;
+
+    this.calculate();
+  }
+
+  // Resize the viewport to the given bounds
+  setBounds(l, r, t, b, rescale = true) {
+    // Safety check
+    if(l > r || b > t) throw new Error(`Invalid Bounds:\nleft: ${l}\tright: ${r}\ntop: ${t}\tbottom: ${b}`);
+
+    let sl, sb, sr, st;
+    if(rescale) {
+        // If requested, find each set of coordinates in space
+        // (By default, assumes provided coordinates are relative to canvas, not clip space)
+        [sl, sb] = this.getCoordinates(l, b);
+        [sr, st] = this.getCoordinates(r, t);
+    } else {
+        // No rescale requested. Just use given coordiantes
+        [sl, sb] = [l, b];
+        [sr, st] = [r, t];
+    }
+
+    // Set the new bounds and recalculate
+    this.left = sl;
+    this.right = sr;
+    this.top = st;
+    this.bottom = sb;
+    this.calculate();
+  }
+
+  /**
+   * Convert canvas coordinates (-1 ≤ x, y ≤ 1) to clip space coordinates
+   * Assumes x and y are 0 if left undefined
+   * 
+   * @param {Number} x Canvas x-coordinate
+   * @param {Number} y Canvas y-coordinate
+   * @returns (x, y) coordinates in clip space
+   */
+  getCoordinates(x, y) {
+    const u = (x === undefined || x === null) ? 0 : this.left + (this.width / 2) + ((this.width * x) / 2);
+    const v = (y === undefined || y === null) ? 0 : this.bottom + (this.height / 2) + ((this.height * y) / 2);
+    return [u, v];
+  }
+
+  /**
+   * Multiply the provided coordinates (-1 ≤ x, y ≤ 1) by this as a transformation
+   * 
+   * @param {Number} x 
+   * @param {Number} y 
+   */
+  multiply(x, y) {
+    return [(2*x - this.left - this.right) / this.width, (2*y - this.top - this.bottom) / this.height];
+  }
+
+  /**
+   * Convert the current transformation to pixel space
+   * 
+   * @param {Object} zr The initial zoomrange
+   * @param {Number} canvWidth
+   * @param {Number} canvHeight
+   */
+  pxBounds(zr, canvWidth, canvHeight) {
+    const pxSpanX = zr.maxX - zr.minX;
+    const pxSpanY = zr.maxY - zr.minY;
+    const pxCenterX = zr.minX + pxSpanX / 2;
+    const pxCenterY = zr.minY + pxSpanY / 2;
+    const [glCenterX, glCenterY] = this.multiply(0, 0);
+
+    const [pxScaleFactorX, pxScaleFactorY] = [pxSpanX / canvWidth, pxSpanY / canvHeight]
+    const [glScaleFactorX, glScaleFactorY] = [this.width / 2, this.height / 2];
+
+    const newPxCenterX = pxCenterX - glCenterX * (canvWidth / 2) * pxScaleFactorX * glScaleFactorX;
+    const newPxCenterY = pxCenterY - glCenterY * (canvHeight / 2) * pxScaleFactorY * glScaleFactorY;
+
+    const newMinX = newPxCenterX - pxSpanX / 2 * glScaleFactorX;
+    const newMaxX = newPxCenterX + pxSpanX / 2 * glScaleFactorX;
+    const newMinY = newPxCenterY - pxSpanY / 2 * glScaleFactorY;
+    const newMaxY = newPxCenterY + pxSpanY / 2 * glScaleFactorY;
+
+    return {
+        minX: newMinX,
+        maxX: newMaxX,
+        minY: newMinY,
+        maxY: newMaxY
+    }
+  }
 }
