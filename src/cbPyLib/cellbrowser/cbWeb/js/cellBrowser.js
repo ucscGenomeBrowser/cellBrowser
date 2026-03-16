@@ -3685,8 +3685,10 @@ var cellbrowser = function() {
         rend.setLabelCoords(labelCoords);
         rend.setLabelField(metaInfo.name);
 
-        if (rend === renderer)
+        if (rend === renderer) {
             setLabelDropdown(metaInfo.name);
+            updateLabelHighlight(metaInfo.name);
+        }
     }
 
     function setLabelField(labelField, targetRenderer) {
@@ -3694,7 +3696,7 @@ var cellbrowser = function() {
         var rend = targetRenderer || renderer;
         if (labelField===null) {
             rend.setLabelField(null);
-            if (!targetRenderer) setLabelDropdown(null);
+            if (!targetRenderer) { setLabelDropdown(null); updateLabelHighlight(null); }
         }
         else {
             var metaInfo = db.findMetaInfo(labelField);
@@ -3712,6 +3714,15 @@ var cellbrowser = function() {
                 db.loadMetaVec(metaInfo, function(values, mi) { computeAndSetLabels(values, mi, rend); });
         }
     }
+
+   function updateLabelHighlight(fieldName) {
+       /* highlight the meta sidebar item for the current label field */
+       $('.tpMetaBox').removeClass('tpMetaLabelSelect');
+       if (fieldName) {
+           var fieldIdx = db.fieldNameToIndex(fieldName);
+           if (fieldIdx >= 0) $('#tpMetaBox_'+fieldIdx).addClass('tpMetaLabelSelect');
+       }
+   }
 
    function setColorByDropdown(fieldName) {
        /* set the meta 'color by' dropdown to a given value. The value is the meta field name, or its label, or its index */
@@ -9492,6 +9503,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         }
         let coordIdx = db.findCoordIdx(otherRend.coords.coordInfo.shortLabel);
         chosenSetValue("tpLayoutCombo", coordIdx);
+        setLabelDropdown(renderer.getLabelField() ?? null);
+        updateLabelHighlight(renderer.getLabelField());
         buildLegendBar();
     }
 

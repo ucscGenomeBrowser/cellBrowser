@@ -377,6 +377,7 @@ input[type=checkbox], input[type=radio] {
 .tpMetaHistLabel { text-decoration: underline; color: blue }
 .tpMetaValue { height: 1.3em; padding-left: 3px; background-color:#EEE; }
 .tpMetaSelect { outline: 2px solid black; background-color: #DEDEDE }
+.tpMetaLabelSelect { outline: 2px solid black; background-color: #DEDEDE }
 .tpMetaValueSelect { background-color: #CCC}
 .tpMetaPerc { color:grey; float:right }
 .tpMetaSpark { float:right }
