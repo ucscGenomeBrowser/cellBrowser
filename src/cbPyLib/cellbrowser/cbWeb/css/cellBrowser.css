@@ -135,6 +135,17 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         font-weight:bold;
 }
 
+#mpFlipbookCont {
+        background: rgba(255,255,255,0.65);
+        padding: 6px 12px 12px;
+        border-radius: 4px;
+        width: auto !important;
+        right: 12px;
+}
+#mpFlipbookCont #mpFlipbook {
+        width: 100% !important;
+}
+
 .ui-helper-reset { font-size: 12px}
 .ui-tabs { padding: 0 }
 .ui-tabs { padding: 0 }
