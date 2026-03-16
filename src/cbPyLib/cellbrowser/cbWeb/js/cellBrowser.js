@@ -656,6 +656,7 @@ var cellbrowser = function() {
         "ena_project" : "European Nucleotide Archive",
         "hca_dcp" : "Human Cell Atlas Data Portal",
         "cirm_dataset" : "California Institute of Regenerative Medicine Dataset",
+        "zenodo" : "Zenodo",
     };
 
     let descUrls = {
@@ -674,6 +675,7 @@ var cellbrowser = function() {
         "cirm_dataset" : "https://cirm.ucsc.edu/d/",
         "arrayexpress" : "https://www.ebi.ac.uk/arrayexpress/experiments/",
         "hca_dcp" : "https://data.humancellatlas.org/explore/projects/",
+        "zenodo" : "https://doi.org/",
     }
 
     function htmlAddLink(htmls, desc, key, linkLabel) {
@@ -1037,6 +1039,7 @@ var cellbrowser = function() {
         htmlAddLink(htmls, desc, "ega_dataset");
         htmlAddLink(htmls, desc, "ena_project");
         htmlAddLink(htmls, desc, "hca_dcp");
+        htmlAddLink(htmls, desc, "zenodo");
 
         if (desc.urls) {
             for (let key in desc.urls)
