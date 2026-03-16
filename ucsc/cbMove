@@ -16,6 +16,34 @@ def parse_timestamp(s):
             continue
     raise argparse.ArgumentTypeError(f"Invalid date/time format: {s}")
 
+def compute_start_time(args):
+    """Return a start_time datetime (or None) based on --min, --time, --date."""
+    now = datetime.now()
+    if args.min:
+        return now - timedelta(minutes=args.min)
+    elif args.time:
+        return args.time
+    elif args.date:
+        return args.date
+    return None
+
+def find_info_files(dataset_name):
+    """Scan current directory for .info files matching the given dataset name."""
+    results = []
+    for f in os.listdir('.'):
+        if not f.endswith('.info'):
+            continue
+        try:
+            with open(f) as fh:
+                metadata = json.load(fh)
+            if metadata.get("MetaData", {}).get("dataset", "") == dataset_name:
+                actual_file = metadata.get("MetaData", {}).get("filename", "")
+                mtime = os.path.getmtime(f)
+                results.append((f, actual_file, mtime))
+        except Exception as e:
+            print(f"[SKIP] Failed to parse {f}: {e}")
+    return results
+
 def get_file_list_from_table(file_path):
     file_list = []
     with open(file_path, newline='') as f:
@@ -146,36 +174,26 @@ def main():
     args = parser.parse_args()
 
     if args.all:
-        results = []
-        for f in os.listdir('.'):
-            if f.endswith('.info'):
-                try:
-                    with open(f) as info_f:
-                        metadata = json.load(info_f)
-                    dataset_name = metadata.get("MetaData", {}).get("dataset", "")
-                    actual_file = metadata.get("MetaData", {}).get("filename", "")
-                    if dataset_name == args.dir:
-                        mtime = os.path.getmtime(f)
-                        results.append((f, actual_file, mtime))
-                except Exception as e:
-                    print(f"[SKIP] Failed to parse {f}: {e}")
+        results = find_info_files(args.dir)
+        start_time = compute_start_time(args)
 
-        for f, actual_file, mtime in sorted(results, key=lambda x: x[2]):
-            time_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
-            print(f"{time_str}  {f} → {actual_file}") 
+        current_year = None
+        for f, actual_file, mtime in sorted(results, key=lambda x: x[2], reverse=True):
+            if start_time and datetime.fromtimestamp(mtime) < start_time:
+                continue
+            file_dt = datetime.fromtimestamp(mtime)
+            if file_dt.year != current_year:
+                if current_year is not None:
+                    print()
+                print(f"--- {file_dt.year} ---")
+                current_year = file_dt.year
+            time_str = file_dt.strftime('%Y-%m-%d %H:%M:%S')
+            print(f"{time_str}  {f} → {actual_file}")
 
         sys.exit(0)
 
-    now = datetime.now()
-    start_time = end_time = None
-
-    if args.min:
-        start_time = now - timedelta(minutes=args.min)
-        end_time = now
-    elif args.time:
-        start_time = args.time
-    elif args.date:
-        start_time = args.date
+    start_time = compute_start_time(args)
+    end_time = datetime.now() if args.min else None
 
     file_list = []
     if args.list:
@@ -183,16 +201,7 @@ def main():
     elif args.file:
         file_list = [args.file]
     else:
-        for f in os.listdir('.'):
-            if f.endswith('.info'):
-                try:
-                    with open(f) as info_f:
-                        metadata = json.load(info_f)
-                    dataset_name = metadata.get("MetaData", {}).get("dataset", "")
-                    if dataset_name == args.dir:
-                        file_list.append(f)
-                except Exception as e:
-                    print(f"[SKIP] Failed to parse {f}: {e}")
+        file_list = [f for f, _, _ in find_info_files(args.dir)]
     
     orig_subdir = None if not args.subdir or args.subdir == "orig" else args.subdir 
 
@@ -215,19 +224,5 @@ def main():
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
-        parser = argparse.ArgumentParser(
-            description="Move uploaded files to Cell Browser dataset 'orig' directory.",
-            formatter_class=argparse.HelpFormatter)
-        parser.add_argument("-d", "--dir", required=True, help="Input dataset directory name (e.g. cortex-dev).")
-        parser.add_argument("-l", "--list", help="Input file list containing .info files (one per line) to move over.")
-        parser.add_argument("-f", "--file", help="Path to a single .info file to move over.")
-        parser.add_argument("-o", "--subdir", default="orig", help="Subdirectory to move files to inside the 'orig' directory. Helpful if you need to version or add updated files (e.g. orig/update-MM-DD-YY or orig/v1_MM-DD-YY)")
-        parser.add_argument("--date", type=parse_timestamp, help="Only move files modified on/after this date (e.g., 2025-06-23)")
-        parser.add_argument("--time", type=parse_timestamp, help="Only move files modified on/after this time (e.g., 12:00)")
-        parser.add_argument("--min", type=int, help="Limit to last N minutes")
-        parser.add_argument("-a", "--all", action="store_true", help="List all .info files in the current directory matching the dataset name")
-        parser.add_argument("--submit", action="store_true", help="Re-copy files from submit directory")
-        parser.print_help()
-        sys.exit(0)
-
+        sys.argv.append("--help")
     main()
