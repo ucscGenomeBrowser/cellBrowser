@@ -728,7 +728,7 @@ a.list-group-item:focus {
 
 /* Slider */
 .sliderContainer {
-    background: rgba(30, 30, 30, 0.7);
+    background: transparent;
 }
 
 .sliderLabel {

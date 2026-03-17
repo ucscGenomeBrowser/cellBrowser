@@ -67,7 +67,7 @@ function MaxPlot(div, top, left, width, height, args) {
     const gTextSize = 16; // size of cluster labels
     const gTitleSize = 18; // size of title text
     const gStatusHeight = 14; // height of status bar
-    const gSliderFromBottom = 56; // distance from bottom to top of slider div
+    const gSliderFromBottom = 70; // distance from bottom to top of slider div
     const gZoomButtonSize = 30; // size of zoom buttons
     const gZoomFromLeft = 10;  // position of zoom buttons from left
     const gZoomFromBottom = 140;  // position of zoom buttons from bottom
@@ -135,6 +135,10 @@ function MaxPlot(div, top, left, width, height, args) {
             }
         }
         $('#mpSliderReset').children()[0].style.fill = this.isLight() ? "black" : "white";
+        $(self.alphaSlider).css('background', this.isLight() ? '' : 'rgba(120,120,120,0.6)');
+        $(self.radiusSlider).css('background', this.isLight() ? '' : 'rgba(120,120,120,0.6)');
+
+        if (self.sliderDiv) self.sliderDiv.style.backgroundColor = this.isLight() ? "rgba(255,255,255,0.75)" : "rgba(30,30,30,0.7)";
         $(`#${this.div.id} > #tpWatermark`).css('color', this.isLight() ? 'black' : 'white');
         $('#mpProgressLabel').css('color', this.isLight() ? 'black' : 'white');
 
@@ -216,7 +220,7 @@ function MaxPlot(div, top, left, width, height, args) {
             addZoomButtons(height-gZoomFromBottom, gZoomFromLeft, self);
             addModeButtons(10, 10, self);
             addStatusLine(height-gStatusHeight, left, width, gStatusHeight);
-            addTitleDiv(height-gTitleSize-gStatusHeight-4, 8);
+            addTitleDiv(height-gTitleSize-gStatusHeight-12, 8);
 
             /* add the div used for the mouse selection/zoom rectangle to the DOM */
             var selectDiv = document.createElement('div');
@@ -584,17 +588,20 @@ function MaxPlot(div, top, left, width, height, args) {
             "value": 4,
             "min"  : 1,
             "max"  : 7,
-            "step" : 1, 
+            "step" : 1,
             "slide": onChangeAlpha
         });
         $(self.radiusSlider).slider({
             "value": 4,
             "min"  : 1,
             "max"  : 7,
-            "step" : 1, 
+            "step" : 1,
             "slide": onChangeRadius
         });
-        
+        if (!self.isLight()) {
+            $(self.alphaSlider).css('background', 'rgba(120,120,120,0.6)');
+            $(self.radiusSlider).css('background', 'rgba(120,120,120,0.6)');
+        }
     }
 
     this.setWatermark = function (text) {
@@ -897,6 +904,8 @@ function MaxPlot(div, top, left, width, height, args) {
         sliderDiv.style.height = "41px";
         sliderDiv.style.position = "absolute";
         sliderDiv.style.zIndex = "10";
+        sliderDiv.style.borderRadius = "4px";
+        sliderDiv.style.backgroundColor = self.isLight() ? "rgba(255,255,255,0.75)" : "rgba(30,30,30,0.7)";
         sliderDiv.id = "mpSliderDiv";
         sliderDiv.appendChild(radiusCont);
         sliderDiv.appendChild(alphaCont);
@@ -2489,7 +2498,7 @@ function MaxPlot(div, top, left, width, height, args) {
        statusDiv.style.top = (height-gStatusHeight)+"px";
        statusDiv.style.width = width+"px";
 
-       self.titleDiv.style.top = (height-gStatusHeight-gTitleSize)+"px";
+       self.titleDiv.style.top = (height-gStatusHeight-gTitleSize-8)+"px";
 
        if (self.sliderDiv)
            self.sliderDiv.style.top = (height-gStatusHeight-gSliderFromBottom)+"px";
