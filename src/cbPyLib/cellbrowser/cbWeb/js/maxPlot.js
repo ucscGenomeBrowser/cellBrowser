@@ -131,11 +131,12 @@ function MaxPlot(div, top, left, width, height, args) {
         let zoomDivButtons = this.zoomDiv.children;
         for(let button of zoomDivButtons) {
             if(gButtonBackgrounds.includes(button.style.backgroundColor)){
-                button.style.backgroundColor = self.isLight() ? gButtonBackground : gButtonDarkBackground;
+                button.style.backgroundColor = this.isLight() ? gButtonBackground : gButtonDarkBackground;
             }
         }
-        $('#mpSliderReset').children()[0].style.fill = self.isLight() ? "black" : "white";
+        $('#mpSliderReset').children()[0].style.fill = this.isLight() ? "black" : "white";
         $(`#${this.div.id} > #tpWatermark`).css('color', this.isLight() ? 'black' : 'white');
+        $('#mpProgressLabel').css('color', this.isLight() ? 'black' : 'white');
 
         // Adjust status line color
         this.statusLine.style.backgroundColor = self.isLight() ? "rgb(240, 240, 240)" : "rgb(25, 25, 25)";
@@ -1023,7 +1024,7 @@ function MaxPlot(div, top, left, width, height, args) {
        for (var i=0; i<3; i++) {
            htmls.push('<div id="mpProgressDiv'+i+'" style="display:none; height:17px; width:300px; background-color: rgba(180, 180, 180, 0.3)" style="">');
            htmls.push('<div id="mpProgress'+i+'" style="background-color:#666; height:17px; width:10%"></div>');
-           htmls.push('<div id="mpProgressLabel'+i+'" style="color:black; line-height:17px; position:absolute; top:'+(i*17)+'px;left:100px">Loading...</div>');
+           htmls.push('<div id="mpProgressLabel'+i+`" style="color:${self.isLight() ? "black" : "white"}; line-height:17px; position:absolute; top:'+(i*17)+'px;left:100px">Loading...</div>`);
            htmls.push('</div>');
        }
 
