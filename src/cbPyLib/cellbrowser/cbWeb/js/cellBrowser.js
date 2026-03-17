@@ -4232,8 +4232,25 @@ var cellbrowser = function() {
         // }
 
         let darkModeCSS = document.getElementById('darkMode');
-        darkModeCSS.disabled = lightMode === 1;
-        // darkModeCSS.disabled = true;
+
+        // If the dark mode sheet doesn't exist
+        if(lightMode === 1) {
+            if(darkModeCSS) {
+                darkModeCSS.disabled = true;
+            }
+        } else {
+            if(darkModeCSS) {
+                darkModeCSS.disabled = false;
+            } else {
+                // Add the dark mode stylesheet
+                // TODO: Add this to cellbrowser.py
+                let darkStyle = document.createElement('link');
+                darkStyle.id = 'darkMode';
+                darkStyle.rel = 'stylesheet';
+                darkStyle.href = 'css/darkMode.css';
+                document.head.appendChild(darkStyle);
+            }
+        }
 
         if(lightMode === 1) {
             $('#tpTooltip').css('background-color', 'rgba(255, 255, 255, 0.85)');
@@ -10306,14 +10323,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
        }
 
         buildEmptyLegendBar(metaBarWidth+metaBarMargin+renderer.width, toolBarHeight);
-
-        // Add the dark mode stylesheet
-        // TODO: Add this to cellbrowser.py
-        let darkStyle = document.createElement('link');
-        darkStyle.id = 'darkMode';
-        darkStyle.rel = 'stylesheet';
-        darkStyle.href = 'css/darkMode.css';
-        document.head.appendChild(darkStyle);
 
         // Set buttons and other interactables to not inherit color by default (avoids changing ext/bootstrap.min.css)
         let bootstrapSheetRules = [...[...document.styleSheets].find((sheet) => sheet.href && sheet.href.includes("bootstrap.min.css")).cssRules];
