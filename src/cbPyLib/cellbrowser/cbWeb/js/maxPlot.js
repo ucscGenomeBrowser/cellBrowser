@@ -829,8 +829,8 @@ function MaxPlot(div, top, left, width, height, args) {
         alphaCont.id = "mpAlphaCont";
         //alphaCont.style.left = "150px"; // cellbrowser.css defines grid widths: 45
         alphaCont.className = "sliderContainer";
-        alphaCont.style.top = "18px";
-        alphaCont.style.left = "0px";
+        alphaCont.style.top = "23px";
+        alphaCont.style.left = "5px";
 
         var alphaLabel = document.createElement('div'); // contains the slider and the reset button, floats right
         alphaLabel.id = "alphaSliderLabel";
@@ -872,8 +872,8 @@ function MaxPlot(div, top, left, width, height, args) {
         var radiusCont = document.createElement('span');
         radiusCont.className = "sliderContainer";
         radiusCont.id = "mpRadiusDiv";
-        radiusCont.style.left = "0px"; 
-        radiusCont.style.top = "0px";
+        radiusCont.style.left = "5px";
+        radiusCont.style.top = "5px";
         radiusCont.appendChild(radiusSlider)
 
 
@@ -890,9 +890,11 @@ function MaxPlot(div, top, left, width, height, args) {
         radiusCont.appendChild(brEl);
 
         // add both to the big container div that holds all three slider elements
-        var sliderDiv = document.createElement('span');
+        var sliderDiv = document.createElement('div');
         sliderDiv.style.bottom = "42px";
-        sliderDiv.style.right = "200px";
+        sliderDiv.style.right = "5px";
+        sliderDiv.style.width = "200px";
+        sliderDiv.style.height = "41px";
         sliderDiv.style.position = "absolute";
         sliderDiv.style.zIndex = "10";
         sliderDiv.id = "mpSliderDiv";

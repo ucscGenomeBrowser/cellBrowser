@@ -93,11 +93,13 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 }
 
 .sliderContainer {
-        position : absolute;
+        position: absolute;
         display: grid;
-        grid-template-columns: 45px 120px 15px;
+        grid-template-columns: 45px 120px 20px;
+}
+#mpSliderDiv {
         background: rgba(255,255,255,0.75);
-        padding: 2px 6px;
+        padding: 2px 6px 0px 6px;
         border-radius: 4px;
 }
 
