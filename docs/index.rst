@@ -32,7 +32,7 @@ or email us at cells@ucsc.edu, we can usually fix them quickly.
 Exploring Data
 --------------
 
-Already have a dataset open at cells.ucsc.edu or your own Cell Browser
+Already have a dataset open at https://cells.ucsc.edu or your own Cell Browser
 instance? Start here to learn how to navigate, search genes, select cells,
 and use features like split-screen comparison and heatmaps.
 
@@ -47,14 +47,9 @@ and use features like split-screen comparison and heatmaps.
    ui/downloading
    ui/faq
 
-Submitting Data
---------------
-
-Learn how to submit your dataset for display on the Cell Browser.
-
 .. toctree::
    :maxdepth: 1
-   :caption: Submitting to the Cell Browser
+   :caption: Submitting Data to the Cell Browser
 
    submission
 
