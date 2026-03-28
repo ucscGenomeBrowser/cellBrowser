@@ -45,6 +45,7 @@ and use features like split-screen comparison and heatmaps.
    ui/visualization
    ui/analysis
    ui/downloading
+   load
    ui/faq
 
 .. toctree::
@@ -78,13 +79,6 @@ host it on your own web server? Follow the guides below.
    dataDesc
    collections
    cellbrowser_conf
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Other
-
-   load
-   downloads
 
 .. toctree::
    :hidden:
