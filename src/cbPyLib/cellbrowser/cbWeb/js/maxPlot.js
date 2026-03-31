@@ -67,7 +67,7 @@ function MaxPlot(div, top, left, width, height, args) {
     const gTextSize = 16; // size of cluster labels
     const gTitleSize = 18; // size of title text
     const gStatusHeight = 14; // height of status bar
-    const gSliderFromBottom = 70; // distance from bottom to top of slider div
+    const gSliderFromBottom = 66; // distance from bottom to top of slider div
     const gZoomButtonSize = 30; // size of zoom buttons
     const gZoomFromLeft = 10;  // position of zoom buttons from left
     const gZoomFromBottom = 140;  // position of zoom buttons from bottom
@@ -220,7 +220,7 @@ function MaxPlot(div, top, left, width, height, args) {
             addZoomButtons(height-gZoomFromBottom, gZoomFromLeft, self);
             addModeButtons(10, 10, self);
             addStatusLine(height-gStatusHeight, left, width, gStatusHeight);
-            addTitleDiv(height-gTitleSize-gStatusHeight-12, 8);
+            addTitleDiv(height-gTitleSize-gStatusHeight-4, 8);
 
             /* add the div used for the mouse selection/zoom rectangle to the DOM */
             var selectDiv = document.createElement('div');
@@ -253,8 +253,14 @@ function MaxPlot(div, top, left, width, height, args) {
         }
 
         addProgressBars(top+Math.round(height*0.3), left+30);
-        if (!args || args.showSliders===undefined || args.showSliders===true)
+        if (!args || args.showSliders===undefined || args.showSliders===true) {
             addSliders();
+            if (self.sliderDiv) {
+                self.sliderDiv.style.bottom = "";
+                var sliderH = self.sliderDiv.offsetHeight || 38;
+                self.sliderDiv.style.top = (height - gStatusHeight - sliderH - 4) + "px";
+            }
+        }
 
         //if (args && args.flipBook)
             self.addFlipbookSlider();
@@ -2498,10 +2504,10 @@ function MaxPlot(div, top, left, width, height, args) {
        statusDiv.style.top = (height-gStatusHeight)+"px";
        statusDiv.style.width = width+"px";
 
-       self.titleDiv.style.top = (height-gStatusHeight-gTitleSize-8)+"px";
+       self.titleDiv.style.top = (height-gStatusHeight-gTitleSize-4)+"px";
 
        if (self.sliderDiv)
-           self.sliderDiv.style.top = (height-gStatusHeight-gSliderFromBottom)+"px";
+           self.refreshSliderPos(false);
 
        var flipCont = document.getElementById("mpFlipbookCont");
        if (flipCont) {
@@ -2510,6 +2516,19 @@ function MaxPlot(div, top, left, width, height, args) {
        }
 
     }
+
+    this.refreshSliderPos = function(nearBottom) {
+        /* reposition the slider div. nearBottom=true: just above status bar (single mode / right panel).
+         * nearBottom=false: above the dataset title (left panel in split mode). */
+        if (!self.sliderDiv) return;
+        self.sliderDiv.style.bottom = "";
+        if (nearBottom) {
+            var sliderH = self.sliderDiv.offsetHeight || 38;
+            self.sliderDiv.style.top = (self.height - gStatusHeight - sliderH - 4) + "px";
+        } else {
+            self.sliderDiv.style.top = (self.height - gStatusHeight - gSliderFromBottom) + "px";
+        }
+    };
 
     this.setPos = function(top, left) {
        /* position canvas. Does not affect child  */
@@ -4108,7 +4127,9 @@ function MaxPlot(div, top, left, width, height, args) {
 
         plot2.statusLine.style.display = "none";
 
-        plot2.port = self.port;
+        plot2.port = Object.assign({}, self.port);
+        plot2.port.zoomRange = Object.assign({}, self.port.zoomRange);
+        plot2.port.initZoom  = Object.assign({}, self.port.initZoom);
         plot2.selCells = self.selCells;
 
         plot2.coords = self.coords;

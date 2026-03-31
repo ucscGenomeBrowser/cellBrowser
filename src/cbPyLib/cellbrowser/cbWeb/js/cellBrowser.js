@@ -9515,8 +9515,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         gLegend = otherRend.legend;
         if (mainRenderer) {
             mainRenderer.sliderTarget = otherRend;
-            if (mainRenderer.sliderDiv)
+            if (mainRenderer.sliderDiv) {
                 otherRend.div.appendChild(mainRenderer.sliderDiv);
+                mainRenderer.refreshSliderPos(otherRend !== mainRenderer);
+            }
         }
         let coordIdx = db.findCoordIdx(otherRend.coords.coordInfo.shortLabel);
         chosenSetValue("tpLayoutCombo", coordIdx);
@@ -9539,6 +9541,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         if (mainRenderer && mainRenderer.sliderDiv)
             mainRenderer.div.appendChild(mainRenderer.sliderDiv);
         renderer.unsplit();
+        if (mainRenderer)
+            mainRenderer.refreshSliderPos(true); // back to single mode: just above grey bar
         mainRenderer = null;
         $("#tpSplitMenuEntry").text("Split Screen");
         renderer.drawDots();
@@ -9557,6 +9561,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
 
         mainRenderer = renderer;
         let rend2 = renderer.split();
+        rend2.setShowLabels(renderer.doDrawLabels);
         buildWatermark(rend2, true);
 
         renderer.childPlot.legend = gLegend;
