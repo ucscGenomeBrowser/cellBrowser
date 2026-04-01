@@ -1469,32 +1469,28 @@ function MaxPlot(div, top, left, width, height, args) {
          * width is the width in pixels.
          * */
 
-        if (!self.usesWebGL()) {
-            ctx.save();
-            //ctx.globalAlpha = 1.0;
+        ctx.save();
+        //ctx.globalAlpha = 1.0;
 
-            ctx.strokeStyle = attrs.lineColor || "#888888";
-            ctx.lineWidth = attrs.lineWidth || 3;
-            ctx.globalAlpha = attrs.lineAlpha || 0.5;
-            //ctx.miterLimit =2;
-            //ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+        ctx.strokeStyle = attrs.lineColor || "#888888";
+        ctx.lineWidth = attrs.lineWidth || 3;
+        ctx.globalAlpha = attrs.lineAlpha || 0.5;
+        //ctx.miterLimit =2;
+        //ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
 
-            for (var i=0; i < pxLines.length; i++) {
-                var line = pxLines[i];
-                var x1 = line[0];
-                var y1 = line[1];
-                var x2 = line[2];
-                var y2 = line[3];
+        for (var i=0; i < pxLines.length; i++) {
+            var line = pxLines[i];
+            var x1 = line[0];
+            var y1 = line[1];
+            var x2 = line[2];
+            var y2 = line[3];
 
-                ctx.beginPath();
-                ctx.moveTo(x1, y1);
-                ctx.lineTo(x2, y2);
-                ctx.stroke();
-            }
-            ctx.restore();
-        } else if (self.mode === 2) {
-
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
         }
+        ctx.restore();
     }
 
     function drawLabelsSvg(svgLines, labelCoords, winWidth, winHeight, zoomFact) {
@@ -2906,9 +2902,16 @@ function MaxPlot(div, top, left, width, height, args) {
 
         if(DEBUG) console.timeEnd("draw");
 
-        if (self.coords.pxLines) {
+        if (self.coords.lines) {
             if(DEBUG) console.time("draw lines");
-            drawLines(self.ctx, self.coords.pxLines, self.canvas.width, self.canvas.height, self.coords.lineAttrs);
+            // If we're using webGL, we must scale the lines and draw to a separate canvas
+            if(this.usesWebGL()) {
+                const projZoom = self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height);
+                self.coords.pxLines = scaleLines(self.coords.lines, projZoom, self.canvas.width, self.canvas.height);
+                drawLines(self.labelCtx, self.coords.pxLines, self.canvas.width, self.canvas.height, self.coords.lineAttrs);
+            } else if(self.coords.pxLines) {
+                drawLines(self.ctx, self.coords.pxLines, self.canvas.width, self.canvas.height, self.coords.lineAttrs);
+            }
             if(DEBUG) console.timeEnd("draw lines");
         }
 
