@@ -3447,7 +3447,7 @@ function MaxPlot(div, top, left, width, height, args) {
             // Since the child plot's selected cells share a pointer 
             if (self.childPlot) {
                 const childPlot = self.childPlot;
-                childPlot.coods.layers = this.coords.layers;
+                childPlot.coords.layers = this.coords.layers;
                 childPlot.bindBuffer(1, childPlot.a_Layer, childPlot.coords.layers, childPlot.ctx.UNSIGNED_BYTE);
             }
         }
