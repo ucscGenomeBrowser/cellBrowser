@@ -3528,8 +3528,9 @@ var cellbrowser = function() {
     }
 
     function colorByLocus(locusStr, onDone, locusLabel) {
-        /* colorByGene: color by a gene or peak, load the array into the renderer and call onDone or just redraw 
-         * peak can be in format: +chr1:1-1000
+        /* colorByLocus aka colorByGene: color by a gene or peak, load the
+         * array into the renderer and call onDone or just redraw peak can be
+         * in format: +chr1:1-1000
          * gene can be in format: geneSym or geneSym=geneId
          * */
         if (onDone===undefined || onDone===null)
@@ -3549,8 +3550,10 @@ var cellbrowser = function() {
                 changeUrl({"gene":locusStr, "meta":null});
 
             var colors = makeLegendExpr(locusStr, geneDesc, binInfo, exprArr, decArr);
-            renderer.setColors(colors);
+
             renderer.setColorArr(decArr);
+            renderer.setColors(colors);
+
             if (renderer.childPlot && document.getElementById("splitJoinBox").checked) {
                 renderer.childPlot.setColors(legendGetColors(gLegend.rows));
                 renderer.childPlot.setColorArr(decArr);

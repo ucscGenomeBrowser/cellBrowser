@@ -1062,5 +1062,5 @@ function MaxHeat(div, args) {
     };
 
     // constructor
-    self.initDrawing(self.div, self.args);
+    self.initDrawing(div, args);
 }
