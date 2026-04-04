@@ -2,9 +2,9 @@ Submitting data to the UCSC Cell Browser
 ----
 
 At this time, we are happy to host pretty much any single-cell dataset,
-regardless of the library prepartion (10x, Smart-seq2, etc), organism 
+regardless of the library preparation (10x, Smart-seq2, etc), organism
 (human, mouse, zebrafish, etc), or analysis method (Seurat, Scanpy,
-Monocle, etc).
+Monocle, etc). We can even display spatial data.
 
 A cell browser requires at minimum three things:
 
@@ -12,10 +12,44 @@ A cell browser requires at minimum three things:
 * Metadata with cell names and cluster field
 * 2D Layout coordinates
 
-If you can provide these alongside some description of the dataset,
-we'll host it. Contact us at cells@ucsc.edu to get started.
+Go to our `submission website <https://cells-submit.gi.ucsc.edu>` to begin.
 
-Preparing and sharing your files
+Step 1: Describe and configure your dataset
+^^^^
+
+The first step in submission is
+`describing your dataset <https://cells-submit.gi.ucsc.edu/cb-submission.py>`,
+which includes
+your dataset title, abstract, methods, GEO accession, paper URLs, and other
+details. Additionally, you will need to create a dataset shortname. A shortname
+must meet the following requirements:
+
+* All lowercase
+* Words separated by dashes ("-")
+* Four words or less (don't be afraid to abbreviate words, e.g. development -> dev)
+* Informative
+
+A great example is cortex-dev - it's all lowercase, the two words are separated by 
+dashes, it's short at only two words long, and informs you that the dataset is focused on 
+cortex development. It fulfills all four points above. 
+
+Dataset collections
+""""
+If you have multiple datasets to submit, you can group them as a collection. Check
+the box "Submitting multiple datasets as a collection" to indicate this, and you will
+be prompted for the details for each dataset in that collection.
+
+"Quick Genes"
+""""
+
+The final step in the dataset description form allows you to upload (in csv or tsv format)
+or paste in a list of "quick genes", a set of genes that you believe represent important
+variables in your dataset(s). In addition to the list of gene symbols, you can include
+a word or two about why it was included (e.g. "Fst, Paraxial Mesoderm"; "HES1, Fig1D").
+For collections, you can have one set of genes for every dataset in the
+collection, or a different set for each.
+
+Step 2: Preparing and sharing your files
 ^^^^
 
 Before we can make a cell browser for you, you have to share the data
@@ -24,94 +58,30 @@ with us. We accept the following file types:
 * Seurat RDS, Rdata, or Robj files
 * Scanpy h5ad or Loom files
 * A collection of tsv or csv files
-* The output directory of one of our cbImport* tools
-  
-After you have your data in one of the formats above, you will have to 
-share the data with us.
 
-We prefer data to be shared in a way that is easy for us to download
-with something like wget, so the following methods are ideal:
+After you have your data in one of the formats above,
+`upload it <https://cells-submit.gi.ucsc.edu/upload.py>`
+to our servers.
 
-* University or other institutional server space
-* AWS
-* GEO
-* Dropbox (if shared via link, e.g. https://www.dropbox.com/s/NN/my_seurat.rds)
-
-We do accept files via other methods, although they take a little more work for 
-us to move to our server. These include methods such as:
-
-* Box
-* Google Drive
-* Dropbox, other methods of sharing data
-
-Other things we want from you
+Step 3: Associate files with datasets
 ^^^^
 
-Dataset description
-""""
+Once you've filled out the dataset description form and uploaded your files,
+you will need to `associate <https://cells-submit.gi.ucsc.edu/associate.py>`
+those files using the dataset shortname that you selected in step 1.
 
-Alongside your submission, it would be great if you filled out a 
-`desc.conf <https://cellbrowser.readthedocs.io/en/master/dataDesc.html>`_ file. At
-the very least, it should have the abstract, methods, and title filled out. 
-However, you are welcome to fill out more fields and make it as complete as 
-you would like. You can run ``cbBuild --init`` to copy an example desc.conf
-into your current directory or you can copy one from 
-`our Github repo <https://github.com/maximilianh/cellBrowser/blob/master/src/cbPyLib/cellbrowser/sampleConfig/desc.conf>`_.
-
-If you have a collection of datasets, please provide basic desc.conf for each of
-the datasets in the collection. These don't have to be as comprehensive as the
-top-level one for the collection itself. At minimum, they should include two tags:
-(1) title and (2) abstract. However, feel free to fill out as many of the desc.conf
-fields as you think is helpful for that dataset.
-
-Dataset shortname
-""""
-
-It would be great if you could suggest a dataset shortname at the time of
-your submission, although we're happy to make one up for you. An ideal short
-name fulfills the following requirements
-
-* All lowercase
-* Words separated by dashes ("-")
-* Four words or less (don't be afraid to abreviate words, e.g. development -> dev)
-* Informative
-
-A great example is cortex-dev - it's all lowercase, the two words are separated by 
-dashes, it's short at only two words long, and informs you that the dataset is focused on 
-cortex development. It fulfills all four points above. 
-
-Other great examples:
-
-* mouse-nervous-system
-* skeletal-muscle
-* mouse-oligo-het
-* covid-hypertension
-
-The short name doesn't have to be perfect, but good enough to communicate something
-about your dataset in a few words. 
-
-"Quick Genes"
-""""
-
-This is a list of 10-15 genes that you think are important to your dataset(s). In
-addition to the list of gene symbols, it is great to have a word or two about why
-it's in the list (e.g. "Fst, Paraxial Mesoderm"; "HES1, Fig1D"). If you have a
-collection of datasets, you can have one set of genes for every dataset in the
-collection or a different set for each. 
-
-This list and descriptions should be in CSV or TSV format. 
 
 Getting your URL
 ^^^^
 
-After you submit your dataset to us, we will import the data and make a preliminary
+After submitting your dataset to us, we will import the data and make a preliminary
 version available on our development server. We will work with you to iterate and
 make improvements to this version first. Once you give your final approval, we will
-push the data to our main site, cells.ucsc.edu. Once there, you will recieve the 
-final URL, e.g. cortex-dev.cells.ucsc.edu. This is the URL you should place in your
+push the data to our main site, https://cells.ucsc.edu. Once there, you will receive the
+final URL, e.g. https://cortex-dev.cells.ucsc.edu. This is the URL you should place in your
 paper, link to from your lab website, tweet about, etc. Please **do not** put the
-url to our development server in your paper, since it is under active development, 
-we occasionaly break it.
+URL to our development server in your paper, since it is under active development,
+we occasionally break it.
 
 FAQs
 ^^^^
@@ -119,13 +89,11 @@ FAQs
 Can I share the output of cbBuild with you?
 """"
 
-If you are going to share the output of one of our cbImport* tools, we prefer
-the directory containing the cellbrowser.conf, desc.conf, etc. The output of 
+We prefer you share the original h5ad, RDS, or tsv files. This way we can offer them
+as downloads alongside your data visualization. The output of
 cbBuild is optimized for web access and display, which makes it difficult if 
 not impossible to make changes to the cell browser at a later date (e.g. 
-correcting spelling mistakes). If we have access to the desc.conf, cellbrowser.conf, 
-and other files, we can easliy make these changes and rebuild the cell browser
-if needed. 
+correcting spelling mistakes).
 
 Can I keep my dataset private until a later date, but still accessible to reviewers?
 """"
