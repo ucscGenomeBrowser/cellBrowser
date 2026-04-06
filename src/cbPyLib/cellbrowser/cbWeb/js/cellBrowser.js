@@ -5831,6 +5831,13 @@ var cellbrowser = function() {
         return geneLabel;
     }
 
+    function getGeneLabelPlural() {
+        /* plural form of getGeneLabel(); can be overridden with geneLabelPlural in the config */
+        if (db.conf.geneLabelPlural)
+            return db.conf.geneLabelPlural;
+        return getGeneLabel()+"s";
+    }
+
     function splitButtonLabel(state) {
         let dataType = getGeneLabel();
         if (state)
@@ -7928,7 +7935,7 @@ var cellbrowser = function() {
         var geneLabel = getGeneLabel();
         var recentHelp = "Shown below are the 10 most recently searched genes. Click any gene to color the plot on the right-hand side by the gene.";
 
-        buildGeneTable(htmls, "tpRecentGenes", "Recent "+geneLabel+"s",
+        buildGeneTable(htmls, "tpRecentGenes", "Recent "+getGeneLabelPlural(),
             "Hover or select cells to update colors here<br>Click to color by "+gFeatDesc, gRecentGenes, null, recentHelp);
 
         var noteStr = "No genes or peaks defined: Use quickGenesFile in cellbrowser.conf.";
@@ -7936,7 +7943,7 @@ var cellbrowser = function() {
             "Click any of them to color the plot on the right hand side by the gene.";
         if (db.conf.atacSearch)
             geneHelp = "Predefined dataset ranges were defined by the dataset submitter. Click any to color by a list of loci, so a sum of the peaks contained in the range. The exact peaks are listed on mouse over.";
-        buildGeneTable(htmls, "tpQuickGenes", "Dataset "+geneLabel+"s", null, db.conf.quickGenes, noteStr, geneHelp);
+        buildGeneTable(htmls, "tpQuickGenes", "Dataset "+getGeneLabelPlural(), null, db.conf.quickGenes, noteStr, geneHelp);
 
         htmls.push("</div>"); // tpGeneTab
 
