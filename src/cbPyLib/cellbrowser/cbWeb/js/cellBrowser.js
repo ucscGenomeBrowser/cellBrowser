@@ -10249,6 +10249,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
             return;
         }
 
+        changeUrl({"nc":null});
         setupKeyboard();
         buildMenuBar();
 
