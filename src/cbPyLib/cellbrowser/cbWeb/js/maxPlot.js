@@ -162,7 +162,7 @@ function MaxPlot(div, top, left, width, height, args) {
         }
 
         if (this.childPlot) {
-            this.canvas.style["border"] = `2px solid ${this.isLight() ? "black" : "white"}`;
+            this.activeBorderDiv.style.border = `3px solid ${this.isLight() ? "black" : "white"}`;
             this.childPlot.setLightMode(mode);
         }
 
@@ -207,6 +207,23 @@ function MaxPlot(div, top, left, width, height, args) {
         if(this.usesWebGL()) [self.bgCtx, self.bgCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, false, 'mpBackgroundCanvas', 1);
         [self.ctx, self.canvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, self.usesWebGL(), 'mpCanvas', self.mode);
         if(this.usesWebGL()) [self.labelCtx, self.labelCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, true, 'mpLabelCanvas', 1);
+
+        /* Transparent overlay div used to show the active-screen border in
+         * split screen mode. Sits above all canvases via z-index so the
+         * border is never painted over. pointer-events:none so it doesn't
+         * block mouse interaction. */
+        var activeBorderDiv = document.createElement('div');
+        activeBorderDiv.style.position    = "absolute";
+        activeBorderDiv.style.top         = "0";
+        activeBorderDiv.style.left        = "0";
+        activeBorderDiv.style.width       = "100%";
+        activeBorderDiv.style.height      = "100%";
+        activeBorderDiv.style.boxSizing   = "border-box";
+        activeBorderDiv.style.pointerEvents = "none";
+        activeBorderDiv.style.zIndex      = "50";
+        activeBorderDiv.style.border      = "none";
+        canvDiv.appendChild(activeBorderDiv);
+        self.activeBorderDiv = activeBorderDiv;
 
         self.interact = false;
 
@@ -339,6 +356,9 @@ function MaxPlot(div, top, left, width, height, args) {
         self.coords = {};
         self.coords.orig = null;   // coordinates of cells in original coordinates
         self.coords.labels    = null;   // cluster label positions in pixels, array of [x,y,text]
+        self.plotLabels    = null;   // per-plot label coords (not shared between split plots)
+        self.plotPxLabels  = null;   // per-plot scaled pixel label coords
+        self.plotLabelBbox = null;   // per-plot label bounding boxes
 
         self.coords.px   = null;   // coordinates of cells and labels as screen pixels or (HIDCOORD,HIDCOORD) if not shown
         self.coords.gl   = null;   // coordinates of cells in WebGL space
@@ -2474,20 +2494,23 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.quickResize = function(width, height) {
        /* resize the canvas and move the status line, don't rescale or draw  */
-       self.div.style.width = width+"px";
-       self.div.style.height = height+"px";
 
-       self.canvDiv.style.width = width+"px";
-       self.canvDiv.style.height = height+"px";
-
-       // if in split screen mode, pass on the message to the second window
+       // if in split screen mode, halve width first so all sizing below uses
+       // the correct per-panel width, then pass the resize to the child plot
        if (self.childPlot) {
            width = width/2;
-           //self.childPlot.left = self.left+width;
-           //self.childPlot.canvas.style.left = self.childPlot.left+"px";
            self.childPlot.setPos(null, self.left+width);
            self.childPlot.setSize(width, height, true);
        }
+
+       let canvHeight = height - gStatusHeight;
+
+       self.div.style.width = width+"px";
+       self.div.style.height = height+"px";
+
+       // canvDiv wraps the canvas stack; its height excludes the status bar
+       self.canvDiv.style.width = width+"px";
+       self.canvDiv.style.height = canvHeight+"px";
 
        if (self.closeButton) {
            self.closeButton.style.left = width - gCloseButtonFromRight;
@@ -2497,9 +2520,6 @@ function MaxPlot(div, top, left, width, height, args) {
        self.canvas.style.width = width+"px";
        self.width = width;
        self.height = height;
-       //let canvHeight = height - gStatusHeight;
-
-       let canvHeight = height - gStatusHeight;
        self.canvas.height = canvHeight;
        self.canvas.width = width;
        self.canvas.style.height = canvHeight+"px";
@@ -2518,9 +2538,10 @@ function MaxPlot(div, top, left, width, height, args) {
        self.zoomDiv.style.left = (gZoomFromLeft)+"px";
 
        // move status line, dataset name and radius/transparency sliders
+       // in split mode the status bar spans both panels, so use double width
        var statusDiv = self.statusLine;
        statusDiv.style.top = (height-gStatusHeight)+"px";
-       statusDiv.style.width = width+"px";
+       statusDiv.style.width = (self.childPlot ? width*2 : width)+"px";
 
        self.titleDiv.style.top = (height-gStatusHeight-gTitleSize-4)+"px";
 
@@ -2601,7 +2622,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
        var oldRadius = self.port.initRadius;
        var oldAlpha  = self.port.initAlpha;
-       var oldLabels = self.coords.pxLabels;
+       var oldLabels = self.plotPxLabels;
        self.port = {};
        self.initPort(coordOpts);
        if (oldRadius)
@@ -2632,7 +2653,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
        self.coords.orig = coords;
        self.coords.coordInfo = coordInfo; // we need to find out the label of the coords
-       self.coords.labels = clusterLabels;
+       self.plotLabels = clusterLabels;
        if (coordInfo.aspectRatio)
            self.coords.aspectRatio = coordInfo.aspectRatio;
 
@@ -2670,8 +2691,8 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.setLabelCoords = function(labelCoords) {
         /* set the label coords and return true if there were any labels before */
-        var hadLabelsBefore = (self.coords.labels && self.coords.labels.length > 0);
-        self.coords.labels = labelCoords;
+        var hadLabelsBefore = (self.plotLabels && self.plotLabels.length > 0);
+        self.plotLabels = labelCoords;
         return hadLabelsBefore;
     };
 
@@ -2734,13 +2755,15 @@ function MaxPlot(div, top, left, width, height, args) {
         });
 
         // Now find the color of each point
-        let colorNumbers = [];
-        for(let colorIndex of colorArr) {
-            colorNumbers.push(colorRGB[colorIndex][0], colorRGB[colorIndex][1], colorRGB[colorIndex][2]);
+        const colorBuf = new Uint8Array(colorArr.length * 3);
+        const maxPalIdx = colorRGB.length - 1;
+        for(let i = 0; i < colorArr.length; i++) {
+            const rgb = colorRGB[Math.min(colorArr[i], maxPalIdx)];
+            colorBuf[i*3]   = rgb[0];
+            colorBuf[i*3+1] = rgb[1];
+            colorBuf[i*3+2] = rgb[2];
         }
         if(WEBGL_DEBUG) console.timeEnd("Parse Colors");
-
-        const colorBuf = new Uint8Array(colorNumbers);
 
         // Bind RGB color buffer (normalized, vec3)
         self.bindBuffer(3, self.a_Color, colorBuf, self.ctx.UNSIGNED_BYTE, true);
@@ -2818,8 +2841,8 @@ function MaxPlot(div, top, left, width, height, args) {
         var height = 1500; // enough space for 100 lines in the legend
         self.svgLines.push("<svg  xmlns='http://www.w3.org/2000/svg' height='"+height+"' width='"+width+"'>\n");
         drawCirclesSvg(self.svgLines, coords, colArr, pal, radius, alpha, self.selCells);
-        if (self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined)
-            drawLabelsSvg(self.svgLines, self.coords.pxLabels, plotWidth, plotHeight, self.port.zoomFact);
+        if (self.doDrawLabels===true && self.plotLabels!==null && self.plotLabels!==undefined)
+            drawLabelsSvg(self.svgLines, self.plotPxLabels, plotWidth, plotHeight, self.port.zoomFact);
         // axis lines
         self.svgLines.push('<line x1="2" y1="2" x2="2" y2="'+plotHeight+'" stroke="black" stroke-width="2"/>');
         self.svgLines.push('<line x1="2" y1="2" x2="'+plotWidth+'" y2="2" stroke="black" stroke-width="2"/>');
@@ -2849,6 +2872,8 @@ function MaxPlot(div, top, left, width, height, args) {
         var colArr = self.col.arr;
         var count = 0;
 
+        if (self.coords.orig === null)
+            return; // no data loaded yet (e.g. heatmap-only dataset)
         if (alpha===undefined)
              alert("internal error: alpha is not defined");
         if (coords===null)
@@ -2932,17 +2957,17 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.drawLabels = function() {
         /* draw only the labels */
-        if (self.doDrawLabels) {
-            self.coords.pxLabels = scaleLabels(
-                self.coords.labels,
+        if (self.doDrawLabels && self.plotLabels && self.plotLabels.length > 0) {
+            self.plotPxLabels = scaleLabels(
+                self.plotLabels,
                 this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
                 self.port.radius,
                 self.canvas.width,
                 self.canvas.height
             );
-            self.coords.labelBbox = drawLabels(
+            self.plotLabelBbox = drawLabels(
                 this.usesWebGL() ? this.labelCtx : self.ctx,
-                self.coords.pxLabels,
+                self.plotPxLabels,
                 self.canvas.width,
                 self.canvas.height,
                 self.port.zoomFact
@@ -3298,6 +3323,18 @@ function MaxPlot(div, top, left, width, height, args) {
         self._selUpdate();
     };
 
+    this.selectByIndices = function(indices) {
+        /* replace current selection with the given array of cell indices */
+        self.selCells = new Set(indices);
+        self._selUpdate();
+    };
+
+    this.clearSelection = function() {
+        /* clear all selected cells */
+        self.selCells = new Set();
+        self._selUpdate();
+    };
+
     this.selectInRect = function(x1, y1, x2, y2) {
         /* find all cells within a rectangle and add them to the selection. */
         let minX = Math.min(x1, x2);
@@ -3509,11 +3546,11 @@ function MaxPlot(div, top, left, width, height, args) {
     this.labelAt = function(x, y) {
         /* return the index and the text of the label at position x,y or null if nothing there */
         //if(DEBUG) console.time("labelCheck");
-        var clusterLabels = self.coords.labels;
+        var clusterLabels = self.plotLabels;
         if (clusterLabels===null || clusterLabels===undefined)
             return null;
-        var labelCoords = self.coords.labels;
-        var boxes = self.coords.labelBbox;
+        var labelCoords = self.plotLabels;
+        var boxes = self.plotLabelBbox;
 
         if (boxes==null) // no cluster labels
             return null;
@@ -3642,8 +3679,8 @@ function MaxPlot(div, top, left, width, height, args) {
             return false;
 
         // only need to do something if we're not already the active plot
-        self.canvas.style["border"] = `2px solid ${this.isLight() ? "black" : "white"}`;
-        self.parentPlot.canvas.style["border"] = "2px solid transparent";
+        self.activeBorderDiv.style.border = `3px solid ${this.isLight() ? "black" : "white"}`;
+        self.parentPlot.activeBorderDiv.style.border = "none";
 
         // flip the parent/child relationship
         self.childPlot = self.parentPlot;
@@ -3721,7 +3758,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var yCanvas = clientY - canvasTop;
 
         // when the cursor is over a label, change it to a hand, but only when there is no marquee
-        if (self.coords.labelBbox!==null && self.mouseDownX === null) {
+        if (self.plotLabelBbox!==null && self.mouseDownX === null) {
             var labelInfo = self.labelAt(xCanvas, yCanvas);
             if (labelInfo===null) {
                 self.canvas.style.cursor = self.canvasCursor;
@@ -3974,7 +4011,8 @@ function MaxPlot(div, top, left, width, height, args) {
     this.getLabels = function() {
         /* get current labels */
         var ret = [];
-        var labels = self.coords.labels;
+        var labels = self.plotLabels;
+        if (!labels) return ret;
         for (var i = 0; i<labels.length; i++)
             ret.push(labels[i][2]);
         return ret;
@@ -3982,16 +4020,16 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.setLabels = function(newLabels) {
         /* set new label text */
-        if (newLabels.length!==self.coords.labels.length) {
+        if (!self.plotLabels || newLabels.length!==self.plotLabels.length) {
             debug("maxPlot:setLabels error: new labels have wrong length.");
             return;
         }
 
         for (var i = 0; i<newLabels.length; i++)
-            self.coords.labels[i][2] = newLabels[i];
+            self.plotLabels[i][2] = newLabels[i];
 
-        self.coords.pxLabels = scaleLabels(
-            self.coords.labels,
+        self.plotPxLabels = scaleLabels(
+            self.plotLabels,
             this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
             self.port.radius,
             self.canvas.width,
@@ -4007,12 +4045,7 @@ function MaxPlot(div, top, left, width, height, args) {
                 self.canvas.height
             );
             for (let pxa of pxAnnots)
-                self.coords.labels.push(pxa);
-        }
-
-        // a special case for connected plots that are not sharing our pixel coordinates
-        if (self.childPlot && self.coords!==self.childPlot.coords) {
-           self.childPlot.setLabels(newLabels);
+                self.plotLabels.push(pxa);
         }
     };
 
@@ -4125,6 +4158,14 @@ function MaxPlot(div, top, left, width, height, args) {
 
         plot2.coords = self.coords;
 
+        /* Give the child plot its own label state so each side can label independently.
+         * Initially they point at the same array (read-only), but setLabelCoords()
+         * will replace the reference so they diverge without affecting each other. */
+        plot2.plotLabels    = self.plotLabels;
+        plot2.plotPxLabels  = self.plotPxLabels;
+        plot2.plotLabelBbox = self.plotLabelBbox;
+        plot2.activeLabelField = self.activeLabelField;
+
         plot2.col = {};
         plot2.col.pal = self.col.pal;
         plot2.col.arr = self.col.arr;
@@ -4160,7 +4201,7 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.parentPlot = self;
 
         // add a thick border and hide the menus in the child
-        self.canvas.style["border"] = `2px solid ${this.isLight() ? "black" : "white"}`;
+        self.activeBorderDiv.style.border = `3px solid ${this.isLight() ? "black" : "white"}`;
         self.childPlot.zoomDiv.style.display = "none";
         self.childPlot.toolDiv.style.display = "none";
 
@@ -4214,7 +4255,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.setSize(self.width*2, self.height, false);
 
         otherRend.div.remove();
-        self.canvas.style["border"] = "none";
+        self.activeBorderDiv.style.border = "none";
         return;
     }
 
