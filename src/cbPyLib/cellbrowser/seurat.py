@@ -564,7 +564,7 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
     fh.write("\nquickGenesFile = 'quickGenes.tsv'\n")
     fh.close()
 
-    if not options.skipMarkers and options.annotMarkers:
+    if not options.skipMarkers and options.annotMarkers and os.path.isfile(join(outDir, "markers.tsv")):
         gi.cbMarkerAnnotate(join(outDir, "markers.tsv"),\
             join(outDir,"markers.annot.tmp"), gi.BRAINSPANMOUSEDEV, gi.HGNC,\
             gi.MGIORTHO, gi.EUREXPRESS, gi.BRAINSPANLMD, gi.HPO, gi.COSMIC,\
