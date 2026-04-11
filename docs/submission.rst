@@ -12,13 +12,13 @@ A cell browser requires at minimum three things:
 * Metadata with cell names and cluster field
 * 2D Layout coordinates
 
-Go to our `submission website <https://cells-submit.gi.ucsc.edu>` to begin.
+Go to our `submission website <https://cells-submit.gi.ucsc.edu>_` to begin.
 
 Step 1: Describe and configure your dataset
 ^^^^
 
-The first step in submission is
-`describing your dataset <https://cells-submit.gi.ucsc.edu/cb-submission.py>`,
+The first step is
+`describing your dataset <https://cells-submit.gi.ucsc.edu/cb-submission.py>`_,
 which includes
 your dataset title, abstract, methods, GEO accession, paper URLs, and other
 details. Additionally, you will need to create a dataset shortname. A shortname
@@ -41,7 +41,6 @@ be prompted for the details for each dataset in that collection.
 
 "Quick Genes"
 """"
-
 The final step in the dataset description form allows you to upload (in csv or tsv format)
 or paste in a list of "quick genes", a set of genes that you believe represent important
 variables in your dataset(s). In addition to the list of gene symbols, you can include
@@ -60,14 +59,14 @@ with us. We accept the following file types:
 * A collection of tsv or csv files
 
 After you have your data in one of the formats above,
-`upload it <https://cells-submit.gi.ucsc.edu/upload.py>`
+`upload it <https://cells-submit.gi.ucsc.edu/upload.py>`_
 to our servers.
 
 Step 3: Associate files with datasets
 ^^^^
 
 Once you've filled out the dataset description form and uploaded your files,
-you will need to `associate <https://cells-submit.gi.ucsc.edu/associate.py>`
+you will need to `associate <https://cells-submit.gi.ucsc.edu/associate.py>`_
 those files using the dataset shortname that you selected in step 1.
 
 
