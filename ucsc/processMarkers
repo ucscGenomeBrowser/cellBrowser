@@ -17,7 +17,6 @@ def main():
     parser.add_argument('-c', '--cm', type=str, help='marker file from CellMarker2.0')
     parser.add_argument('-p', '--pdb', type=str, help='marker file from PanglaoDB')
     parser.add_argument('-s', '--scb', type=str, help='marker file from singleCellBase')
-    parser.add_argument('-t', '--sct', type=str, help='marker file from scType')
     args = parser.parse_args()
 
     if args.pdb:
@@ -112,8 +111,8 @@ def main():
                     geneSymbol = splitLine[9]
                     cellType = splitLine[6]
                     tissue = splitLine[2]
-                    pubmed_id = splitLine[15]
-                    technology_seq = splitLine[13]
+                    pubmed_id = splitLine[16]
+                    technology_seq = splitLine[14]
                     marker_source = splitLine[15]
                     cellontology_id = splitLine[7]
 
