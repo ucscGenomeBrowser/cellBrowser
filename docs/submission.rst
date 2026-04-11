@@ -12,7 +12,7 @@ A cell browser requires at minimum three things:
 * Metadata with cell names and cluster field
 * 2D Layout coordinates
 
-Go to our `submission website <https://cells-submit.gi.ucsc.edu>_` to begin.
+Go to our `submission website <https://cells-submit.gi.ucsc.edu>`_ to begin.
 
 Step 1: Describe and configure your dataset
 ^^^^
