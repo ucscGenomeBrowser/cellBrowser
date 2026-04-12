@@ -1,25 +1,31 @@
 The Visualization
 =================
 
-.. image:: /images/cellbrowser-BasicUiFeatures.converted.jpg
+.. image:: /images/datasets_overview.png
    :alt: Annotated screenshot of the main Cell Browser view
 
 Once you open a dataset, you will see the core visualization with
 these main areas:
 
-**Left sidebar** — Contains the "Annotation" and "Gene" tabs for
-   controlling how cells are colored.
+**Left sidebar**
+   Contains the "Annotation" and "Gene" tabs for
+   controlling how cells are colored or labeled.
 
-**Center scatter plot** — The primary 2D layout (typically tSNE or UMAP).
+**Center scatter plot**
+   The primary 2D layout (typically tSNE or UMAP, though sometimes spatial images too).
    Cells appear as dots, colored by the currently selected annotation or
-   gene.
+   gene. Clusters are labeled according to the currently selected field.
 
-**Right legend** — Shows the color key for the current coloring.
+**Right legend**
+    Shows the color key for the current field used for coloring. Color key can be sorted
+    alphabetically or by frequency. Use the checkboxes to select large groups of cells.
 
-**Top toolbar** — Contains menus (Edit, View, Tools) and links to
+**Top toolbar**
+   Contains menus (Edit, View, Tools) and links to
    dataset information, layout switching, and external resources.
 
-**Bottom heatmap area** — When enabled, shows an expression heatmap
+**Bottom heatmap area**
+   When enabled, shows an expression heatmap
    of dataset genes across clusters (see :doc:`analysis` for details).
 
 Navigating the Scatter Plot
@@ -49,14 +55,16 @@ Many datasets display cluster labels directly on the scatter plot. Hover
 over a label to see additional details such as top marker genes or the
 full name behind an acronym. Click a cluster label to bring up a pop-up
 list of marker genes for that cluster (see `Marker Genes from Cluster
-Labels`_ below).
+Labels`_ below). Use the "Label by Annotation" drop-down menu under
+the "Annotation" tab to change the field used to generate the labels.
 
 Switching Layouts
 -----------------
 
 If a dataset provides multiple dimensionality reduction results (e.g.
 both tSNE and UMAP), you can switch between them using the layout
-dropdown in the top toolbar.
+dropdown in the top toolbar. You can also change the size and
+transparency of the dots.
 
 Coloring by Metadata
 --------------------
@@ -85,10 +93,21 @@ The scatter plot will recolor using a gradient from light (low expression)
 to dark (high expression). The legend will show the expression bins and
 their associated colors.
 
+Multi-gene Coloring
+~~~~~~~~~~~
+
+To color cells by the expression of multiple genes:
+
+1. Click the "Multi Gene" button under the **Gene** tab.
+2. Enter a list of genes, either as one per line or a space/comma separated list.
+3. Click "Load the genes below".
+
+The scatter plot is then colored based on the summed expression of those genes.
+
 Quick Genes
 ~~~~~~~~~~~
 
-Many datasets include a curated list of **quick genes** — genes the dataset
+Many datasets include a curated list of **quick genes**, which are genes the dataset
 authors consider particularly important or informative. These appear as a
 clickable table below the gene search box. Click any gene name to instantly
 color the plot by its expression.
@@ -141,16 +160,47 @@ Example spatial datasets to explore:
 Keyboard Shortcuts
 ------------------
 
+**Viewer Navigation**
 .. list-table::
    :header-rows: 1
    :widths: 20 80
 
    * - Shortcut
      - Action
+   * - ``+``
+     - Zoom in
+   * - ``-``
+     - Zoom out
    * - ``Space``
      - Reset zoom to default (100%)
+   * - ``c`` then ``l``
+     - Hide/show cluster labels
    * - ``t``
      - Toggle split-screen mode (see :doc:`analysis`)
+   * - ``h``
+     - Toggle heatmap (see :doc:`analysis`)
+   * - ``o``
+     - Open a new dataset
+
+**Cell Selection**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+   * - ``s`` then ``a``
+     - Select all visible cells
+   * - ``s`` then ``n``
+     - Unselect all cells
+   * - ``s`` then ``i``
+     - Invert current cell selection
+   * - ``s`` then ``s``
+     - Name current cell selection
+   * - ``s`` then ``s``
+     - Name current cell selection
+   * - ``f`` then ``c``
+     - Find and select cells based on metadata attributes or gene expression
+   * - ``f`` then ``i``
+     - Find and select cells based on cell ID
    * - ``b`` then ``s``
      - Set selected cells as background for violin plots
    * - ``b`` then ``r``
@@ -161,8 +211,13 @@ Menu Reference
 
 **Edit menu**
 
-- **Find Cells** — Filter and select cells using metadata criteria
-- **Export** — Export identifiers of currently selected cells
+- **Find Cells** — Filter and select cells using metadata criteria or gene expression
+- **Find by ID** — Filter and select cells using cell IDs
+- **Export** — Export and download identifiers of currently selected cells
+
+.. tip::
+   Combine **Find Cells** with the **Export** option to get cell IDs to use with the
+   **Find by ID** option.
 
 **View menu**
 
