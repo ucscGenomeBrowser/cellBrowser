@@ -189,6 +189,8 @@ Keyboard Shortcuts
    :header-rows: 1
    :widths: 20 80
 
+   * - Shortcut
+     - Action
    * - ``s`` then ``a``
      - Select all visible cells
    * - ``s`` then ``n``
