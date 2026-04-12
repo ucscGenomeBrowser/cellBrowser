@@ -161,6 +161,7 @@ Keyboard Shortcuts
 ------------------
 
 **Viewer Navigation**
+
 .. list-table::
    :header-rows: 1
    :widths: 20 80
@@ -187,6 +188,7 @@ Keyboard Shortcuts
 .. list-table::
    :header-rows: 1
    :widths: 20 80
+
    * - ``s`` then ``a``
      - Select all visible cells
    * - ``s`` then ``n``
