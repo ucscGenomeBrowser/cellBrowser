@@ -2768,8 +2768,8 @@ function MaxPlot(div, top, left, width, height, args) {
         // Bind RGB color buffer (normalized, vec3)
         self.bindBuffer(3, self.a_Color, colorBuf, self.ctx.UNSIGNED_BYTE, true);
 
-        // Bind raw color indices (not normalized — values 0-255 match u_FatID integer index)
-        self.bindBuffer(1, self.a_ColID, colorArr, self.ctx.UNSIGNED_BYTE, false);
+        // Bind raw color indices as floats so any number of colors is handled correctly
+        self.bindBuffer(1, self.a_ColID, Float32Array.from(colorArr), self.ctx.FLOAT, false);
     }
 
     // No-op: layer computation has been moved into the vertex shader.

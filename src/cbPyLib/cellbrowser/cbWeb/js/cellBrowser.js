@@ -8535,7 +8535,8 @@ var cellbrowser = function() {
         /* mouse hovers over legend */
         var legendId = parseInt(ev.target.id.split("_")[1]);
         var legendLabel = ev.target.innerText;
-        onClusterNameHover(legendLabel, legendId, ev, true, false);
+        var intKey = parseInt(ev.target.getAttribute("data-intkey"));
+        onClusterNameHover(legendLabel, legendId, ev, true, false, isNaN(intKey) ? undefined : intKey);
     }
 
     function onLegendLabelClick(ev) {
@@ -8971,7 +8972,7 @@ var cellbrowser = function() {
             else
                 htmls.push("<div title='Cannot change color manually - too many legend entries' style='display: inline-block; background-color: #"+colorHex+"; width:14px; height:14px; margin-right: 3px' class='' id='tpLegendColor"+i+"'>&nbsp;</div>");
 
-            htmls.push("<span class='"+labelClass+"' id='tpLegendLabel_"+i+"' data-placement='auto top' title='"+mouseOver+"'>");
+            htmls.push("<span class='"+labelClass+"' id='tpLegendLabel_"+i+"' data-intkey='"+valueIndex+"' data-placement='auto top' title='"+mouseOver+"'>");
             htmls.push(label);
             htmls.push("</span>");
             var prec = 1;
@@ -9426,10 +9427,10 @@ var cellbrowser = function() {
         }
     }
 
-    function drawAndFattenCluster(clusterName, doScroll) {
+    function drawAndFattenCluster(clusterName, doScroll, intKeyOverride) {
     /* highlight one of the clusters and redraw */
 
-        let legendRowIdx = legendLabelGetIntKey(gLegend, clusterName);
+        let legendRowIdx = (intKeyOverride !== undefined) ? intKeyOverride : legendLabelGetIntKey(gLegend, clusterName);
 
         renderer.fatIdx = legendRowIdx;
         renderer.bindLayers();
@@ -9448,7 +9449,7 @@ var cellbrowser = function() {
         }
     }
 
-function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
+function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKeyOverride) {
         /* user hovers over cluster label */
         /* doHighlight can be undefined, which means true = called from onHoverLabel */
         // when called from the maxPlot interface = mouse is over label = scroll the legend to the right place
@@ -9472,7 +9473,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         }
 
         if (labelField === db.conf.labelField) {
-            if (db.conf.topMarkers!==undefined) {
+            if (db.conf.topMarkers!==undefined && db.conf.topMarkers[clusterName]!==undefined) {
                 labelLines.push("Top enriched/depleted markers: "+db.conf.topMarkers[clusterName].join(", "));
             }
             labelLines.push("");
@@ -9496,7 +9497,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
             // XX cannot do anything when not coloring on the meta field that we are coloring on
         } else {
             //var valIdx = findMetaValIndex(metaInfo, clusterName);
-            drawAndFattenCluster(clusterName, doScroll);
+            drawAndFattenCluster(clusterName, doScroll, intKeyOverride);
         }
     }
 
