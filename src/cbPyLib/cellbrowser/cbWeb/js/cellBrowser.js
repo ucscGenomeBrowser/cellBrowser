@@ -33,6 +33,12 @@ var cellbrowser = function() {
     // strKey is used to save manually defined colors to localStorage, a string
     var gLegend = null;
 
+    // gene -> [perturbation, ...] index, loaded once for perturb-seq datasets
+    var gGenePerturbIndex = null;
+
+    // full sorted list of all perturbation names (for resetting the datalist)
+    var gAllLegendValues = [];
+
     // object with info about the current meta left side bar
     // keys are:
     // .rows = array of objects with .field and .value
@@ -8808,6 +8814,32 @@ var cellbrowser = function() {
         saveAs(blob, "plotLegend.tsv");
     }
 
+    function setLegendDatalist(names) {
+        /* replace datalist options with the given array of perturbation name strings */
+        var dl = document.getElementById("tpValueList");
+        if (!dl) return;
+        dl.innerHTML = "";
+        var frag = document.createDocumentFragment();
+        for (var i = 0; i < names.length; i++) {
+            var opt = document.createElement("option");
+            opt.value = names[i];
+            frag.appendChild(opt);
+        }
+        dl.appendChild(frag);
+    }
+
+    function onLegendSearch() {
+        /* filter legend rows by label text as user types */
+        var query = $('#tpValueSearch').val().trim().toLowerCase();
+        var rows = document.querySelectorAll('#tpLegendRows .tpLegend');
+        rows.forEach(function(row) {
+            var label = row.querySelector('.tpLegendLabel');
+            if (!label) return;
+            var text = label.textContent.toLowerCase();
+            row.style.display = (query === '' || text.indexOf(query) !== -1) ? '' : 'none';
+        });
+    }
+
     function onLegendCheckboxClick(ev) {
         /* user clicked the small checkboxes in the legend */
         var valIdx = parseInt(ev.target.getAttribute("data-value-index")); // index of this value in original array (before sort)
@@ -8913,6 +8945,17 @@ var cellbrowser = function() {
         htmls.push("<button id='tpLegendColorChecked'>"+buttonText+"</button></small>");
 
         htmls.push("</div>"); // title
+
+        if (gLegend.type === "meta" && gLegend.metaInfo && gLegend.metaInfo.type === "enum") {
+            htmls.push('<div id="tpValueFilter" style="margin-top:6px;margin-bottom:3px">');
+            htmls.push('<div style="font-size:11px;font-weight:bold;color:#555;margin-bottom:3px">Filter by value:</div>');
+            htmls.push('<input type="text" id="tpValueSearch" list="tpValueList" autocomplete="off" '+
+                       'placeholder="Search..." '+
+                       'style="width:100%;box-sizing:border-box;font-size:12px;padding:2px 4px"/>');
+            htmls.push('<datalist id="tpValueList"></datalist>');
+            htmls.push('</div>');
+        }
+
         htmls.push('<div id="tpLegendHeader"><span id="tpLegendCol1"></span><span id="tpLegendCol2"></span></div>');
         htmls.push('<div id="tpLegendRows">');
 
@@ -9030,6 +9073,31 @@ var cellbrowser = function() {
         $("#tpLegendInvert").click( function() { legendSetCheckboxes("invert"); } );
         $("#tpLegendNotNull").click( function() { legendSetCheckboxes("notNull"); } );
         $("#tpLegendColorChecked").click( function(ev) { legendColorOnlyChecked(ev); } );
+
+        if (gLegend.type === "meta" && gLegend.metaInfo && gLegend.metaInfo.type === "enum") {
+            $('#tpValueSearch').val('');
+            $('#tpValueSearch').on('input', onLegendSearch);
+
+            var legendMetaInfo = gLegend.metaInfo;
+            gAllLegendValues = [];
+
+            function populateDatalist(arr, mi) {
+                var dl = document.getElementById("tpValueList");
+                if (!dl) return;
+                var valCounts = mi.valCounts;
+                var sorted = valCounts.slice().sort(function(a, b) {
+                    return a[0].toLowerCase().localeCompare(b[0].toLowerCase());
+                });
+                gAllLegendValues = sorted.map(function(v) { return v[0]; });
+                setLegendDatalist(gAllLegendValues);
+            }
+
+            if (legendMetaInfo.valCounts) {
+                populateDatalist(null, legendMetaInfo);
+            } else {
+                db.loadMetaVec(legendMetaInfo, populateDatalist);
+            }
+        }
 
         $('.tpLegendLabel').on("mouseup", onLegendLabelClick ); // clicking the legend should have the same effect as clicking the checkbox
         $('.tpLegendLabel').on("mouseover", onLegendHover ); // hovering over the legend should have the same effect hovering over the label
@@ -10056,6 +10124,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         htmls.push("</tbody>");
         htmls.push("</table>");
 
+        if (totalRows > MAX_UNFILTERED_ROWS)
+            htmls.push("<p style='color:#888; font-size:85%; margin-top:4px'>Showing top "+MAX_UNFILTERED_ROWS+" of "+totalRows+" rows — use the table filter to narrow results.</p>");
+
         // sub function ----
         function onMarkerGeneClick(ev) {
             /* user clicks onto a gene in the table of the marker gene dialog window */
@@ -10093,15 +10164,16 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         };
         if (doDescSort)
             tableOpt.sortList[0][1] = 1; // = sort first column descending
+        var $table = $("#"+tableId);
         //new Tablesort(document.getElementById('tpMarkerTable'), tableOpt);
-        $("#tpMarkerTable").tablesorter(tableOpt);
+        $table.tablesorter(tableOpt);
         //$('#tpMarkerTable').trigger('sorton', tableOpt.sortList); // does not work, though documented
         // this is a pretty bad hack, but I have no idea why the sortList option doesn't work above...
         $("[data-column='1']").trigger("sort"); // this seems to work!
         if (doDescSort)
             $("[data-column='1']").trigger("sort"); // second click...
 
-        $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
+$(".tpLoadGeneLink").on("click", onMarkerGeneClick);
         activateTooltip(".link");
 
         var ttOpt = {"html": true, "animation": false, "delay":{"show":100, "hide":100} };
