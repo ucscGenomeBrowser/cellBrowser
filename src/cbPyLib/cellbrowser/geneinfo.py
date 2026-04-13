@@ -243,9 +243,13 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
             yield headers
         sym = row[1]
         isSeurat = False
-        if sym.isnumeric(): # if column 2 is only a number, it's probably a seurat file
-            sym = row[0] # gene symbol is in column 1
-            isSeurat = True
+        try:
+            float(sym)
+            isSeurat = True # if column 2 is a number, it's probably a seurat file
+        except ValueError:
+            pass
+        if isSeurat:
+            sym = row[7] # gene symbol is in the 'gene' column (index 7) for Seurat format
         if "|" in sym: # marker gene lists can carry geneId|symbol, strip the symbol in this case and re-convert below
             sym = sym.split("|")[0]
         if "." in sym: # remove Ensembl version identifier
@@ -315,7 +319,7 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
 
         row = list(row)
         if isSeurat:
-            row[0] = sym # for seurat files, column 1 is the gene
+            row[7] = sym # for seurat files, update the gene column with the canonical symbol
         else:
             row[1] = sym # in case the original ID was a geneID, not a symbol
 
