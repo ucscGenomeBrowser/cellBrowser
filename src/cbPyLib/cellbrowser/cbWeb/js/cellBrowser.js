@@ -3714,7 +3714,10 @@ var cellbrowser = function() {
             if (metaInfo.arr) // preloaded
                 computeAndSetLabels(metaInfo.arr, metaInfo, rend);
             else
-                db.loadMetaVec(metaInfo, function(values, mi) { computeAndSetLabels(values, mi, rend); });
+                db.loadMetaVec(metaInfo, function(values, mi) {
+                    computeAndSetLabels(values, mi, rend);
+                    rend.drawDots(); // redraw after async label load completes
+                });
         }
     }
 
@@ -3976,6 +3979,9 @@ var cellbrowser = function() {
                    //buildWatermark();
                    //renderer.drawDots();
                    changeUrl({"layout":null, "meta":null, "gene":null});
+                   renderer.drawDots();
+               } else if (getVar("split") === "1") {
+                   activateSplit();
                    renderer.drawDots();
                } else {
                     $("#splitJoinDiv").hide();
@@ -8018,7 +8024,7 @@ var cellbrowser = function() {
         ttDiv.style["background-color"]=lightMode === 1 ? "rgba(255, 255, 255, 0.85)" : "rgba(0, 0, 0, 0.85)";
         ttDiv.style["box-shadow"]="0px 2px 4px rgba(0,0,0,0.3)";
         ttDiv.style["user-select"]="none";
-        ttDiv.style["z-index"]="10";
+        ttDiv.style["z-index"]="10000019";
         return ttDiv;
     }
 
@@ -9398,7 +9404,7 @@ var cellbrowser = function() {
         "display":"block",
         "left" : x,
         "top" : y,
-        "z-index" : "10000019!important", // because intro-js sets it to 9999999!important
+        "z-index" : "10000019"
        }).html(labelStr);
     }
 
@@ -9522,6 +9528,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
     function onActRendChange(otherRend) {
         /* called after the user has activated a view with a click */
         renderer.legend = gLegend;
+        // move flipbook to the newly active panel
+        var prevRend = renderer;
         renderer = otherRend;
         gLegend = otherRend.legend;
         if (mainRenderer) {
@@ -9531,10 +9539,17 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 mainRenderer.refreshSliderPos(otherRend !== mainRenderer);
             }
         }
+        // update flipbook visibility: show on new active panel, hide on old
+        if (gLegend.rows && gLegend.rows.length > gFlipbookMin) {
+            prevRend.hideFlipbook();
+            renderer.showFlipbook();
+        }
         let coordIdx = db.findCoordIdx(otherRend.coords.coordInfo.shortLabel);
         chosenSetValue("tpLayoutCombo", coordIdx);
         setLabelDropdown(renderer.getLabelField() ?? null);
         updateLabelHighlight(renderer.getLabelField());
+        if (gLegend && gLegend.metaInfo && gLegend.metaInfo.name)
+            setColorByDropdown(gLegend.metaInfo.name);
         buildLegendBar();
     }
 
@@ -9556,6 +9571,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             mainRenderer.refreshSliderPos(true); // back to single mode: just above grey bar
         mainRenderer = null;
         $("#tpSplitMenuEntry").text("Split Screen");
+        buildWatermark(renderer); // clears the watermark now that isSplit() is false
         renderer.drawDots();
         $("#tpSplitOnGene").text(splitButtonLabel(true));
     }
@@ -9573,6 +9589,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         mainRenderer = renderer;
         let rend2 = renderer.split();
         rend2.setShowLabels(renderer.doDrawLabels);
+        rend2.onSliderChange = onSliderChange;
         buildWatermark(rend2, true);
 
         renderer.childPlot.legend = gLegend;
@@ -9587,8 +9604,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         /* user clicked on View > Split Screen */
         if (!renderer.childPlot && !renderer.parentPlot) {
             activateSplit();
+            changeUrl({"split": "1"});
         } else {
             removeSplit(renderer);
+            changeUrl({"split": null});
         }
         renderer.drawDots();
     }

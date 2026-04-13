@@ -843,6 +843,12 @@ function MaxPlot(div, top, left, width, height, args) {
         if(DEBUG) console.log("alphaMult: "+target.port.alphaMult);
         target.calcRadius();
         target.drawDots();
+        var other = target.childPlot || target.parentPlot;
+        if (other && target.coords === other.coords) {
+            other.port.alphaMult = multMap[sliderVal];
+            other.calcRadius();
+            other.drawDots();
+        }
     }
 
     function onChangeRadius(ev, ui) {
@@ -861,6 +867,12 @@ function MaxPlot(div, top, left, width, height, args) {
         target.port.radiusMult = multMap[sliderVal];
         target.calcRadius();
         target.drawDots();
+        var other = target.childPlot || target.parentPlot;
+        if (other && target.coords === other.coords) {
+            other.port.radiusMult = multMap[sliderVal];
+            other.calcRadius();
+            other.drawDots();
+        }
     }
 
     function addSliders() {
@@ -956,28 +968,28 @@ function MaxPlot(div, top, left, width, height, args) {
         self.sliderDiv = sliderDiv; // for quickResize()
     }
 
+    var _flipbookRafId = null;
+    var _flipbookPendingIdx = null;
+    var _flipbookPendingEv = null;
+
     function onChangeFlipBook(ev) {
-        let hlColIdx = $( "#mpFlipbook" ).slider( "value" );
-        console.log(hlColIdx);
+        _flipbookPendingIdx = $( self.flipBookEl ).slider( "value" );
+        _flipbookPendingEv = ev;
+        if (_flipbookRafId !== null) return; // already scheduled for this frame
+        _flipbookRafId = requestAnimationFrame(function() {
+            _flipbookRafId = null;
+            var idx = _flipbookPendingIdx;
+            var pendEv = _flipbookPendingEv;
 
-        self.selectClear(true);
-        self.selectByColor ( hlColIdx );
+            self.selectClear(true);
+            self.selectByColor(idx);
 
-        let mouseEv = ev.originalEvent.originalEvent;
-        let x = mouseEv.clientX;
-        let y = mouseEv.clientY;
-        if (self.onSliderChange)
-            self.onSliderChange( hlColIdx, x, y );
+            var mouseEv = pendEv.originalEvent.originalEvent;
+            if (self.onSliderChange)
+                self.onSliderChange(idx, mouseEv.clientX, mouseEv.clientY);
 
-        //
-        //let newPal = [];
-        //for (let i=0; i < self.col.pal.length; i++) {
-            //newPal.push("DDDDDD");
-        //}
-        //newPal[hlColIdx] = "0000AA";
-        //self.setColors(newPal);
-        self.drawDots();
-
+            self.drawDots();
+        });
     }
 
     function addCloseButton(top, left) {
@@ -4167,8 +4179,8 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.activeLabelField = self.activeLabelField;
 
         plot2.col = {};
-        plot2.col.pal = self.col.pal;
         plot2.col.arr = self.col.arr;
+        plot2.setColors(self.col.pal); // initializes the flipbook slider on the child panel
 
         if (self.background)
             plot2.setBackground (self.background.image);
@@ -4234,13 +4246,14 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.div.appendChild(contDiv);
         self.flipBookEl = sliderDiv;
+        self.flipBookCont = contDiv;
     }
 
     this.hideFlipbook = function() {
-        $("#mpFlipbookCont").hide();
+        if (self.flipBookCont) self.flipBookCont.style.display = "none";
     }
     this.showFlipbook = function() {
-        $("#mpFlipbookCont").show();
+        if (self.flipBookCont) self.flipBookCont.style.display = "";
     }
 
     this.unsplit = function() {
