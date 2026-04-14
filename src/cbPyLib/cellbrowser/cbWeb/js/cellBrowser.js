@@ -33,11 +33,13 @@ var cellbrowser = function() {
     // strKey is used to save manually defined colors to localStorage, a string
     var gLegend = null;
 
-    // gene -> [perturbation, ...] index, loaded once for perturb-seq datasets
-    var gGenePerturbIndex = null;
-
-    // full sorted list of all perturbation names (for resetting the datalist)
+    // full sorted list of all legend values (for resetting the datalist)
     var gAllLegendValues = [];
+
+    // Web Worker for off-thread violin plot computation
+    var gViolinWorker = null;
+    // incremented each time we request a new violin; used to discard stale results
+    var gViolinReqId  = 0;
 
     // object with info about the current meta left side bar
     // keys are:
@@ -3310,76 +3312,241 @@ var cellbrowser = function() {
 	);
     }
 
+    function getViolinWorkerUrl() {
+        /* Derive violinWorker.js URL from the cellBrowser.js script tag so
+         * it works regardless of the deployment path. */
+        var scripts = document.getElementsByTagName('script');
+        for (var i = 0; i < scripts.length; i++) {
+            var src = scripts[i].src;
+            if (src && src.indexOf('cellBrowser.js') !== -1)
+                return src.replace(/cellBrowser\.js.*$/, 'violinWorker.js');
+        }
+        return 'js/violinWorker.js'; // fallback
+    }
+
     function buildViolinFromValues(labelList, dataList) {
-        /* make a violin plot given the labels and the values for them */
-        if ("violinChart" in window)
-            window.violinChart.destroy();
+        /* Dispatch expression data to a Web Worker for off-thread violin
+         * statistics computation. Renders via drawViolinCanvas when done. */
 
-        let log2Done = false;
-        if (db.conf.matrixArrType.includes("int")) {
-	    dataList = log2All(dataList);
-            log2Done = true;
-        }
-
-        var labelLines = [];
-        labelLines[0] = labelList[0].split("\n");
-        labelLines[0].push(dataList[0].length);
-        if (dataList.length > 1) {
-            labelLines[1] = labelList[1].split("\n");
-            labelLines[1].push(dataList[1].length);
-        }
-
-        const ctx = getById("tpViolinCanvas").getContext("2d");
-
- 	var violinData = {
-          labels : labelLines,
-	  datasets: [{
-            data : dataList,
-	    label: 'Mean',
-	    backgroundColor: 'rgba(255,0,0,0.5)',
-	    borderColor: 'red',
-	    borderWidth: 1,
-	    outlierColor: '#999999',
-	    padding: 7,
-	    itemRadius: 0
-	}]
-	};
-
-        var optDict = {
-            maintainAspectRatio: false,
-            legend: { display: false },
-	    title: { display: false }
-        };
+        var doLog2 = db.conf.matrixArrType && db.conf.matrixArrType.includes("int");
 
         var yLabel = null;
-        if (db.conf.unit===undefined && db.conf.matrixArrType==="Uint32") {
+        if (db.conf.unit === undefined && db.conf.matrixArrType === "Uint32")
             yLabel = "read/UMI count";
-        }
-        if (db.conf.unit!==undefined)
+        if (db.conf.unit !== undefined)
             yLabel = db.conf.unit;
+        if (doLog2)
+            yLabel = "log2(" + (yLabel || "count") + " + 1)";
 
-        if (log2Done)
-            yLabel = "log2("+yLabel+" + 1)";
+        /* Convert each dataList entry to a transferable Float32Array.
+         * If the entry is already a Float32Array (e.g. sliced exprVec),
+         * .slice() is a fast typed memcpy. Regular JS arrays use the
+         * Float32Array constructor, also O(n) but no per-element boxing. */
+        var arrays = dataList.map(function(arr) {
+            return (arr instanceof Float32Array) ? arr.slice() : new Float32Array(arr);
+        });
 
-        if (yLabel!==null)
-            optDict.scales = {
-                yAxes: [{
-                    scaleLabel: {
-                        display: true,
-                        labelString: yLabel
-                    }
-                    }]
+        /* Show a lightweight "computing..." message while the worker runs */
+        var canvas = getById("tpViolinCanvas");
+        if (canvas) {
+            var rect = canvas.getBoundingClientRect();
+            var w = Math.round(rect.width)  || 200;
+            var h = Math.round(rect.height) || 220;
+            canvas.width  = w;
+            canvas.height = h;
+            var ctx = canvas.getContext("2d");
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = "#999";
+            ctx.font = "12px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("Computing violin plot...", w / 2, h / 2);
+        }
+
+        var reqId = ++gViolinReqId;
+        var transferList = arrays.map(function(a) { return a.buffer; });
+
+        function postToWorker() {
+            gViolinWorker.onmessage = function(e) {
+                if (e.data.reqId !== gViolinReqId) return;
+                if(DEBUG) console.time("violinDraw");
+                drawViolinCanvas("tpViolinCanvas", e.data.results, e.data.labels, yLabel);
+                if(DEBUG) console.timeEnd("violinDraw");
             };
+            gViolinWorker.postMessage(
+                { arrays: arrays, labels: labelList, doLog2: doLog2, reqId: reqId },
+                transferList
+            );
+        }
 
-        window.setTimeout(function() {
-            if(DEBUG) console.time("violinDraw");
-            window.violinChart = new Chart(ctx, {
-                type: 'violin',
-                data: violinData,
-                options: optDict
-            });
-            if(DEBUG) console.timeEnd("violinDraw");
-        }, 10);
+        /* Lazy-init via fetch→blob so the worker is always same-origin,
+         * bypassing the Cross-Origin-Embedder-Policy: require-corp restriction. */
+        if (gViolinWorker !== null) {
+            postToWorker();
+        } else {
+            fetch(getViolinWorkerUrl())
+                .then(function(r) { return r.blob(); })
+                .then(function(blob) {
+                    gViolinWorker = new Worker(URL.createObjectURL(blob));
+                    postToWorker();
+                })
+                .catch(function(err) {
+                    console.warn("violinWorker could not be loaded, violin plots disabled:", err);
+                });
+        }
+    }
+
+    function drawViolinCanvas(canvasId, results, labels, yLabel) {
+        /* Custom canvas renderer for violin plots from precomputed stats.
+         * results: array of {q1,q3,median,whiskerLow,whiskerHigh,minVal,maxVal,
+         *                    densityX,densityY,n}
+         * labels:  array of label strings (may contain \n)
+         */
+        var canvas = getById(canvasId);
+        if (!canvas) return;
+
+        var nViolins = results.length;
+        if (nViolins === 0) return;
+
+        /* getBoundingClientRect gives the true rendered CSS size, unaffected
+         * by padding on the canvas element itself. Fall back to sensible
+         * defaults if the element hasn't been laid out yet. */
+        var rect = canvas.getBoundingClientRect();
+        var w = Math.round(rect.width)  || 200;
+        var h = Math.round(rect.height) || 220;
+        canvas.width  = w;
+        canvas.height = h;
+
+        var ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, w, h);
+
+        /* Layout constants */
+        var padL   = yLabel ? 46 : 32;
+        var padR   = 6;
+        var padT   = 10;
+        var padB   = 42;           /* room for x-axis labels */
+        var plotW  = w - padL - padR;
+        var plotH  = h - padT - padB;
+
+        /* Global y-range across all violins */
+        var globalMin =  Infinity;
+        var globalMax = -Infinity;
+        for (var v = 0; v < nViolins; v++) {
+            if (results[v].minVal < globalMin) globalMin = results[v].minVal;
+            if (results[v].maxVal > globalMax) globalMax = results[v].maxVal;
+        }
+        var yRange = globalMax - globalMin || 1;
+
+        function yPx(val) {
+            return padT + plotH - (val - globalMin) / yRange * plotH;
+        }
+
+        /* Per-violin geometry */
+        var slotW     = plotW / nViolins;
+        var halfViolin = slotW * 0.38;  /* max half-width of the KDE shape  */
+
+        var fillColors   = ['rgba(220,50,50,0.45)',  'rgba(50,100,220,0.45)'];
+        var strokeColors = ['rgba(180,20,20,0.9)',   'rgba(20,60,180,0.9)'];
+
+        for (var v = 0; v < nViolins; v++) {
+            var r       = results[v];
+            var centerX = padL + (v + 0.5) * slotW;
+            var dX      = r.densityX;
+            var dY      = r.densityY;
+            var nPts    = dX.length;
+
+            if (nPts === 0) continue;
+
+            /* ---- Violin shape ---------------------------------------- */
+            ctx.beginPath();
+            /* Right side: low → high */
+            ctx.moveTo(centerX + dY[0] * halfViolin, yPx(dX[0]));
+            for (var i = 1; i < nPts; i++)
+                ctx.lineTo(centerX + dY[i] * halfViolin, yPx(dX[i]));
+            /* Left side: high → low (mirrored) */
+            for (var i = nPts - 1; i >= 0; i--)
+                ctx.lineTo(centerX - dY[i] * halfViolin, yPx(dX[i]));
+            ctx.closePath();
+            ctx.fillStyle   = fillColors[v % fillColors.length];
+            ctx.fill();
+            ctx.strokeStyle = strokeColors[v % strokeColors.length];
+            ctx.lineWidth   = 1;
+            ctx.stroke();
+
+            /* ---- Whisker line + end caps ------------------------------ */
+            var capHalf = slotW * 0.07;
+            ctx.strokeStyle = strokeColors[v % strokeColors.length];
+            ctx.lineWidth   = 1.5;
+            ctx.beginPath();
+            /* vertical line */
+            ctx.moveTo(centerX, yPx(r.whiskerLow));
+            ctx.lineTo(centerX, yPx(r.whiskerHigh));
+            /* bottom cap */
+            ctx.moveTo(centerX - capHalf, yPx(r.whiskerLow));
+            ctx.lineTo(centerX + capHalf, yPx(r.whiskerLow));
+            /* top cap */
+            ctx.moveTo(centerX - capHalf, yPx(r.whiskerHigh));
+            ctx.lineTo(centerX + capHalf, yPx(r.whiskerHigh));
+            ctx.stroke();
+
+            /* ---- Median dot ------------------------------------------- */
+            ctx.beginPath();
+            ctx.arc(centerX, yPx(r.median), 4, 0, 2 * Math.PI);
+            ctx.fillStyle   = 'white';
+            ctx.fill();
+            ctx.strokeStyle = strokeColors[v % strokeColors.length];
+            ctx.lineWidth   = 1.5;
+            ctx.stroke();
+
+            /* ---- X-axis label ----------------------------------------- */
+            ctx.fillStyle  = '#333';
+            ctx.font       = '11px sans-serif';
+            ctx.textAlign  = 'center';
+            var parts = labels[v].split('\n');
+            parts.push('n=' + r.n.toLocaleString());
+            var labelY = h - padB + 14;
+            for (var p = 0; p < parts.length; p++) {
+                ctx.fillText(parts[p], centerX, labelY + p * 13);
+            }
+        }
+
+        /* ---- Y axis line --------------------------------------------- */
+        ctx.beginPath();
+        ctx.moveTo(padL, padT);
+        ctx.lineTo(padL, padT + plotH);
+        ctx.strokeStyle = '#bbb';
+        ctx.lineWidth   = 1;
+        ctx.stroke();
+
+        /* ---- Y axis ticks and labels ---------------------------------- */
+        var nTicks = 5;
+        ctx.fillStyle  = '#555';
+        ctx.font       = '10px sans-serif';
+        ctx.textAlign  = 'right';
+        for (var t = 0; t <= nTicks; t++) {
+            var val = globalMin + (t / nTicks) * yRange;
+            var py  = yPx(val);
+            /* tick mark */
+            ctx.beginPath();
+            ctx.moveTo(padL - 4, py);
+            ctx.lineTo(padL, py);
+            ctx.strokeStyle = '#bbb';
+            ctx.lineWidth   = 1;
+            ctx.stroke();
+            /* tick label */
+            ctx.fillText(val.toPrecision(3), padL - 6, py + 3);
+        }
+
+        /* ---- Y axis label (rotated) ----------------------------------- */
+        if (yLabel) {
+            ctx.save();
+            ctx.translate(13, padT + plotH / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.textAlign  = 'center';
+            ctx.fillStyle  = '#555';
+            ctx.font       = '11px sans-serif';
+            ctx.fillText(yLabel, 0, 0);
+            ctx.restore();
+        }
     }
 
 
@@ -3449,7 +3616,7 @@ var cellbrowser = function() {
             // there is no violin field
             if (selCells.length===0) {
                 // no selection, no violinField: default to a single violin plot
-                dataList = [Array.prototype.slice.call(exprVec)];
+                dataList = [exprVec]; // Float32Array passed directly; worker will copy it
                 if (background === null) {
                     labelList = ['All cells'];
                 } else {
@@ -9041,8 +9208,8 @@ var cellbrowser = function() {
         htmls.push('<button id="tpExpColorButton" style="margin-top: 3px; line-height:9x">Export Legend</button>'); 
 
         // add the div where the violin plot will later be shown
-        htmls.push("<div id='tpViolin'>");
-        htmls.push("<canvas style='height:200px; padding-top: 10px; padding-bottom:30px' id='tpViolinCanvas'></canvas>");
+        htmls.push("<div id='tpViolin' style='padding-top:8px;padding-bottom:8px'>");
+        htmls.push("<canvas style='display:block;width:100%;height:220px' id='tpViolinCanvas'></canvas>");
         htmls.push("</div>"); // violin
 
         var htmlStr = htmls.join("");
