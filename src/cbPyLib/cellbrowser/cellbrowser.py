@@ -2382,6 +2382,7 @@ def parseOneColorFile(fname):
     " read key-val file that defines colors "
     logging.debug("Parsing color file %s" % fname)
     lineNo = 0
+    dataLineNo = 0
     newDict = dict()
     invColumns = False
 
@@ -2392,8 +2393,9 @@ def parseOneColorFile(fname):
         if len(row)!=2:
             errAbort("color file %s - line %d does not contain exactly two fields: %s" % (fname, lineNo, row))
         metaVal, color = row
+        dataLineNo += 1
 
-        if metaVal.lower().startswith("color") or metaVal.lower().startswith("colour"):
+        if dataLineNo == 1 and (metaVal.lower().startswith("color") or metaVal.lower().startswith("colour")):
             # tolerate a header line, otherwise will stop with "color not found"
             invColumns = True
             continue
@@ -4841,7 +4843,7 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         # they are just here for backwards-compatibility and will eventually get removed
         "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays", 
         # facets are taking their place now
-        "facets", "multiModal"]:
+        "facets", "multiModal", "showHeatmap"]:
         copyConf(inConf, outConf, tag)
 
     if "name" not in outConf:

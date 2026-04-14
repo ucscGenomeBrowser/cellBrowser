@@ -15,8 +15,8 @@ var cellbrowser = function() {
 
     // Src: https://stackoverflow.com/questions/56393880/how-do-i-detect-dark-mode-using-javascript
     const darkModeMq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
-    // 1 = light mode, 2 = dark mode
-    let lightMode = darkModeMq && darkModeMq.matches ? 2 : 1;
+    // 1 = light mode, 2 = dark mode; always default to light regardless of OS preference
+    let lightMode = 1;
 
     var db = null; // the cbData object from cbData.js. Loads coords,
                    // annotations and gene expression vectors
@@ -33,6 +33,14 @@ var cellbrowser = function() {
     // strKey is used to save manually defined colors to localStorage, a string
     var gLegend = null;
 
+    // full sorted list of all legend values (for resetting the datalist)
+    var gAllLegendValues = [];
+
+    // Web Worker for off-thread violin plot computation
+    var gViolinWorker = null;
+    // incremented each time we request a new violin; used to discard stale results
+    var gViolinReqId  = 0;
+
     // object with info about the current meta left side bar
     // keys are:
     // .rows = array of objects with .field and .value
@@ -42,6 +50,7 @@ var cellbrowser = function() {
     var gOtherLegend = null;
 
     var renderer = null;
+    var mainRenderer = null; // the renderer with sliders, always the left panel in split mode
 
     var background = null;
 
@@ -669,6 +678,7 @@ var cellbrowser = function() {
         "ena_project" : "European Nucleotide Archive",
         "hca_dcp" : "Human Cell Atlas Data Portal",
         "cirm_dataset" : "California Institute of Regenerative Medicine Dataset",
+        "zenodo" : "Zenodo",
     };
 
     let descUrls = {
@@ -687,6 +697,7 @@ var cellbrowser = function() {
         "cirm_dataset" : "https://cirm.ucsc.edu/d/",
         "arrayexpress" : "https://www.ebi.ac.uk/arrayexpress/experiments/",
         "hca_dcp" : "https://data.humancellatlas.org/explore/projects/",
+        "zenodo" : "https://doi.org/",
     }
 
     function htmlAddLink(htmls, desc, key, linkLabel) {
@@ -1050,6 +1061,7 @@ var cellbrowser = function() {
         htmlAddLink(htmls, desc, "ega_dataset");
         htmlAddLink(htmls, desc, "ena_project");
         htmlAddLink(htmls, desc, "hca_dcp");
+        htmlAddLink(htmls, desc, "zenodo");
 
         if (desc.urls) {
             for (let key in desc.urls)
@@ -1268,7 +1280,7 @@ var cellbrowser = function() {
         /* keep only datasets that fulfill the filters */
 
         // read the current filter values of the dropboxes
-        var categories = ["Body", "Dis", "Org", "Proj", "Stage", "Dom", "Source"];
+        var categories = ["Body", "Dis", "Org", "Proj", "Stage", "Dom", "Assay", "Source"];
         var filtVals = {};
         for (var category of categories) {
             var vals = $("#tp"+category+"Combo").val();
@@ -1623,7 +1635,7 @@ var cellbrowser = function() {
             activateFilterCombo(projects, "tpProjCombo");
             activateFilterCombo(lifeStages, "tpStageCombo");
             activateFilterCombo(domains, "tpDomCombo");
-            activateFilterCombo(domains, "tpAssayCombo");
+            activateFilterCombo(assays, "tpAssayCombo");
             activateFilterCombo(sources, "tpSourceCombo");
         }
 
@@ -1701,9 +1713,10 @@ var cellbrowser = function() {
             return;
 
         let htmls = [];
-        htmls.push('<button style="display:none" title="Hide selected cells" id="tpHideSel" type="button" class="tpRibbonButton tpSelectButton" data-placement="bottom">Hide selected</button>');
-        htmls.push('<button style="display:none" title="Hide all unselected cells" id="tpOnlySel" type="button" class="tpRibbonButton tpSelectButton" data-placement="bottom">Only show selected</button>');
-        htmls.push('<button style="display:none" title="Show all cells that were hidden before" id="tpShowAll" type="button" class="tpRibbonButton" data-placement="bottom">Show all</button>&nbsp;&nbsp;&nbsp;');
+        htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Hide selected cells" id="tpHideSel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Hide selected</button>');
+        htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Hide all unselected cells" id="tpOnlySel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Only show selected</button>');
+        htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Show all cells that were hidden before" id="tpShowAll" type="button" class="gradientBackground ui-button ui-widget ui-corner-all" data-placement="bottom">Show all</button>');
+        htmls.push('<span style="display:inline-block; margin-right:6px"></span>');
         //htmls.push('');
         getById('tpToolBar').insertAdjacentHTML('afterbegin', htmls.join(""));
         getById('tpHideSel').addEventListener('click', onHideSelClick);
@@ -3195,6 +3208,8 @@ var cellbrowser = function() {
         var idx = 0;
         if (name==="gene")
             idx = 1;
+        if (name==="layout")
+            idx = 2;
 
         $( "#tpLeftTabs" ).tabs( "option", "active", idx );
     }
@@ -3305,76 +3320,241 @@ var cellbrowser = function() {
 	);
     }
 
+    function getViolinWorkerUrl() {
+        /* Derive violinWorker.js URL from the cellBrowser.js script tag so
+         * it works regardless of the deployment path. */
+        var scripts = document.getElementsByTagName('script');
+        for (var i = 0; i < scripts.length; i++) {
+            var src = scripts[i].src;
+            if (src && src.indexOf('cellBrowser.js') !== -1)
+                return src.replace(/cellBrowser\.js.*$/, 'violinWorker.js');
+        }
+        return 'js/violinWorker.js'; // fallback
+    }
+
     function buildViolinFromValues(labelList, dataList) {
-        /* make a violin plot given the labels and the values for them */
-        if ("violinChart" in window)
-            window.violinChart.destroy();
+        /* Dispatch expression data to a Web Worker for off-thread violin
+         * statistics computation. Renders via drawViolinCanvas when done. */
 
-        let log2Done = false;
-        if (db.conf.matrixArrType.includes("int")) {
-	    dataList = log2All(dataList);
-            log2Done = true;
-        }
-
-        var labelLines = [];
-        labelLines[0] = labelList[0].split("\n");
-        labelLines[0].push(dataList[0].length);
-        if (dataList.length > 1) {
-            labelLines[1] = labelList[1].split("\n");
-            labelLines[1].push(dataList[1].length);
-        }
-
-        const ctx = getById("tpViolinCanvas").getContext("2d");
-
- 	var violinData = {
-          labels : labelLines,
-	  datasets: [{
-            data : dataList,
-	    label: 'Mean',
-	    backgroundColor: 'rgba(255,0,0,0.5)',
-	    borderColor: 'red',
-	    borderWidth: 1,
-	    outlierColor: '#999999',
-	    padding: 7,
-	    itemRadius: 0
-	}]
-	};
-
-        var optDict = {
-            maintainAspectRatio: false,
-            legend: { display: false },
-	    title: { display: false }
-        };
+        var doLog2 = db.conf.matrixArrType && db.conf.matrixArrType.includes("int");
 
         var yLabel = null;
-        if (db.conf.unit===undefined && db.conf.matrixArrType==="Uint32") {
+        if (db.conf.unit === undefined && db.conf.matrixArrType === "Uint32")
             yLabel = "read/UMI count";
-        }
-        if (db.conf.unit!==undefined)
+        if (db.conf.unit !== undefined)
             yLabel = db.conf.unit;
+        if (doLog2)
+            yLabel = "log2(" + (yLabel || "count") + " + 1)";
 
-        if (log2Done)
-            yLabel = "log2("+yLabel+" + 1)";
+        /* Convert each dataList entry to a transferable Float32Array.
+         * If the entry is already a Float32Array (e.g. sliced exprVec),
+         * .slice() is a fast typed memcpy. Regular JS arrays use the
+         * Float32Array constructor, also O(n) but no per-element boxing. */
+        var arrays = dataList.map(function(arr) {
+            return (arr instanceof Float32Array) ? arr.slice() : new Float32Array(arr);
+        });
 
-        if (yLabel!==null)
-            optDict.scales = {
-                yAxes: [{
-                    scaleLabel: {
-                        display: true,
-                        labelString: yLabel
-                    }
-                    }]
+        /* Show a lightweight "computing..." message while the worker runs */
+        var canvas = getById("tpViolinCanvas");
+        if (canvas) {
+            var rect = canvas.getBoundingClientRect();
+            var w = Math.round(rect.width)  || 200;
+            var h = Math.round(rect.height) || 220;
+            canvas.width  = w;
+            canvas.height = h;
+            var ctx = canvas.getContext("2d");
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = "#999";
+            ctx.font = "12px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("Computing violin plot...", w / 2, h / 2);
+        }
+
+        var reqId = ++gViolinReqId;
+        var transferList = arrays.map(function(a) { return a.buffer; });
+
+        function postToWorker() {
+            gViolinWorker.onmessage = function(e) {
+                if (e.data.reqId !== gViolinReqId) return;
+                if(DEBUG) console.time("violinDraw");
+                drawViolinCanvas("tpViolinCanvas", e.data.results, e.data.labels, yLabel);
+                if(DEBUG) console.timeEnd("violinDraw");
             };
+            gViolinWorker.postMessage(
+                { arrays: arrays, labels: labelList, doLog2: doLog2, reqId: reqId },
+                transferList
+            );
+        }
 
-        window.setTimeout(function() {
-            if(DEBUG) console.time("violinDraw");
-            window.violinChart = new Chart(ctx, {
-                type: 'violin',
-                data: violinData,
-                options: optDict
-            });
-            if(DEBUG) console.timeEnd("violinDraw");
-        }, 10);
+        /* Lazy-init via fetch→blob so the worker is always same-origin,
+         * bypassing the Cross-Origin-Embedder-Policy: require-corp restriction. */
+        if (gViolinWorker !== null) {
+            postToWorker();
+        } else {
+            fetch(getViolinWorkerUrl())
+                .then(function(r) { return r.blob(); })
+                .then(function(blob) {
+                    gViolinWorker = new Worker(URL.createObjectURL(blob));
+                    postToWorker();
+                })
+                .catch(function(err) {
+                    console.warn("violinWorker could not be loaded, violin plots disabled:", err);
+                });
+        }
+    }
+
+    function drawViolinCanvas(canvasId, results, labels, yLabel) {
+        /* Custom canvas renderer for violin plots from precomputed stats.
+         * results: array of {q1,q3,median,whiskerLow,whiskerHigh,minVal,maxVal,
+         *                    densityX,densityY,n}
+         * labels:  array of label strings (may contain \n)
+         */
+        var canvas = getById(canvasId);
+        if (!canvas) return;
+
+        var nViolins = results.length;
+        if (nViolins === 0) return;
+
+        /* getBoundingClientRect gives the true rendered CSS size, unaffected
+         * by padding on the canvas element itself. Fall back to sensible
+         * defaults if the element hasn't been laid out yet. */
+        var rect = canvas.getBoundingClientRect();
+        var w = Math.round(rect.width)  || 200;
+        var h = Math.round(rect.height) || 220;
+        canvas.width  = w;
+        canvas.height = h;
+
+        var ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, w, h);
+
+        /* Layout constants */
+        var padL   = yLabel ? 46 : 32;
+        var padR   = 6;
+        var padT   = 10;
+        var padB   = 42;           /* room for x-axis labels */
+        var plotW  = w - padL - padR;
+        var plotH  = h - padT - padB;
+
+        /* Global y-range across all violins */
+        var globalMin =  Infinity;
+        var globalMax = -Infinity;
+        for (var v = 0; v < nViolins; v++) {
+            if (results[v].minVal < globalMin) globalMin = results[v].minVal;
+            if (results[v].maxVal > globalMax) globalMax = results[v].maxVal;
+        }
+        var yRange = globalMax - globalMin || 1;
+
+        function yPx(val) {
+            return padT + plotH - (val - globalMin) / yRange * plotH;
+        }
+
+        /* Per-violin geometry */
+        var slotW     = plotW / nViolins;
+        var halfViolin = slotW * 0.38;  /* max half-width of the KDE shape  */
+
+        var fillColors   = ['rgba(220,50,50,0.45)',  'rgba(50,100,220,0.45)'];
+        var strokeColors = ['rgba(180,20,20,0.9)',   'rgba(20,60,180,0.9)'];
+
+        for (var v = 0; v < nViolins; v++) {
+            var r       = results[v];
+            var centerX = padL + (v + 0.5) * slotW;
+            var dX      = r.densityX;
+            var dY      = r.densityY;
+            var nPts    = dX.length;
+
+            if (nPts === 0) continue;
+
+            /* ---- Violin shape ---------------------------------------- */
+            ctx.beginPath();
+            /* Right side: low → high */
+            ctx.moveTo(centerX + dY[0] * halfViolin, yPx(dX[0]));
+            for (var i = 1; i < nPts; i++)
+                ctx.lineTo(centerX + dY[i] * halfViolin, yPx(dX[i]));
+            /* Left side: high → low (mirrored) */
+            for (var i = nPts - 1; i >= 0; i--)
+                ctx.lineTo(centerX - dY[i] * halfViolin, yPx(dX[i]));
+            ctx.closePath();
+            ctx.fillStyle   = fillColors[v % fillColors.length];
+            ctx.fill();
+            ctx.strokeStyle = strokeColors[v % strokeColors.length];
+            ctx.lineWidth   = 1;
+            ctx.stroke();
+
+            /* ---- Whisker line + end caps ------------------------------ */
+            var capHalf = slotW * 0.07;
+            ctx.strokeStyle = strokeColors[v % strokeColors.length];
+            ctx.lineWidth   = 1.5;
+            ctx.beginPath();
+            /* vertical line */
+            ctx.moveTo(centerX, yPx(r.whiskerLow));
+            ctx.lineTo(centerX, yPx(r.whiskerHigh));
+            /* bottom cap */
+            ctx.moveTo(centerX - capHalf, yPx(r.whiskerLow));
+            ctx.lineTo(centerX + capHalf, yPx(r.whiskerLow));
+            /* top cap */
+            ctx.moveTo(centerX - capHalf, yPx(r.whiskerHigh));
+            ctx.lineTo(centerX + capHalf, yPx(r.whiskerHigh));
+            ctx.stroke();
+
+            /* ---- Median dot ------------------------------------------- */
+            ctx.beginPath();
+            ctx.arc(centerX, yPx(r.median), 4, 0, 2 * Math.PI);
+            ctx.fillStyle   = 'white';
+            ctx.fill();
+            ctx.strokeStyle = strokeColors[v % strokeColors.length];
+            ctx.lineWidth   = 1.5;
+            ctx.stroke();
+
+            /* ---- X-axis label ----------------------------------------- */
+            ctx.fillStyle  = '#333';
+            ctx.font       = '11px sans-serif';
+            ctx.textAlign  = 'center';
+            var parts = labels[v].split('\n');
+            parts.push('n=' + r.n.toLocaleString());
+            var labelY = h - padB + 14;
+            for (var p = 0; p < parts.length; p++) {
+                ctx.fillText(parts[p], centerX, labelY + p * 13);
+            }
+        }
+
+        /* ---- Y axis line --------------------------------------------- */
+        ctx.beginPath();
+        ctx.moveTo(padL, padT);
+        ctx.lineTo(padL, padT + plotH);
+        ctx.strokeStyle = '#bbb';
+        ctx.lineWidth   = 1;
+        ctx.stroke();
+
+        /* ---- Y axis ticks and labels ---------------------------------- */
+        var nTicks = 5;
+        ctx.fillStyle  = '#555';
+        ctx.font       = '10px sans-serif';
+        ctx.textAlign  = 'right';
+        for (var t = 0; t <= nTicks; t++) {
+            var val = globalMin + (t / nTicks) * yRange;
+            var py  = yPx(val);
+            /* tick mark */
+            ctx.beginPath();
+            ctx.moveTo(padL - 4, py);
+            ctx.lineTo(padL, py);
+            ctx.strokeStyle = '#bbb';
+            ctx.lineWidth   = 1;
+            ctx.stroke();
+            /* tick label */
+            ctx.fillText(val.toPrecision(3), padL - 6, py + 3);
+        }
+
+        /* ---- Y axis label (rotated) ----------------------------------- */
+        if (yLabel) {
+            ctx.save();
+            ctx.translate(13, padT + plotH / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.textAlign  = 'center';
+            ctx.fillStyle  = '#555';
+            ctx.font       = '11px sans-serif';
+            ctx.fillText(yLabel, 0, 0);
+            ctx.restore();
+        }
     }
 
 
@@ -3444,7 +3624,7 @@ var cellbrowser = function() {
             // there is no violin field
             if (selCells.length===0) {
                 // no selection, no violinField: default to a single violin plot
-                dataList = [Array.prototype.slice.call(exprVec)];
+                dataList = [exprVec]; // Float32Array passed directly; worker will copy it
                 if (background === null) {
                     labelList = ['All cells'];
                 } else {
@@ -3627,8 +3807,9 @@ var cellbrowser = function() {
     }
 
 
-    function gotCoords(coords, info, clusterInfo, newRadius) {
+    function gotCoords(coords, info, clusterInfo, newRadius, rend) {
         /* called when the coordinates have been loaded */
+        rend = rend || renderer;
         if (coords.length===0)
             alert("cellBrowser.js/gotCoords: coords.bin seems to be empty");
         var opts = {};
@@ -3649,7 +3830,7 @@ var cellbrowser = function() {
             for (var i = 0; i < clusterMids.length; i++) {
                 origLabels.push(clusterMids[i][2]);
             }
-            renderer.origLabels = origLabels;
+            rend.origLabels = origLabels;
          }
 
         if (clusterInfo && clusterInfo.lines) {
@@ -3659,22 +3840,23 @@ var cellbrowser = function() {
             opts["lineAlpha"] = db.conf.lineAlpha;
         }
 
-        renderer.setCoords(coords, clusterMids, info, opts);
-        buildWatermark(renderer);
+        rend.setCoords(coords, clusterMids, info, opts);
+        buildWatermark(rend);
     }
 
-    function computeAndSetLabels(values, metaInfo) {
+    function computeAndSetLabels(values, metaInfo, rend) {
         /* recompute the label positions and redraw everything. Updates the dropdown. */
+        rend = rend || renderer;
         var labelCoords;
 
-        var coords = renderer.coords.orig;
+        var coords = rend.coords.orig;
         var names = null;
         if (metaInfo.type !== "float" && metaInfo.type !== "int") {
             var names = metaInfo.ui.shortLabels;
         }
 
         if(DEBUG) console.time("cluster centers");
-        var calc = renderer.calcMedian(coords, values, names, metaInfo.origVals);
+        var calc = rend.calcMedian(coords, values, names, metaInfo.origVals);
 
         labelCoords = [];
         for (var label in calc) {
@@ -3685,17 +3867,21 @@ var cellbrowser = function() {
         }
         if(DEBUG) console.timeEnd("cluster centers");
 
-        renderer.setLabelCoords(labelCoords);
-        renderer.setLabelField(metaInfo.name);
+        rend.setLabelCoords(labelCoords);
+        rend.setLabelField(metaInfo.name);
 
-        setLabelDropdown(metaInfo.name);
+        if (rend === renderer) {
+            setLabelDropdown(metaInfo.name);
+            updateLabelHighlight(metaInfo.name);
+        }
     }
 
-    function setLabelField(labelField) {
+    function setLabelField(labelField, targetRenderer) {
         /* updates the UI: change the field that is used for drawing the labels. 'null' means hide labels. Do not redraw. */
+        var rend = targetRenderer || renderer;
         if (labelField===null) {
-            renderer.setLabelField(null);
-            setLabelDropdown(null);
+            rend.setLabelField(null);
+            if (!targetRenderer) { setLabelDropdown(null); updateLabelHighlight(null); }
         }
         else {
             var metaInfo = db.findMetaInfo(labelField);
@@ -3703,16 +3889,28 @@ var cellbrowser = function() {
                 let valCount = metaInfo.valCounts.length;
                 alert("Error: This field contains "+valCount+" different values. "+
                     "The limit is "+MAXLABELCOUNT+". Too many labels overload the screen.");
-                renderer.setLabelField(null);
-                setLabelDropdown(null);
+                rend.setLabelField(null);
+                if (!targetRenderer) setLabelDropdown(null);
                 return;
             }
             if (metaInfo.arr) // preloaded
-                computeAndSetLabels(metaInfo.arr, metaInfo);
+                computeAndSetLabels(metaInfo.arr, metaInfo, rend);
             else
-                db.loadMetaVec(metaInfo, computeAndSetLabels);
+                db.loadMetaVec(metaInfo, function(values, mi) {
+                    computeAndSetLabels(values, mi, rend);
+                    rend.drawDots(); // redraw after async label load completes
+                });
         }
     }
+
+   function updateLabelHighlight(fieldName) {
+       /* highlight the meta sidebar item for the current label field */
+       $('.tpMetaBox').removeClass('tpMetaLabelSelect');
+       if (fieldName) {
+           var fieldIdx = db.fieldNameToIndex(fieldName);
+           if (fieldIdx >= 0) $('#tpMetaBox_'+fieldIdx).addClass('tpMetaLabelSelect');
+       }
+   }
 
    function setColorByDropdown(fieldName) {
        /* set the meta 'color by' dropdown to a given value. The value is the meta field name, or its label, or its index */
@@ -3957,12 +4155,15 @@ var cellbrowser = function() {
                    //buildWatermark();
                    //buildWatermark();
                    activateSplit();
-                   configureRenderer(splitOpts);
+                   configureRenderer(splitOpts, renderer.childPlot);
                    $("#splitJoinDiv").show();
                    $("#splitJoinBox").prop("checked", true);
                    //buildWatermark();
                    //renderer.drawDots();
                    changeUrl({"layout":null, "meta":null, "gene":null});
+                   renderer.drawDots();
+               } else if (getVar("split") === "1") {
+                   activateSplit();
                    renderer.drawDots();
                } else {
                     $("#splitJoinDiv").hide();
@@ -5931,30 +6132,40 @@ var cellbrowser = function() {
         htmls.push('</select>');
     }
 
-    function loadCoordSet(coordIdx, labelFieldName) {
+    function loadCoordSet(coordIdx, labelFieldName, targetRenderer, targetLabelField) {
         /* load coordinates and color by meta data */
+        var rend = targetRenderer || renderer;
         var newRadius = db.conf.coords[coordIdx].radius;
         var colorOnMetaField = db.conf.coords[coordIdx].colorOnMeta;
-        renderer.background = null; // remove the background image
+        rend.background = null; // remove the background image
 
         db.loadCoords(coordIdx,
                 function(coords, info, clusterMids) {
-                    gotCoords(coords,info,clusterMids, newRadius);
+                    gotCoords(coords, info, clusterMids, newRadius, rend);
 
-                    setLabelField(labelFieldName);
+                    if (targetRenderer)
+                        setLabelField(targetLabelField, rend);
+                    else
+                        setLabelField(labelFieldName);
 
                     if (colorOnMetaField!==undefined) {
                         setColorByDropdown(colorOnMetaField);
                         colorByMetaField(colorOnMetaField, undefined);
                     }
                     else
-                        renderer.drawDots();
+                        rend.drawDots();
                 },
-                gotSpatial,
+                function(img) {
+                    rend.setBackground(img);
+                    if (rend.readyToDraw())
+                        rend.drawDots();
+                    else
+                        console.log("got spatial, but cannot draw yet");
+                },
                 onProgress);
     }
 
-    function changeLayout(coordIdx, doNotUpdateUrl) {
+    function changeLayout(coordIdx, doNotUpdateUrl, targetRenderer, targetLabelField) {
         /* activate a set of coordinates, given the index of a coordinate set */
         var labelFieldName = null;
         var labelFieldVal = $("#tpLabelCombo").val();
@@ -5966,12 +6177,13 @@ var cellbrowser = function() {
             }
         }
 
-        loadCoordSet(coordIdx, labelFieldName);
+        loadCoordSet(coordIdx, labelFieldName, targetRenderer, targetLabelField);
 
-        changeUrl({"layout":coordIdx, "zoom":null});
+        if (!targetRenderer)
+            changeUrl({"layout":coordIdx, "zoom":null});
     }
 
-    function changeLayoutByName(coordName) {
+    function changeLayoutByName(coordName, targetRenderer, targetLabelField) {
         /* activate a set of coordinates, given the shortLabel of a coordinate set */
         if (coordName===undefined)
             return;
@@ -5979,19 +6191,20 @@ var cellbrowser = function() {
        if (coordIdx===undefined)
            alert("Coordinateset with name "+coordName+" does not exist");
         else
-           changeLayout(coordIdx);
+           changeLayout(coordIdx, undefined, targetRenderer, targetLabelField);
     }
 
-    function configureRenderer(opts) {
+    function configureRenderer(opts, targetRenderer) {
        /* given an obj with .coords, .meta or .gene, configure the current renderer */
+       var targetLabelField = ('labelField' in opts) ? opts.labelField : undefined;
        if (opts.coords)
-           changeLayoutByName(opts.coords);
+           changeLayoutByName(opts.coords, targetRenderer, targetLabelField);
+       else if (targetLabelField !== undefined)
+           setLabelField(targetLabelField, targetRenderer);
        if (opts.gene)
            colorByLocus(opts.gene);
        if (opts.meta)
            colorByMetaField(opts.meta);
-       if (opts.labelField)
-           setLabelField(opts.labelField);
     }
 
     function onLayoutChange(ev, params) {
@@ -6217,7 +6430,7 @@ var cellbrowser = function() {
     function buildCollectionCombo(htmls, id, width, left, top) {
         /* build combobox with shortLabels of all datasets that are part of same collection */
         //htmls.push('<div class="tpToolBarItem" style="position:absolute;width:'+width+'px;left:'+left+'px;top:'+top+'px"><label for="'+id+'">Jump to...</label>');
-        htmls.push('<div class="tpToolBarItem" style="position:relative;top:3px; margin-left:10px;width:'+width+'px;top:'+top+'px"><label for="'+id+'">Jump to...</label>');
+        htmls.push('<div class="tpToolBarItem" style="position:relative;margin-left:10px;width:'+width+'px;top:'+top+'px"><label for="'+id+'">Jump to...</label>');
 
         var entries = [];
         //var linkedDatasets = parentConf.datasets;
@@ -6272,6 +6485,13 @@ var cellbrowser = function() {
         if (db.conf.geneLabel)
             geneLabel = db.conf.geneLabel;
         return geneLabel;
+    }
+
+    function getGeneLabelPlural() {
+        /* plural form of getGeneLabel(); can be overridden with geneLabelPlural in the config */
+        if (db.conf.geneLabelPlural)
+            return db.conf.geneLabelPlural;
+        return getGeneLabel()+"s";
     }
 
     function splitButtonLabel(state) {
@@ -7182,7 +7402,8 @@ var cellbrowser = function() {
         parentEl.innerHTML = "";
 
         // now that we know the height, plot them again
-        plotDotColumnLabels(htmls, minX, minY+maxHeight, xDist, geneSyms, "black");
+        let textColor = (lightMode === 1) ? "black" : "white";
+        plotDotColumnLabels(htmls, minX, minY+maxHeight, xDist, geneSyms, textColor);
         return maxHeight;
     }
 
@@ -7228,19 +7449,20 @@ var cellbrowser = function() {
         }
     }
 
-    function plotLegend(htmls, avgMin, avgMax, legendX, legendY, colorPal, legendWidth, legendHeight, maxDotSize) {
+    function plotLegend(htmls, avgMin, avgMax, legendX, legendY, colorPal, legendWidth, legendHeight, maxDotSize, textColor) {
         /* plot the legend at x, y*/
-        htmls.push('<rect style="fill:transparent;stroke-width:0.3;stroke:black" x="'+legendX+'" y="'+legendY+'" width="'+(legendWidth)+'" height="'+legendHeight+'"/>');
+        if (!textColor) textColor = "black";
+        htmls.push('<rect style="fill:transparent;stroke-width:0.3;stroke:'+textColor+'" x="'+legendX+'" y="'+legendY+'" width="'+(legendWidth)+'" height="'+legendHeight+'"/>');
 
         let titleX = legendX + 5;
         let titleY = legendY + 20;
-        htmls.push("<text font-family='sans-serif' font-size='16' fill='black' text-anchor='start' x='"+titleX+"' y='"+titleY+"'>Average Expression (sum/cell#)</text>");
+        htmls.push("<text font-family='sans-serif' font-size='16' fill='"+textColor+"' text-anchor='start' x='"+titleX+"' y='"+titleY+"'>Average Expression (sum/cell#)</text>");
 
         titleY += 100;
-        htmls.push("<text font-family='sans-serif' font-size='16' fill='black' text-anchor='start' x='"+titleX+"' y='"+titleY+"'>Expressed in Cells (non-zeroes)</text>");
+        htmls.push("<text font-family='sans-serif' font-size='16' fill='"+textColor+"' text-anchor='start' x='"+titleX+"' y='"+titleY+"'>Expressed in Cells (non-zeroes)</text>");
 
         titleY += 85;
-        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+(titleX)+"' y='"+titleY+"'>Exact values on mouse-over</text>");
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='"+textColor+"' text-anchor='start' x='"+(titleX)+"' y='"+titleY+"'>Exact values on mouse-over</text>");
 
         // draw five circles and 0% and 100% percent values underneath
         let circlesY = legendY+150;
@@ -7248,14 +7470,14 @@ var cellbrowser = function() {
         for (let i=0; i < 5; i++) {
             let x = legendX+20+(i*30);
             let radius = Math.round(Math.max(1, (maxDotSize*0.5)*(i*0.2)));
-            htmls.push("<circle fill-opacity='0.8' cx='"+x+"' cy='"+circlesY+"' r='"+radius+"' fill='black' />");
+            htmls.push("<circle fill-opacity='0.8' cx='"+x+"' cy='"+circlesY+"' r='"+radius+"' fill='"+textColor+"' />");
             lastCircleX = x;
         }
 
         let zeroX = legendX+10;
         let circleLabelY = legendY+150+30;
-        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+zeroX+"' y='"+circleLabelY+"'>0%</text>");
-        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+(lastCircleX-15)+"' y='"+circleLabelY+"'>100%</text>");
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='"+textColor+"' text-anchor='start' x='"+zeroX+"' y='"+circleLabelY+"'>0%</text>");
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='"+textColor+"' text-anchor='start' x='"+(lastCircleX-15)+"' y='"+circleLabelY+"'>100%</text>");
 
         let rectY = legendY+25;
         let rectX = legendX+10;
@@ -7274,8 +7496,8 @@ var cellbrowser = function() {
 
         let exprMinX = legendX+10;
         let avgLabelY = rectY+50;
-        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+exprMinX+"' y='"+avgLabelY+"'>"+minLabel+"</text>");
-        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='end' x='"+(lastRectX)+"' y='"+avgLabelY+"'>"+maxLabel+"</text>");
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='"+textColor+"' text-anchor='start' x='"+exprMinX+"' y='"+avgLabelY+"'>"+minLabel+"</text>");
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='"+textColor+"' text-anchor='end' x='"+(lastRectX)+"' y='"+avgLabelY+"'>"+maxLabel+"</text>");
 
     }
 
@@ -7376,14 +7598,15 @@ var cellbrowser = function() {
         rowLabelWidth = Math.max(50, rowLabelWidth); // need some minimum width since the column labels are slanted to the left
 
         let colLabelHeight = plotDotColumnLabelsAutoSize(parentEl, htmls, leftPad+rowLabelWidth, topPad, colWidth, syms)+10;
-        plotDotRowLabels(htmls, leftPad, colLabelHeight, rowHeight, rowLabels, cellCounts, "black", fontSize);
+        let textColor = (lightMode === 1) ? "black" : "white";
+        plotDotRowLabels(htmls, leftPad, colLabelHeight, rowHeight, rowLabels, cellCounts, textColor, fontSize);
 
         let colorPal = makeColorPalette(cDefGradPalette, 20);
 
         plotDotCircles(htmls, syms, rowLabels, dotRows, leftPad+rowLabelWidth, topPad+colLabelHeight, colWidth, rowHeight, maxDotSize, colorPal, cellCounts, avgMin, avgMax);
 
         let legendMinX = leftPad+rowLabelWidth+(colCount*colWidth)+(0.5*cellCountColWidth);
-        plotLegend(htmls, avgMin, avgMax, legendMinX, topPad+colLabelHeight, colorPal, legendWidth, legendHeight, maxDotSize)
+        plotLegend(htmls, avgMin, avgMax, legendMinX, topPad+colLabelHeight, colorPal, legendWidth, legendHeight, maxDotSize, textColor)
 
         let chartWidth = leftPad+rowLabelWidth+(colWidth*colCount)+legendWidth+cellCountColWidth+1; // +1 because the legend box can be 2 pixels wide
         let chartHeight = topPad+colLabelHeight+Math.max(legendHeight, rowCount*rowHeight);
@@ -7998,28 +8221,29 @@ var cellbrowser = function() {
         var htmls = [];
 
         htmls.push("<div id='tpToolBar' style='position:absolute;left:"+fromLeft+"px;top:"+fromTop+"px'>");
-        htmls.push('<button title="More info about this dataset: abstract, methods, data download, etc." id="tpButtonInfo" type="button" class="ui-button tpIconButton" data-placement="bottom">Info &amp; Download</button>');
+        htmls.push('<button title="More info about this dataset: abstract, methods, data download, etc." id="tpButtonInfo" type="button" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" data-placement="bottom">Info &amp; Download</button>');
+
+        if (!getVar("suppressOpenButton", false))
+            htmls.push('<button id="tpOpenDatasetButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open another dataset" data-placement="bottom">Open...</button>');
 
         if (db.conf.fileVersions.supplImageConf)
             htmls.push('<button id="tpOpenImgButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Show supplemental hi-res images submitted with this dataset" data-placement="bottom">Supplemental Images</button>');
 
-        if (!getVar("suppressOpenButton", false))
-            htmls.push('<button id="tpOpenDatasetButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Open another dataset" data-placement="bottom">Open...</button>');
-
         //if (!db.conf.atacSearch)
         htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Violin Plot Viewer" data-placement="bottom">Gene Expression Plots</button>');
 
-        htmls.push('<button id="tpHeatButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Show Heatmap" data-placement="bottom">Heatmap</button>');
+        if (db.conf.showHeatmap)
+            htmls.push('<button id="tpHeatButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Show Heatmap" data-placement="bottom">Heatmap</button>');
 
         //var nextLeft = 220;
         if (db.conf.hubUrl!==undefined) {
-            htmls.push('<a target=_blank href="#" id="tpOpenGenome" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-left: 10px; margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Show sequencing read coverage and gene expression on UCSC Genome Browser" data-placement="bottom">Genome Browser</a>');
+            htmls.push('<a target=_blank href="#" id="tpOpenGenome" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-left: 3px; margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Show sequencing read coverage and gene expression on UCSC Genome Browser" data-placement="bottom">Genome Browser</a>');
             //nextLeft += 155;
         }
 
         var xenaId = db.conf.xenaId;
         if (xenaId!==undefined) {
-            htmls.push('<a target=_blank href="#" id="tpOpenXena" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-left: 10px; margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Show gene expression heatmap on UCSC Xena Browser, creates heatmap of current gene (if coloring by gene) and all dataset genes. Click this button also if you have an active Xena window open and want to update the view there." data-placement="bottom">Xena</a>');
+            htmls.push('<a target=_blank href="#" id="tpOpenXena" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-left: 3px; margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Show gene expression heatmap on UCSC Xena Browser, creates heatmap of current gene (if coloring by gene) and all dataset genes. Click this button also if you have an active Xena window open and want to update the view there." data-placement="bottom">Xena</a>');
             //nextLeft += 80;
         }
 
@@ -8051,7 +8275,7 @@ var cellbrowser = function() {
         activateTooltip('#tpOpenUcsc');
         activateTooltip('#tpOpenDatasetButton');
         activateTooltip('#tpOpenExprButton');
-        activateTooltip('#tpHeatButton');
+        if (db.conf.showHeatmap) activateTooltip('#tpHeatButton');
         activateTooltip('#tpOpenImgButton');
 
         $('#tpButtonInfo').click( function() { openDatasetDialog(db.conf, db.name) } );
@@ -8099,7 +8323,7 @@ var cellbrowser = function() {
         $('#tpLayoutCombo').change(onLayoutChange);
         $('#tpOpenDatasetButton').click(openCurrentDataset);
         $('#tpOpenExprButton').click(buildExprViewWindow);
-        $('#tpHeatButton').click(switchToHeat);
+        if (db.conf.showHeatmap) $('#tpHeatButton').click(switchToHeat);
     }
 
     function metaFieldToLabel(fieldName) {
@@ -8371,7 +8595,7 @@ var cellbrowser = function() {
         var geneLabel = getGeneLabel();
         var recentHelp = "Shown below are the 10 most recently searched genes. Click any gene to color the plot on the right-hand side by the gene.";
 
-        buildGeneTable(htmls, "tpRecentGenes", "Recent "+geneLabel+"s",
+        buildGeneTable(htmls, "tpRecentGenes", "Recent "+getGeneLabelPlural(),
             "Hover or select cells to update colors here<br>Click to color by "+gFeatDesc, gRecentGenes, null, recentHelp);
 
         var noteStr = "No genes or peaks defined: Use quickGenesFile in cellbrowser.conf.";
@@ -8379,7 +8603,7 @@ var cellbrowser = function() {
             "Click any of them to color the plot on the right hand side by the gene.";
         if (db.conf.atacSearch)
             geneHelp = "Predefined dataset ranges were defined by the dataset submitter. Click any to color by a list of loci, so a sum of the peaks contained in the range. The exact peaks are listed on mouse over.";
-        buildGeneTable(htmls, "tpQuickGenes", "Dataset "+geneLabel+"s", null, db.conf.quickGenes, noteStr, geneHelp);
+        buildGeneTable(htmls, "tpQuickGenes", "Dataset "+getGeneLabelPlural(), null, db.conf.quickGenes, noteStr, geneHelp);
 
         buildMarkerSection(htmls);
 
@@ -8459,7 +8683,7 @@ var cellbrowser = function() {
         ttDiv.style["background-color"]=lightMode === 1 ? "rgba(255, 255, 255, 0.85)" : "rgba(0, 0, 0, 0.85)";
         ttDiv.style["box-shadow"]="0px 2px 4px rgba(0,0,0,0.3)";
         ttDiv.style["user-select"]="none";
-        ttDiv.style["z-index"]="10";
+        ttDiv.style["z-index"]="10000019";
         return ttDiv;
     }
 
@@ -8714,7 +8938,7 @@ var cellbrowser = function() {
         //setZoomRange();
     }
 
-    function loadClusterTsv(fullUrl, func, divName, clusterName) {
+    function loadClusterTsv(fullUrl, func, divName, clusterName, errorMsg) {
     /* load a tsv file relative to baseUrl and call a function when done */
         function conversionDone(data) {
             Papa.parse(data, {
@@ -8729,6 +8953,13 @@ var cellbrowser = function() {
         }
 
         function onTsvLoadDone(res) {
+            if (res.target.status === 404 || res.target.status === 0) {
+                if (divName !== undefined) {
+                    var el = document.getElementById(divName);
+                    el.innerHTML = '<p style="padding:8px 10px 0 10px">'+(errorMsg || "No markers found for this cluster.")+'</p>';
+                }
+                return;
+            }
             var data = res.target.response;
             if (res.target.responseURL.endsWith(".gz")) {
                 data = pako.ungzip(data);
@@ -8976,7 +9207,8 @@ var cellbrowser = function() {
         /* mouse hovers over legend */
         var legendId = parseInt(ev.target.id.split("_")[1]);
         var legendLabel = ev.target.innerText;
-        onClusterNameHover(legendLabel, legendId, ev, true, false);
+        var intKey = parseInt(ev.target.getAttribute("data-intkey"));
+        onClusterNameHover(legendLabel, legendId, ev, true, false, isNaN(intKey) ? undefined : intKey);
     }
 
     function onLegendLabelClick(ev) {
@@ -9242,6 +9474,32 @@ var cellbrowser = function() {
         saveAs(blob, "plotLegend.tsv");
     }
 
+    function setLegendDatalist(names) {
+        /* replace datalist options with the given array of perturbation name strings */
+        var dl = document.getElementById("tpValueList");
+        if (!dl) return;
+        dl.innerHTML = "";
+        var frag = document.createDocumentFragment();
+        for (var i = 0; i < names.length; i++) {
+            var opt = document.createElement("option");
+            opt.value = names[i];
+            frag.appendChild(opt);
+        }
+        dl.appendChild(frag);
+    }
+
+    function onLegendSearch() {
+        /* filter legend rows by label text as user types */
+        var query = $('#tpValueSearch').val().trim().toLowerCase();
+        var rows = document.querySelectorAll('#tpLegendRows .tpLegend');
+        rows.forEach(function(row) {
+            var label = row.querySelector('.tpLegendLabel');
+            if (!label) return;
+            var text = label.textContent.toLowerCase();
+            row.style.display = (query === '' || text.indexOf(query) !== -1) ? '' : 'none';
+        });
+    }
+
     function onLegendCheckboxClick(ev) {
         /* user clicked the small checkboxes in the legend */
         var valIdx = parseInt(ev.target.getAttribute("data-value-index")); // index of this value in original array (before sort)
@@ -9347,6 +9605,17 @@ var cellbrowser = function() {
         htmls.push("<button id='tpLegendColorChecked'>"+buttonText+"</button></small>");
 
         htmls.push("</div>"); // title
+
+        if (gLegend.type === "meta" && gLegend.metaInfo && gLegend.metaInfo.type === "enum") {
+            htmls.push('<div id="tpValueFilter" style="margin-top:6px;margin-bottom:3px">');
+            htmls.push('<div style="font-size:11px;font-weight:bold;color:#555;margin-bottom:3px">Filter by value:</div>');
+            htmls.push('<input type="text" id="tpValueSearch" list="tpValueList" autocomplete="off" '+
+                       'placeholder="Search..." '+
+                       'style="width:100%;box-sizing:border-box;font-size:12px;padding:2px 4px"/>');
+            htmls.push('<datalist id="tpValueList"></datalist>');
+            htmls.push('</div>');
+        }
+
         htmls.push('<div id="tpLegendHeader"><span id="tpLegendCol1"></span><span id="tpLegendCol2"></span></div>');
         htmls.push('<div id="tpLegendRows">');
 
@@ -9412,7 +9681,7 @@ var cellbrowser = function() {
             else
                 htmls.push("<div title='Cannot change color manually - too many legend entries' style='display: inline-block; background-color: #"+colorHex+"; width:14px; height:14px; margin-right: 3px' class='' id='tpLegendColor"+i+"'>&nbsp;</div>");
 
-            htmls.push("<span class='"+labelClass+"' id='tpLegendLabel_"+i+"' data-placement='auto top' title='"+mouseOver+"'>");
+            htmls.push("<span class='"+labelClass+"' id='tpLegendLabel_"+i+"' data-intkey='"+valueIndex+"' data-placement='auto top' title='"+mouseOver+"'>");
             htmls.push(label);
             htmls.push("</span>");
             var prec = 1;
@@ -9430,8 +9699,8 @@ var cellbrowser = function() {
         htmls.push('<button id="tpExpColorButton" style="margin-top: 3px; line-height:9x">Export Legend</button>'); 
 
         // add the div where the violin plot will later be shown
-        htmls.push("<div id='tpViolin'>");
-        htmls.push("<canvas style='height:200px; padding-top: 10px; padding-bottom:30px' id='tpViolinCanvas'></canvas>");
+        htmls.push("<div id='tpViolin' style='padding-top:8px;padding-bottom:8px'>");
+        htmls.push("<canvas style='display:block;width:100%;height:220px' id='tpViolinCanvas'></canvas>");
         htmls.push("</div>"); // violin
 
         var htmlStr = htmls.join("");
@@ -9464,6 +9733,31 @@ var cellbrowser = function() {
         $("#tpLegendInvert").click( function() { legendSetCheckboxes("invert"); } );
         $("#tpLegendNotNull").click( function() { legendSetCheckboxes("notNull"); } );
         $("#tpLegendColorChecked").click( function(ev) { legendColorOnlyChecked(ev); } );
+
+        if (gLegend.type === "meta" && gLegend.metaInfo && gLegend.metaInfo.type === "enum") {
+            $('#tpValueSearch').val('');
+            $('#tpValueSearch').on('input', onLegendSearch);
+
+            var legendMetaInfo = gLegend.metaInfo;
+            gAllLegendValues = [];
+
+            function populateDatalist(arr, mi) {
+                var dl = document.getElementById("tpValueList");
+                if (!dl) return;
+                var valCounts = mi.valCounts;
+                var sorted = valCounts.slice().sort(function(a, b) {
+                    return a[0].toLowerCase().localeCompare(b[0].toLowerCase());
+                });
+                gAllLegendValues = sorted.map(function(v) { return v[0]; });
+                setLegendDatalist(gAllLegendValues);
+            }
+
+            if (legendMetaInfo.valCounts) {
+                populateDatalist(null, legendMetaInfo);
+            } else {
+                db.loadMetaVec(legendMetaInfo, populateDatalist);
+            }
+        }
 
         $('.tpLegendLabel').on("mouseup", onLegendLabelClick ); // clicking the legend should have the same effect as clicking the checkbox
         $('.tpLegendLabel').on("mouseover", onLegendHover ); // hovering over the legend should have the same effect hovering over the label
@@ -9838,7 +10132,7 @@ var cellbrowser = function() {
         "display":"block",
         "left" : x,
         "top" : y,
-        "z-index" : "10000019!important", // because intro-js sets it to 9999999!important
+        "z-index" : "10000019"
        }).html(labelStr);
     }
 
@@ -9867,10 +10161,10 @@ var cellbrowser = function() {
         }
     }
 
-    function drawAndFattenCluster(clusterName, doScroll) {
+    function drawAndFattenCluster(clusterName, doScroll, intKeyOverride) {
     /* highlight one of the clusters and redraw */
 
-        let legendRowIdx = legendLabelGetIntKey(gLegend, clusterName);
+        let legendRowIdx = (intKeyOverride !== undefined) ? intKeyOverride : legendLabelGetIntKey(gLegend, clusterName);
 
         renderer.fatIdx = legendRowIdx;
         renderer.bindLayers();
@@ -9889,7 +10183,7 @@ var cellbrowser = function() {
         }
     }
 
-function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
+function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKeyOverride) {
         /* user hovers over cluster label */
         /* doHighlight can be undefined, which means true = called from onHoverLabel */
         // when called from the maxPlot interface = mouse is over label = scroll the legend to the right place
@@ -9913,7 +10207,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         }
 
         if (labelField === db.conf.labelField) {
-            if (db.conf.topMarkers!==undefined) {
+            if (db.conf.topMarkers!==undefined && db.conf.topMarkers[clusterName]!==undefined) {
                 labelLines.push("Top enriched/depleted markers: "+db.conf.topMarkers[clusterName].join(", "));
             }
             labelLines.push("");
@@ -9937,7 +10231,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
             // XX cannot do anything when not coloring on the meta field that we are coloring on
         } else {
             //var valIdx = findMetaValIndex(metaInfo, clusterName);
-            drawAndFattenCluster(clusterName, doScroll);
+            drawAndFattenCluster(clusterName, doScroll, intKeyOverride);
         }
     }
 
@@ -9962,10 +10256,28 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
     function onActRendChange(otherRend) {
         /* called after the user has activated a view with a click */
         renderer.legend = gLegend;
+        // move flipbook to the newly active panel
+        var prevRend = renderer;
         renderer = otherRend;
         gLegend = otherRend.legend;
+        if (mainRenderer) {
+            mainRenderer.sliderTarget = otherRend;
+            if (mainRenderer.sliderDiv) {
+                otherRend.div.appendChild(mainRenderer.sliderDiv);
+                mainRenderer.refreshSliderPos(otherRend !== mainRenderer);
+            }
+        }
+        // update flipbook visibility: show on new active panel, hide on old
+        if (gLegend.rows && gLegend.rows.length > gFlipbookMin) {
+            prevRend.hideFlipbook();
+            renderer.showFlipbook();
+        }
         let coordIdx = db.findCoordIdx(otherRend.coords.coordInfo.shortLabel);
         chosenSetValue("tpLayoutCombo", coordIdx);
+        setLabelDropdown(renderer.getLabelField() ?? null);
+        updateLabelHighlight(renderer.getLabelField());
+        if (gLegend && gLegend.metaInfo && gLegend.metaInfo.name)
+            setColorByDropdown(gLegend.metaInfo.name);
         buildLegendBar();
     }
 
@@ -9980,8 +10292,14 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
             renderer = renderer.childPlot;
             renderer.activatePlot();
         }
+        if (mainRenderer && mainRenderer.sliderDiv)
+            mainRenderer.div.appendChild(mainRenderer.sliderDiv);
         renderer.unsplit();
+        if (mainRenderer)
+            mainRenderer.refreshSliderPos(true); // back to single mode: just above grey bar
+        mainRenderer = null;
         $("#tpSplitMenuEntry").text("Split Screen");
+        buildWatermark(renderer); // clears the watermark now that isSplit() is false
         renderer.drawDots();
         $("#tpSplitOnGene").text(splitButtonLabel(true));
     }
@@ -9996,7 +10314,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         renderer.legend = gLegend;
         renderer.isMain = true;
 
+        mainRenderer = renderer;
         let rend2 = renderer.split();
+        rend2.setShowLabels(renderer.doDrawLabels);
+        rend2.onSliderChange = onSliderChange;
         buildWatermark(rend2, true);
 
         renderer.childPlot.legend = gLegend;
@@ -10011,8 +10332,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         /* user clicked on View > Split Screen */
         if (!renderer.childPlot && !renderer.parentPlot) {
             activateSplit();
+            changeUrl({"split": "1"});
         } else {
             removeSplit(renderer);
+            changeUrl({"split": null});
         }
         renderer.drawDots();
     }
@@ -10268,6 +10591,12 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
             htmls.push("</ul>");
         }
 
+        var allTabLabels = tabInfo.map(function(t) { return t.shortLabel; });
+        var markerSetsStr = allTabLabels.length > 1
+            ? allTabLabels.slice(0, -1).join(", ") + " and " + allTabLabels[allTabLabels.length-1]
+            : allTabLabels[0];
+        var currentField = (gLegend.metaInfo && gLegend.metaInfo.name) ? gLegend.metaInfo.name : "";
+
         for (let tabIdx = 0; tabIdx < tabInfo.length; tabIdx++) {
             var divName = "tabs-"+tabIdx;
             var tabDir = tabInfo[tabIdx].name;
@@ -10277,7 +10606,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
             htmls.push("Loading...");
             htmls.push("</div>");
 
-            loadClusterTsv(markerTsvUrl, loadMarkersFromTsv, divName, clusterName);
+            var errorMsg = "No markers found for '"+clusterName+"' in '"+currentField+"'. "+
+                markerSetsStr+" are available for the '"+db.conf.labelField+"' field.";
+            loadClusterTsv(markerTsvUrl, loadMarkersFromTsv, divName, clusterName, errorMsg);
         }
 
         htmls.push("</div>"); // tabs
@@ -10354,8 +10685,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         if (sortOrder==="desc")
             sortOrderNum = 1;
 
+        var tableId = "tpMarkerTable-"+markerListIdx;
         //htmls.push("<table class='table' data-sortlist='[[1,1],[4,0]]' id='tpMarkerTable'>");
-        htmls.push("<table class='table' data-sortlist='[["+sortColumn+","+sortOrder+"]]' id='tpMarkerTable'>");
+        htmls.push("<table class='table' data-sortlist='[["+sortColumn+","+sortOrder+"]]' id='"+tableId+"'>");
         htmls.push("<thead>");
         var hprdCol = null;
         var geneListCol = null;
@@ -10415,11 +10747,23 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
 
         var hubUrl = makeHubUrl();
 
+        var MAX_UNFILTERED_ROWS = 200;
+        var renderedRows = 0;
+        var totalRows = 0; // count non-empty rows for "showing N of M" note
+
         htmls.push("<tbody>");
         for (let i = 1; i < rows.length; i++) {
             var row = rows[i];
             if ((row.length===1) && row[0]==="") // papaparse sometimes adds empty lines to files
                 continue;
+
+            totalRows++;
+
+            // cap unfiltered view to avoid slow DOM rendering
+            if (renderedRows >= MAX_UNFILTERED_ROWS)
+                continue;
+
+            renderedRows++;
 
             htmls.push("<tr>");
             var geneId = row[0];
@@ -10461,6 +10805,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         htmls.push("</tbody>");
         htmls.push("</table>");
 
+        if (totalRows > MAX_UNFILTERED_ROWS)
+            htmls.push("<p style='color:#888; font-size:85%; margin-top:4px'>Showing top "+MAX_UNFILTERED_ROWS+" of "+totalRows+" rows — use the table filter to narrow results.</p>");
+
         // sub function ----
         function onMarkerGeneClick(ev) {
             /* user clicks onto a gene in the table of the marker gene dialog window */
@@ -10498,15 +10845,16 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll) {
         };
         if (doDescSort)
             tableOpt.sortList[0][1] = 1; // = sort first column descending
+        var $table = $("#"+tableId);
         //new Tablesort(document.getElementById('tpMarkerTable'), tableOpt);
-        $("#tpMarkerTable").tablesorter(tableOpt);
+        $table.tablesorter(tableOpt);
         //$('#tpMarkerTable').trigger('sorton', tableOpt.sortList); // does not work, though documented
         // this is a pretty bad hack, but I have no idea why the sortList option doesn't work above...
         $("[data-column='1']").trigger("sort"); // this seems to work!
         if (doDescSort)
             $("[data-column='1']").trigger("sort"); // second click...
 
-        $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
+$(".tpLoadGeneLink").on("click", onMarkerGeneClick);
         activateTooltip(".link");
 
         var ttOpt = {"html": true, "animation": false, "delay":{"show":100, "hide":100} };

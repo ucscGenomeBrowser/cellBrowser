@@ -1435,7 +1435,7 @@ button.list-group-item:hover {
 }
 
 .sliderContainer {
-  background: rgba(0,0,0,0.5);
+  background: transparent;
 }
 
 .tpLegendHl { background-color: #333; color: white; }
