@@ -13,7 +13,7 @@ def main():
     # Set up script arguments
     parser = argparse.ArgumentParser(
     formatter_class=argparse.RawDescriptionHelpFormatter,
-    description="Get all values for a list of datasets for specified cellbrowser.conf tag")
+    description="Process files from a set of curated marker databases and build json files for use in the Cell Browser UI")
     parser.add_argument('-c', '--cm', type=str, help='marker file from CellMarker2.0')
     parser.add_argument('-p', '--pdb', type=str, help='marker file from PanglaoDB')
     parser.add_argument('-s', '--scb', type=str, help='marker file from singleCellBase')
@@ -47,7 +47,6 @@ def main():
                         "ubiquitousness index":ubiqIndex, "sensitivity": sensitivity_mouse,\
                         "specificity":specificity_mouse}
 
-                        #panglaoMarkers[species][cellType][geneSymbol] = evidence
                         panglaoMarkersMouse[species][organ][cellType][geneSymbol] = evidence
 
                     elif species == "Hs":
@@ -56,7 +55,7 @@ def main():
                         "ubiquitousness index":ubiqIndex, "sensitivity": sensitivity_human,\
                         "specificity":specificity_human}
 
-                        panglaoMarkersHuman[species][cellType][geneSymbol] = evidence
+                        panglaoMarkersHuman[species][organ][cellType][geneSymbol] = evidence
 
         dumpToJson(panglaoMarkersHuman, 'panglaoDb_human.json')
         dumpToJson(panglaoMarkersMouse, 'panglaoDb_mouse.json')
