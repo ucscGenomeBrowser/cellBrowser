@@ -343,7 +343,8 @@ var cellbrowser = function() {
     /* send an event to google analytics */
         if (typeof gtag !== 'function')
             return;
-        gtag('event', eventName, {"name": eventLabel});
+        gtag('event', eventName, {"name": eventLabel, "value":1.0});
+        gtag('event', eventName, {"dataset_name": eventLabel});
     }
 
     function trackEventObj(eventName, obj) {
