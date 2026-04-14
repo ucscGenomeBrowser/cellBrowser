@@ -8457,7 +8457,7 @@ var cellbrowser = function() {
         //setZoomRange();
     }
 
-    function loadClusterTsv(fullUrl, func, divName, clusterName) {
+    function loadClusterTsv(fullUrl, func, divName, clusterName, errorMsg) {
     /* load a tsv file relative to baseUrl and call a function when done */
         function conversionDone(data) {
             Papa.parse(data, {
@@ -8472,6 +8472,13 @@ var cellbrowser = function() {
         }
 
         function onTsvLoadDone(res) {
+            if (res.target.status === 404 || res.target.status === 0) {
+                if (divName !== undefined) {
+                    var el = document.getElementById(divName);
+                    el.innerHTML = '<p style="padding:8px 10px 0 10px">'+(errorMsg || "No markers found for this cluster.")+'</p>';
+                }
+                return;
+            }
             var data = res.target.response;
             if (res.target.responseURL.endsWith(".gz")) {
                 data = pako.ungzip(data);
@@ -10103,6 +10110,12 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             htmls.push("</ul>");
         }
 
+        var allTabLabels = tabInfo.map(function(t) { return t.shortLabel; });
+        var markerSetsStr = allTabLabels.length > 1
+            ? allTabLabels.slice(0, -1).join(", ") + " and " + allTabLabels[allTabLabels.length-1]
+            : allTabLabels[0];
+        var currentField = (gLegend.metaInfo && gLegend.metaInfo.name) ? gLegend.metaInfo.name : "";
+
         for (let tabIdx = 0; tabIdx < tabInfo.length; tabIdx++) {
             var divName = "tabs-"+tabIdx;
             var tabDir = tabInfo[tabIdx].name;
@@ -10112,7 +10125,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             htmls.push("Loading...");
             htmls.push("</div>");
 
-            loadClusterTsv(markerTsvUrl, loadMarkersFromTsv, divName, clusterName);
+            var errorMsg = "No markers found for '"+clusterName+"' in '"+currentField+"'. "+
+                markerSetsStr+" are available for the '"+db.conf.labelField+"' field.";
+            loadClusterTsv(markerTsvUrl, loadMarkersFromTsv, divName, clusterName, errorMsg);
         }
 
         htmls.push("</div>"); // tabs
@@ -10189,8 +10204,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         if (sortOrder==="desc")
             sortOrderNum = 1;
 
+        var tableId = "tpMarkerTable-"+markerListIdx;
         //htmls.push("<table class='table' data-sortlist='[[1,1],[4,0]]' id='tpMarkerTable'>");
-        htmls.push("<table class='table' data-sortlist='[["+sortColumn+","+sortOrder+"]]' id='tpMarkerTable'>");
+        htmls.push("<table class='table' data-sortlist='[["+sortColumn+","+sortOrder+"]]' id='"+tableId+"'>");
         htmls.push("<thead>");
         var hprdCol = null;
         var geneListCol = null;
@@ -10250,11 +10266,23 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         var hubUrl = makeHubUrl();
 
+        var MAX_UNFILTERED_ROWS = 200;
+        var renderedRows = 0;
+        var totalRows = 0; // count non-empty rows for "showing N of M" note
+
         htmls.push("<tbody>");
         for (let i = 1; i < rows.length; i++) {
             var row = rows[i];
             if ((row.length===1) && row[0]==="") // papaparse sometimes adds empty lines to files
                 continue;
+
+            totalRows++;
+
+            // cap unfiltered view to avoid slow DOM rendering
+            if (renderedRows >= MAX_UNFILTERED_ROWS)
+                continue;
+
+            renderedRows++;
 
             htmls.push("<tr>");
             var geneId = row[0];
