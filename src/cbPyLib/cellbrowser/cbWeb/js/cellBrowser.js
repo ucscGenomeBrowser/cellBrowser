@@ -1272,7 +1272,7 @@ var cellbrowser = function() {
         /* keep only datasets that fulfill the filters */
 
         // read the current filter values of the dropboxes
-        var categories = ["Body", "Dis", "Org", "Proj", "Stage", "Dom", "Source"];
+        var categories = ["Body", "Dis", "Org", "Proj", "Stage", "Dom", "Assay", "Source"];
         var filtVals = {};
         for (var category of categories) {
             var vals = $("#tp"+category+"Combo").val();
@@ -1627,7 +1627,7 @@ var cellbrowser = function() {
             activateFilterCombo(projects, "tpProjCombo");
             activateFilterCombo(lifeStages, "tpStageCombo");
             activateFilterCombo(domains, "tpDomCombo");
-            activateFilterCombo(domains, "tpAssayCombo");
+            activateFilterCombo(assays, "tpAssayCombo");
             activateFilterCombo(sources, "tpSourceCombo");
         }
 
