@@ -67,7 +67,7 @@ function MaxPlot(div, top, left, width, height, args) {
     const gTextSize = 16; // size of cluster labels
     const gTitleSize = 18; // size of title text
     const gStatusHeight = 14; // height of status bar
-    const gSliderFromBottom = 45; // distance from buttom to top of slider div
+    const gSliderFromBottom = 66; // distance from bottom to top of slider div
     const gZoomButtonSize = 30; // size of zoom buttons
     const gZoomFromLeft = 10;  // position of zoom buttons from left
     const gZoomFromBottom = 140;  // position of zoom buttons from bottom
@@ -135,6 +135,10 @@ function MaxPlot(div, top, left, width, height, args) {
             }
         }
         $('#mpSliderReset').children()[0].style.fill = this.isLight() ? "black" : "white";
+        $(self.alphaSlider).css('background', this.isLight() ? '' : 'rgba(120,120,120,0.6)');
+        $(self.radiusSlider).css('background', this.isLight() ? '' : 'rgba(120,120,120,0.6)');
+
+        if (self.sliderDiv) self.sliderDiv.style.backgroundColor = this.isLight() ? "rgba(255,255,255,0.75)" : "rgba(30,30,30,0.7)";
         $(`#${this.div.id} > #tpWatermark`).css('color', this.isLight() ? 'black' : 'white');
         $('#mpProgressLabel').css('color', this.isLight() ? 'black' : 'white');
 
@@ -158,7 +162,7 @@ function MaxPlot(div, top, left, width, height, args) {
         }
 
         if (this.childPlot) {
-            this.canvas.style["border"] = `2px solid ${this.isLight() ? "black" : "white"}`;
+            this.activeBorderDiv.style.border = `3px solid ${this.isLight() ? "black" : "white"}`;
             this.childPlot.setLightMode(mode);
         }
 
@@ -204,6 +208,23 @@ function MaxPlot(div, top, left, width, height, args) {
         [self.ctx, self.canvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, self.usesWebGL(), 'mpCanvas', self.mode);
         if(this.usesWebGL()) [self.labelCtx, self.labelCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, true, 'mpLabelCanvas', 1);
 
+        /* Transparent overlay div used to show the active-screen border in
+         * split screen mode. Sits above all canvases via z-index so the
+         * border is never painted over. pointer-events:none so it doesn't
+         * block mouse interaction. */
+        var activeBorderDiv = document.createElement('div');
+        activeBorderDiv.style.position    = "absolute";
+        activeBorderDiv.style.top         = "0";
+        activeBorderDiv.style.left        = "0";
+        activeBorderDiv.style.width       = "100%";
+        activeBorderDiv.style.height      = "100%";
+        activeBorderDiv.style.boxSizing   = "border-box";
+        activeBorderDiv.style.pointerEvents = "none";
+        activeBorderDiv.style.zIndex      = "50";
+        activeBorderDiv.style.border      = "none";
+        canvDiv.appendChild(activeBorderDiv);
+        self.activeBorderDiv = activeBorderDiv;
+
         self.interact = false;
 
         if (args && args.showClose===true) {
@@ -237,6 +258,7 @@ function MaxPlot(div, top, left, width, height, args) {
             self.onNoLabelHover = null; // called when mouse does not hover over a label
             self.onLineHover = null; // called when mouse over a trajectory line
             self.onRadiusAlphaChange = null; // called when user changes radius or alpha
+            self.sliderTarget = null;        // if set, sliders control this renderer instead of self
             // self.onZoom100Click: called when user clicks the zoom100 button. Implemented below.
             self.selectBox = selectDiv; // we need this later
             self.setupMouse();
@@ -248,8 +270,14 @@ function MaxPlot(div, top, left, width, height, args) {
         }
 
         addProgressBars(top+Math.round(height*0.3), left+30);
-        if (!args || args.showSliders===undefined || args.showSliders===true)
+        if (!args || args.showSliders===undefined || args.showSliders===true) {
             addSliders();
+            if (self.sliderDiv) {
+                self.sliderDiv.style.bottom = "";
+                var sliderH = self.sliderDiv.offsetHeight || 38;
+                self.sliderDiv.style.top = (height - gStatusHeight - sliderH - 4) + "px";
+            }
+        }
 
         //if (args && args.flipBook)
             self.addFlipbookSlider();
@@ -328,11 +356,14 @@ function MaxPlot(div, top, left, width, height, args) {
         self.coords = {};
         self.coords.orig = null;   // coordinates of cells in original coordinates
         self.coords.labels    = null;   // cluster label positions in pixels, array of [x,y,text]
+        self.plotLabels    = null;   // per-plot label coords (not shared between split plots)
+        self.plotPxLabels  = null;   // per-plot scaled pixel label coords
+        self.plotLabelBbox = null;   // per-plot label bounding boxes
 
         self.coords.px   = null;   // coordinates of cells and labels as screen pixels or (HIDCOORD,HIDCOORD) if not shown
         self.coords.gl   = null;   // coordinates of cells in WebGL space
         self.coords.hidden = null; // Hidden coordinates (used by WebGL drawing)
-        self.coords.layers = null; // Coordinate layers (used by WebGL drawing)
+        self.coords.selected = null; // Per-cell selection flag for WebGL (0 or 1)
         self.coords.labelBbox = null;   // cluster label bounding boxes, array of [x1,x2,x2,y2]
 
         self.col = {};
@@ -389,14 +420,14 @@ function MaxPlot(div, top, left, width, height, args) {
         attribute vec2 a_Position;
         attribute vec3 a_Color;
         attribute float a_ColID;
-        attribute float a_Layer;
+        attribute float a_Selected;
         attribute float a_Hidden;
-        
+
         uniform float u_Radius;
         uniform mat4 u_Projection;
         uniform float u_Layer;
         uniform float u_LightMode;
-        
+
         uniform float u_FatID;
         uniform float u_AnySelected;
 
@@ -404,8 +435,24 @@ function MaxPlot(div, top, left, width, height, args) {
         varying vec3 v_Color;
 
         void main() {
+            // Compute layer per-vertex in shader (replaces JS bindLayers loop):
+            //   2  = selected cell
+            //   1  = fat (highlighted) cell
+            //  -1  = color index 0 (background/unassigned)
+            //   0  = normal cell
+            float l_Layer;
+            if(a_Selected == 1.0) {
+                l_Layer = 2.0;
+            } else if(u_FatID >= 0.0 && a_ColID == u_FatID) {
+                l_Layer = 1.0;
+            } else if(a_ColID == 0.0) {
+                l_Layer = -1.0;
+            } else {
+                l_Layer = 0.0;
+            }
+
             float l_Depth;
-            if(u_Layer != a_Layer || a_Hidden == 1.0) {
+            if(u_Layer != l_Layer || a_Hidden == 1.0) {
                 l_Depth = -2.0;
             } else if(u_Layer == 2.0) {
                 l_Depth = 0.9;
@@ -550,9 +597,10 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // Get attributes
         self.a_Position = getAttribute('a_Position');
-        self.a_Color = getAttribute('a_Color');
-        self.a_Layer = getAttribute('a_Layer');
-        self.a_Hidden = getAttribute('a_Hidden');
+        self.a_Color    = getAttribute('a_Color');
+        self.a_ColID    = getAttribute('a_ColID');
+        self.a_Selected = getAttribute('a_Selected');
+        self.a_Hidden   = getAttribute('a_Hidden');
 
         // Get uniforms
         self.u_Radius = getUniform('u_Radius');
@@ -583,17 +631,20 @@ function MaxPlot(div, top, left, width, height, args) {
             "value": 4,
             "min"  : 1,
             "max"  : 7,
-            "step" : 1, 
+            "step" : 1,
             "slide": onChangeAlpha
         });
         $(self.radiusSlider).slider({
             "value": 4,
             "min"  : 1,
             "max"  : 7,
-            "step" : 1, 
+            "step" : 1,
             "slide": onChangeRadius
         });
-        
+        if (!self.isLight()) {
+            $(self.alphaSlider).css('background', 'rgba(120,120,120,0.6)');
+            $(self.radiusSlider).css('background', 'rgba(120,120,120,0.6)');
+        }
     }
 
     this.setWatermark = function (text) {
@@ -787,10 +838,17 @@ function MaxPlot(div, top, left, width, height, args) {
             2 : 1.5,
             1 : 1.8
         }
-        self.port.alphaMult = multMap[sliderVal];
-        if(DEBUG) console.log("alphaMult: "+self.port.alphaMult);
-        self.calcRadius();
-        self.drawDots();
+        var target = self.sliderTarget || self;
+        target.port.alphaMult = multMap[sliderVal];
+        if(DEBUG) console.log("alphaMult: "+target.port.alphaMult);
+        target.calcRadius();
+        target.drawDots();
+        var other = target.childPlot || target.parentPlot;
+        if (other && target.coords === other.coords) {
+            other.port.alphaMult = multMap[sliderVal];
+            other.calcRadius();
+            other.drawDots();
+        }
     }
 
     function onChangeRadius(ev, ui) {
@@ -805,9 +863,16 @@ function MaxPlot(div, top, left, width, height, args) {
             6 : 2.0,
             7 : 3.0
         }
-        self.port.radiusMult = multMap[sliderVal];
-        self.calcRadius();
-        self.drawDots();
+        var target = self.sliderTarget || self;
+        target.port.radiusMult = multMap[sliderVal];
+        target.calcRadius();
+        target.drawDots();
+        var other = target.childPlot || target.parentPlot;
+        if (other && target.coords === other.coords) {
+            other.port.radiusMult = multMap[sliderVal];
+            other.calcRadius();
+            other.drawDots();
+        }
     }
 
     function addSliders() {
@@ -826,8 +891,8 @@ function MaxPlot(div, top, left, width, height, args) {
         alphaCont.id = "mpAlphaCont";
         //alphaCont.style.left = "150px"; // cellbrowser.css defines grid widths: 45
         alphaCont.className = "sliderContainer";
-        alphaCont.style.top = "15px"; 
-        alphaCont.style.left = "0px";
+        alphaCont.style.top = "23px";
+        alphaCont.style.left = "5px";
 
         var alphaLabel = document.createElement('div'); // contains the slider and the reset button, floats right
         alphaLabel.id = "alphaSliderLabel";
@@ -869,8 +934,8 @@ function MaxPlot(div, top, left, width, height, args) {
         var radiusCont = document.createElement('span');
         radiusCont.className = "sliderContainer";
         radiusCont.id = "mpRadiusDiv";
-        radiusCont.style.left = "0px"; 
-        radiusCont.style.top = "0px";
+        radiusCont.style.left = "5px";
+        radiusCont.style.top = "5px";
         radiusCont.appendChild(radiusSlider)
 
 
@@ -887,11 +952,15 @@ function MaxPlot(div, top, left, width, height, args) {
         radiusCont.appendChild(brEl);
 
         // add both to the big container div that holds all three slider elements
-        var sliderDiv = document.createElement('span');
-        sliderDiv.style.bottom = "28px";
-        sliderDiv.style.right = "200px";
+        var sliderDiv = document.createElement('div');
+        sliderDiv.style.bottom = "42px";
+        sliderDiv.style.right = "5px";
+        sliderDiv.style.width = "200px";
+        sliderDiv.style.height = "41px";
         sliderDiv.style.position = "absolute";
         sliderDiv.style.zIndex = "10";
+        sliderDiv.style.borderRadius = "4px";
+        sliderDiv.style.backgroundColor = self.isLight() ? "rgba(255,255,255,0.75)" : "rgba(30,30,30,0.7)";
         sliderDiv.id = "mpSliderDiv";
         sliderDiv.appendChild(radiusCont);
         sliderDiv.appendChild(alphaCont);
@@ -899,28 +968,28 @@ function MaxPlot(div, top, left, width, height, args) {
         self.sliderDiv = sliderDiv; // for quickResize()
     }
 
+    var _flipbookRafId = null;
+    var _flipbookPendingIdx = null;
+    var _flipbookPendingEv = null;
+
     function onChangeFlipBook(ev) {
-        let hlColIdx = $( "#mpFlipbook" ).slider( "value" );
-        console.log(hlColIdx);
+        _flipbookPendingIdx = $( self.flipBookEl ).slider( "value" );
+        _flipbookPendingEv = ev;
+        if (_flipbookRafId !== null) return; // already scheduled for this frame
+        _flipbookRafId = requestAnimationFrame(function() {
+            _flipbookRafId = null;
+            var idx = _flipbookPendingIdx;
+            var pendEv = _flipbookPendingEv;
 
-        self.selectClear(true);
-        self.selectByColor ( hlColIdx );
+            self.selectClear(true);
+            self.selectByColor(idx);
 
-        let mouseEv = ev.originalEvent.originalEvent;
-        let x = mouseEv.clientX;
-        let y = mouseEv.clientY;
-        if (self.onSliderChange)
-            self.onSliderChange( hlColIdx, x, y );
+            var mouseEv = pendEv.originalEvent.originalEvent;
+            if (self.onSliderChange)
+                self.onSliderChange(idx, mouseEv.clientX, mouseEv.clientY);
 
-        //
-        //let newPal = [];
-        //for (let i=0; i < self.col.pal.length; i++) {
-            //newPal.push("DDDDDD");
-        //}
-        //newPal[hlColIdx] = "0000AA";
-        //self.setColors(newPal);
-        self.drawDots();
-
+            self.drawDots();
+        });
     }
 
     function addCloseButton(top, left) {
@@ -2028,14 +2097,19 @@ function MaxPlot(div, top, left, width, height, args) {
             ctx.finish();
             console.time("draw");
         }
+        const count = self.getCount();
         ctx.uniform1f(self.u_Layer, -1);
-        ctx.drawArrays(self.ctx.POINTS, 0, self.getCount());
+        ctx.drawArrays(self.ctx.POINTS, 0, count);
         ctx.uniform1f(self.u_Layer, 0);
-        ctx.drawArrays(self.ctx.POINTS, 0, self.getCount());
-        ctx.uniform1f(self.u_Layer, 1);
-        ctx.drawArrays(self.ctx.POINTS, 0, self.getCount());
-        ctx.uniform1f(self.u_Layer, 2);
-        ctx.drawArrays(self.ctx.POINTS, 0, self.getCount());
+        ctx.drawArrays(self.ctx.POINTS, 0, count);
+        if(fatIdx !== null) {
+            ctx.uniform1f(self.u_Layer, 1);
+            ctx.drawArrays(self.ctx.POINTS, 0, count);
+        }
+        if(selCells.size > 0) {
+            ctx.uniform1f(self.u_Layer, 2);
+            ctx.drawArrays(self.ctx.POINTS, 0, count);
+        }
         if(WEBGL_DEBUG) {
             ctx.finish();
             console.timeEnd("draw");
@@ -2432,20 +2506,23 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.quickResize = function(width, height) {
        /* resize the canvas and move the status line, don't rescale or draw  */
-       self.div.style.width = width+"px";
-       self.div.style.height = height+"px";
 
-       self.canvDiv.style.width = width+"px";
-       self.canvDiv.style.height = height+"px";
-
-       // if in split screen mode, pass on the message to the second window
+       // if in split screen mode, halve width first so all sizing below uses
+       // the correct per-panel width, then pass the resize to the child plot
        if (self.childPlot) {
            width = width/2;
-           //self.childPlot.left = self.left+width;
-           //self.childPlot.canvas.style.left = self.childPlot.left+"px";
            self.childPlot.setPos(null, self.left+width);
            self.childPlot.setSize(width, height, true);
        }
+
+       let canvHeight = height - gStatusHeight;
+
+       self.div.style.width = width+"px";
+       self.div.style.height = height+"px";
+
+       // canvDiv wraps the canvas stack; its height excludes the status bar
+       self.canvDiv.style.width = width+"px";
+       self.canvDiv.style.height = canvHeight+"px";
 
        if (self.closeButton) {
            self.closeButton.style.left = width - gCloseButtonFromRight;
@@ -2455,9 +2532,6 @@ function MaxPlot(div, top, left, width, height, args) {
        self.canvas.style.width = width+"px";
        self.width = width;
        self.height = height;
-       //let canvHeight = height - gStatusHeight;
-
-       let canvHeight = height - gStatusHeight;
        self.canvas.height = canvHeight;
        self.canvas.width = width;
        self.canvas.style.height = canvHeight+"px";
@@ -2476,16 +2550,36 @@ function MaxPlot(div, top, left, width, height, args) {
        self.zoomDiv.style.left = (gZoomFromLeft)+"px";
 
        // move status line, dataset name and radius/transparency sliders
+       // in split mode the status bar spans both panels, so use double width
        var statusDiv = self.statusLine;
        statusDiv.style.top = (height-gStatusHeight)+"px";
-       statusDiv.style.width = width+"px";
+       statusDiv.style.width = (self.childPlot ? width*2 : width)+"px";
 
-       self.titleDiv.style.top = (height-gStatusHeight-gTitleSize)+"px";
+       self.titleDiv.style.top = (height-gStatusHeight-gTitleSize-4)+"px";
 
        if (self.sliderDiv)
-           self.sliderDiv.style.top = (height-gStatusHeight-gSliderFromBottom)+"px";
+           self.refreshSliderPos(false);
+
+       var flipCont = document.getElementById("mpFlipbookCont");
+       if (flipCont) {
+           flipCont.style.bottom = "";
+           flipCont.style.top = (height-gStatusHeight-gSliderFromBottom-45)+"px";
+       }
 
     }
+
+    this.refreshSliderPos = function(nearBottom) {
+        /* reposition the slider div. nearBottom=true: just above status bar (single mode / right panel).
+         * nearBottom=false: above the dataset title (left panel in split mode). */
+        if (!self.sliderDiv) return;
+        self.sliderDiv.style.bottom = "";
+        if (nearBottom) {
+            var sliderH = self.sliderDiv.offsetHeight || 38;
+            self.sliderDiv.style.top = (self.height - gStatusHeight - sliderH - 4) + "px";
+        } else {
+            self.sliderDiv.style.top = (self.height - gStatusHeight - gSliderFromBottom) + "px";
+        }
+    };
 
     this.setPos = function(top, left) {
        /* position canvas. Does not affect child  */
@@ -2540,7 +2634,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
        var oldRadius = self.port.initRadius;
        var oldAlpha  = self.port.initAlpha;
-       var oldLabels = self.coords.pxLabels;
+       var oldLabels = self.plotPxLabels;
        self.port = {};
        self.initPort(coordOpts);
        if (oldRadius)
@@ -2571,7 +2665,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
        self.coords.orig = coords;
        self.coords.coordInfo = coordInfo; // we need to find out the label of the coords
-       self.coords.labels = clusterLabels;
+       self.plotLabels = clusterLabels;
        if (coordInfo.aspectRatio)
            self.coords.aspectRatio = coordInfo.aspectRatio;
 
@@ -2596,10 +2690,9 @@ function MaxPlot(div, top, left, width, height, args) {
         if(self.usesWebGL()) {
             self.setCoordsWebGL();
 
-            // Initialize layer and hidden attributes since they depend on how many points there are
-            // (Not entirely sure where the best place to put this would be)
-            self.coords.layers = new Int8Array(this.getCount());
-            this.bindLayers();
+            // Initialize per-cell selection and hidden buffers
+            self.coords.selected = new Uint8Array(this.getCount());
+            self.bindBuffer(1, self.a_Selected, self.coords.selected, self.ctx.UNSIGNED_BYTE);
 
             self.coords.hidden = new Uint8Array(this.getCount());
             self.bindBuffer(1, self.a_Hidden, self.coords.hidden, self.ctx.UNSIGNED_BYTE);
@@ -2610,8 +2703,8 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.setLabelCoords = function(labelCoords) {
         /* set the label coords and return true if there were any labels before */
-        var hadLabelsBefore = (self.coords.labels && self.coords.labels.length > 0);
-        self.coords.labels = labelCoords;
+        var hadLabelsBefore = (self.plotLabels && self.plotLabels.length > 0);
+        self.plotLabels = labelCoords;
         return hadLabelsBefore;
     };
 
@@ -2674,54 +2767,34 @@ function MaxPlot(div, top, left, width, height, args) {
         });
 
         // Now find the color of each point
-        let colorNumbers = [];
-        for(let colorIndex of colorArr) {
-            colorNumbers.push(colorRGB[colorIndex][0], colorRGB[colorIndex][1], colorRGB[colorIndex][2]);
+        const colorBuf = new Uint8Array(colorArr.length * 3);
+        const maxPalIdx = colorRGB.length - 1;
+        for(let i = 0; i < colorArr.length; i++) {
+            const rgb = colorRGB[Math.min(colorArr[i], maxPalIdx)];
+            colorBuf[i*3]   = rgb[0];
+            colorBuf[i*3+1] = rgb[1];
+            colorBuf[i*3+2] = rgb[2];
         }
         if(WEBGL_DEBUG) console.timeEnd("Parse Colors");
 
-        const colorBuf = new Uint8Array(colorNumbers);
-
-        // Bind color buffer
+        // Bind RGB color buffer (normalized, vec3)
         self.bindBuffer(3, self.a_Color, colorBuf, self.ctx.UNSIGNED_BYTE, true);
-        
-        // Since some colors are drawn behind other colors, calculate which colors should be behind which here
-        // Pass in colorNumbers.length as the length since getCount() uses an array that may not have been defined yet
-        this.bindLayers(colorNumbers.length);
+
+        // Bind raw color indices as floats so any number of colors is handled correctly
+        self.bindBuffer(1, self.a_ColID, Float32Array.from(colorArr), self.ctx.FLOAT, false);
     }
 
-    // When using WebGL, determine what layers each cell should be on.
-    // Based on color, fatID, and whether or not it's selected
-    this.bindLayers = function(length = this.getCount()) {
-        if(!this.usesWebGL()) {
-            return;
-        }
+    // No-op: layer computation has been moved into the vertex shader.
+    // Kept to avoid breaking any external callers.
+    this.bindLayers = function(length = this.getCount()) { return; }
 
-        const selCells = this.selCells;
-        const colorArr = this.col.arr;
-
-        // Calculating layers requires color and coordinate knowledge. Only bind once both are known
-        if(!colorArr || !this.coords.layers) {
-            return;
-        }
-
-        if(WEBGL_DEBUG) console.time("Parse Layers");
-        for(let i = 0; i < length; i++) {
-            if(selCells.has(i)) {
-                this.coords.layers[i] = 2;
-            } else {
-                const col = colorArr[i];
-                if(this.fatIdx !== null && this.fatIdx === col) {
-                    this.coords.layers[i] = 1;
-                } else if(col === 0) {
-                    this.coords.layers[i] = -1;
-                } else {
-                    this.coords.layers[i] = 0;
-                }
-            }
-        }
-        this.bindBuffer(1, this.a_Layer, this.coords.layers, this.ctx.BYTE);
-        if(WEBGL_DEBUG) console.timeEnd("Parse Layers");
+    // Upload the a_Selected buffer to GPU. Called whenever selCells changes.
+    this._bindSelected = function() {
+        if(!this.usesWebGL()) return;
+        if(!this.coords.selected) return;
+        const sel = this.selCells, buf = this.coords.selected;
+        for(let i = 0; i < buf.length; i++) buf[i] = sel.has(i) ? 1 : 0;
+        this.bindBuffer(1, this.a_Selected, buf, this.ctx.UNSIGNED_BYTE);
     }
 
     this.calcRadius = function() {
@@ -2780,8 +2853,8 @@ function MaxPlot(div, top, left, width, height, args) {
         var height = 1500; // enough space for 100 lines in the legend
         self.svgLines.push("<svg  xmlns='http://www.w3.org/2000/svg' height='"+height+"' width='"+width+"'>\n");
         drawCirclesSvg(self.svgLines, coords, colArr, pal, radius, alpha, self.selCells);
-        if (self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined)
-            drawLabelsSvg(self.svgLines, self.coords.pxLabels, plotWidth, plotHeight, self.port.zoomFact);
+        if (self.doDrawLabels===true && self.plotLabels!==null && self.plotLabels!==undefined)
+            drawLabelsSvg(self.svgLines, self.plotPxLabels, plotWidth, plotHeight, self.port.zoomFact);
         // axis lines
         self.svgLines.push('<line x1="2" y1="2" x2="2" y2="'+plotHeight+'" stroke="black" stroke-width="2"/>');
         self.svgLines.push('<line x1="2" y1="2" x2="'+plotWidth+'" y2="2" stroke="black" stroke-width="2"/>');
@@ -2811,6 +2884,8 @@ function MaxPlot(div, top, left, width, height, args) {
         var colArr = self.col.arr;
         var count = 0;
 
+        if (self.coords.orig === null)
+            return; // no data loaded yet (e.g. heatmap-only dataset)
         if (alpha===undefined)
              alert("internal error: alpha is not defined");
         if (coords===null)
@@ -2876,8 +2951,7 @@ function MaxPlot(div, top, left, width, height, args) {
             if(DEBUG) console.timeEnd("draw lines");
         }
 
-        if ((self.doDrawLabels===true && self.coords.labels!==null && self.coords.labels!==undefined)
-            || self.coords.coordInfo.annots!==undefined) {
+        if (self.doDrawLabels || self.coords.coordInfo.annots!==undefined) {
             self.drawLabels();
         }
 
@@ -2895,20 +2969,22 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.drawLabels = function() {
         /* draw only the labels */
-        self.coords.pxLabels = scaleLabels(
-            self.coords.labels,
-            this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
-            self.port.radius,
-            self.canvas.width,
-            self.canvas.height
-        );
-        self.coords.labelBbox = drawLabels(
-            this.usesWebGL() ? this.labelCtx : self.ctx,
-            self.coords.pxLabels,
-            self.canvas.width,
-            self.canvas.height,
-            self.port.zoomFact
-        );
+        if (self.doDrawLabels && self.plotLabels && self.plotLabels.length > 0) {
+            self.plotPxLabels = scaleLabels(
+                self.plotLabels,
+                this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
+                self.port.radius,
+                self.canvas.width,
+                self.canvas.height
+            );
+            self.plotLabelBbox = drawLabels(
+                this.usesWebGL() ? this.labelCtx : self.ctx,
+                self.plotPxLabels,
+                self.canvas.width,
+                self.canvas.height,
+                self.port.zoomFact
+            );
+        }
 
         // draw annotations - look like labels, but cannot be clicked
         self.coords.pxAnnots = scaleLabels(
@@ -3172,10 +3248,8 @@ function MaxPlot(div, top, left, width, height, args) {
         self.selCells.clear();
         setStatus("");
 
-        // If we're using webGL, adjust the attribute buffer
         if(self.usesWebGL()) {
-            // Reset layers
-            this.bindLayers();
+            this._bindSelected();
         }
 
         if (self.onSelChange!==null && skipNotify!==true)
@@ -3258,6 +3332,18 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.selCells = selCells;
         debug(cnt + " cells removed from selection, by color");
+        self._selUpdate();
+    };
+
+    this.selectByIndices = function(indices) {
+        /* replace current selection with the given array of cell indices */
+        self.selCells = new Set(indices);
+        self._selUpdate();
+    };
+
+    this.clearSelection = function() {
+        /* clear all selected cells */
+        self.selCells = new Set();
         self._selUpdate();
     };
 
@@ -3438,18 +3524,9 @@ function MaxPlot(div, top, left, width, height, args) {
         /* called after the selection has been updated, calls the onSelChange callback */
         setStatus(self.selCells.size + " " + self.gSampleDescription + "s selected");
 
-        // If we're using webGL, adjust the attribute buffer
         if(self.usesWebGL()) {
-            // Convert the selected cell set to a buffer
-            this.bindLayers();
-
-            // We need to do the same work on the child plot, if one exists
-            // Since the child plot's selected cells share a pointer 
-            if (self.childPlot) {
-                const childPlot = self.childPlot;
-                childPlot.coords.layers = this.coords.layers;
-                childPlot.bindBuffer(1, childPlot.a_Layer, childPlot.coords.layers, childPlot.ctx.UNSIGNED_BYTE);
-            }
+            this._bindSelected();
+            if(self.childPlot) self.childPlot._bindSelected();
         }
 
         if (self.onSelChange!==null)
@@ -3481,11 +3558,11 @@ function MaxPlot(div, top, left, width, height, args) {
     this.labelAt = function(x, y) {
         /* return the index and the text of the label at position x,y or null if nothing there */
         //if(DEBUG) console.time("labelCheck");
-        var clusterLabels = self.coords.labels;
+        var clusterLabels = self.plotLabels;
         if (clusterLabels===null || clusterLabels===undefined)
             return null;
-        var labelCoords = self.coords.labels;
-        var boxes = self.coords.labelBbox;
+        var labelCoords = self.plotLabels;
+        var boxes = self.plotLabelBbox;
 
         if (boxes==null) // no cluster labels
             return null;
@@ -3614,8 +3691,8 @@ function MaxPlot(div, top, left, width, height, args) {
             return false;
 
         // only need to do something if we're not already the active plot
-        self.canvas.style["border"] = `2px solid ${this.isLight() ? "black" : "white"}`;
-        self.parentPlot.canvas.style["border"] = "2px solid transparent";
+        self.activeBorderDiv.style.border = `3px solid ${this.isLight() ? "black" : "white"}`;
+        self.parentPlot.activeBorderDiv.style.border = "none";
 
         // flip the parent/child relationship
         self.childPlot = self.parentPlot;
@@ -3693,7 +3770,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var yCanvas = clientY - canvasTop;
 
         // when the cursor is over a label, change it to a hand, but only when there is no marquee
-        if (self.coords.labelBbox!==null && self.mouseDownX === null) {
+        if (self.plotLabelBbox!==null && self.mouseDownX === null) {
             var labelInfo = self.labelAt(xCanvas, yCanvas);
             if (labelInfo===null) {
                 self.canvas.style.cursor = self.canvasCursor;
@@ -3946,7 +4023,8 @@ function MaxPlot(div, top, left, width, height, args) {
     this.getLabels = function() {
         /* get current labels */
         var ret = [];
-        var labels = self.coords.labels;
+        var labels = self.plotLabels;
+        if (!labels) return ret;
         for (var i = 0; i<labels.length; i++)
             ret.push(labels[i][2]);
         return ret;
@@ -3954,16 +4032,16 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.setLabels = function(newLabels) {
         /* set new label text */
-        if (newLabels.length!==self.coords.labels.length) {
+        if (!self.plotLabels || newLabels.length!==self.plotLabels.length) {
             debug("maxPlot:setLabels error: new labels have wrong length.");
             return;
         }
 
         for (var i = 0; i<newLabels.length; i++)
-            self.coords.labels[i][2] = newLabels[i];
+            self.plotLabels[i][2] = newLabels[i];
 
-        self.coords.pxLabels = scaleLabels(
-            self.coords.labels,
+        self.plotPxLabels = scaleLabels(
+            self.plotLabels,
             this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
             self.port.radius,
             self.canvas.width,
@@ -3979,12 +4057,7 @@ function MaxPlot(div, top, left, width, height, args) {
                 self.canvas.height
             );
             for (let pxa of pxAnnots)
-                self.coords.labels.push(pxa);
-        }
-
-        // a special case for connected plots that are not sharing our pixel coordinates
-        if (self.childPlot && self.coords!==self.childPlot.coords) {
-           self.childPlot.setLabels(newLabels);
+                self.plotLabels.push(pxa);
         }
     };
 
@@ -4090,19 +4163,30 @@ function MaxPlot(div, top, left, width, height, args) {
 
         plot2.statusLine.style.display = "none";
 
-        plot2.port = self.port;
+        plot2.port = Object.assign({}, self.port);
+        plot2.port.zoomRange = Object.assign({}, self.port.zoomRange);
+        plot2.port.initZoom  = Object.assign({}, self.port.initZoom);
         plot2.selCells = self.selCells;
 
         plot2.coords = self.coords;
 
+        /* Give the child plot its own label state so each side can label independently.
+         * Initially they point at the same array (read-only), but setLabelCoords()
+         * will replace the reference so they diverge without affecting each other. */
+        plot2.plotLabels    = self.plotLabels;
+        plot2.plotPxLabels  = self.plotPxLabels;
+        plot2.plotLabelBbox = self.plotLabelBbox;
+        plot2.activeLabelField = self.activeLabelField;
+
         plot2.col = {};
-        plot2.col.pal = self.col.pal;
         plot2.col.arr = self.col.arr;
+        plot2.setColors(self.col.pal); // initializes the flipbook slider on the child panel
 
         if (self.background)
             plot2.setBackground (self.background.image);
 
         self.setSize(newWidth, newHeight, false); // will call scaleData(), but not redraw.
+        self.statusLine.style.width = (newWidth * 2) + "px"; // span both panels
 
         plot2.onLabelClick = self.onLabelClick;
         plot2.onCellClick = self.onCellClick;
@@ -4117,9 +4201,8 @@ function MaxPlot(div, top, left, width, height, args) {
             // Initialiaze WebGL buffers on child plot
             plot2.bindBuffer(2, plot2.a_Position, plot2.coords.gl, plot2.ctx.FLOAT);
 
-            plot2.bindColors();
-
-            plot2.bindBuffer(1, plot2.a_Layer, plot2.coords.layers, plot2.ctx.UNSIGNED_BYTE);
+            plot2.bindColors();     // binds a_Color and a_ColID
+            plot2._bindSelected();  // binds a_Selected from shared selCells
 
             plot2.bindBuffer(1, plot2.a_Hidden, plot2.coords.hidden, plot2.ctx.UNSIGNED_BYTE);
         }
@@ -4130,7 +4213,7 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.parentPlot = self;
 
         // add a thick border and hide the menus in the child
-        self.canvas.style["border"] = `2px solid ${this.isLight() ? "black" : "white"}`;
+        self.activeBorderDiv.style.border = `3px solid ${this.isLight() ? "black" : "white"}`;
         self.childPlot.zoomDiv.style.display = "none";
         self.childPlot.toolDiv.style.display = "none";
 
@@ -4142,7 +4225,7 @@ function MaxPlot(div, top, left, width, height, args) {
         contDiv.style.width = "100%";
         contDiv.style.display = "none";
         contDiv.style.position = "absolute";
-        contDiv.style.bottom = "50px";
+        contDiv.style.bottom = "48px";
         contDiv.id = "mpFlipbookCont";
         let fromLeft = 55;
         contDiv.style.left = fromLeft+"px";
@@ -4154,8 +4237,6 @@ function MaxPlot(div, top, left, width, height, args) {
         labelDiv.textContent = "Quickflip through annotations:"
 
         var sliderDiv = document.createElement('div');
-        sliderDiv.style.width = self.canvas.width-fromLeft+"px";
-        //sliderDiv.style.width = "100%";
         sliderDiv.style.height = "8px";
         sliderDiv.style.marginTop = "4px";
         sliderDiv.id = "mpFlipbook";
@@ -4165,13 +4246,14 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.div.appendChild(contDiv);
         self.flipBookEl = sliderDiv;
+        self.flipBookCont = contDiv;
     }
 
     this.hideFlipbook = function() {
-        $("#mpFlipbookCont").hide();
+        if (self.flipBookCont) self.flipBookCont.style.display = "none";
     }
     this.showFlipbook = function() {
-        $("#mpFlipbookCont").show();
+        if (self.flipBookCont) self.flipBookCont.style.display = "";
     }
 
     this.unsplit = function() {
@@ -4186,7 +4268,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.setSize(self.width*2, self.height, false);
 
         otherRend.div.remove();
-        self.canvas.style["border"] = "none";
+        self.activeBorderDiv.style.border = "none";
         return;
     }
 

@@ -49,7 +49,10 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 }
 
 .tpTitle {
+        position: absolute;
         z-index: 100;
+        border-radius: 3px;
+        padding: 2px 4px;
 }
 
 .tpGeneExprCombo {
@@ -83,26 +86,29 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
     display : block;
     position : absolute;
     font-size : 16px;
+    font-family: Arial, Helvetica, sans-serif;
     color: white;
     text-shadow:
-       1px 1px 0 #000,
-     -1px -1px 0 #000,  
-      1px -1px 0 #000,
-      -1px 1px 0 #000,
-       1px 1px 0 #000;
+       1px 1px 2px rgba(0,0,0,0.8),
+      -1px -1px 2px rgba(0,0,0,0.8),
+       1px -1px 2px rgba(0,0,0,0.8),
+      -1px  1px 2px rgba(0,0,0,0.8);
 }
 
 .sliderContainer {
-        position : absolute;
+        position: absolute;
         display: grid;
-        grid-template-columns: 45px 120px 15px;
-        background: rgba(255,255,255,0.5);
+        grid-template-columns: 45px 120px 20px;
+}
+#mpSliderDiv {
+        padding: 2px 6px 0px 6px;
 }
 
 .sliderLabel {
     font-size: 11px;
     z-index: 10;
     font-weight: bold;
+    background: transparent;
 }
 
 .tpLegend { font-size:13px; /* border: 2px solid transparent; */ cursor:default; word-wrap: break-word; clear:both}
@@ -133,6 +139,17 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         font-weight:bold;
 }
 
+#mpFlipbookCont {
+        background: rgba(255,255,255,0.65);
+        padding: 6px 12px 12px;
+        border-radius: 4px;
+        width: auto !important;
+        right: 12px;
+}
+#mpFlipbookCont #mpFlipbook {
+        width: 100% !important;
+}
+
 .ui-helper-reset { font-size: 12px}
 .ui-tabs { padding: 0 }
 .ui-tabs { padding: 0 }
@@ -147,7 +164,7 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 .ui-menu-item { font-size:13px }
 .ui-menu .ui-menu-item-wrapper { padding: 1px 1em 1px .4em; }
 .ui-tooltip { font-size: 13px }
-#tpButtonInfo { height: 24px; top: 1px; margin-right: 8px; border-radius: 4px; padding-top: 4px }
+#tpButtonInfo { height: 24px; border-radius: 4px; padding-top: 3px }
 .tpDialogInput { margin-left: 12px; margin-top: 5px; margin-bottom: 12px; }
 #tpDialog { z-index: 1001; }}
 
@@ -340,9 +357,12 @@ input[type=checkbox], input[type=radio] {
         overflow-y: scroll;
 }
 
-#tpLeftTabs { 
-        border: 0; 
+#tpLeftTabs {
+        border: 0;
         height: 100%;
+}
+#tpLeftTabs .ui-tabs-nav li {
+        margin: 0 2px 0 0;
 }
 
 #tpGeneTab, #tpAnnotTab, #tpLayoutTab { 
@@ -364,6 +384,7 @@ input[type=checkbox], input[type=radio] {
 .tpMetaHistLabel { text-decoration: underline; color: blue }
 .tpMetaValue { height: 1.3em; padding-left: 3px; background-color:#EEE; }
 .tpMetaSelect { outline: 2px solid black; background-color: #DEDEDE }
+.tpMetaLabelSelect { outline: 2px solid black; background-color: #DEDEDE }
 .tpMetaValueSelect { background-color: #CCC}
 .tpMetaPerc { color:grey; float:right }
 .tpMetaSpark { float:right }
@@ -440,6 +461,7 @@ button { line-height: 12px }
 }
 
 #tpToolBar { margin-left: 5px; margin-top: 1px}
+#tpToolBar button, #tpToolBar a.ui-button { margin-right: 0; vertical-align: middle; }
 
 #tpCanvas { }
 
