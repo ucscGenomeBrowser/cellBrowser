@@ -7586,7 +7586,8 @@ var cellbrowser = function() {
         //if (!db.conf.atacSearch)
         htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Violin Plot Viewer" data-placement="bottom">Gene Expression Plots</button>');
 
-        htmls.push('<button id="tpHeatButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Show Heatmap" data-placement="bottom">Heatmap</button>');
+        if (db.conf.showHeatmap)
+            htmls.push('<button id="tpHeatButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Show Heatmap" data-placement="bottom">Heatmap</button>');
 
         //var nextLeft = 220;
         if (db.conf.hubUrl!==undefined) {
@@ -7628,7 +7629,7 @@ var cellbrowser = function() {
         activateTooltip('#tpOpenUcsc');
         activateTooltip('#tpOpenDatasetButton');
         activateTooltip('#tpOpenExprButton');
-        activateTooltip('#tpHeatButton');
+        if (db.conf.showHeatmap) activateTooltip('#tpHeatButton');
         activateTooltip('#tpOpenImgButton');
 
         $('#tpButtonInfo').click( function() { openDatasetDialog(db.conf, db.name) } );
@@ -7676,7 +7677,7 @@ var cellbrowser = function() {
         $('#tpLayoutCombo').change(onLayoutChange);
         $('#tpOpenDatasetButton').click(openCurrentDataset);
         $('#tpOpenExprButton').click(buildExprViewWindow);
-        $('#tpHeatButton').click(switchToHeat);
+        if (db.conf.showHeatmap) $('#tpHeatButton').click(switchToHeat);
     }
 
     function metaFieldToLabel(fieldName) {
