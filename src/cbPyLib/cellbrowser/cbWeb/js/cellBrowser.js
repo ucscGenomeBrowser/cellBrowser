@@ -6926,7 +6926,8 @@ var cellbrowser = function() {
         parentEl.innerHTML = "";
 
         // now that we know the height, plot them again
-        plotDotColumnLabels(htmls, minX, minY+maxHeight, xDist, geneSyms, "black");
+        let textColor = (lightMode === 1) ? "black" : "white";
+        plotDotColumnLabels(htmls, minX, minY+maxHeight, xDist, geneSyms, textColor);
         return maxHeight;
     }
 
@@ -6972,19 +6973,20 @@ var cellbrowser = function() {
         }
     }
 
-    function plotLegend(htmls, avgMin, avgMax, legendX, legendY, colorPal, legendWidth, legendHeight, maxDotSize) {
+    function plotLegend(htmls, avgMin, avgMax, legendX, legendY, colorPal, legendWidth, legendHeight, maxDotSize, textColor) {
         /* plot the legend at x, y*/
-        htmls.push('<rect style="fill:transparent;stroke-width:0.3;stroke:black" x="'+legendX+'" y="'+legendY+'" width="'+(legendWidth)+'" height="'+legendHeight+'"/>');
+        if (!textColor) textColor = "black";
+        htmls.push('<rect style="fill:transparent;stroke-width:0.3;stroke:'+textColor+'" x="'+legendX+'" y="'+legendY+'" width="'+(legendWidth)+'" height="'+legendHeight+'"/>');
 
         let titleX = legendX + 5;
         let titleY = legendY + 20;
-        htmls.push("<text font-family='sans-serif' font-size='16' fill='black' text-anchor='start' x='"+titleX+"' y='"+titleY+"'>Average Expression (sum/cell#)</text>");
+        htmls.push("<text font-family='sans-serif' font-size='16' fill='"+textColor+"' text-anchor='start' x='"+titleX+"' y='"+titleY+"'>Average Expression (sum/cell#)</text>");
 
         titleY += 100;
-        htmls.push("<text font-family='sans-serif' font-size='16' fill='black' text-anchor='start' x='"+titleX+"' y='"+titleY+"'>Expressed in Cells (non-zeroes)</text>");
+        htmls.push("<text font-family='sans-serif' font-size='16' fill='"+textColor+"' text-anchor='start' x='"+titleX+"' y='"+titleY+"'>Expressed in Cells (non-zeroes)</text>");
 
         titleY += 85;
-        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+(titleX)+"' y='"+titleY+"'>Exact values on mouse-over</text>");
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='"+textColor+"' text-anchor='start' x='"+(titleX)+"' y='"+titleY+"'>Exact values on mouse-over</text>");
 
         // draw five circles and 0% and 100% percent values underneath
         let circlesY = legendY+150;
@@ -6992,14 +6994,14 @@ var cellbrowser = function() {
         for (let i=0; i < 5; i++) {
             let x = legendX+20+(i*30);
             let radius = Math.round(Math.max(1, (maxDotSize*0.5)*(i*0.2)));
-            htmls.push("<circle fill-opacity='0.8' cx='"+x+"' cy='"+circlesY+"' r='"+radius+"' fill='black' />");
+            htmls.push("<circle fill-opacity='0.8' cx='"+x+"' cy='"+circlesY+"' r='"+radius+"' fill='"+textColor+"' />");
             lastCircleX = x;
         }
 
         let zeroX = legendX+10;
         let circleLabelY = legendY+150+30;
-        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+zeroX+"' y='"+circleLabelY+"'>0%</text>");
-        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+(lastCircleX-15)+"' y='"+circleLabelY+"'>100%</text>");
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='"+textColor+"' text-anchor='start' x='"+zeroX+"' y='"+circleLabelY+"'>0%</text>");
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='"+textColor+"' text-anchor='start' x='"+(lastCircleX-15)+"' y='"+circleLabelY+"'>100%</text>");
 
         let rectY = legendY+25;
         let rectX = legendX+10;
@@ -7018,8 +7020,8 @@ var cellbrowser = function() {
 
         let exprMinX = legendX+10;
         let avgLabelY = rectY+50;
-        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='start' x='"+exprMinX+"' y='"+avgLabelY+"'>"+minLabel+"</text>");
-        htmls.push("<text font-family='sans-serif' font-size='14' fill='black' text-anchor='end' x='"+(lastRectX)+"' y='"+avgLabelY+"'>"+maxLabel+"</text>");
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='"+textColor+"' text-anchor='start' x='"+exprMinX+"' y='"+avgLabelY+"'>"+minLabel+"</text>");
+        htmls.push("<text font-family='sans-serif' font-size='14' fill='"+textColor+"' text-anchor='end' x='"+(lastRectX)+"' y='"+avgLabelY+"'>"+maxLabel+"</text>");
 
     }
 
@@ -7120,14 +7122,15 @@ var cellbrowser = function() {
         rowLabelWidth = Math.max(50, rowLabelWidth); // need some minimum width since the column labels are slanted to the left
 
         let colLabelHeight = plotDotColumnLabelsAutoSize(parentEl, htmls, leftPad+rowLabelWidth, topPad, colWidth, syms)+10;
-        plotDotRowLabels(htmls, leftPad, colLabelHeight, rowHeight, rowLabels, cellCounts, "black", fontSize);
+        let textColor = (lightMode === 1) ? "black" : "white";
+        plotDotRowLabels(htmls, leftPad, colLabelHeight, rowHeight, rowLabels, cellCounts, textColor, fontSize);
 
         let colorPal = makeColorPalette(cDefGradPalette, 20);
 
         plotDotCircles(htmls, syms, rowLabels, dotRows, leftPad+rowLabelWidth, topPad+colLabelHeight, colWidth, rowHeight, maxDotSize, colorPal, cellCounts, avgMin, avgMax);
 
         let legendMinX = leftPad+rowLabelWidth+(colCount*colWidth)+(0.5*cellCountColWidth);
-        plotLegend(htmls, avgMin, avgMax, legendMinX, topPad+colLabelHeight, colorPal, legendWidth, legendHeight, maxDotSize)
+        plotLegend(htmls, avgMin, avgMax, legendMinX, topPad+colLabelHeight, colorPal, legendWidth, legendHeight, maxDotSize, textColor)
 
         let chartWidth = leftPad+rowLabelWidth+(colWidth*colCount)+legendWidth+cellCountColWidth+1; // +1 because the legend box can be 2 pixels wide
         let chartHeight = topPad+colLabelHeight+Math.max(legendHeight, rowCount*rowHeight);
