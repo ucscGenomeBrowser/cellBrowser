@@ -9429,7 +9429,7 @@ var cellbrowser = function() {
         /* unselect all checkboxes in the legend and clear the selection */
         if (gLegend.selectionDirection == "all") {
             $(".tpLegendCheckbox").prop('checked', true);
-            onSelectAllClick();
+            legendSetCheckboxes("all");
             gLegend.selectionDirection = "none";
         } else {
             $(".tpLegendCheckbox").prop('checked', false);
