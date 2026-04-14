@@ -5949,6 +5949,9 @@ def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None
         logging.info("%s does not exist: running cbUpgrade now to make sure there are static js/css files" % outIndexFname)
         cbUpgrade(outDir, doData=False, doCode=True)
 
+    if not isdir(join(outDir, "downloads", "markers")):
+        copyMarkers(outDir)
+
     if port:
         print("Interrupt this process, e.g. with Ctrl-C, to stop the webserver")
         startHttpServer(outDir, int(port))
@@ -6357,6 +6360,66 @@ def copyAndReplace(inFname, outDir):
         ofh.write(data)
     logging.debug("Wrote version string %s into file %s, source was %s" % (repr(versionStr), inFname, outFname))
 
+MARKER_SOURCE_URL = "https://cells-test.gi.ucsc.edu/markers/"
+MARKER_SOURCE_DIR = "/usr/local/apache/htdocs-cells/downloads/markers/"
+
+MARKER_DB_FILES = [
+    {"fname": "cellMarker2.0_human.json", "label": "CellMarker 2.0 (Human)", "species": "human",
+     "dbUrl": "http://bio-bigdata.hrbmu.edu.cn/CellMarker/",
+     "paperUrl": "https://doi.org/10.1093/nar/gkac947"},
+    {"fname": "cellMarker2.0_mouse.json", "label": "CellMarker 2.0 (Mouse)", "species": "mouse",
+     "dbUrl": "http://bio-bigdata.hrbmu.edu.cn/CellMarker/",
+     "paperUrl": "https://doi.org/10.1093/nar/gkac947"},
+    {"fname": "panglaoDb_human.json",     "label": "PanglaoDB (Human)",      "species": "human",
+     "dbUrl": "https://panglaodb.se/",
+     "paperUrl": "https://doi.org/10.1093/database/baz046"},
+    {"fname": "panglaoDb_mouse.json",     "label": "PanglaoDB (Mouse)",      "species": "mouse",
+     "dbUrl": "https://panglaodb.se/",
+     "paperUrl": "https://doi.org/10.1093/database/baz046"},
+    {"fname": "singleCellBase_human.json","label": "singleCellBase (Human)", "species": "human",
+     "dbUrl": "http://cloud.capitalbiotech.com/SingleCellBase/",
+     "paperUrl": "https://doi.org/10.1186/s40364-023-00523-3"},
+    {"fname": "singleCellBase_mouse.json","label": "singleCellBase (Mouse)", "species": "mouse",
+     "dbUrl": "http://cloud.capitalbiotech.com/SingleCellBase/",
+     "paperUrl": "https://doi.org/10.1186/s40364-023-00523-3"},
+]
+
+def copyMarkers(outDir):
+    """ Copy precomputed marker gene JSON files to outDir/downloads/markers/.
+        Copies from MARKER_SOURCE_DIR if available, otherwise downloads from MARKER_SOURCE_URL. """
+    markerDir = join(outDir, "downloads", "markers")
+    makeDir(markerDir)
+
+    present = []
+    for entry in MARKER_DB_FILES:
+        fname = entry["fname"]
+        destPath = join(markerDir, fname)
+        localSrc = join(MARKER_SOURCE_DIR, fname)
+        if isfile(localSrc):
+            logging.info("Copying marker database from %s" % localSrc)
+            shutil.copy(localSrc, destPath)
+            present.append(fname)
+        else:
+            srcUrl = MARKER_SOURCE_URL + fname
+            logging.info("Downloading marker database %s" % srcUrl)
+            data = downloadUrlBinary(srcUrl)
+            if data is not None:
+                with open(destPath, "wb") as fh:
+                    fh.write(data)
+                present.append(fname)
+            else:
+                logging.warning("Could not find marker file locally or download from %s" % srcUrl)
+
+    indexData = [
+        {"name": e["fname"], "label": e["label"], "species": e["species"],
+         "dbUrl": e["dbUrl"], "paperUrl": e["paperUrl"]}
+        for e in MARKER_DB_FILES if e["fname"] in present
+    ]
+    indexPath = join(markerDir, "index.json")
+    with open(indexPath, "w") as fh:
+        json.dump(indexData, fh, indent=2)
+    logging.info("Marker gene databases in %s: %s" % (markerDir, [d["name"] for d in indexData]))
+
 def copyStatic(baseDir, outDir):
     " copy all js, css and img files to outDir "
     logging.info("Copying js, css and img files to %s" % outDir)
@@ -6370,6 +6433,7 @@ def copyStatic(baseDir, outDir):
     copyAllFiles(baseDir, "genes", outDir, ext=".json.gz")
 
     copyAndReplace(join(baseDir, "js", "cellBrowser.js"), join(outDir, "js"))
+    copyMarkers(outDir)
 
 def writeVersionedLink(ofh, mask, webDir, relFname, addVersion=True):
     " write sprintf-formatted mask to ofh, but add ?md5 to jsFname first. Goal is to force cache reload in browser. "

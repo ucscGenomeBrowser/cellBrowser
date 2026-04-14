@@ -266,8 +266,53 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         display: inline-block;
 }
 
-.tpGeneBarCellSelected { 
-        outline: 1px solid black 
+.tpGeneBarCellSelected {
+        outline: 1px solid black
+}
+
+.tpMarkerCellTypeItem {
+        cursor: pointer;
+        padding: 2px 4px;
+        font-size: 12px;
+        border-bottom: 1px solid #eee;
+}
+
+.tpMarkerCellTypeItem:hover {
+        background-color: #e8f0fe;
+}
+
+.tpMarkerBrowseTissue {
+        margin-bottom: 2px;
+}
+
+.tpMarkerBrowseTissueSummary {
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: bold;
+        padding: 3px 4px;
+        background-color: #f0f0f0;
+        border-radius: 2px;
+        user-select: none;
+}
+
+.tpMarkerBrowseTissueSummary:hover {
+        background-color: #e0e0e0;
+}
+
+.tpMarkerBrowseCt {
+        cursor: pointer;
+        padding: 2px 4px 2px 12px;
+        font-size: 12px;
+        border-bottom: 1px solid #f0f0f0;
+}
+
+.tpMarkerBrowseCt:hover {
+        background-color: #e8f0fe;
+}
+
+.tpMarkerBrowseCtSelected {
+        background-color: #d0e4fc;
+        font-weight: bold;
 }
 
 #tpPeakListTitle { 
