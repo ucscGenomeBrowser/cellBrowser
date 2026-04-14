@@ -15,8 +15,8 @@ var cellbrowser = function() {
 
     // Src: https://stackoverflow.com/questions/56393880/how-do-i-detect-dark-mode-using-javascript
     const darkModeMq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
-    // 1 = light mode, 2 = dark mode
-    let lightMode = darkModeMq && darkModeMq.matches ? 2 : 1;
+    // 1 = light mode, 2 = dark mode; always default to light regardless of OS preference
+    let lightMode = 1;
 
     var db = null; // the cbData object from cbData.js. Loads coords,
                    // annotations and gene expression vectors
@@ -1703,9 +1703,10 @@ var cellbrowser = function() {
             return;
 
         let htmls = [];
-        htmls.push('<button style="display:none" title="Hide selected cells" id="tpHideSel" type="button" class="tpRibbonButton tpSelectButton" data-placement="bottom">Hide selected</button>');
-        htmls.push('<button style="display:none" title="Hide all unselected cells" id="tpOnlySel" type="button" class="tpRibbonButton tpSelectButton" data-placement="bottom">Only show selected</button>');
-        htmls.push('<button style="display:none" title="Show all cells that were hidden before" id="tpShowAll" type="button" class="tpRibbonButton" data-placement="bottom">Show all</button>&nbsp;&nbsp;&nbsp;');
+        htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Hide selected cells" id="tpHideSel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Hide selected</button>');
+        htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Hide all unselected cells" id="tpOnlySel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Only show selected</button>');
+        htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Show all cells that were hidden before" id="tpShowAll" type="button" class="gradientBackground ui-button ui-widget ui-corner-all" data-placement="bottom">Show all</button>');
+        htmls.push('<span style="display:inline-block; margin-right:6px"></span>');
         //htmls.push('');
         getById('tpToolBar').insertAdjacentHTML('afterbegin', htmls.join(""));
         getById('tpHideSel').addEventListener('click', onHideSelClick);
