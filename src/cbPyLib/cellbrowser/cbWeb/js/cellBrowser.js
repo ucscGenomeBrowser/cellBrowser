@@ -10062,6 +10062,7 @@ var cellbrowser = function() {
             var fieldValue = cellInfo[i];
             let metaIdx = i + customCount;
             let metaInfo = fieldInfos[metaIdx];
+            if (metaInfo === undefined) break; // meta.tsv has more fields than conf; stop here
 
             if (i===0) {
                 //changeUrl({"cell":fieldValue});
@@ -10209,6 +10210,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         var labelField = renderer.getLabelField();
         var metaInfo = db.findMetaInfo(labelField);
+        if (!metaInfo) return;
         var longLabels = metaInfo.ui.longLabels;
         if (longLabels) {
             for (let i=0; i<longLabels.length; i++) {
