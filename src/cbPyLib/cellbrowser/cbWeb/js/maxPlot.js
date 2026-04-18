@@ -1141,7 +1141,8 @@ function MaxPlot(div, top, left, width, height, args) {
             case 0:
             case 1:
                 // alpha:false recommended by https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Optimizing_canvas
-                ctx = canv.getContext("2d", { alpha: transparent });
+                // willReadFrequently:true avoids Chrome warnings when getImageData is used in drawPixels
+                ctx = canv.getContext("2d", { alpha: transparent, willReadFrequently: true });
                 break;
             case 2:
                 // Find the canvas' webgl2 context
@@ -2290,7 +2291,15 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.background===undefined || self.background===null)
             self.background = {};
         self.background.image = img;
-        self.scaleBackground(self.background, self.port.initZoom, this.usesWebGL() ? self.port.projection :self.port.zoomRange);
+        if (this.usesWebGL()) {
+            self.scaleBackground(self.background, self.port.initZoom, self.port.projection);
+        } else if (self.coords) {
+            // For canvas-2D, scaleBackground alone isn't enough: setCoords already ran
+            // scaleData() with background=null (early return), so coords.px was computed
+            // for the un-extended zoomRange.  Now that the image is here, re-run scaleData
+            // so it extends zoomRange for aspect-ratio AND recomputes coords.px to match.
+            self.scaleData();
+        }
         if (self.childPlot)
             self.childPlot.setBackground(img);
     };
@@ -2323,25 +2332,25 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.scaleBackground = function(background, dataRange, zoomRange) {
         /* determine the (x,y,width,height) in pixels of the current rectangle of the background bitmap on the canvas */
-        if (!background) 
+        if (!background)
             return;
 
         // Find the size of the source image
         const width = background.image.width;
         const height = background.image.height;
- 
+
         // Find the size of the drawing canvas
         const canvWidth  = self.canvas.width;
         const canvHeight = self.canvas.height;
 
         // To keep the original image aspect ratio, scale the less restrictive canvas dimension to match the more restrictive one
         const [canvScaleX, canvScaleY] = [width / canvWidth, height / canvHeight];
-        
+
         const dx = 0;
         const dy = 0;
         const dWidth = canvWidth;
         const dHeight = canvHeight;
-        
+
         // Since the points should match the background, adjust the zoom range's aspect ratio to match the canvas
         // Since WebGL uses a projection matrix, this is determined differently depending on draw mode, but we will need the pixel range for later.
         let zr;
@@ -2442,10 +2451,16 @@ function MaxPlot(div, top, left, width, height, args) {
 
         let w = self.canvas.width;
         let h = self.canvas.height;
-        self.scaleBackground(self.background, self.port.initZoom, self.port.zoomRange);
-        self.coords.px = scaleCoords(self.coords.orig, borderMargin, self.port.zoomRange, w, h, self.coords.aspectRatio);
+
+        // Use a local AR-corrected copy of zoomRange so port.zoomRange stays clean
+        // (tracking only user zoom/pan). scaleBackground mutates the copy to extend
+        // for aspect-ratio correction; calling scaleData multiple times at different
+        // canvas sizes no longer compounds the extension.
+        let arZr = Object.assign({}, self.port.zoomRange);
+        self.scaleBackground(self.background, self.port.initZoom, arZr);
+        self.coords.px = scaleCoords(self.coords.orig, borderMargin, arZr, w, h, self.coords.aspectRatio);
         if (self.coords.lines)
-            self.coords.pxLines = scaleLines(self.coords.lines, self.port.zoomRange, self.canvas.width, self.canvas.height);
+            self.coords.pxLines = scaleLines(self.coords.lines, arZr, self.canvas.width, self.canvas.height);
         self.scalingDone = true;
     }
 
@@ -3052,6 +3067,22 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.resetAlpha();
         self.resetRadius();
+
+        // Sync the child panel (split screen).
+        if (self.childPlot) {
+            if (this.usesWebGL()) {
+                // Spatial datasets give the child its own projection — reset it too.
+                if (self.childPlot.port.projection !== self.port.projection)
+                    self.childPlot.port.projection.reset();
+                self.childPlot.port.alphaMult  = 1.0;
+                self.childPlot.port.radiusMult = 1.0;
+                self.childPlot.calcRadius();
+            } else {
+                // Canvas-2D: reset child zoomRange and recompute its background/coord scaling.
+                copyObj(self.port.initZoom, self.childPlot.port.zoomRange);
+                self.childPlot.scaleData();
+            }
+        }
     };
 
     this.zoomToTest = function(x1, y1, x2, y2) {
@@ -3083,9 +3114,14 @@ function MaxPlot(div, top, left, width, height, args) {
 
             // Set the new bounds
             p.setBounds(glMinX, glMaxX, glMaxY, glMinY);
+            // Spatial datasets: mirror the zoom bounds onto child's independent projection
+            if (self.childPlot && self.childPlot.port.projection !== p)
+                self.childPlot.port.projection.setBounds(p.left, p.right, p.top, p.bottom, false);
 
             // Recalculate radius
             this.calcRadius();
+            if (self.childPlot && self.childPlot.port.projection !== p)
+                self.childPlot.calcRadius();
 
             // Redraw
             this.drawDots();
@@ -3171,7 +3207,14 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // a special case for connected plots that are not sharing our pixel coordinates
         if (self.childPlot && self.coords===self.childPlot.coords) {
-            self.childPlot.zoomBy(zoomFact, xPx, yPx);
+            if (this.usesWebGL()) {
+                // Spatial datasets give the child its own projection — mirror the scale op.
+                if (self.childPlot.port.projection !== self.port.projection)
+                    self.childPlot.port.projection.scale(zoomFact, x, y);
+                self.childPlot.calcRadius();
+            } else {
+                self.childPlot.zoomBy(zoomFact, xPx, yPx);
+            }
         }
 
         return self.usesWebGL() ? self.port.projection : newRange;
@@ -3215,9 +3258,12 @@ function MaxPlot(div, top, left, width, height, args) {
             // Scale distance relative to canvas
             const x = 2 * xDiff / self.canvas.width;
             const y = 2 * yDiff / self.canvas.height;
-            
+
             // Translate the projection matrix
             self.port.projection.translate(-x, y);
+            // Spatial datasets: mirror pan onto child's independent projection
+            if (self.childPlot && self.childPlot.port.projection !== self.port.projection)
+                self.childPlot.port.projection.translate(-x, y);
 
             self.drawDots();
         } else {
@@ -4164,11 +4210,31 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.statusLine.style.display = "none";
 
         plot2.port = Object.assign({}, self.port);
-        plot2.port.zoomRange = Object.assign({}, self.port.zoomRange);
         plot2.port.initZoom  = Object.assign({}, self.port.initZoom);
+        // For canvas-2D spatial datasets, scaleBackground permanently mutates zoomRange for
+        // aspect-ratio correction.  The parent's zoomRange is already AR-corrected for its
+        // (wider) canvas, so copying it to the child and then calling scaleBackground again
+        // for the child's narrower canvas would double-extend it.  Always start from initZoom
+        // so the child's scaleBackground computes the correct AR correction from scratch.
+        // For non-spatial datasets the AR logic is never triggered so the copy is harmless.
+        plot2.port.zoomRange = Object.assign({}, self.port.initZoom);
         plot2.selCells = self.selCells;
 
-        plot2.coords = self.coords;
+        // For spatial datasets (those with a background image), give the child its own
+        // projection matrix so each panel can apply aspect-ratio correction independently
+        // without the panels interfering with each other.  Zoom/pan operations explicitly
+        // mirror the parent's state onto the child projection (see zoomBy, zoom100, etc.).
+        // For non-spatial datasets the original shared-projection behaviour is preserved.
+        if (self.background && self.usesWebGL()) {
+            const p = self.port.projection;
+            plot2.port.projection = new Matrix4();
+            plot2.port.projection.setBounds(p.left, p.right, p.top, p.bottom, false);
+        }
+
+        // Give the child its own coords wrapper so child.scaleData() can compute its own
+        // coords.px (scaled for the child's canvas size) without overwriting the parent's.
+        // All underlying data arrays (orig, gl, hidden, selected, lines, etc.) remain shared.
+        plot2.coords = Object.assign({}, self.coords);
 
         /* Give the child plot its own label state so each side can label independently.
          * Initially they point at the same array (read-only), but setLabelCoords()

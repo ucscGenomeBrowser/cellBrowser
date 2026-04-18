@@ -6311,8 +6311,6 @@ var cellbrowser = function() {
         else
             metaBarWidth = 250;
 
-        renderer.setPos(null, metaBarWidth+metaBarMargin);
-
         var hubUrl = makeHubUrl(null);
         $('#tpOpenGenome').attr("href", hubUrl);
 
@@ -6325,6 +6323,60 @@ var cellbrowser = function() {
                 showCollectionDialog(datasetName);
             return;
         }
+
+        // Create renderer on first dataset load now that sampleCount is known.
+        // Done here (after the collection early-return) so we never create the renderer
+        // from a collection config that lacks a meaningful sampleCount.
+        if (renderer === null) {
+            var canvLeft = metaBarWidth + metaBarMargin;
+            var canvTop  = menuBarHeight + toolBarHeight;
+            var canvWidth = window.innerWidth - canvLeft - legendBarWidth;
+            var canvHeight = window.innerHeight - menuBarHeight - toolBarHeight;
+
+            var rendDiv = document.createElement('div');
+            rendDiv.id = "tpMaxPlot";
+
+            const drawModeUrl = parseInt(getVar("drawMode"));
+            const drawMode = Number.isInteger(drawModeUrl) ? drawModeUrl :
+                (db.conf.sampleCount > 200000 ? 2 : undefined);
+            renderer = new MaxPlot(rendDiv, canvTop, canvLeft, canvWidth, canvHeight, {lightMode: lightMode, drawMode: drawMode});
+            window.renderer = renderer;
+
+            document.body.appendChild(rendDiv);
+            activateTooltip(".mpButton");
+            renderer.activateSliders();
+
+            self.tooltipDiv = makeTooltipCont();
+            document.body.appendChild(self.tooltipDiv);
+
+            buildEmptyLegendBar(metaBarWidth + metaBarMargin + renderer.width, toolBarHeight);
+
+            // Set buttons/inputs to not inherit color from bootstrap by default
+            let bootstrapSheetRules = [...[...document.styleSheets].find((sheet) => sheet.href && sheet.href.includes("bootstrap.min.css")).cssRules];
+            let interactableRule = bootstrapSheetRules.find((rule) => rule.selectorText == 'button, input, optgroup, select, textarea');
+            interactableRule.style.color = "revert";
+
+            updateLightModeHTML(lightMode);
+
+            renderer.setupMouse();
+            $(window).resize(onWindowResize);
+
+            renderer.onLabelClick = onClusterNameClick;
+            renderer.onLabelHover = onClusterNameHover;
+            renderer.onNoLabelHover = onNoClusterNameHover;
+            renderer.onCellClick = onCellClickOrHover;
+            renderer.onCellHover = onCellClickOrHover;
+            renderer.onNoCellHover = clearMetaAndGene;
+            renderer.onLineHover = onLineHover;
+            renderer.onZoom100Click = onZoom100Click;
+            renderer.onSelChange = onSelChange;
+            renderer.onRadiusAlphaChange = onRadiusAlphaChange;
+            renderer.onSliderChange = onSliderChange;
+
+            renderer.canvas.addEventListener("mouseleave", hideTooltip);
+        }
+
+        renderer.setPos(null, metaBarWidth+metaBarMargin);
 
         let binData = localStorage.getItem(db.name+"|custom");
         if (binData) {
@@ -10062,6 +10114,7 @@ var cellbrowser = function() {
             var fieldValue = cellInfo[i];
             let metaIdx = i + customCount;
             let metaInfo = fieldInfos[metaIdx];
+            if (metaInfo === undefined) break; // meta.tsv has more fields than conf; stop here
 
             if (i===0) {
                 //changeUrl({"cell":fieldValue});
@@ -10209,6 +10262,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         var labelField = renderer.getLabelField();
         var metaInfo = db.findMetaInfo(labelField);
+        if (!metaInfo) return;
         var longLabels = metaInfo.ui.longLabels;
         if (longLabels) {
             for (let i=0; i<longLabels.length; i++) {
@@ -11104,57 +11158,7 @@ $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
         // pre-load dataset.json here?
         menuBarHeight = $('#tpMenuBar').outerHeight(true);
 
-        var canvLeft = metaBarWidth+metaBarMargin;
-        var canvTop  = menuBarHeight+toolBarHeight;
-        var canvWidth = window.innerWidth - canvLeft - legendBarWidth;
-        var canvHeight = window.innerHeight - menuBarHeight - toolBarHeight;
-
-        // Initialize renderer
-        if (renderer===null) {
-           var div = document.createElement('div');
-           div.id = "tpMaxPlot";
-
-           const drawMode = parseInt(getVar("drawMode"));
-           renderer = new MaxPlot(div, canvTop, canvLeft, canvWidth, canvHeight,  {lightMode: lightMode, drawMode: Number.isInteger(drawMode) ? drawMode: undefined});
-           window.renderer = renderer; // XX undo this?
-
-           document.body.appendChild(div);
-           activateTooltip(".mpButton"); // tpMaxPlot has no special tooltip support itself
-           renderer.activateSliders();
-
-           self.tooltipDiv = makeTooltipCont();
-           document.body.appendChild(self.tooltipDiv);
-       }
-
-        buildEmptyLegendBar(metaBarWidth+metaBarMargin+renderer.width, toolBarHeight);
-
-        // Set buttons and other interactables to not inherit color by default (avoids changing ext/bootstrap.min.css)
-        let bootstrapSheetRules = [...[...document.styleSheets].find((sheet) => sheet.href && sheet.href.includes("bootstrap.min.css")).cssRules];
-        let interactableRule = bootstrapSheetRules.find((rule) => rule.selectorText == 'button, input, optgroup, select, textarea');
-        interactableRule.style.color = "revert";
-
-        // Set light mode
-        updateLightModeHTML(lightMode);
-
-        // Enable input
-        renderer.setupMouse();
-        $(window).resize(onWindowResize);
-
-        renderer.onLabelClick = onClusterNameClick;
-        renderer.onLabelHover = onClusterNameHover;
-        renderer.onNoLabelHover = onNoClusterNameHover;
-        renderer.onCellClick = onCellClickOrHover;
-        renderer.onCellHover = onCellClickOrHover;
-        renderer.onNoCellHover = clearMetaAndGene;
-        renderer.onLineHover = onLineHover;
-        renderer.onZoom100Click = onZoom100Click;
-        renderer.onSelChange = onSelChange;
-        renderer.onRadiusAlphaChange = onRadiusAlphaChange;
-        renderer.onSliderChange = onSliderChange;
-
-        renderer.canvas.addEventListener("mouseleave", hideTooltip);
-
-       // Load data
+        // Load data; renderer is created in onConfigLoaded once sampleCount is known
         loadDataset(datasetName, false, rootMd5);
     }
 
