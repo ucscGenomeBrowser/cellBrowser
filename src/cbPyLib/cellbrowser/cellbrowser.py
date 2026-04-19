@@ -3087,6 +3087,12 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac):
 
     data, newHeaders = parseMarkerTable(filename, geneToSym)
 
+    logFcIdx = None
+    for idx, h in enumerate(newHeaders):
+        if re.search(r'log.*fc', h.split("|")[0], re.IGNORECASE):
+            logFcIdx = idx
+            break
+
     logging.debug("Splitting cluster markers into directory %s" % (outDir))
     fileCount = 0
     sanNames = set()
@@ -3128,7 +3134,17 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac):
             logging.error("Marker table contains these genes, they were skipped, they are not in the matrix: %s" % (",".join(missGeneIds)))
             #logging.error("Use --force to accept this.")
 
-        topSyms = [row[1] for row in rows[:topMarkerCount]]
+        if logFcIdx is not None:
+            enrichedRows = []
+            for row in rows:
+                try:
+                    if float(row[logFcIdx]) > 0:
+                        enrichedRows.append(row)
+                except (ValueError, IndexError):
+                    pass
+            topSyms = [row[1] for row in enrichedRows[:topMarkerCount]]
+        else:
+            topSyms = [row[1] for row in rows[:topMarkerCount]]
         topMarkers[clusterName] = topSyms
 
         ofh.close()

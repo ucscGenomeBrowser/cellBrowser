@@ -151,6 +151,8 @@ var cellbrowser = function() {
         "OMIM" : "https://omim.org/entry/", // OMIM ID
         "COSMIC" : "http://cancer.sanger.ac.uk/cosmic/gene/analysis?ln=", // gene symbol
         "SFARI" : "https://gene.sfari.org/database/human-gene/", // gene symbol
+        "GeneCards" : "https://www.genecards.org/cgi-bin/carddisp.pl?gene=", // gene symbol
+        "ZFIN" : "https://zfin.org/", // ZFIN ID
         "BrainSpLMD" : "http://www.brainspan.org/lcm/search?exact_match=true&search_type=gene&search_term=", // entrez
         "BrainSpMouseDev" : "http://developingmouse.brain-map.org/gene/show/", // internal Brainspan ID
         "Eurexp" : "http://www.eurexpress.org/ee/databases/assay.jsp?assayID=", // internal ID
@@ -1556,7 +1558,13 @@ var cellbrowser = function() {
                 shortLabel:"Overview",
                 name:openDsInfo.name,
                 hasFiles:openDsInfo.hasFiles,
-                body_parts:["summary"],
+                body_parts:openDsInfo.body_parts || ["summary"],
+                diseases:openDsInfo.diseases,
+                organisms:openDsInfo.organisms,
+                life_stages:openDsInfo.life_stages,
+                domains:openDsInfo.domains,
+                sources:openDsInfo.sources,
+                assay:openDsInfo.assay,
                 isSummary:true,
                 abstract:openDsInfo.abstract
             });
@@ -10277,7 +10285,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         if (labelField === db.conf.labelField) {
             if (db.conf.topMarkers!==undefined && db.conf.topMarkers[clusterName]!==undefined) {
-                labelLines.push("Top enriched/depleted markers: "+db.conf.topMarkers[clusterName].join(", "));
+                labelLines.push("Top enriched markers: "+db.conf.topMarkers[clusterName].join(", "));
             }
             labelLines.push("");
 
@@ -10623,7 +10631,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         if(DEBUG) console.log("building marker genes window for "+clusterName);
         var htmls = [];
-        htmls.push("<div id='tpPaneHeader' style='padding:0.4em 1em'>");
+        htmls.push("<div style='padding: 0 1em'>");
+        htmls.push("<div id='tpPaneHeader' style='padding: 0.4em 0'>");
 
         var buttons = [];
 
@@ -10681,6 +10690,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         }
 
         htmls.push("</div>"); // tabs
+        htmls.push("</div>"); // padding wrapper
 
         var winWidth = window.innerWidth - 0.10*window.innerWidth;
         var winHeight = window.innerHeight - 0.10*window.innerHeight;
@@ -10761,7 +10771,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var hprdCol = null;
         var geneListCol = null;
         var exprCol = null;
-        var pValCol = null
+        var pValCol = null;
+        var logFcCol = null;
         var doDescSort = false;
         for (var i = 1; i < headerRow.length; i++) {
             var colLabel = headerRow[i];
@@ -10777,7 +10788,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
             var width = null;
             if (colLabel==="_geneLists") {
-                colLabel = "Gene Lists";
+                colLabel = "Phenotype and Disease";
                 geneListCol = i;
             }
             else if (colLabel==="pVal" || /[pP].[Vv]al.*/.test(colLabel)) {
@@ -10796,6 +10807,16 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 hprdCol = i;
                 colLabel = "Protein Class (HPRD)";
                 width = "200px";
+            }
+            else if (colLabel==="_zfin") {
+                colLabel = "ZFIN";
+            }
+            else if (colLabel==="_geneCards") {
+                colLabel = "GeneCards";
+            }
+
+            if (logFcCol === null && /log.*fc/i.test(colLabel)) {
+                logFcCol = i;
             }
 
             var addStr = "";
@@ -10819,6 +10840,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var MAX_UNFILTERED_ROWS = 200;
         var renderedRows = 0;
         var totalRows = 0; // count non-empty rows for "showing N of M" note
+        var enrichedCount = 0;
+        var depletedCount = 0;
 
         htmls.push("<tbody>");
         for (let i = 1; i < rows.length; i++) {
@@ -10834,7 +10857,17 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
             renderedRows++;
 
-            htmls.push("<tr>");
+            var enrichAttr = "";
+            if (logFcCol !== null && logFcCol < row.length) {
+                var logFcVal = parseFloat(row[logFcCol]);
+                if (!isNaN(logFcVal)) {
+                    var enrichLabel = logFcVal > 0 ? "enriched" : "depleted";
+                    enrichAttr = " data-enrich='" + enrichLabel + "'";
+                    if (enrichLabel === "enriched") enrichedCount++;
+                    else depletedCount++;
+                }
+            }
+            htmls.push("<tr" + enrichAttr + ">");
             var geneId = row[0];
 
             // old marker files still have the format geneId|sym, so tolerate this here
@@ -10908,7 +10941,35 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         }
         // ----
 
+        var btnGroupId = "tpEnrichBtns-"+markerListIdx;
+        if (logFcCol !== null && enrichedCount > 0 && depletedCount > 0) {
+            var btnHtml = "<div style='margin-bottom:6px'>" +
+                "<div id='"+btnGroupId+"' class='btn-group btn-group-xs' role='group'>" +
+                "<button type='button' class='btn btn-default active' data-val='all'>All</button>" +
+                "<button type='button' class='btn btn-default' data-val='enriched'>Enriched (logFC &gt; 0)</button>" +
+                "<button type='button' class='btn btn-default' data-val='depleted'>Depleted (logFC &lt; 0)</button>" +
+                "</div></div>";
+            htmls.unshift(btnHtml);
+        }
+
         $("#"+divId).html(htmls.join(""));
+
+        if (logFcCol !== null && enrichedCount > 0 && depletedCount > 0) {
+            $("#"+btnGroupId+" button").on("click", function() {
+                $("#"+btnGroupId+" button").removeClass("active");
+                $(this).addClass("active");
+                var val = $(this).data("val");
+                var $rows = $("#"+tableId+" tbody tr");
+                if (val === "all") {
+                    $rows.show();
+                } else {
+                    $rows.each(function() {
+                        $(this).toggle($(this).data("enrich") === val);
+                    });
+                }
+            });
+        }
+
         var sortOpt = {};
         var tableOpt = { sortList: [[pValCol,0]], theme: "bootstrap", widgets : [ "uitheme", "filter", "columns", "zebra" ],
         };
