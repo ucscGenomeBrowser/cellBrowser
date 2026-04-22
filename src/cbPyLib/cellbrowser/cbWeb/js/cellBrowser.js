@@ -791,8 +791,7 @@ var cellbrowser = function() {
             $( "#tabLink3" ).hide();
         } else {
             if (desc.hideDownload===true || desc.hideDownload=="True" || desc.hideDownload=="true") {
-                htmls.push("The downloads section has been deactivated by the authors.");
-                htmls.push("Please contact the dataset authors to get access.");
+                htmls.push("The downloads section has been deactivated by the authors. Please contact the dataset authors to get access.");
                 $( "#pane3" ).html(htmls.join(""));
                 $( "#pane3" ).show();
                 $( "#tabLink3" ).show();
@@ -11155,6 +11154,8 @@ $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
         buildMenuBar();
 
         var datasetName = getDatasetNameFromUrl()
+        if (datasetName === "whole-brain-perturb" && window.location.hostname === "cells.ucsc.edu")
+            window.location.replace("https://cells-test.gi.ucsc.edu/?ds=" + datasetName);
         // pre-load dataset.json here?
         menuBarHeight = $('#tpMenuBar').outerHeight(true);
 
