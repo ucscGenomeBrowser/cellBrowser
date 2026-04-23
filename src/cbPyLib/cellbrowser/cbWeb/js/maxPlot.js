@@ -439,13 +439,13 @@ function MaxPlot(div, top, left, width, height, args) {
         console.log("alpha: "+ui.value);
         var sliderVal = ui.value; // 1-7
         var multMap = {
-            7 : 0.15,
-            6 : 0.4,
-            5 : 0.8,
+            7 : 0.10,
+            6 : 0.3,
+            5 : 0.7,
             4 : 1.0,
             3 : 1.2,
             2 : 1.5,
-            1 : 1.8
+            1 : 2.0
         }
         self.port.alphaMult = multMap[sliderVal];
         console.log("alphaMult: "+self.port.alphaMult);
@@ -462,8 +462,8 @@ function MaxPlot(div, top, left, width, height, args) {
             3 : 1/1.5,
             4 : 1.0,
             5 : 1.5,
-            6 : 2.0,
-            7 : 3.0
+            6 : 2.5,
+            7 : 5.0
         }
         self.port.radiusMult = multMap[sliderVal];
         self.calcRadius();
