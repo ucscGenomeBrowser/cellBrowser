@@ -1769,7 +1769,7 @@ var cellbrowser = function() {
     function onRadiusAlphaChange(radius, alpha) {
         /* user changed alpha or radius value */
         getById("tpSizeInput").value = radius;
-        getById("tpAlphaInput").value = alpha;
+        getById("tpAlphaInput").value = 8-alpha;
     }
 
     function onSliderChange(valIdx, x, y) {
@@ -3193,7 +3193,7 @@ var cellbrowser = function() {
 
        changeUrl({"pal":null});
        // clear the gene search box
-       var select = $('#tpGeneCombo')[0].selectize.clear();
+       selectizeClear('tpGeneCombo');
     }
 
     function activateTab(name) {
@@ -3642,21 +3642,28 @@ var cellbrowser = function() {
     }
 
     function selectizeSetValue(elId, name) {
-        /* little convenience method to set a selective dropdown to a given
-         * value. does not trigger the change event. */
+        /* set a gene combobox to a given value. Works for both selectize typeahead
+         * and the select2 dropdown used for small gene sets. Does not fire change. */
         if (name===undefined)
             return;
-        var sel = getById(elId).selectize;
-        sel.addOption({id: name, text: name});
-        sel.setValue(name, 1); // 1 = do not fire change
+        var el = getById(elId);
+        if (el && el.selectize) {
+            el.selectize.addOption({id: name, text: name});
+            el.selectize.setValue(name, 1); // 1 = do not fire change
+        } else {
+            // select2: change.select2 updates the UI without firing user change handlers
+            $("#"+elId).val(name).trigger("change.select2");
+        }
     }
 
     function selectizeClear(elId) {
-        /* clear a selectize Dropdown */
-        if (name===undefined)
-            return;
-        var sel = getById(elId).selectize;
-        sel.clear();
+        /* clear a gene combobox. Works for both selectize and select2. */
+        var el = getById(elId);
+        if (!el) return;
+        if (el.selectize)
+            el.selectize.clear();
+        else
+            $("#"+elId).val(null).trigger("change.select2");
     }
 
     function colorByNothing() {
@@ -5005,7 +5012,7 @@ var cellbrowser = function() {
 
     function onSetRadiusAlphaClick(ev) {
         let newRadius = parseFloat(getById('tpSizeInput').value);
-        let newAlpha = parseFloat(getById('tpAlphaInput').value);
+        let newAlpha = 8-parseFloat(getById('tpAlphaInput').value);
         renderer.setRadiusAlpha(newRadius, newAlpha);
         renderer.drawDots();
     }
@@ -6576,9 +6583,16 @@ var cellbrowser = function() {
        loadGroupedExprData(db.heatmap.exprData, geneIds, metaName, onExprDataDoneHeat);
     }
 
+    function useGeneDropdown() {
+        /* Use a searchable dropdown (all genes pre-populated) rather than a
+         * typeahead, when the gene list is small enough to fit comfortably. */
+        if (db.conf.atacSearch) return false;
+        return db.geneCount && db.geneCount <= 300;
+    }
+
     function activateGeneCombo(id, onGeneComboChange) {
-    /* initialize the gene search combo box with selectize */
-        // selectize: gene or ATAC Color by search box
+    /* initialize the gene search combo box. Uses a select2 dropdown with all
+     * options pre-populated for small gene sets; selectize typeahead otherwise. */
         var comboLoad = comboLoadGene;
         if (db.conf.atacSearch) {
             comboLoad = comboLoadAtac;
@@ -6587,6 +6601,32 @@ var cellbrowser = function() {
             getById("tpPeakListNone").addEventListener("click", onPeakNone);
             activateTooltip("#tpPeakListButtons > button");
 
+        }
+
+        if (useGeneDropdown()) {
+            var selectEl = getById(id);
+            var geneIds = db.allGeneIds();
+            var opts = [];
+            for (var i=0; i<geneIds.length; i++)
+                opts.push(db.getGeneInfo(geneIds[i]));
+            opts.sort(function(a, b) { return a.sym.localeCompare(b.sym); });
+            var placeholder = selectEl.getAttribute("placeholder") || "";
+            // select2 needs an empty <option> first to show the placeholder
+            var html = ['<option></option>'];
+            for (var j=0; j<opts.length; j++) {
+                var text = opts[j].sym;
+                if (opts[j].sym !== opts[j].id)
+                    text = opts[j].sym + " (" + opts[j].id + ")";
+                html.push('<option value="'+opts[j].id+'">'+text+'</option>');
+            }
+            selectEl.innerHTML = html.join("");
+            var widthPx = selectEl.style.width || 'resolve';
+            $("#"+id).select2({
+                placeholder: placeholder,
+                allowClear: true,
+                width: widthPx
+            }).on("change", onGeneComboChange);
+            return;
         }
 
         var select = $("#"+id).selectize({
@@ -8086,7 +8126,7 @@ var cellbrowser = function() {
         htmls.push("<ul>");
         htmls.push("<li><a href='#tpAnnotTab'>Annotation</a></li>");
         htmls.push("<li><a href='#tpGeneTab'>"+getGeneLabel()+"</a></li>");
-        htmls.push("<li><a href='#tpLayoutTab'>Layout</a></li>");
+        htmls.push("<li><a href='#tpLayoutTab'>"+(db.conf.coordLabel || "Layout")+"</a></li>");
         htmls.push("</ul>");
 
         htmls.push("<div id='tpAnnotTab'>");
@@ -8533,7 +8573,12 @@ var cellbrowser = function() {
         Mousetrap.bind('m', function() {$('#tpMetaCombo').trigger("chosen:open"); return false;});
         Mousetrap.bind('d', function() {$('#tpDatasetCombo').trigger("chosen:open"); return false;});
         //Mousetrap.bind('l', function() {$('#tpLayoutCombo').trigger("chosen:open"); return false;});
-        Mousetrap.bind('g', function() {$("#tpGeneCombo").selectize()[0].selectize.focus(); return false;});
+        Mousetrap.bind('g', function() {
+            var el = getById("tpGeneCombo");
+            if (el && el.selectize) el.selectize.focus();
+            else $("#tpGeneCombo").select2('open');
+            return false;
+        });
         Mousetrap.bind('c l', onHideShowLabelsClick );
         Mousetrap.bind('f c', onFindCellsClick );
         Mousetrap.bind('f i', function() { onSelectByIdClick(); return false; } );
