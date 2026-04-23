@@ -57,6 +57,14 @@ var cellbrowser = function() {
     // last 10 genes
     var gRecentGenes = [];
 
+    // precomputed marker gene databases
+    var gMarkerCellTypes = null; // [{cellType, tissue?, genes:[]}] for the currently loaded db
+    var gMarkerDbUrl = null;     // URL of the last loaded marker db
+    var gMarkerBrowseCellTypes = null; // cell types loaded in the browse popup
+    var gMarkerBrowseIndexData = null; // filtered index entries for the browse popup dropdown
+    var gMarkerBrowseSelectedUrl = null;  // URL last selected in the browse popup
+    var gMarkerBrowseSelectedIdx = null;  // data-idx of the last selected cell type in the browse popup
+
     // -- CONSTANTS
     var gTitle = "UCSC Cell Browser";
     var COL_PREFIX = "col_";
@@ -783,13 +791,23 @@ var cellbrowser = function() {
             $( "#pane3" ).hide();
             $( "#tabLink3" ).hide();
         } else {
-            if (desc.coordFiles===undefined) {
-                htmls.push("To download the data for datasets in this collection: open the collection, ");
-                htmls.push("select a dataset in the list to the left, and navigate to the 'Data Download' tab. ");
-                htmls.push("This information can also be accessed while viewing a dataset by clicking the 'Info &amp; Downloads' button.");
-            } else if (desc.hideDownload===true || desc.hideDownload=="True" || desc.hideDownload=="true") {
+            if (desc.hideDownload===true || desc.hideDownload=="True" || desc.hideDownload=="true") {
                 htmls.push("The downloads section has been deactivated by the authors.");
                 htmls.push("Please contact the dataset authors to get access.");
+                $( "#pane3" ).html(htmls.join(""));
+                $( "#pane3" ).show();
+                $( "#tabLink3" ).show();
+            } else if (desc.coordFiles===undefined) {
+                htmls.push("<p>To download the data for datasets in this collection: open the collection, ");
+                htmls.push("select a dataset in the list to the left, and navigate to the 'Data Download' tab. ");
+                htmls.push("This information can also be accessed while viewing a dataset by clicking the 'Info &amp; Downloads' button.</p>");
+                htmls.push("<p><b>To bulk download all datasets in this collection via rsync:</b><br>");
+                htmls.push("<code style='display:inline-block; background:#f4f4f4; border:1px solid #ddd; padding:4px 8px; border-radius:3px; font-size:12px; user-select:all'>");
+                htmls.push("rsync --avzp hgdownload.gi.ucsc.edu::cells/"+datasetInfo.name+"/ ./"+datasetInfo.name+"/");
+                htmls.push("</code></p>");
+                $( "#pane3" ).html(htmls.join(""));
+                $( "#pane3" ).show();
+                $( "#tabLink3" ).show();
             } else {
                 if (desc.matrices) {
                     htmls.push("<p>");
@@ -839,6 +857,11 @@ var cellbrowser = function() {
 
                 htmls.push("<p><b>Cell Browser configuration</b>: ");
                 htmls.push("<a target=_blank href='"+datasetInfo.name+"/dataset.json'>dataset.json</a></p>");
+
+                htmls.push("<p><b>Bulk download via rsync:</b><br>");
+                htmls.push("<code style='display:inline-block; background:#f4f4f4; border:1px solid #ddd; padding:4px 8px; border-radius:3px; font-size:12px; user-select:all'>");
+                htmls.push("rsync --avzp hgdownload.gi.ucsc.edu::cells/"+datasetInfo.name+"/ ./"+datasetInfo.name+"/");
+                htmls.push("</code></p>");
 
                 $( "#pane3" ).html(htmls.join(""));
                 $( "#pane3" ).show();
@@ -1273,7 +1296,7 @@ var cellbrowser = function() {
         /* keep only datasets that fulfill the filters */
 
         // read the current filter values of the dropboxes
-        var categories = ["Body", "Dis", "Org", "Proj", "Stage", "Dom", "Source"];
+        var categories = ["Body", "Dis", "Org", "Proj", "Stage", "Dom", "Assay", "Source"];
         var filtVals = {};
         for (var category of categories) {
             var vals = $("#tp"+category+"Combo").val();
@@ -1628,7 +1651,7 @@ var cellbrowser = function() {
             activateFilterCombo(projects, "tpProjCombo");
             activateFilterCombo(lifeStages, "tpStageCombo");
             activateFilterCombo(domains, "tpDomCombo");
-            activateFilterCombo(domains, "tpAssayCombo");
+            activateFilterCombo(assays, "tpAssayCombo");
             activateFilterCombo(sources, "tpSourceCombo");
         }
 
@@ -4986,6 +5009,11 @@ var cellbrowser = function() {
         //dialogOpts["height"] = "auto";
         //dialogOpts["width"] = "auto";
 
+        dialogOpts["open"] = function() {
+            $(".ui-widget-overlay").on("click", function() {
+                $("#tpDialog").dialog("close");
+            });
+        };
         $( "#tpDialog" ).dialog(dialogOpts);
     }
 
@@ -5254,6 +5282,469 @@ var cellbrowser = function() {
 
         for (var el of tdEls) {
             el.style.minWidth = maxWidth+"px";
+        }
+    }
+
+    function flattenMarkerData(rawData) {
+    /* Normalize a marker JSON file to [{cellType, tissue?, genes:[], geneMeta:{gene:{...}}}].
+     * Supports 2-level (cellType -> gene) and 3-level (tissue -> cellType -> gene) formats. */
+        var result = [];
+        var speciesData = Object.values(rawData)[0];
+        if (!speciesData) return result;
+
+        // Detect depth: check if first value's first sub-value has a 'source' key (2-level)
+        // or is itself a nested object (3-level: tissue -> cellType -> gene)
+        var firstVal = Object.values(speciesData)[0];
+        if (!firstVal) return result;
+        var firstSubVal = Object.values(firstVal)[0];
+        var is2Level = (firstSubVal && typeof firstSubVal === 'object' && 'source' in firstSubVal);
+
+        if (is2Level) {
+            for (var cellType in speciesData) {
+                result.push({cellType: cellType, genes: Object.keys(speciesData[cellType]),
+                    geneMeta: speciesData[cellType]});
+            }
+        } else {
+            for (var tissue in speciesData) {
+                for (var cellType in speciesData[tissue]) {
+                    result.push({cellType: cellType, tissue: tissue,
+                        genes: Object.keys(speciesData[tissue][cellType]),
+                        geneMeta: speciesData[tissue][cellType]});
+                }
+            }
+        }
+        return result;
+    }
+
+    function buildMarkerSection(htmls) {
+    /* Build the HTML for the "Marker Genes" section in the gene tab */
+        var markerHelp = "Search curated marker gene databases to find known markers for a cell type. " +
+            "Select a database, search for a cell type, then click it to show its marker genes. " +
+            "Click any gene to color the plot by that gene.";
+
+        htmls.push("<div style='margin-top:8px' id='tpMarkerSection_title'>");
+        htmls.push("<div style='display:inline; padding-left:3px; font-weight:bold'>Marker Genes</div>");
+        htmls = htmlAddInfoIcon(htmls, markerHelp);
+        htmls.push("</div>"); // tpMarkerSection_title
+
+        htmls.push("<div id='tpMarkerSection'>");
+
+        htmls.push("<div id='tpMarkerNoDb' style='display:none' class='tpHint'>" +
+            "No marker databases are available for this species.</div>");
+
+        htmls.push("<div id='tpMarkerDbDiv' style='margin-top:4px; display:none'>");
+        htmls.push("<button id='tpMarkerBrowseBtn' style='display:none'>Browse</button>");
+        htmls.push("</div>");
+
+        htmls.push("</div>"); // tpMarkerSection
+    }
+
+    function getDatasetSpecies() {
+    /* Return "human", "mouse", etc. from db.conf.organisms, or null if unrecognized */
+        var orgs = db.conf.organisms;
+        if (!orgs || orgs.length === 0) return null;
+        var s = orgs[0].toLowerCase();
+        if (s.indexOf("sapiens") !== -1 || s.indexOf("human") !== -1) return "human";
+        if (s.indexOf("musculus") !== -1 || s.indexOf("mouse") !== -1) return "mouse";
+        return null;
+    }
+
+    function loadMarkerIndex() {
+    /* Load markers/index.json, filter by dataset species, and show the Browse button if available */
+        cbUtil.loadJson("downloads/markers/index.json", function(indexData) {
+            if (!indexData) return;
+
+            var dsSpecies = getDatasetSpecies();
+            var hasOrganisms = db.conf.organisms && db.conf.organisms.length > 0;
+
+            var filtered;
+            if (dsSpecies) {
+                // Recognized species — show only matching databases
+                filtered = indexData.filter(function(d) { return d.species === dsSpecies; });
+            } else if (hasOrganisms) {
+                // Organism is set but not recognized (e.g. zebrafish) — no databases available
+                filtered = [];
+            } else {
+                // No organism info at all — show everything
+                filtered = indexData;
+            }
+
+            if (filtered.length === 0) {
+                $("#tpMarkerNoDb").show();
+                return;
+            }
+
+            gMarkerBrowseIndexData = filtered;
+            $("#tpMarkerDbDiv").show();
+            $("#tpMarkerBrowseBtn").show();
+        }, true); // silent=true
+    }
+
+    function onMarkerDbChange() {
+    /* Called when the user selects a marker database */
+        var url = document.getElementById("tpMarkerDbSelect").value;
+        $("#tpMarkerSearchDiv").hide();
+        $("#tpMarkerCellTypeList").hide().empty();
+        $("#tpMarkerGeneDisplay").hide();
+        $("#tpMarkerSearchBox").val("");
+        gMarkerCellTypes = null;
+        if (!url) return;
+
+        cbUtil.loadJson(url, function(rawData) {
+            if (!rawData) return;
+            gMarkerCellTypes = flattenMarkerData(rawData);
+            addDatasetCounts(gMarkerCellTypes);
+            gMarkerDbUrl = url;
+            $("#tpMarkerSearchDiv").show();
+        });
+    }
+
+    function filterMarkerCellTypes(query) {
+    /* Filter cell types by query string and update the results list */
+        if (!gMarkerCellTypes || !query || query.length < 2) {
+            $("#tpMarkerCellTypeList").hide().empty();
+            return;
+        }
+        var lq = query.toLowerCase();
+        var matches = gMarkerCellTypes.filter(function(item) {
+            return item.cellType.toLowerCase().indexOf(lq) !== -1 ||
+                (item.tissue && item.tissue.toLowerCase().indexOf(lq) !== -1);
+        });
+
+        var listDiv = $("#tpMarkerCellTypeList");
+        if (matches.length === 0) {
+            listDiv.html("<div style='font-style:italic; font-size:11px; padding:2px'>No cell types found</div>").show();
+            return;
+        }
+
+        var htmls = [];
+        for (var i = 0; i < matches.length; i++) {
+            var item = matches[i];
+            var label = item.tissue ? item.tissue + " \u2192 " + item.cellType : item.cellType;
+            var idx = gMarkerCellTypes.indexOf(item);
+            var dsCount = item._dsCount !== undefined ? item._dsCount : item.genes.length;
+            htmls.push("<div class='tpMarkerCellTypeItem' data-idx='" + idx + "' " +
+                "title='" + dsCount + " marker genes in dataset'>" +
+                label + " <span style='color:#999; font-size:10px'>(" + dsCount + ")</span></div>");
+        }
+        listDiv.html(htmls.join("")).show();
+
+        listDiv.find(".tpMarkerCellTypeItem").click(function() {
+            var idx = parseInt($(this).attr("data-idx"));
+            showMarkerGenesForCellType(gMarkerCellTypes[idx]);
+        });
+    }
+
+    function showMarkerGenesForCellType(item) {
+    /* Show marker genes for the given cell type as clickable gene cells.
+     * Filters to only genes present in the current dataset's expression matrix. */
+        var titleText = item.tissue ? item.tissue + " \u2192 " + item.cellType : item.cellType;
+
+        var htmls = [];
+        var nTotal = 0;
+        for (var i = 0; i < item.genes.length; i++) {
+            var gene = item.genes[i];
+            if (!gene) continue;
+            nTotal++;
+            // Resolve to the canonical ID in this dataset (case-insensitive match).
+            // Use the resolved form so that colorByLocus() can find it in geneOffsets.
+            var resolvedGene = gene;
+            if (db.geneSyns) {
+                var geneIds = db.findGenesExact(gene);
+                if (geneIds.length === 0) continue;
+                resolvedGene = geneIds[0];
+            }
+            // Build tooltip from per-gene metadata fields
+            var tooltipParts = [];
+            var meta = item.geneMeta ? item.geneMeta[gene] : null;
+            if (meta) {
+                for (var key in meta) {
+                    var val = meta[key];
+                    if (!val) continue;
+                    tooltipParts.push(key + ": " + val);
+                }
+            }
+            var tooltip = tooltipParts.join(" | ").replace(/"/g, "&quot;");
+            htmls.push('<span title="' + tooltip + '" data-geneId="' + resolvedGene + '" ' +
+                'id="tpGeneBarCell_' + onlyAlphaNum(resolvedGene) + '" ' +
+                'class="hasTooltip tpGeneBarCell" style="cursor:pointer">' + resolvedGene + '</span>');
+        }
+
+        var subtitle = titleText;
+        if (db.geneSyns && htmls.length < nTotal)
+            subtitle += " (" + htmls.length + "\u202f/\u202f" + nTotal + " in dataset)";
+        $("#tpMarkerGeneTitle").text(subtitle);
+
+        $("#tpMarkerGeneDisplay").show();
+        if (htmls.length === 0) {
+            $("#tpMarkerGenes").html("<div style='font-style:italic; font-size:11px; padding:2px 0'>No marker genes found in this dataset.</div>");
+        } else {
+            $("#tpMarkerGenes").html(htmls.join(""));
+            $("#tpMarkerGenes .tpGeneBarCell").click(onGeneClick);
+            resizeGeneTableDivs("tpMarkerGenes");
+            activateTooltip(".hasTooltip");
+        }
+    }
+
+    function addDatasetCounts(cellTypes) {
+    /* Pre-compute per-item count of genes present in the current dataset's expression matrix.
+     * Stores result as item._dsCount. Falls back to total gene count if matrix not yet loaded. */
+        for (var i = 0; i < cellTypes.length; i++) {
+            var item = cellTypes[i];
+            if (!db.geneSyns) {
+                item._dsCount = item.genes.length;
+            } else {
+                var count = 0;
+                for (var j = 0; j < item.genes.length; j++) {
+                    if (item.genes[j] && db.findGenesExact(item.genes[j]).length > 0) count++;
+                }
+                item._dsCount = count;
+            }
+        }
+    }
+
+    function buildMarkerBrowseTree(cellTypes, query) {
+    /* Build the collapsible tree HTML for the browse popup. Returns an HTML string.
+     * Groups by tissue for 3-level databases; flat list for 2-level. */
+        if (!cellTypes || cellTypes.length === 0)
+            return "<div style='font-style:italic; font-size:11px; padding:4px'>No cell types available.</div>";
+
+        var lq = query ? query.toLowerCase() : "";
+        var filtered = (lq.length >= 1) ? cellTypes.filter(function(item) {
+            return item.cellType.toLowerCase().indexOf(lq) !== -1 ||
+                   (item.tissue && item.tissue.toLowerCase().indexOf(lq) !== -1);
+        }) : cellTypes;
+
+        if (filtered.length === 0)
+            return "<div style='font-style:italic; font-size:11px; padding:4px'>No cell types match.</div>";
+
+        var htmls = [];
+        var hasTissue = filtered.some(function(item) { return !!item.tissue; });
+
+        if (hasTissue) {
+            var byTissue = {};
+            var tissueOrder = [];
+            for (var i = 0; i < filtered.length; i++) {
+                var tissue = filtered[i].tissue || "(other)";
+                if (!byTissue[tissue]) {
+                    byTissue[tissue] = [];
+                    tissueOrder.push(tissue);
+                }
+                byTissue[tissue].push(filtered[i]);
+            }
+            tissueOrder.sort();
+            var autoOpen = (lq.length > 0 || tissueOrder.length <= 5);
+            for (var t = 0; t < tissueOrder.length; t++) {
+                var tName = tissueOrder[t];
+                var items = byTissue[tName];
+                htmls.push("<details" + (autoOpen ? " open" : "") + " class='tpMarkerBrowseTissue'>");
+                htmls.push("<summary class='tpMarkerBrowseTissueSummary'>" + tName +
+                    " <span style='color:#999; font-size:10px'>(" + items.length + ")</span></summary>");
+                for (var j = 0; j < items.length; j++) {
+                    var item = items[j];
+                    var idx = cellTypes.indexOf(item);
+                    var dsCount = item._dsCount !== undefined ? item._dsCount : item.genes.length;
+                    htmls.push("<div class='tpMarkerBrowseCt' data-idx='" + idx + "'>" +
+                        item.cellType + " <span style='color:#999; font-size:10px'>(" + dsCount + ")</span></div>");
+                }
+                htmls.push("</details>");
+            }
+        } else {
+            for (var i = 0; i < filtered.length; i++) {
+                var item = filtered[i];
+                var idx = cellTypes.indexOf(item);
+                var dsCount = item._dsCount !== undefined ? item._dsCount : item.genes.length;
+                htmls.push("<div class='tpMarkerBrowseCt' data-idx='" + idx + "'>" +
+                    item.cellType + " <span style='color:#999; font-size:10px'>(" + dsCount + ")</span></div>");
+            }
+        }
+        return htmls.join("");
+    }
+
+    function updateMarkerBrowseTree(query) {
+    /* Rebuild the browse popup tree HTML with optional filter, and wire click events */
+        var treeDiv = $("#tpMarkerBrowseTree");
+        if (!gMarkerBrowseCellTypes) { treeDiv.empty(); return; }
+        treeDiv.html(buildMarkerBrowseTree(gMarkerBrowseCellTypes, query));
+        treeDiv.find(".tpMarkerBrowseCt").click(function() {
+            treeDiv.find(".tpMarkerBrowseCt").removeClass("tpMarkerBrowseCtSelected");
+            $(this).addClass("tpMarkerBrowseCtSelected");
+            var idx = parseInt($(this).attr("data-idx"));
+            gMarkerBrowseSelectedIdx = idx;
+            showMarkerBrowseGenes(gMarkerBrowseCellTypes[idx]);
+        });
+    }
+
+    function restoreMarkerBrowseSelection() {
+    /* Re-highlight and re-display the last selected cell type in the browse popup tree */
+        if (gMarkerBrowseSelectedIdx === null || !gMarkerBrowseCellTypes) return;
+        var treeDiv = $("#tpMarkerBrowseTree");
+        var el = treeDiv.find(".tpMarkerBrowseCt[data-idx='" + gMarkerBrowseSelectedIdx + "']");
+        if (!el.length) return;
+        el.addClass("tpMarkerBrowseCtSelected");
+        el.closest("details").prop("open", true); // ensure the tissue group is expanded
+        el[0].scrollIntoView({block: "nearest"});
+        showMarkerBrowseGenes(gMarkerBrowseCellTypes[gMarkerBrowseSelectedIdx]);
+    }
+
+    function showMarkerBrowseGenes(item) {
+    /* Show marker genes for a cell type in the browse popup right panel */
+        var titleText = item.tissue ? item.tissue + " \u2192 " + item.cellType : item.cellType;
+        var htmls = [];
+        var resolvedGenes = [];
+        var nTotal = 0;
+        for (var i = 0; i < item.genes.length; i++) {
+            var gene = item.genes[i];
+            if (!gene) continue;
+            nTotal++;
+            var resolvedGene = gene;
+            if (db.geneSyns) {
+                var geneIds = db.findGenesExact(gene);
+                if (geneIds.length === 0) continue;
+                resolvedGene = geneIds[0];
+            }
+            resolvedGenes.push(resolvedGene);
+            var tooltipParts = [];
+            var meta = item.geneMeta ? item.geneMeta[gene] : null;
+            if (meta) {
+                for (var key in meta) {
+                    var val = meta[key];
+                    if (!val) continue;
+                    tooltipParts.push(key + ": " + val);
+                }
+            }
+            var tooltip = tooltipParts.join(" | ").replace(/"/g, "&quot;");
+            htmls.push('<span title="' + tooltip + '" data-geneId="' + resolvedGene + '" ' +
+                'id="tpBrowseGeneCell_' + onlyAlphaNum(resolvedGene) + '" ' +
+                'class="hasTooltip tpGeneBarCell" style="cursor:pointer">' + resolvedGene + '</span>');
+        }
+        var subtitle = titleText;
+        if (db.geneSyns && htmls.length < nTotal)
+            subtitle += " (" + htmls.length + "\u202f/\u202f" + nTotal + " in dataset)";
+        $("#tpMarkerBrowseGeneTitle").text(subtitle);
+
+        var colorAllBtn = $("#tpMarkerBrowseColorAll");
+        if (resolvedGenes.length > 0) {
+            colorAllBtn.show().off("click").on("click", (function(genes) {
+                return function() { colorByMultiGenes(genes, genes); };
+            })(resolvedGenes.slice()));
+        } else {
+            colorAllBtn.hide();
+        }
+
+        if (htmls.length === 0) {
+            $("#tpMarkerBrowseGenes").html("<div style='font-style:italic; font-size:11px; padding:2px 0'>No marker genes found in this dataset.</div>");
+        } else {
+            $("#tpMarkerBrowseGenes").html(htmls.join(""));
+            $("#tpMarkerBrowseGenes .tpGeneBarCell").click(onGeneClick);
+            resizeGeneTableDivs("tpMarkerBrowseGenes");
+            activateTooltip(".hasTooltip");
+        }
+    }
+
+    function updateMarkerBrowseLinks(url) {
+    /* Update the database/paper links below the popup dropdown for the selected database URL */
+        var linksDiv = $("#tpMarkerBrowseLinks");
+        if (!url || !gMarkerBrowseIndexData) { linksDiv.empty(); return; }
+        var entry = null;
+        for (var i = 0; i < gMarkerBrowseIndexData.length; i++) {
+            if ("downloads/markers/" + gMarkerBrowseIndexData[i].name === url) {
+                entry = gMarkerBrowseIndexData[i];
+                break;
+            }
+        }
+        if (!entry) { linksDiv.empty(); return; }
+        var parts = [];
+        if (entry.dbUrl)    parts.push("<a class='link' href='" + entry.dbUrl + "' target='_blank'>Database ↗</a>");
+        if (entry.paperUrl) parts.push("<a class='link' href='" + entry.paperUrl + "' target='_blank'>Paper ↗</a>");
+        linksDiv.html(parts.join(" &nbsp;&middot;&nbsp; "));
+    }
+
+    function onMarkerBrowseClick() {
+    /* Open the marker database browser popup */
+        if (!gMarkerBrowseIndexData || gMarkerBrowseIndexData.length === 0) return;
+
+        var htmls = [];
+        htmls.push("<div style='display:flex; height:100%; gap:8px'>");
+
+        // Left panel: database selector, links, search filter, collapsible tree
+        htmls.push("<div style='width:38%; display:flex; flex-direction:column; min-width:0'>");
+        htmls.push("<select id='tpMarkerBrowseDbSelect' style='width:100%; font-size:12px; margin-bottom:3px'>");
+        htmls.push("<option value=''>Select a database...</option>");
+        for (var i = 0; i < gMarkerBrowseIndexData.length; i++) {
+            var entry = gMarkerBrowseIndexData[i];
+            htmls.push("<option value='downloads/markers/" + entry.name + "'>" + entry.label + "</option>");
+        }
+        htmls.push("</select>");
+        htmls.push("<div id='tpMarkerBrowseLinks' style='font-size:11px; color:#555; margin-bottom:5px; min-height:16px'></div>");
+        htmls.push("<input type='text' id='tpMarkerBrowseSearch' class='form-control' " +
+            "style='font-size:12px; height:28px; margin-bottom:4px' placeholder='Filter cell types...'>");
+        htmls.push("<div id='tpMarkerBrowseTree' style='flex:1; overflow-y:auto; border:1px solid #ddd; " +
+            "border-radius:3px; padding:2px'></div>");
+        htmls.push("</div>");
+
+        // Right panel: gene title + color-all button + gene cells
+        htmls.push("<div style='width:62%; display:flex; flex-direction:column; min-width:0'>");
+        htmls.push("<div style='display:flex; align-items:baseline; gap:8px; margin-bottom:4px'>");
+        htmls.push("<div id='tpMarkerBrowseGeneTitle' style='font-size:11px; font-style:italic; color:#555; " +
+            "flex:1'>Select a cell type to view its marker genes.</div>");
+        htmls.push("<button id='tpMarkerBrowseColorAll' class='tpButton' " +
+            "style='font-size:11px; padding:1px 6px; white-space:nowrap; display:none'>Color by all</button>");
+        htmls.push("</div>");
+        htmls.push("<div id='tpMarkerBrowseGenes'></div>");
+        htmls.push("</div>");
+
+        htmls.push("</div>"); // flex container
+
+        showDialogBox(htmls, "Browse Marker Gene Databases", {width: 900, height: 600});
+
+        // Wire the database selector change
+        var browseSearchTimer = null;
+        $("#tpMarkerBrowseDbSelect").change(function() {
+            var url = $(this).val();
+            gMarkerBrowseCellTypes = null;
+            gMarkerBrowseSelectedUrl = url || null;
+            gMarkerBrowseSelectedIdx = null;
+            $("#tpMarkerBrowseSearch").val("");
+            $("#tpMarkerBrowseGeneTitle").text("Select a cell type to view its marker genes.");
+            $("#tpMarkerBrowseGenes").empty();
+            $("#tpMarkerBrowseColorAll").hide();
+            updateMarkerBrowseLinks(url);
+            if (!url) { $("#tpMarkerBrowseTree").empty(); return; }
+            $("#tpMarkerBrowseTree").html("<div style='font-style:italic; font-size:11px; padding:4px'>Loading...</div>");
+            cbUtil.loadJson(url, function(rawData) {
+                if (!rawData) return;
+                gMarkerBrowseCellTypes = flattenMarkerData(rawData);
+                addDatasetCounts(gMarkerBrowseCellTypes);
+                updateMarkerBrowseTree("");
+            });
+        });
+
+        // Wire the search/filter input
+        $("#tpMarkerBrowseSearch").on("input", function() {
+            clearTimeout(browseSearchTimer);
+            var q = $(this).val();
+            browseSearchTimer = setTimeout(function() { updateMarkerBrowseTree(q); }, 200);
+        });
+
+        // Restore previous browse state; fall back to mirroring the main panel on first open
+        if (gMarkerBrowseSelectedUrl && gMarkerBrowseCellTypes) {
+            $("#tpMarkerBrowseDbSelect").val(gMarkerBrowseSelectedUrl);
+            updateMarkerBrowseLinks(gMarkerBrowseSelectedUrl);
+            updateMarkerBrowseTree("");
+            restoreMarkerBrowseSelection();
+        } else if (gMarkerBrowseSelectedUrl && !gMarkerBrowseCellTypes) {
+            // Data was cleared (shouldn't normally happen); reload
+            $("#tpMarkerBrowseDbSelect").val(gMarkerBrowseSelectedUrl);
+            updateMarkerBrowseLinks(gMarkerBrowseSelectedUrl);
+            $("#tpMarkerBrowseTree").html("<div style='font-style:italic; font-size:11px; padding:4px'>Loading...</div>");
+            cbUtil.loadJson(gMarkerBrowseSelectedUrl, function(rawData) {
+                if (!rawData) return;
+                gMarkerBrowseCellTypes = flattenMarkerData(rawData);
+                addDatasetCounts(gMarkerBrowseCellTypes);
+                updateMarkerBrowseTree("");
+                restoreMarkerBrowseSelection();
+            });
         }
     }
 
@@ -5828,8 +6319,6 @@ var cellbrowser = function() {
         else
             metaBarWidth = 250;
 
-        renderer.setPos(null, metaBarWidth+metaBarMargin);
-
         var hubUrl = makeHubUrl(null);
         $('#tpOpenGenome').attr("href", hubUrl);
 
@@ -5842,6 +6331,60 @@ var cellbrowser = function() {
                 showCollectionDialog(datasetName);
             return;
         }
+
+        // Create renderer on first dataset load now that sampleCount is known.
+        // Done here (after the collection early-return) so we never create the renderer
+        // from a collection config that lacks a meaningful sampleCount.
+        if (renderer === null) {
+            var canvLeft = metaBarWidth + metaBarMargin;
+            var canvTop  = menuBarHeight + toolBarHeight;
+            var canvWidth = window.innerWidth - canvLeft - legendBarWidth;
+            var canvHeight = window.innerHeight - menuBarHeight - toolBarHeight;
+
+            var rendDiv = document.createElement('div');
+            rendDiv.id = "tpMaxPlot";
+
+            const drawModeUrl = parseInt(getVar("drawMode"));
+            const drawMode = Number.isInteger(drawModeUrl) ? drawModeUrl :
+                (db.conf.sampleCount > 200000 ? 2 : undefined);
+            renderer = new MaxPlot(rendDiv, canvTop, canvLeft, canvWidth, canvHeight, {lightMode: lightMode, drawMode: drawMode});
+            window.renderer = renderer;
+
+            document.body.appendChild(rendDiv);
+            activateTooltip(".mpButton");
+            renderer.activateSliders();
+
+            self.tooltipDiv = makeTooltipCont();
+            document.body.appendChild(self.tooltipDiv);
+
+            buildEmptyLegendBar(metaBarWidth + metaBarMargin + renderer.width, toolBarHeight);
+
+            // Set buttons/inputs to not inherit color from bootstrap by default
+            let bootstrapSheetRules = [...[...document.styleSheets].find((sheet) => sheet.href && sheet.href.includes("bootstrap.min.css")).cssRules];
+            let interactableRule = bootstrapSheetRules.find((rule) => rule.selectorText == 'button, input, optgroup, select, textarea');
+            interactableRule.style.color = "revert";
+
+            updateLightModeHTML(lightMode);
+
+            renderer.setupMouse();
+            $(window).resize(onWindowResize);
+
+            renderer.onLabelClick = onClusterNameClick;
+            renderer.onLabelHover = onClusterNameHover;
+            renderer.onNoLabelHover = onNoClusterNameHover;
+            renderer.onCellClick = onCellClickOrHover;
+            renderer.onCellHover = onCellClickOrHover;
+            renderer.onNoCellHover = clearMetaAndGene;
+            renderer.onLineHover = onLineHover;
+            renderer.onZoom100Click = onZoom100Click;
+            renderer.onSelChange = onSelChange;
+            renderer.onRadiusAlphaChange = onRadiusAlphaChange;
+            renderer.onSliderChange = onSliderChange;
+
+            renderer.canvas.addEventListener("mouseleave", hideTooltip);
+        }
+
+        renderer.setPos(null, metaBarWidth+metaBarMargin);
 
         let binData = localStorage.getItem(db.name+"|custom");
         if (binData) {
@@ -8170,6 +8713,8 @@ var cellbrowser = function() {
             geneHelp = "Predefined dataset ranges were defined by the dataset submitter. Click any to color by a list of loci, so a sum of the peaks contained in the range. The exact peaks are listed on mouse over.";
         buildGeneTable(htmls, "tpQuickGenes", "Dataset "+getGeneLabelPlural(), null, db.conf.quickGenes, noteStr, geneHelp);
 
+        buildMarkerSection(htmls);
+
         htmls.push("</div>"); // tpGeneTab
 
         htmls.push("<div id='tpLayoutTab'>");
@@ -8182,6 +8727,9 @@ var cellbrowser = function() {
 
         resizeGeneTableDivs("tpRecentGenes");
         resizeGeneTableDivs("tpQuickGenes");
+
+        loadMarkerIndex();
+        $("#tpMarkerBrowseBtn").click(onMarkerBrowseClick);
 
         activateTooltip('.hasTooltip');
 
@@ -8991,7 +9539,7 @@ var cellbrowser = function() {
         /* unselect all checkboxes in the legend and clear the selection */
         if (gLegend.selectionDirection == "all") {
             $(".tpLegendCheckbox").prop('checked', true);
-            onSelectAllClick();
+            legendSetCheckboxes("all");
             gLegend.selectionDirection = "none";
         } else {
             $(".tpLegendCheckbox").prop('checked', false);
@@ -9612,6 +10160,7 @@ var cellbrowser = function() {
             var fieldValue = cellInfo[i];
             let metaIdx = i + customCount;
             let metaInfo = fieldInfos[metaIdx];
+            if (metaInfo === undefined) break; // meta.tsv has more fields than conf; stop here
 
             if (i===0) {
                 //changeUrl({"cell":fieldValue});
@@ -9759,6 +10308,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         var labelField = renderer.getLabelField();
         var metaInfo = db.findMetaInfo(labelField);
+        if (!metaInfo) return;
         var longLabels = metaInfo.ui.longLabels;
         if (longLabels) {
             for (let i=0; i<longLabels.length; i++) {
@@ -10654,57 +11204,7 @@ $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
         // pre-load dataset.json here?
         menuBarHeight = $('#tpMenuBar').outerHeight(true);
 
-        var canvLeft = metaBarWidth+metaBarMargin;
-        var canvTop  = menuBarHeight+toolBarHeight;
-        var canvWidth = window.innerWidth - canvLeft - legendBarWidth;
-        var canvHeight = window.innerHeight - menuBarHeight - toolBarHeight;
-
-        // Initialize renderer
-        if (renderer===null) {
-           var div = document.createElement('div');
-           div.id = "tpMaxPlot";
-
-           const drawMode = parseInt(getVar("drawMode"));
-           renderer = new MaxPlot(div, canvTop, canvLeft, canvWidth, canvHeight,  {lightMode: lightMode, drawMode: Number.isInteger(drawMode) ? drawMode: undefined});
-           window.renderer = renderer; // XX undo this?
-
-           document.body.appendChild(div);
-           activateTooltip(".mpButton"); // tpMaxPlot has no special tooltip support itself
-           renderer.activateSliders();
-
-           self.tooltipDiv = makeTooltipCont();
-           document.body.appendChild(self.tooltipDiv);
-       }
-
-        buildEmptyLegendBar(metaBarWidth+metaBarMargin+renderer.width, toolBarHeight);
-
-        // Set buttons and other interactables to not inherit color by default (avoids changing ext/bootstrap.min.css)
-        let bootstrapSheetRules = [...[...document.styleSheets].find((sheet) => sheet.href && sheet.href.includes("bootstrap.min.css")).cssRules];
-        let interactableRule = bootstrapSheetRules.find((rule) => rule.selectorText == 'button, input, optgroup, select, textarea');
-        interactableRule.style.color = "revert";
-
-        // Set light mode
-        updateLightModeHTML(lightMode);
-
-        // Enable input
-        renderer.setupMouse();
-        $(window).resize(onWindowResize);
-
-        renderer.onLabelClick = onClusterNameClick;
-        renderer.onLabelHover = onClusterNameHover;
-        renderer.onNoLabelHover = onNoClusterNameHover;
-        renderer.onCellClick = onCellClickOrHover;
-        renderer.onCellHover = onCellClickOrHover;
-        renderer.onNoCellHover = clearMetaAndGene;
-        renderer.onLineHover = onLineHover;
-        renderer.onZoom100Click = onZoom100Click;
-        renderer.onSelChange = onSelChange;
-        renderer.onRadiusAlphaChange = onRadiusAlphaChange;
-        renderer.onSliderChange = onSliderChange;
-
-        renderer.canvas.addEventListener("mouseleave", hideTooltip);
-
-       // Load data
+        // Load data; renderer is created in onConfigLoaded once sampleCount is known
         loadDataset(datasetName, false, rootMd5);
     }
 
