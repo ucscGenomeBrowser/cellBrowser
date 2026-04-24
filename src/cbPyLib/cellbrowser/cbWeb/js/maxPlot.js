@@ -4370,7 +4370,7 @@ function MaxPlot(div, top, left, width, height, args) {
             var x = coords[i * 2];
             var y = coords[i * 2 + 1];
 
-            if (isHidden(x, y, i) && !this.usesWebGL())
+            if (isHidden(x, y, i))
                 continue;
 
             calc[label][0].push(x);
