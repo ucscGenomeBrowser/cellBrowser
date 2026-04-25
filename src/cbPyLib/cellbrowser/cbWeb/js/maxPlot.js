@@ -830,13 +830,13 @@ function MaxPlot(div, top, left, width, height, args) {
         if(DEBUG) console.log("alpha: "+ui.value);
         var sliderVal = ui.value; // 1-7
         var multMap = {
-            7 : 0.15,
-            6 : 0.4,
-            5 : 0.8,
+            7 : 0.10,
+            6 : 0.3,
+            5 : 0.7,
             4 : 1.0,
             3 : 1.2,
             2 : 1.5,
-            1 : 1.8
+            1 : 2.0
         }
         var target = self.sliderTarget || self;
         target.port.alphaMult = multMap[sliderVal];
@@ -860,8 +860,8 @@ function MaxPlot(div, top, left, width, height, args) {
             3 : 1/1.5,
             4 : 1.0,
             5 : 1.5,
-            6 : 2.0,
-            7 : 3.0
+            6 : 2.5,
+            7 : 5.0
         }
         var target = self.sliderTarget || self;
         target.port.radiusMult = multMap[sliderVal];
@@ -4370,7 +4370,7 @@ function MaxPlot(div, top, left, width, height, args) {
             var x = coords[i * 2];
             var y = coords[i * 2 + 1];
 
-            if (isHidden(x, y, i) && !this.usesWebGL())
+            if (isHidden(x, y, i))
                 continue;
 
             calc[label][0].push(x);
