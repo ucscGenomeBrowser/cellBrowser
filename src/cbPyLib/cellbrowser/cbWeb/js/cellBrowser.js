@@ -1981,8 +1981,14 @@ var cellbrowser = function() {
             rowType = "meta";
             findCellsUpdateRowType(rowIdx, rowType);
             findCellsUpdateMetaCombo(rowIdx, metaInfo.index);
-            var enumIdx = findMetaValIndex(metaInfo, query[op]);
-            $("#tpSelectMetaValueEnum_"+rowIdx).val(enumIdx);
+            if (metaInfo.valCounts !== undefined) {
+                // enum field: restore selected option
+                var enumIdx = findMetaValIndex(metaInfo, query[op]);
+                $("#tpSelectMetaValueEnum_"+rowIdx).val(enumIdx);
+            } else {
+                // numeric field: restore value in text input
+                $('#tpSelectValue_'+rowIdx).val(query[op]);
+            }
         }
         $("#tpSelectOperator_"+rowIdx).val(op);
 
