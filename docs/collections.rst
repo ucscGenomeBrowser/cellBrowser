@@ -8,7 +8,7 @@ When you open a collection, it will show you all of the datasets within it.
 This requires your datasets to be arranged in directories on disk. Let's say
 you have two directories with data files, one in directory ``data1`` and one in
 directory ``data2``, each with their own cellbrowser.conf files, then these
-two directories must be both subdirectories of a parent directoryn
+two directories must be both subdirectories of a parent directory
 named e.g. ``dataParent``. The names of all the datasets
 are the names of their directories, not the names 
 specified via the ``name`` statement in their ``cellbrowser.conf`` files anymore.
