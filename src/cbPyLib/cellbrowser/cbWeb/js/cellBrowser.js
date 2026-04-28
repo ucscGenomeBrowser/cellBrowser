@@ -2175,12 +2175,12 @@ var cellbrowser = function() {
     }
 
     function addNewAnnotation(fieldLabel, newMetaValue, cellIds) {
-        var metaInfo;
+        var metaInfo = findCustomFieldByLabel(fieldLabel);
         let cellCount = db.conf.sampleCount;
-        if (!db.getMetaFields()[0].isCustom) {
-            // add a new enum meta field
+        if (!metaInfo) {
+            var fieldName = generateCustomFieldName();
             metaInfo = {
-                name:"custom",
+                name: fieldName,
                 label: fieldLabel,
                 type: "enum",
                 arr : Array.from(new Uint8Array(cellCount)), // cannot JSON-serialize Typed Arrays
@@ -2188,55 +2188,47 @@ var cellbrowser = function() {
                     shortLabels : ["No annotation"]
                 },
                 valCounts : [ ["No annotation", cellCount]]
-            }
+            };
             db.addCustomMetaField(metaInfo);
             rebuildMetaPanel();
             activateTab("meta");
-        } else
-            metaInfo = db.getMetaFields()[0];
+        }
 
         metaInfo.ui.shortLabels.push( newMetaValue );
         let newValIdx = metaInfo.valCounts.length;
         metaInfo.valCounts.push( [newMetaValue, cellIds.length]);
-        // update the "No annotation" count
         let noAnnotCount = metaInfo.valCounts[0][1];
         metaInfo.valCounts[0][1] = noAnnotCount - cellIds.length;
 
         let arr = metaInfo.arr;
         for (let i=0; i<cellIds.length; i++)
             arr[cellIds[i]] = newValIdx;
-        // need to update the value histogram
         db.metaHist[metaInfo.name] = makeFieldHistogram(metaInfo, cellIds, arr);
-        updateMetaBarManyCells(cellIds); // redo, as we rebuilt the meta panel
-
-        var jsonStr = JSON.stringify(metaInfo);
-        var comprStr = LZString.compress(jsonStr);
-        localStorage.setItem(db.name+"|custom", comprStr);
-        }
+        updateMetaBarManyCells(cellIds);
+        saveCustomFieldsToStorage();
+        return metaInfo.name;
+    }
 
     function onSelectNameClick() {
         /* Edit > Name selection */
-
         let title = "Annotate selected "+gSampleDesc+"s";
-
         let htmls = [];
         htmls.push('<p>There are '+renderer.getSelection().length+' '+gSampleDesc+' in the current selection.</p>');
 
-        htmls.push('<p><b>Name of annotation field</b>:<br>');
-        htmls.push('<input class="tpDialogInput" id="tpFieldLabel" type="text" value="My custom annotations"></p>');
+        var existingLabels = getCustomFields().map(function(f) { return f.label; });
+        var defaultLabel = existingLabels.length > 0 ? existingLabels[0] : "My custom annotations";
+        htmls.push('<p><b>Annotation field</b>:<br>');
+        htmls.push('<input class="tpDialogInput" id="tpFieldLabel" type="text" list="tpFieldLabelList" value="'+defaultLabel+'">');
+        htmls.push('<datalist id="tpFieldLabelList">');
+        existingLabels.forEach(function(lbl) { htmls.push('<option value="'+lbl+'">'); });
+        htmls.push('</datalist></p>');
         htmls.push('<p><b>Annotate selected cells as:</b><br>');
         htmls.push('<input class="tpDialogInput" id="tpMetaVal" type="text"></p>');
-        htmls.push('<p>Remove annotations later by clicking <b>Tools > Remove all annotations</b>.</p>');
+        htmls.push('<p>Remove annotations later by right-clicking on the annotation field in the left panel.</p>');
 
         var dlgHeight = 400;
         var dlgWidth = 800;
         var buttons = [
-            //"Close and remove all annotations" : function() {
-                //db.getMetaFields().shift();
-                //rebuildMetaPanel();
-                //localStorage.removeItem(db.name+"|custom");
-                //resetCustomAnnotations();
-            //},
         {text:"OK", click: function() {
                 let fieldLabel = $('#tpFieldLabel').val();
                 if (fieldLabel==="")
@@ -2244,10 +2236,9 @@ var cellbrowser = function() {
                 let newMetaValue = $("#tpMetaVal").val();
                 if (newMetaValue==="")
                     return;
-
-                addNewAnnotation(fieldLabel, newMetaValue, renderer.getSelection());
+                var fieldName = addNewAnnotation(fieldLabel, newMetaValue, renderer.getSelection());
                 $( this ).dialog( "close" );
-                colorByMetaField("custom");
+                colorByMetaField(fieldName);
             }
         }];
         showDialogBox(htmls, title, {showClose:true, height:dlgHeight, width:dlgWidth, buttons:buttons});
@@ -2589,17 +2580,72 @@ var cellbrowser = function() {
         rebuildMetaPanel();
         changeUrl({"meta":null});
         colorByDefaultField();
+        localStorage.removeItem(db.name+"|customFields");
         localStorage.removeItem(db.name+"|custom");
     }
 
     function onCustomAnnotationsClick() {
-        /* */
-        if (!db.getMetaFields()[0].isCustom) {
+        if (getCustomFields().length === 0) {
             alert("You have currently no custom annotations. Select a few cells and use Edit > Name selection "+
                     "to create a custom annotation field.");
         } else {
             resetCustomAnnotations();
         }
+    }
+
+    function getCustomFields() {
+        return db.getMetaFields().filter(function(f) { return f.isCustom; });
+    }
+
+    function findCustomFieldByLabel(label) {
+        var fields = getCustomFields();
+        for (var i = 0; i < fields.length; i++)
+            if (fields[i].label === label) return fields[i];
+        return null;
+    }
+
+    function generateCustomFieldName() {
+        var names = {};
+        getCustomFields().forEach(function(f) { names[f.name] = true; });
+        if (!names["custom"]) return "custom";
+        var i = 1;
+        while (names["custom_" + i]) i++;
+        return "custom_" + i;
+    }
+
+    function saveCustomFieldsToStorage() {
+        var fields = getCustomFields();
+        if (fields.length === 0) { localStorage.removeItem(db.name + "|customFields"); return; }
+        var obj = {};
+        for (var i = 0; i < fields.length; i++) obj[fields[i].name] = fields[i];
+        localStorage.setItem(db.name + "|customFields", LZString.compress(JSON.stringify(obj)));
+    }
+
+    function loadCustomFieldsFromStorage() {
+        var data = localStorage.getItem(db.name + "|customFields");
+        if (data) {
+            var fields = JSON.parse(LZString.decompress(data));
+            var names = Object.keys(fields).reverse();
+            for (var i = 0; i < names.length; i++)
+                db.conf.metaFields.unshift(fields[names[i]]);
+            return;
+        }
+        var oldData = localStorage.getItem(db.name + "|custom");
+        if (oldData) {
+            var metaInfo = JSON.parse(LZString.decompress(oldData));
+            db.conf.metaFields.unshift(metaInfo);
+            saveCustomFieldsToStorage();
+            localStorage.removeItem(db.name + "|custom");
+        }
+    }
+
+    function removeOneCustomAnnotation(fieldName) {
+        db.conf.metaFields = db.getMetaFields().filter(function(f) { return !(f.isCustom && f.name === fieldName); });
+        saveCustomFieldsToStorage();
+        rebuildMetaPanel();
+        var remaining = getCustomFields();
+        if (remaining.length > 0) colorByMetaField(remaining[0].name);
+        else { changeUrl({"meta": null}); colorByDefaultField(); }
     }
 
     function onRenameClustersClick() {
@@ -6400,12 +6446,7 @@ var cellbrowser = function() {
 
         renderer.setPos(null, metaBarWidth+metaBarMargin);
 
-        let binData = localStorage.getItem(db.name+"|custom");
-        if (binData) {
-            let jsonStr = LZString.decompress(binData);
-            let customMeta = JSON.parse(jsonStr);
-            db.conf.metaFields.unshift(customMeta);
-        }
+        loadCustomFieldsFromStorage();
 
         cartLoad(db);
         if (getVar("exprGene")) {
@@ -8471,7 +8512,8 @@ var cellbrowser = function() {
 
             var addClass = "";
             var addTitle="";
-            htmls.push("<div class='tpMetaBox' data-field-name='"+metaInfo.name+"' id='tpMetaBox_"+i+"'>");
+            var customAttr = metaInfo.isCustom ? " data-is-custom='true'" : "";
+            htmls.push("<div class='tpMetaBox' data-field-name='"+metaInfo.name+"' id='tpMetaBox_"+i+"'"+customAttr+">");
             if (isGrey) {
                 addClass=" tpMetaLabelGrey";
                 addTitle=" title='This field contains too many different values. You cannot click it to color on it.'";
@@ -8530,9 +8572,10 @@ var cellbrowser = function() {
         $.contextMenu( menuOpt );
 
         var menuItemsCust = [{name: "Copy field value to clipboard"},
-            {name: "Remove custom annotations"}];
+            {name: "Remove this annotation field"},
+            {name: "Remove all annotation fields"}];
         var menuOptCust = {
-            selector: "#tpMetaBox_custom",
+            selector: ".tpMetaBox[data-is-custom]",
             items: menuItemsCust,
             className: 'contextmenu-customwidth',
             callback: onMetaRightClick
@@ -9363,19 +9406,16 @@ var cellbrowser = function() {
 
     function onMetaRightClick (key, options) {
     /* user right-clicks on a meta field */
-        var metaName = options.$trigger[0].id.split("_")[1];
-
-        //if (key==0) {
-            //gCurrentDataset.labelField = gCurrentDataset.metaFields[metaIdx];
-            //gClusterMids = null; // force recalc
-            //plotDots();
-            //renderer.render(stage);
-            //updateMenu();
-        //}
+        var triggerEl = options.$trigger[0];
+        var metaIdx = triggerEl.id.split("_")[1];
+        var fieldName = triggerEl.getAttribute('data-field-name');
         if (key===0) {
-            copyToClipboard("#tpMeta_"+metaName);
+            copyToClipboard("#tpMeta_"+metaIdx);
+        } else if (key===1) {
+            removeOneCustomAnnotation(fieldName);
+        } else if (key===2) {
+            resetCustomAnnotations();
         }
-
     }
 
     //function onLegendRightClick (key, options) {
@@ -10138,7 +10178,6 @@ var cellbrowser = function() {
         if (db===null) // users moved the mouse while the db is still loading
             return;
 
-        $('#tpMeta_custom').html("");
         $(".tpMetaValue").html("");
 
         var fieldCount = db.getMetaFields();
@@ -10151,22 +10190,21 @@ var cellbrowser = function() {
 
     function updateMetaBarCustomFields(cellId) {
         /* update custom meta fields with custom data */
-        if (!db.getMetaFields()[0].isCustom)
-            return;
-
-        let metaInfo = db.getMetaFields()[0];
-        let intVal = metaInfo.arr[cellId];
-        let strVal = metaInfo.ui.shortLabels[intVal];
-        let rowDiv = $('#tpMeta_custom').html(strVal);
+        var allFields = db.getMetaFields();
+        for (var i = 0; i < allFields.length; i++) {
+            var metaInfo = allFields[i];
+            if (!metaInfo.isCustom) continue;
+            var intVal = metaInfo.arr[cellId];
+            var strVal = metaInfo.ui.shortLabels[intVal];
+            $('#tpMeta_'+i).html(strVal);
+        }
     }
 
     function updateMetaBarOneCell(cellInfo, otherCellCount) {
         /* update the meta bar with meta data from a single cellId */
         $('#tpMetaTitle').text(METABOXTITLE);
 
-        let customCount = 0;
-        if (db.getMetaFields()[0].isCustom)
-            customCount = 1;
+        let customCount = getCustomFields().length;
 
         let fieldInfos = db.getMetaFields();
 
@@ -10182,7 +10220,7 @@ var cellbrowser = function() {
                     plotTrace(fieldValue);
             }
 
-            let rowDiv = $('#tpMeta_'+i);
+            let rowDiv = $('#tpMeta_'+metaIdx);
             if (fieldValue.startsWith("http") && fieldValue.endsWith(".png")) {
                 rowDiv.css('height', "40px");
                 rowDiv.html("<img src='"+fieldValue+"'></img>");
