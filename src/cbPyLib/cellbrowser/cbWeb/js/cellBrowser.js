@@ -5073,6 +5073,10 @@ var cellbrowser = function() {
             $(".ui-widget-overlay").on("click", function() {
                 $("#tpDialog").dialog("close");
             });
+            $("#tpDialog").on("keydown", "input", function(e) {
+                if (e.which === 13)
+                    $("#tpDialog").closest(".ui-dialog").find(".ui-dialog-buttonpane button:contains('OK')").click();
+            });
         };
         $( "#tpDialog" ).dialog(dialogOpts);
     }
@@ -9932,15 +9936,38 @@ var cellbrowser = function() {
         activateTooltip(".tpLegendLabel");
         activateTooltip(".tpLegendCount");
 
-        // setup the right-click menu
-        //var menuItems = [{name: "Hide "+gSampleDesc+"s with this value"}, {name:"Show only "+gSampleDesc+"s with this value"}];
-        //var menuOpt = {
-            //selector: ".tpLegend",
-            //items: menuItems,
-            //className: 'contextmenu-customwidth',
-            //callback: onLegendRightClick
-        //};
-        //$.contextMenu( menuOpt );
+        // setup the right-click menu for custom annotation values
+        $.contextMenu('destroy', '.tpLegend');
+        $.contextMenu({
+            selector: ".tpLegend",
+            build: function($trigger, e) {
+                if (!gLegend.metaInfo || !gLegend.metaInfo.isCustom) return false;
+                var intKey = parseInt($trigger[0].id.split("_")[1]);
+                if (intKey === 0) return false; // no actions on "No annotation"
+                var metaInfo = gLegend.metaInfo;
+                var items = {};
+                items["rename"] = {name: "Rename this value"};
+                items["delete"] = {name: "Delete this value (reassign to 'No annotation')"};
+                var otherItems = {};
+                var hasOthers = false;
+                for (var i = 1; i < metaInfo.valCounts.length; i++) {
+                    if (i === intKey || metaInfo.valCounts[i][1] === 0) continue;
+                    otherItems["reassign_"+i] = {name: metaInfo.valCounts[i][0]};
+                    hasOthers = true;
+                }
+                if (hasOthers)
+                    items["reassign"] = {name: "Reassign cells to", items: otherItems};
+                return {items: items, className: 'contextmenu-customwidth', callback: onLegendValueRightClick};
+            }
+        });
+
+        // double-click a legend label to rename a custom annotation value
+        $('.tpLegendLabel').on("dblclick", function() {
+            if (!gLegend.metaInfo || !gLegend.metaInfo.isCustom) return;
+            var intKey = parseInt($(this).data('intkey'));
+            if (intKey === 0) return;
+            renameAnnotationValue(intKey);
+        });
 
         // activate the color pickers
         for (let i = 0; i < colors.length; i++) {
@@ -9962,6 +9989,72 @@ var cellbrowser = function() {
         }
 
         buildViolinPlot();
+    }
+
+    function onLegendValueRightClick(key, options) {
+        var intKey = parseInt(options.$trigger[0].id.split("_")[1]);
+        if (key === "rename") {
+            renameAnnotationValue(intKey);
+        } else if (key === "delete") {
+            deleteAnnotationValue(intKey);
+        } else if (key.indexOf("reassign_") === 0) {
+            var toIntKey = parseInt(key.split("_")[1]);
+            reassignAnnotationValue(intKey, toIntKey);
+        }
+    }
+
+    function renameAnnotationValue(intKey) {
+        var metaInfo = gLegend.metaInfo;
+        var oldName = metaInfo.ui.shortLabels[intKey];
+        var htmls = [];
+        htmls.push('<p><b>New name:</b><br>');
+        htmls.push('<input class="tpDialogInput" id="tpRenameVal" type="text" value="'+oldName+'">');
+        htmls.push('</p>');
+        var buttons = [{text:"OK", click: function() {
+            var newName = $('#tpRenameVal').val().trim();
+            if (!newName) return;
+            metaInfo.ui.shortLabels[intKey] = newName;
+            metaInfo.valCounts[intKey][0] = newName;
+            saveCustomFieldsToStorage();
+            $(this).dialog("close");
+            colorByMetaField(metaInfo.name);
+        }}];
+        showDialogBox(htmls, 'Rename "'+oldName+'"', {showClose:true, height:200, width:400, buttons:buttons});
+        $('#tpRenameVal').focus().select();
+    }
+
+    function deleteAnnotationValue(intKey) {
+        var metaInfo = gLegend.metaInfo;
+        var arr = metaInfo.arr;
+        var deletedCount = 0;
+        for (var i = 0; i < arr.length; i++) {
+            if (arr[i] === intKey) {
+                arr[i] = 0;
+                deletedCount++;
+            }
+        }
+        metaInfo.valCounts[0][1] += deletedCount;
+        metaInfo.valCounts[intKey][1] = 0;
+        saveCustomFieldsToStorage();
+        db.metaHist[metaInfo.name] = null;
+        colorByMetaField(metaInfo.name);
+    }
+
+    function reassignAnnotationValue(fromIntKey, toIntKey) {
+        var metaInfo = gLegend.metaInfo;
+        var arr = metaInfo.arr;
+        var movedCount = 0;
+        for (var i = 0; i < arr.length; i++) {
+            if (arr[i] === fromIntKey) {
+                arr[i] = toIntKey;
+                movedCount++;
+            }
+        }
+        metaInfo.valCounts[toIntKey][1] += movedCount;
+        metaInfo.valCounts[fromIntKey][1] = 0;
+        saveCustomFieldsToStorage();
+        db.metaHist[metaInfo.name] = null;
+        colorByMetaField(metaInfo.name);
     }
 
     function onColorPickerChange(color, ev) {
