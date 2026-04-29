@@ -6399,7 +6399,8 @@ def copyMarkers(outDir):
         localSrc = join(MARKER_SOURCE_DIR, fname)
         if isfile(localSrc):
             logging.info("Copying marker database from %s" % localSrc)
-            shutil.copy(localSrc, destPath)
+            if (localSrc!=destPath):
+                shutil.copy(localSrc, destPath)
             present.append(fname)
         else:
             srcUrl = MARKER_SOURCE_URL + fname
