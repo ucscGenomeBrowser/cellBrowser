@@ -3271,6 +3271,7 @@ var cellbrowser = function() {
          htmls.push('<li><a href="#" id="tpAboutButton">About</a></li>');
          htmls.push('<li><a href="https://cellbrowser.readthedocs.io/en/master/interface.html" target=_blank id="tpQuickstartButton">How to use this website</a></li>');
          htmls.push('<li><a href="#" id="tpTutorialButton">Interactive Tutorial</a></li>');
+         htmls.push('<li><a href="#" id="tpKeyboardShortcuts" class="dropmenu-item"><span class="dropmenu-item-label">Keyboard Shortcuts</span><span class="dropmenu-item-content">?</span></a></li>');
          htmls.push('<li><a target=_blank href="https://cells-submit.gi.ucsc.edu" id="tpSubmitButton">Upload your own data</a></li>');
          htmls.push('<li><a target=_blank href="https://github.com/ucscGenomeBrowser/cellBrowser#readme" id="tpGithubButton">Setup your own cell browser</a></li>');
          htmls.push('</ul>'); // Help dropdown-menu
@@ -3302,6 +3303,7 @@ var cellbrowser = function() {
        $('#tpMarkClear').click( onMarkClearClick );
        $('#tpTutorialButton').click( function()  { showIntro(false); } );
        $('#tpAboutButton').click( onAboutClick );
+       $('#tpKeyboardShortcuts').click( onKeyboardShortcutsClick );
        $('#tpOpenDatasetLink').click( openCurrentDataset );
        $('#tpSaveImage').click( onSaveAsClick );
        $('#tpSaveImageSvg').click( onSaveAsSvgClick );
@@ -9430,6 +9432,64 @@ var cellbrowser = function() {
 
     }
 
+    function onKeyboardShortcutsClick() {
+        var sections = [
+            {title: "Navigation", shortcuts: [
+                ["space",         "Reset zoom to 100%"],
+                ["+",             "Zoom in"],
+                ["-",             "Zoom out"],
+                ["↑ ↓ ← → / i j k l", "Pan"],
+                ["z",             "Zoom mode"],
+                ["m",             "Move/pan mode"],
+            ]},
+            {title: "Selection", shortcuts: [
+                ["s",             "Select mode"],
+                ["s a",           "Select all visible"],
+                ["s n",           "Select none"],
+                ["s i",           "Invert selection"],
+                ["s s",           "Name selection (annotate)"],
+            ]},
+            {title: "View", shortcuts: [
+                ["t",             "Toggle split screen"],
+                ["h",             "Toggle heatmap"],
+                ["c l",           "Hide / show labels"],
+            ]},
+            {title: "Search & Navigate", shortcuts: [
+                ["g",             "Focus gene search"],
+                ["m",             "Open metadata field picker"],
+                ["d",             "Open dataset picker"],
+                ["o",             "Open dataset dialog"],
+                ["f c",           "Find cells..."],
+                ["f i",           "Find by ID..."],
+            ]},
+            {title: "Annotations", shortcuts: [
+                ["c a",           "Custom Annotations manager"],
+            ]},
+            {title: "Background", shortcuts: [
+                ["b s",           "Set selected as background"],
+                ["b r",           "Reset background"],
+            ]},
+        ];
+
+        var htmls = [];
+        htmls.push('<div style="display:flex;flex-wrap:wrap;gap:16px">');
+        sections.forEach(function(sec) {
+            htmls.push('<div style="min-width:220px;flex:1">');
+            htmls.push('<div style="font-weight:bold;margin-bottom:6px;border-bottom:1px solid #ddd;padding-bottom:3px">'+sec.title+'</div>');
+            htmls.push('<table style="border-collapse:collapse;width:100%">');
+            sec.shortcuts.forEach(function(pair) {
+                htmls.push('<tr>');
+                htmls.push('<td style="padding:2px 10px 2px 0;white-space:nowrap;font-family:monospace;font-size:0.9em;color:#444">'+pair[0]+'</td>');
+                htmls.push('<td style="padding:2px 0;color:#555;font-size:0.9em">'+pair[1]+'</td>');
+                htmls.push('</tr>');
+            });
+            htmls.push('</table></div>');
+        });
+        htmls.push('</div>');
+
+        showDialogBox(htmls, "Keyboard Shortcuts", {showOk: true, height: 480, width: 660});
+    }
+
     function setupKeyboard() {
     /* bind the keyboard shortcut keys */
         phoneHome();
@@ -9479,6 +9539,8 @@ var cellbrowser = function() {
         Mousetrap.bind('j', function() { renderer.movePerc(-0.1, 0); renderer.drawDots(); } );
         Mousetrap.bind('l', function() { renderer.movePerc(0.1, 0); renderer.drawDots(); } );
         Mousetrap.bind('k', function() { renderer.movePerc(0, -0.1); renderer.drawDots(); } );
+
+        Mousetrap.bind('?', onKeyboardShortcutsClick);
 
         //Mousetrap.stopCallback = function(e, element, combo) {
             //var doStop = (element.tagName == 'INPUT' || element.tagName == 'SELECT' || element.tagName == 'TEXTAREA' || (element.contentEditable && element.contentEditable == 'true'));
