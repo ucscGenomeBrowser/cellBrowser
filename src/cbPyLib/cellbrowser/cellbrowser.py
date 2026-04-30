@@ -6594,7 +6594,7 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         "ext/OverlayScrollbars.min.css", # 1.6.2, from https://cdnjs.com/libraries/overlayscrollbars
         #"ext/theme.default.css", #  tablesorter
         "ext/theme.bootstrap_3.css", #  tablesorter
-        "ext/jquery.tablesorter.pager.css", # tablesorter pager addon
+        #"ext/jquery.tablesorter.pager.css", # tablesorter pager addon
         "css/cellBrowser.css"
         ]
 
@@ -6618,9 +6618,9 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         "ext/jquery.sparkline.min.js",
         "ext/jquery.overlayScrollbars.min.js", # 1.6.2 from https://cdnjs.com/libraries/overlayscrollbars
         "ext/jquery.event.drag-2.3.0.js", # for slickgrid 2.4.5
-        "ext/jquery.tablesorter.js",
-        "ext/jquery.tablesorter.widgets.js",
-        "ext/jquery.tablesorter.pager.js",
+        #"ext/jquery.tablesorter.js",
+        #"ext/jquery.tablesorter.widgets.js",
+        #"ext/jquery.tablesorter.pager.js",
         "ext/lz-string.js",  # 1.4.4, https://raw.githubusercontent.com/pieroxy/lz-string/master/libs/lz-string.js
         "ext/slick.core.js",
         "ext/slick.cellrangedecorator.js", "ext/slick.cellrangeselector.js", "ext/slick.cellselectionmodel.js",
