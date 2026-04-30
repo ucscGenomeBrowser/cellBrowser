@@ -248,8 +248,15 @@ var cbUtil = (function () {
                 var urlPath = this._url.split("?")[0];
                 if (urlPath.endsWith(".gz")) {
                     var bytes = new Uint8Array(binData);
-                    if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b)
-                        binData = pako.ungzip(bytes).buffer;
+                    if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
+                        // pako returns a Uint8Array that may be a view into a
+                        // larger pre-allocated pool, so .buffer can be longer
+                        // than the actual data and not a multiple of 4. Slice
+                        // out exactly the decompressed bytes into a fresh
+                        // ArrayBuffer before constructing the typed array.
+                        var ungz = pako.ungzip(bytes);
+                        binData = ungz.buffer.slice(ungz.byteOffset, ungz.byteOffset + ungz.byteLength);
+                    }
                 }
                 binData = new this._arrType(binData);
             }
