@@ -238,8 +238,19 @@ var cbUtil = (function () {
                 var dec = new TextDecoder("utf-8");
                 binData = dec.decode(arr);
             }
-            else if (this._arrType!=="string")
+            else if (this._arrType!=="string") {
+                // For URLs ending in .gz (e.g. coords.bin.gz), we may receive either
+                // the raw gzip stream (typical with Apache, since .gz is not re-compressed)
+                // or auto-decompressed bytes (if the server set Content-Encoding: gzip).
+                // Detect the gzip magic header (0x1f 0x8b) to handle both cases.
+                var urlPath = this._url.split("?")[0];
+                if (urlPath.endsWith(".gz")) {
+                    var bytes = new Uint8Array(binData);
+                    if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b)
+                        binData = pako.ungzip(bytes).buffer;
+                }
                 binData = new this._arrType(binData);
+            }
         }
 
         this._onDone(binData, this._otherInfo);
@@ -544,7 +555,10 @@ function CbDbFile(url) {
             }
         }
 
-        var binUrl = cbUtil.joinPaths([self.url, "coords", coordInfo.name, "coords.bin"]);
+        // coords.bin was renamed to coords.bin.gz in cbBuild — see coordInfo.gzip in dataset.json.
+        // Old datasets without the gzip flag continue to serve the uncompressed coords.bin.
+        var binFname = coordInfo.gzip ? "coords.bin.gz" : "coords.bin";
+        var binUrl = cbUtil.joinPaths([self.url, "coords", coordInfo.name, binFname]);
         if (coordInfo.md5)
             binUrl += "?"+coordInfo.md5;
         var arrType = cbUtil.makeType(coordInfo.type || "float64");
