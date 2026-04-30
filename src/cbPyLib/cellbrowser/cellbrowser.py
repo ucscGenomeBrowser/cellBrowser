@@ -2733,9 +2733,17 @@ def writeCoords(coordName, coords, sampleNames, coordBinFname, coordInfo, textOu
         debugFh.close()
         logging.info("DEBUG: wrote %s" % debugFh.name)
     renameFile(tmpFname, coordBinFname)
-    
-    md5 = md5WithPython(coordBinFname)
+
+    # gzip coords.bin -> coords.bin.gz. Named .gz so Apache mod_deflate doesn't try to
+    # re-compress it on the wire. The JS reader (cbData.js) ungzips with pako.
+    # Compresses well on datasets with many hidden cells (long HIDDENCOORD runs).
+    coordBinGz = runGzip(coordBinFname)
+    if isfile(coordBinFname):
+        os.remove(coordBinFname)
+
+    md5 = md5WithPython(coordBinGz)
     coordInfo["md5"] = md5[:MD5LEN]
+    coordInfo["gzip"] = True
 
     coordInfo["minX"] = minX
     coordInfo["maxX"] = maxX

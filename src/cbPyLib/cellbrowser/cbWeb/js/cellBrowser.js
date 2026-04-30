@@ -3426,7 +3426,7 @@ var cellbrowser = function() {
         }
 
         var label = url;
-        if (url.endsWith("coords.bin"))
+        if (url.endsWith("coords.bin") || url.endsWith("coords.bin.gz"))
             label = "Loading Coordinates";
         else if (url.endsWith(".bin"))
             label = "Loading cell annotations";
