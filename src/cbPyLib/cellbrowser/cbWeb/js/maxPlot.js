@@ -4370,8 +4370,18 @@ function MaxPlot(div, top, left, width, height, args) {
             var x = coords[i * 2];
             var y = coords[i * 2 + 1];
 
-            if (isHidden(x, y, i))
-                continue;
+            // Skip hidden cells only. Don't use isHidden() here: in WebGL it also
+            // does a viewport-bounds check in clip space, but coords here are in
+            // data space, so that check would drop almost everything and labels
+            // would collapse to the canvas center. Labels follow the data, not
+            // the current zoom/pan.
+            if (self.usesWebGL()) {
+                if (self.coords.hidden && self.coords.hidden[i] === 1)
+                    continue;
+            } else {
+                if (x === HIDCOORD && y === HIDCOORD)
+                    continue;
+            }
 
             calc[label][0].push(x);
             calc[label][1].push(y);
