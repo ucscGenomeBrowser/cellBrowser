@@ -3247,18 +3247,19 @@ function MaxPlot(div, top, left, width, height, args) {
             var x = coords[i * 2];
             var y = coords[i * 2 + 1];
 
-            // Skip hidden cells only. Don't use isHidden() here: in WebGL it also
-            // does a viewport-bounds check in clip space, but coords here are in
-            // data space, so that check would drop almost everything and labels
-            // would collapse to the canvas center. Labels follow the data, not
-            // the current zoom/pan.
-            if (self.usesWebGL()) {
-                if (self.coords.hidden && self.coords.hidden[i] === 1)
-                    continue;
-            } else {
-                if (x === HIDCOORD && y === HIDCOORD)
-                    continue;
-            }
+            // Skip hidden cells. HIDCOORD is the sentinel cbBuild writes for
+            // cells that have no coordinate in this layout (common in spatial
+            // datasets where each layout shows one slide). Non-WebGL also uses
+            // it for user-hidden cells; WebGL tracks user-hide separately in
+            // coords.hidden[i]. We don't use isHidden() because its WebGL
+            // branch does a viewport-bounds check in clip space, but coords
+            // here are in data space — that check would drop almost everything
+            // and labels would collapse to the canvas center. Labels follow
+            // the data, not the current zoom/pan.
+            if (x === HIDCOORD && y === HIDCOORD)
+                continue;
+            if (self.usesWebGL() && self.coords.hidden && self.coords.hidden[i] === 1)
+                continue;
 
             calc[label][0].push(x);
             calc[label][1].push(y);
