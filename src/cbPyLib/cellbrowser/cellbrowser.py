@@ -3936,6 +3936,7 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
     matType = matrixToBin(outMatrixFname, geneToSym, binMat, binMatIndex, discretBinMat, \
             discretMatrixIndex, metaSampleNames, matType=matType, genesAreRanges=genesAreRanges,
             geneAnnots=geneAnnots)
+    outConf["fileVersions"]["exprMatrix"] = getFileVersion(binMatIndex)
 
     # these are the Javascript type names, not the python ones (they are also better to read than the Python ones)
     if matType=="int" or matType=="forceInt":

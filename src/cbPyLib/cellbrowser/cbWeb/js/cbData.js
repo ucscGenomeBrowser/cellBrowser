@@ -462,6 +462,7 @@ function CbDbFile(url) {
         if (self.name!='') {
             // start loading gene offsets in the background now, because this takes a while
             var osUrl = cbUtil.joinPaths([this.url, "exprMatrix.json"]);
+            if (md5) osUrl += "?" + md5;
             cbUtil.loadJson(osUrl, gotMatrix, true);
         } else {
             gotOneFile();
@@ -570,6 +571,7 @@ function CbDbFile(url) {
             onTracesDone(self.traces);
         }
         var fileUrl = cbUtil.joinPaths([self.url, "traces.json"]);
+        if (self.conf.md5) fileUrl += "?" + self.conf.md5;
         cbUtil.loadJson(fileUrl, onFileDone, true);
     };
 
