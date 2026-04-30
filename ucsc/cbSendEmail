@@ -16,11 +16,16 @@ import os
 import re
 import subprocess
 import time
+import json
+import argparse
 import xml.etree.ElementTree as ET
+from datetime import date
 import requests
 from urllib.parse import quote
 
 import anthropic
+import gspread
+from google.oauth2.service_account import Credentials
 
 # Retry settings for rate limits
 MAX_RETRIES = 3
@@ -64,7 +69,383 @@ UCSC Cell Browser Team
 
 BIO_RXIV_API = "https://api.biorxiv.org/details/biorxiv"
 MEDRXIV_API = "https://api.biorxiv.org/details/medrxiv"
+NCBI_ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 NCBI_EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+
+# Keywords that strongly suggest single-cell genomic data
+SC_KEYWORDS = [
+    "single cell", "single-cell", "scrna", "scatac", "snrna", "snatac",
+    "spatial transcriptom", "spatial genom", "multiome", "10x genomics",
+    "10x chromium", "visium", "merfish", "seqfish", "slide-seq", "drop-seq",
+    "smart-seq", "cel-seq", "sci-rna", "sci-atac", "cellranger",
+    "single nucleus", "single-nucleus", "starmap", "osmfish",
+    "stereo-seq", "stereoseq", "dbit-seq", "hdst",
+    "cite-seq", "citeseq", "reap-seq", "asap-seq",
+    "scrna-seq", "scatac-seq", "snrna-seq", "snatac-seq",
+]
+
+
+EMAILED_TSV = "/hive/data/inside/cells/emailed.tsv"
+
+
+def load_emailed_emails(path=EMAILED_TSV):
+    """Load the set of email addresses that have already been contacted."""
+    emails = set()
+    if not os.path.exists(path):
+        return emails
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("name\t"):
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                emails.add(parts[1].lower())
+    return emails
+
+
+def record_emailed(name, email, path=EMAILED_TSV):
+    """Append a name/email/date row to the emailed tracking file."""
+    today_str = date.today().strftime("%Y-%m-%d")
+    write_header = not os.path.exists(path)
+    with open(path, "a") as f:
+        if write_header:
+            f.write("name\temail\tdate\n")
+        f.write(f"{name}\t{email}\t{today_str}\n")
+
+
+GSHEET_KEY = "11rVa6gNb1SI1meThqWyRMJDncyeR_lLFDFzzZrPsWjE"
+GSHEET_CREDS = "/hive/data/inside/cells/gsheet-credentials.json"
+GSHEET_GID = 1584536607  # "2026" sheet
+
+
+def append_to_gsheet(paper_link, email_addr, title_summary):
+    """
+    Append a row to the Google Sheets tracking spreadsheet.
+    Columns: Release Month, Directory, Version, Status, Priority, Wrangler, Contributor Email, Notes
+    """
+    try:
+        scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+        creds = Credentials.from_service_account_file(GSHEET_CREDS, scopes=scopes)
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(GSHEET_KEY)
+        ws = sh.get_worksheet_by_id(GSHEET_GID)
+
+        today_str = date.today().strftime("%B %Y")  # e.g. "April 2026"
+        notes = f"{title_summary}; {paper_link}"
+        row = [today_str, "", "", "emailed", "", "Max", email_addr, notes]
+
+        ws.append_row(row, value_input_option="RAW")
+        print(f"  Appended row to Google Sheet '{ws.title}'")
+    except Exception as e:
+        print(f"Warning: Could not append to Google Sheet: {e}", file=sys.stderr)
+
+
+def fetch_biorxiv_papers(start_date=None, end_date=None, server="biorxiv"):
+    """
+    Fetch all papers posted in a date range from the bioRxiv or medRxiv API.
+    If only start_date is given, fetches that single day.
+    If neither is given, fetches today.
+    Paginates through results (100 per page).
+    Returns a list of paper record dicts.
+    """
+    if start_date is None:
+        start_date = date.today().strftime("%Y-%m-%d")
+    if end_date is None:
+        end_date = start_date
+
+    api_base = BIO_RXIV_API if server == "biorxiv" else MEDRXIV_API
+    all_papers = []
+    cursor = 0
+
+    while True:
+        url = f"{api_base}/{start_date}/{end_date}/{cursor}/json"
+        for attempt in range(3):
+            try:
+                resp = requests.get(url, timeout=120)
+                break
+            except requests.exceptions.Timeout:
+                if attempt < 2:
+                    print(f"  Timeout fetching {server} (attempt {attempt+1}/3), retrying...",
+                          file=sys.stderr)
+                    time.sleep(5)
+                else:
+                    print(f"Warning: {server} API timed out after 3 attempts", file=sys.stderr)
+                    return all_papers
+
+        if resp.status_code != 200:
+            print(f"Warning: {server} API returned status {resp.status_code}", file=sys.stderr)
+            break
+
+        data = resp.json()
+        collection = data.get("collection", [])
+        if not collection:
+            break
+
+        all_papers.extend(collection)
+        total = data.get("messages", [{}])[0].get("total", 0)
+        cursor += len(collection)
+
+        if cursor >= int(total):
+            break
+
+        time.sleep(1)  # be polite to the API
+
+    return all_papers
+
+
+def fetch_pubmed_papers(start_date=None, end_date=None, query="single cell"):
+    """
+    Search PubMed for papers matching a query in a date range.
+    Uses esearch to find PMIDs, then efetch to get metadata.
+    Returns a list of paper dicts with keys: doi, title, abstract, authors, pmid.
+    """
+    if start_date is None:
+        start_date = date.today().strftime("%Y/%m/%d")
+    else:
+        start_date = start_date.replace("-", "/")
+    if end_date is None:
+        end_date = start_date
+    else:
+        end_date = end_date.replace("-", "/")
+
+    # Step 1: esearch — find PMIDs for preprints matching query
+    search_term = query
+    all_pmids = []
+    retstart = 0
+    retmax = 500
+
+    while True:
+        params = {
+            "db": "pubmed",
+            "term": search_term,
+            "mindate": start_date,
+            "maxdate": end_date,
+            "datetype": "PDAT",
+            "retmax": retmax,
+            "retstart": retstart,
+            "retmode": "json",
+        }
+        for attempt in range(3):
+            try:
+                resp = requests.get(NCBI_ESEARCH_URL, params=params, timeout=120)
+                break
+            except requests.exceptions.Timeout:
+                if attempt < 2:
+                    print(f"  Timeout on esearch (attempt {attempt+1}/3), retrying...",
+                          file=sys.stderr)
+                    time.sleep(5)
+                else:
+                    print("Warning: PubMed esearch timed out after 3 attempts", file=sys.stderr)
+                    return []
+
+        if resp.status_code != 200:
+            print(f"Warning: PubMed esearch returned status {resp.status_code}", file=sys.stderr)
+            break
+
+        data = resp.json()
+        result = data.get("esearchresult", {})
+        id_list = result.get("idlist", [])
+        total = int(result.get("count", 0))
+
+        all_pmids.extend(id_list)
+        retstart += len(id_list)
+
+        if retstart >= total or not id_list:
+            break
+        time.sleep(0.4)  # NCBI asks for max 3 requests/second
+
+    if not all_pmids:
+        return []
+
+    print(f"  Found {len(all_pmids)} PMIDs, fetching metadata...")
+
+    # Step 2: efetch in batches of 200
+    all_papers = []
+    for i in range(0, len(all_pmids), 200):
+        batch_ids = all_pmids[i:i+200]
+        params = {
+            "db": "pubmed",
+            "id": ",".join(batch_ids),
+            "retmode": "xml",
+        }
+        for attempt in range(3):
+            try:
+                resp = requests.get(NCBI_EFETCH_URL, params=params, timeout=120)
+                break
+            except requests.exceptions.Timeout:
+                if attempt < 2:
+                    print(f"  Timeout on efetch (attempt {attempt+1}/3), retrying...",
+                          file=sys.stderr)
+                    time.sleep(5)
+                else:
+                    print("Warning: PubMed efetch timed out after 3 attempts", file=sys.stderr)
+                    return all_papers
+
+        if resp.status_code != 200:
+            print(f"Warning: PubMed efetch returned status {resp.status_code}", file=sys.stderr)
+            continue
+
+        root = ET.fromstring(resp.text)
+
+        for article in root.findall(".//PubmedArticle"):
+            # Title
+            title_elem = article.find(".//ArticleTitle")
+            title = title_elem.text if title_elem is not None and title_elem.text else ""
+
+            # Abstract — may have multiple AbstractText elements
+            abstract_parts = []
+            for at in article.findall(".//AbstractText"):
+                if at.text:
+                    abstract_parts.append(at.text)
+            abstract = " ".join(abstract_parts)
+
+            # DOI
+            doi = ""
+            for aid in article.findall(".//ArticleId"):
+                if aid.get("IdType") == "doi" and aid.text:
+                    doi = aid.text
+                    break
+            if not doi:
+                for eloc in article.findall(".//ELocationID"):
+                    if eloc.get("EIdType") == "doi" and eloc.text:
+                        doi = eloc.text
+                        break
+
+            # PMID
+            pmid_elem = article.find(".//PMID")
+            pmid = pmid_elem.text if pmid_elem is not None else ""
+
+            # Authors
+            author_names = []
+            for author in article.findall(".//Author"):
+                ln = author.find("LastName")
+                fn = author.find("ForeName")
+                if ln is not None and ln.text:
+                    if fn is not None and fn.text:
+                        author_names.append(f"{fn.text} {ln.text}")
+                    else:
+                        author_names.append(ln.text)
+            authors_str = "; ".join(author_names)
+
+            all_papers.append({
+                "doi": doi,
+                "title": title,
+                "abstract": abstract,
+                "authors": authors_str,
+                "pmid": pmid,
+            })
+
+        if i + 200 < len(all_pmids):
+            time.sleep(0.4)
+
+    return all_papers
+
+
+def prefilter_papers(papers, query="single cell"):
+    """
+    Pre-filter papers by checking if title or abstract contains any
+    single-cell related keywords. Returns papers that match.
+    """
+    # Combine user query with built-in keywords
+    keywords = list(SC_KEYWORDS)
+    if query.lower() not in [k.lower() for k in keywords]:
+        keywords.append(query.lower())
+
+    matched = []
+    for paper in papers:
+        text = (paper.get("title", "") + " " + paper.get("abstract", "")).lower()
+        for kw in keywords:
+            if kw in text:
+                matched.append(paper)
+                break
+    return matched
+
+
+def classify_papers_with_claude(papers, batch_size=20):
+    """
+    Send papers to Claude in batches to classify which ones contain
+    single-cell genomic data and what type.
+    Returns a list of dicts: {doi, title, authors, data_types, has_new_data, summary}
+    """
+    client = anthropic.Anthropic()
+    results = []
+
+    for i in range(0, len(papers), batch_size):
+        batch = papers[i:i + batch_size]
+        papers_text = ""
+        for idx, p in enumerate(batch):
+            papers_text += f"\n--- PAPER {idx + 1} ---\n"
+            papers_text += f"DOI: {p.get('doi', 'N/A')}\n"
+            papers_text += f"Title: {p.get('title', 'N/A')}\n"
+            papers_text += f"Authors: {p.get('authors', 'N/A')}\n"
+            papers_text += f"Abstract: {p.get('abstract', 'N/A')}\n"
+
+        prompt = f"""You are classifying bioRxiv preprints to find papers that generated new single-cell genomic datasets.
+
+For each paper below, determine:
+1. Does it contain NEW single-cell or single-nucleus genomic data (not re-analysis of public data)?
+2. What type(s) of data: scRNA-seq, snRNA-seq, scATAC-seq, snATAC-seq, spatial (Visium/MERFISH/etc), multiome, CITE-seq, or other_sc
+3. A one-line summary of what the dataset is
+
+Papers that are purely computational methods, reviews, re-analyses of existing public data, or not about single-cell genomics should be marked not_relevant.
+
+{papers_text}
+
+Respond ONLY with a JSON array. Each element must have these fields:
+- "doi": the paper DOI
+- "data_types": array of strings from [scRNA-seq, snRNA-seq, scATAC-seq, snATAC-seq, spatial, multiome, CITE-seq, other_sc, not_relevant]
+- "has_new_data": true if the paper generated new data, false if re-analysis or methods-only
+- "summary": one-line description of the dataset/paper
+
+Example:
+[
+  {{"doi": "10.1101/2026.01.01.000001", "data_types": ["scRNA-seq", "spatial"], "has_new_data": true, "summary": "Mouse brain cortex atlas with Visium and scRNA-seq"}},
+  {{"doi": "10.1101/2026.01.01.000002", "data_types": ["not_relevant"], "has_new_data": false, "summary": "Benchmarking of clustering algorithms on public data"}}
+]
+
+Return ONLY the JSON array, no other text."""
+
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=4096,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                break
+            except anthropic.RateLimitError:
+                if attempt < MAX_RETRIES - 1:
+                    print(f"Rate limited, waiting {RETRY_DELAY}s before retry {attempt + 2}/{MAX_RETRIES}...")
+                    time.sleep(RETRY_DELAY)
+                else:
+                    raise
+
+        # Parse response
+        for block in response.content:
+            if block.type == "text":
+                text = block.text.strip()
+                # Strip markdown code fences if present
+                if text.startswith("```"):
+                    text = re.sub(r'^```(?:json)?\s*\n?', '', text)
+                    text = re.sub(r'\n?```\s*$', '', text)
+                try:
+                    parsed = json.loads(text)
+                    # Attach original paper metadata
+                    doi_to_paper = {p["doi"]: p for p in batch}
+                    for item in parsed:
+                        paper = doi_to_paper.get(item["doi"], {})
+                        item["title"] = paper.get("title", "")
+                        item["authors"] = paper.get("authors", "")
+                        results.append(item)
+                except json.JSONDecodeError as e:
+                    print(f"Warning: Could not parse Claude response: {e}", file=sys.stderr)
+                    print(f"Response was: {text[:200]}...", file=sys.stderr)
+
+        if i + batch_size < len(papers):
+            time.sleep(1)
+
+    return results
 
 
 def is_pmid(identifier: str) -> bool:
@@ -297,7 +678,7 @@ Do not include any other text besides lines in the above format.
     return results
 
 
-def personalize_email_with_claude(template: str, record: dict, recipient_name: str) -> dict:
+def personalize_email_with_claude(template: str, record: dict, recipient_name: str, dataset_name: str = None) -> dict:
     """
     Use Claude to personalize the email template based on paper metadata.
     Returns dict with 'subject' and 'body' keys.
@@ -314,11 +695,28 @@ def personalize_email_with_claude(template: str, record: dict, recipient_name: s
     category = record.get("category", "")
     date = record.get("date", "")
 
-    path = "/hive/data/inside/cells/datasets"
-    dsNames = [name for name in os.listdir(path) if os.path.isdir(os.path.join(path, name))]
-    dsNameString = ",".join(dsNames)
+    if not dataset_name:
+        path = "/hive/data/inside/cells/datasets"
+        dsNames = [name for name in os.listdir(path) if os.path.isdir(os.path.join(path, name))]
+        dsNameString = ",".join(dsNames)
+    else:
+        dsNameString = ""
 
     paper_url = f"https://doi.org/{doi}" if doi else ""
+
+    if dataset_name:
+        ds_instructions = f'Replace $DATASET_NAME with "{dataset_name}" exactly as given.'
+    else:
+        ds_instructions = f"""Replace $DATASET_NAME with a suggested shortname of the dataset. A good dataset shortname is shorter than 20 characters, ideally shorter, but can be a little longer if needed, e.g. < 25 letters. Never include the word "human", as most datasets are human. Never include "singlecell" or "sc" into the name, as all datasets are from single cells. The name usually includes the organ and the disease, the most important one of the paper,
+or the cell line or condition that the paper focusses on. If the paper has mostly ATAC or spatial data, add -atac or -spatial to the dataset name. You can add the celltype if the paper focuses on a celltype. Abbreviate parts of the name to shorten the name if necessary. Only dashes are allowed in the name and lowercase characters. Example dataset names are: cortex-dev for a paper about the developing cortex, cortex-atac, for ATAC-seq on the cortex. Other examples: mouse-liver-scaring, ciona-regeneration, zebrafish-dev, hindbrain-dev, mouse-olig-dev. ms is usually multiple sclerosis, common acronyms for diseases are fine to use as acronyms. We do not usually abbreviate "organoid", so leave that as a word. Use an acronym if possible from the abstract, e.g. if the abstract mentions "HSC" as hematopoietic stem cells, then create a dataset with that acronym it, e.g. hsc-reprogram.
+Try to use one or two parts separated by dashes, and not to use more than three parts separated by dashes. If the dataset is from mouse or another non-human species, prefix the dataset with the name of the species.
+
+Here are example dataset names, as examples, do not use any of these literally, to avoid conflicts, but use them as inspiration: {dsNameString}
+
+Do not use these words in dataset names:
+    - homo
+    - hetero
+    - cells"""
 
     prompt = f"""You are helping to personalize an outreach email to a researcher about their preprint.
 
@@ -342,15 +740,7 @@ Here is the email template to personalize:
 
 Please rewrite this email to make it specific to this paper. Reference specific aspects of their research (from the title/abstract) without praising the work, no sycophancy please. Keep the same overall structure and style of the template.
 
-Replace $DATASET_NAME with a suggested shortname of the dataset. A good dataset shortname is shorter than 25 characters. Never include the word "human", as most datasets are human. Never include "singlecell" or "sc" into the name, as all datasets are from single cells. The name usually includes the organ and the disease, the most important one of the paper,
-or the cell line or condition that the paper focusses on. If the paper has mostly ATAC or spatial data, add -atac or -spatial to the dataset name. You can add the celltype if the paper focuses on a celltype. Abbreviate parts of the name to shorten the name if necessary. Only dashes are allowed in the name and lowercase characters. Example dataset names are: cortex-dev for a paper about the developing cortex, cortex-atac, for ATAC-seq on the cortex. Other examples: mouse-liver-scaring, ciona-regeneration, zebrafish-dev, hindbrain-dev, mouse-olig-dev. ms is usually multiple sclerosis, common acronyms for diseases are fine to use as acronyms. We do not usually abbreviate "organoid", so leave that as a word. Use an acronym if possible from the abstract, e.g. if the abstract mentions "HSC" as hematopoietic stem cells, then create a dataset with that acronym it, e.g. hsc-reprogram.
-Try to use one or two parts separated by dashes, and not to use more than three parts separated by dashes. If the dataset is from mouse or another non-human species, prefix the dataset with the name of the species.
-
-Here are example dataset names, as examples, do not use any of these literally, to avoid conflicts, but use them as inspiration: {dsNameString}
-
-Do not use these words in dataset names:
-    - homo
-    - hetero
+{ds_instructions}
 
 If the abstract suggests that the paper contains ATAC-seq or Chip-Seq or "chromatin accessibility" data or other cis-regulatory data, replace the placeholder "UCSC Genome Browser tracks note for ATAC-seq datasets" with a text like the following: "Since your paper seems to include Chip-Seq or ATAC-seq data, note that we have support for this assay: You can send us your bigWig files and we convert them to UCSC Genome Browser Tracks, that can be loaded from the single cell browser or can be loaded via the UCSC Genome Browser public hubs page."
 
@@ -364,7 +754,7 @@ BODY:
     for attempt in range(MAX_RETRIES):
         try:
             response = client.messages.create(
-                model="claude-3-5-haiku-latest",
+                model="claude-haiku-4-5-20251001",
                 max_tokens=2048,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -423,20 +813,190 @@ Subject: {subject}
         return False
 
 
-def main():
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <DOI_or_PMID> [email1] [email2] ...", file=sys.stderr)
-        print(f"  Accepts either a bioRxiv/medRxiv DOI or a PubMed ID (PMID).", file=sys.stderr)
-        print(f"  If email addresses are provided, skips the email search step.", file=sys.stderr)
-        sys.exit(1)
+def print_scan_results(classified):
+    """Print classified scan results grouped by data type with copy-paste commands."""
+    relevant = [p for p in classified if "not_relevant" not in p.get("data_types", [])]
+    not_relevant = [p for p in classified if "not_relevant" in p.get("data_types", [])]
 
-    identifier = sys.argv[1].strip()
-    provided_emails = [e.strip() for e in sys.argv[2:] if e.strip()]
+    # Collect all data types for grouping
+    type_groups = {}
+    for p in relevant:
+        for dt in p.get("data_types", []):
+            type_groups.setdefault(dt, []).append(p)
+
+    # Print results
+    print("\n" + "=" * 80)
+    print(f"Results: {len(relevant)} relevant papers, {len(not_relevant)} not relevant")
+    print("=" * 80)
+
+    for dtype, papers in sorted(type_groups.items()):
+        print(f"\n{dtype} ({len(papers)}):")
+        for p in papers:
+            new_tag = "[NEW DATA]" if p.get("has_new_data") else "[no new data]"
+            doi = p.get("doi", "N/A")
+            title = p.get("title", "N/A")
+            if len(title) > 70:
+                title = title[:67] + "..."
+            print(f"  {doi}  {title}  {new_tag}")
+            if p.get("summary"):
+                print(f"    -> {p['summary']}")
+
+    if not_relevant:
+        print(f"\nnot_relevant ({len(not_relevant)}):")
+        for p in not_relevant:
+            doi = p.get("doi", "N/A")
+            title = p.get("title", "N/A")
+            if len(title) > 70:
+                title = title[:67] + "..."
+            print(f"  {doi}  {title}")
+
+    # Print DOIs/PMIDs for easy copy-paste
+    new_data_papers = [p for p in relevant if p.get("has_new_data")]
+    if new_data_papers:
+        print("\n" + "-" * 80)
+        print("Papers with new data (copy-paste to send emails):")
+        for p in new_data_papers:
+            identifier = p.get("doi") or p.get("pmid", "")
+            print(f"  cbSendEmail {identifier}")
+
+
+def deduplicate_papers(papers):
+    """Remove duplicate papers by DOI."""
+    seen_dois = set()
+    unique = []
+    for p in papers:
+        doi = p.get("doi", "")
+        if doi and doi not in seen_dois:
+            seen_dois.add(doi)
+            unique.append(p)
+        elif not doi:
+            unique.append(p)
+    if len(unique) < len(papers):
+        print(f"  ({len(papers) - len(unique)} duplicates removed)")
+    return unique
+
+
+def classify_and_print(papers, query):
+    """Pre-filter, classify with Claude, and print results. Shared by both scan modes."""
+    filtered = prefilter_papers(papers, query)
+    print(f"\n{len(filtered)} papers match single-cell keywords (from {len(papers)} total)")
+
+    if not filtered:
+        print("No papers matched the keyword filter.")
+        return
+
+    print(f"\nClassifying {len(filtered)} papers with Claude...")
+    classified = classify_papers_with_claude(filtered)
+    print_scan_results(classified)
+
+
+def scan_biorxiv(start_date=None, end_date=None, query="single cell"):
+    """
+    Scan bioRxiv and medRxiv for single-cell genomic papers in a date range.
+    """
+    if start_date is None:
+        start_date = date.today().strftime("%Y-%m-%d")
+    if end_date is None:
+        end_date = start_date
+
+    if start_date == end_date:
+        print(f"Scanning bioRxiv and medRxiv for {start_date}...")
+    else:
+        print(f"Scanning bioRxiv and medRxiv from {start_date} to {end_date}...")
+    print(f"Pre-filter query: \"{query}\"")
+    print()
+
+    biorxiv_papers = fetch_biorxiv_papers(start_date, end_date, server="biorxiv")
+    print(f"  bioRxiv: {len(biorxiv_papers)} papers")
+
+    medrxiv_papers = fetch_biorxiv_papers(start_date, end_date, server="medrxiv")
+    print(f"  medRxiv: {len(medrxiv_papers)} papers")
+
+    all_papers = biorxiv_papers + medrxiv_papers
+    if not all_papers:
+        print("\nNo papers found for this date. Try a different date (bioRxiv may not have posted yet today).")
+        return
+
+    all_papers = deduplicate_papers(all_papers)
+    classify_and_print(all_papers, query)
+
+
+def scan_pubmed(start_date=None, end_date=None, query="single cell"):
+    """
+    Scan PubMed for papers with single-cell genomic data in a date range.
+    """
+    if start_date is None:
+        start_date = date.today().strftime("%Y-%m-%d")
+    if end_date is None:
+        end_date = start_date
+
+    if start_date == end_date:
+        print(f"Scanning PubMed for {start_date}...")
+    else:
+        print(f"Scanning PubMed from {start_date} to {end_date}...")
+    print(f"Search query: \"{query}\"")
+    print()
+
+    all_papers = fetch_pubmed_papers(start_date, end_date, query)
+    print(f"  PubMed: {len(all_papers)} papers")
+
+    if not all_papers:
+        print("\nNo papers found for this date range.")
+        return
+
+    all_papers = deduplicate_papers(all_papers)
+    classify_and_print(all_papers, query)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Extract author emails from bioRxiv/medRxiv preprints or PubMed articles "
+                    "and send outreach emails about the UCSC Cell Browser.")
+    parser.add_argument("identifier", nargs="?",
+                        help="A bioRxiv/medRxiv DOI or a PubMed ID (PMID)")
+    parser.add_argument("emails", nargs="*", help="Email addresses (skips the email search step)")
+    parser.add_argument("--name", dest="dataset_name",
+                        help="Dataset name to use. Skips Claude-based name generation.")
+    parser.add_argument("--scanPre", nargs="?", const="today", metavar="DATE",
+                        help="Scan bioRxiv/medRxiv for single-cell papers. "
+                             "No date=today, one date=that day, or START/END for a range "
+                             "(e.g. 2026-04-01/2026-04-09).")
+    parser.add_argument("--scanPm", nargs="?", const="today", metavar="DATE",
+                        help="Scan PubMed for single-cell papers. "
+                             "Same date syntax as --scanPre.")
+    parser.add_argument("--query", default="single cell",
+                        help="Pre-filter keyword for --scanPre/--scanPm (default: 'single cell')")
+    args = parser.parse_args()
 
     # Check for API key
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("Error: ANTHROPIC_API_KEY environment variable not set", file=sys.stderr)
         sys.exit(1)
+
+    # Scan modes
+    for scan_arg, scan_fn in [(args.scanPre, scan_biorxiv), (args.scanPm, scan_pubmed)]:
+        if scan_arg is not None:
+            if scan_arg == "today":
+                scan_fn(query=args.query)
+            elif "/" in scan_arg:
+                parts = scan_arg.split("/")
+                if len(parts) != 2:
+                    parser.error("Date range must be START/END, e.g. 2026-04-01/2026-04-09")
+                scan_fn(start_date=parts[0], end_date=parts[1], query=args.query)
+            else:
+                scan_fn(start_date=scan_arg, query=args.query)
+            return
+
+    if not args.identifier:
+        parser.error("identifier is required (unless using --scanPre or --scanPm)")
+
+    identifier = args.identifier.strip()
+    provided_emails = [e.strip() for e in args.emails if e.strip()]
+    dataset_name = args.dataset_name
+
+    if "doi.org" in identifier:
+        # https://doi.org/10.64898/2026.03.09.710568
+        identifier = identifier.replace("https://doi.org/", "")
 
     # Step 1: Get metadata (from PubMed for PMID, from bioRxiv for DOI)
     is_pmid_input = is_pmid(identifier)
@@ -517,6 +1077,15 @@ def main():
             print(f"Error calling Claude API: {e}", file=sys.stderr)
             sys.exit(1)
 
+    # Check if any recipient was already emailed
+    already_emailed = load_emailed_emails()
+    previously_contacted = [e for e in email_list if e.lower() in already_emailed]
+    if previously_contacted:
+        print(f"\nWARNING: Already emailed before: {', '.join(previously_contacted)}")
+        print(f"  (see {EMAILED_TSV})")
+        print("Aborting to avoid sending duplicate emails. Remove the entry from the file to override.")
+        sys.exit(3)
+
     # Step 3: Personalize email and send to all recipients
     if FROM_EMAIL == "your-email@example.com":
         print("\nError: Please edit FROM_EMAIL in the script before sending emails.", file=sys.stderr)
@@ -530,7 +1099,7 @@ def main():
     last_author_name = authors[-1] if authors else "Researcher"
 
     try:
-        personalized = personalize_email_with_claude(EMAIL_TEMPLATE, record, last_author_name)
+        personalized = personalize_email_with_claude(EMAIL_TEMPLATE, record, last_author_name, dataset_name)
 
         if not personalized["subject"] or not personalized["body"]:
             print("\nError: Could not personalize email", file=sys.stderr)
@@ -540,6 +1109,7 @@ def main():
         print(f"Error personalizing email: {e}", file=sys.stderr)
         sys.exit(1)
 
+    personalized["body"] = personalized["body"]+"\n\n\n"+identifier
     # Collect all email addresses
     all_recipients = email_list.copy()
     all_recipients.append(FROM_EMAIL)
@@ -568,6 +1138,13 @@ def main():
     if send_email_via_sendmail(to_line, FROM_EMAIL,
                               personalized['subject'], personalized['body']):
         print(f"Sent to {to_line}")
+        # Record all external recipients (not FROM_EMAIL or cells@ucsc.edu)
+        for email_addr in email_list:
+            record_emailed(last_author_name, email_addr)
+            print(f"  Recorded {email_addr} in {EMAILED_TSV}")
+        # Append to Google Sheet
+        paper_link = f"https://doi.org/{record.get('doi', identifier)}" if record.get('doi') else identifier
+        append_to_gsheet(paper_link, ", ".join(email_list), paper_title)
     else:
         print(f"Failed to send email", file=sys.stderr)
         sys.exit(1)
