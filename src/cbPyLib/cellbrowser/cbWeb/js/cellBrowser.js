@@ -8674,6 +8674,19 @@ var cellbrowser = function() {
         //if (!db.conf.atacSearch)
         htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Violin Plot Viewer" data-placement="bottom">Gene Expression Plots</button>');
 
+        if (db.conf.markers && db.conf.markers.length > 0) {
+            var labelMetaInfo = db.findMetaInfo(db.conf.labelField);
+            var clusterLabels = (labelMetaInfo && labelMetaInfo.ui && labelMetaInfo.ui.shortLabels) ? labelMetaInfo.ui.shortLabels : [];
+            htmls.push('<button id="tpClusterMarkersBtn" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding:0 8px" title="Open Cluster Markers for a cell type">Cluster Markers &#9662;</button>');
+            // dropdown list is appended to body and positioned via JS to avoid wrapper div affecting button alignment
+            var listHtmls = ['<div id="tpClusterMarkersList" style="display:none;position:fixed;z-index:9999;background:white;border:1px solid #ccc;border-radius:3px;max-height:300px;overflow-y:auto;min-width:150px;box-shadow:2px 2px 5px rgba(0,0,0,0.2)">'];
+            for (var i = 0; i < clusterLabels.length; i++) {
+                listHtmls.push('<div class="tpClusterMarkersItem" data-cluster="' + clusterLabels[i].replace(/"/g, '&quot;') + '" style="padding:4px 8px;cursor:pointer;font-size:12px;white-space:nowrap">' + clusterLabels[i] + '</div>');
+            }
+            listHtmls.push('</div>');
+            $('body').append(listHtmls.join(''));
+        }
+
         if (db.conf.showHeatmap)
             htmls.push('<button id="tpHeatButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Show Heatmap" data-placement="bottom">Heatmap</button>');
 
@@ -8766,6 +8779,24 @@ var cellbrowser = function() {
         $('#tpOpenDatasetButton').click(openCurrentDataset);
         $('#tpOpenExprButton').click(buildExprViewWindow);
         if (db.conf.showHeatmap) $('#tpHeatButton').click(switchToHeat);
+
+        if (db.conf.markers && db.conf.markers.length > 0) {
+            $('#tpClusterMarkersBtn').click(function(e) {
+                e.stopPropagation();
+                var list = $('#tpClusterMarkersList');
+                var rect = this.getBoundingClientRect();
+                list.css({top: rect.bottom + 'px', left: rect.left + 'px'});
+                list.toggle();
+            });
+            $(document).on('click', '.tpClusterMarkersItem', function() {
+                var clusterName = $(this).data('cluster');
+                $('#tpClusterMarkersList').hide();
+                onClusterNameClick(clusterName, clusterName, {});
+            });
+            $(document).click(function() {
+                $('#tpClusterMarkersList').hide();
+            });
+        }
     }
 
     function metaFieldToLabel(fieldName) {
@@ -10116,10 +10147,9 @@ var cellbrowser = function() {
         if (gLegend.type === "meta" && gLegend.metaInfo && gLegend.metaInfo.type === "enum") {
             htmls.push('<div id="tpValueFilter" style="margin-top:6px;margin-bottom:3px">');
             htmls.push('<div style="font-size:11px;font-weight:bold;color:#555;margin-bottom:3px">Filter by value:</div>');
-            htmls.push('<input type="text" id="tpValueSearch" list="tpValueList" autocomplete="off" '+
+            htmls.push('<input type="text" id="tpValueSearch" autocomplete="off" '+
                        'placeholder="Search..." '+
                        'style="width:100%;box-sizing:border-box;font-size:12px;padding:2px 4px"/>');
-            htmls.push('<datalist id="tpValueList"></datalist>');
             htmls.push('</div>');
         }
 
@@ -11357,77 +11387,74 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var hubUrl = makeHubUrl();
 
         var MAX_UNFILTERED_ROWS = 200;
-        var renderedRows = 0;
-        var totalRows = 0; // count non-empty rows for "showing N of M" note
         var enrichedCount = 0;
         var depletedCount = 0;
 
-        htmls.push("<tbody>");
+        // collect all non-empty data rows for full-dataset filtering
+        var allDataRows = [];
         for (let i = 1; i < rows.length; i++) {
             var row = rows[i];
-            if ((row.length===1) && row[0]==="") // papaparse sometimes adds empty lines to files
-                continue;
-
-            totalRows++;
-
-            // cap unfiltered view to avoid slow DOM rendering
-            if (renderedRows >= MAX_UNFILTERED_ROWS)
-                continue;
-
-            renderedRows++;
-
-            var enrichAttr = "";
+            if ((row.length===1) && row[0]==="") continue;
+            allDataRows.push(row);
             if (logFcCol !== null && logFcCol < row.length) {
                 var logFcVal = parseFloat(row[logFcCol]);
                 if (!isNaN(logFcVal)) {
-                    var enrichLabel = logFcVal > 0 ? "enriched" : "depleted";
-                    enrichAttr = " data-enrich='" + enrichLabel + "'";
-                    if (enrichLabel === "enriched") enrichedCount++;
+                    if (logFcVal > 0) enrichedCount++;
                     else depletedCount++;
                 }
             }
-            htmls.push("<tr" + enrichAttr + ">");
-            var geneId = row[0];
-
-            // old marker files still have the format geneId|sym, so tolerate this here
-            if (geneId.indexOf("|") > -1)
-                geneId = geneId.split("|")[0];
-
-            var geneSym = row[1];
-            htmls.push("<td><a data-gene='"+geneId+"' class='link tpLoadGeneLink'>"+geneSym+"</a>");
-            if (hubUrl!==null) {
-                var fullHubUrl = hubUrl+"&position="+geneSym+"&singleSearch=knownCanonical";
-                htmls.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to UCSC Genome Browser' href='"+fullHubUrl+"'>Genome</a>");
-            }
-            htmls.push("</td>");
-
-            for (var j = 2; j < row.length; j++) {
-                var val = row[j];
-                htmls.push("<td>");
-                // added for the autism dataset, allows to add mouse overs with images
-                // field has to start with ./
-                if (val.startsWith("./")) {
-                    var imgUrl = val.replace("./", db.url+"/");
-                    var imgHtml = '<img width="100px" src="'+imgUrl+'">';
-                    val = "<a data-toggle='tooltip' data-placement='auto' class='tpPlots link' target=_blank title='"+imgHtml+"' href='"+ imgUrl + "'>plot</a>";
-                }
-                if (j===geneListCol || j===exprCol)
-                    geneListFormat(htmls, val, geneSym);
-                else if (j===pValCol)
-                    htmls.push(parseFloat(val).toPrecision(5)); // five digits ought to be enough for everyone
-                else
-                    //htmls.push(val);
-                    geneListFormat(htmls, val, geneSym);
-                htmls.push("</td>");
-            }
-            htmls.push("</tr>");
         }
 
+        function buildRowsHtml(subset) {
+            var h = [];
+            for (var i = 0; i < subset.length; i++) {
+                var row = subset[i];
+                var enrichAttr = "";
+                if (logFcCol !== null && logFcCol < row.length) {
+                    var logFcVal = parseFloat(row[logFcCol]);
+                    if (!isNaN(logFcVal))
+                        enrichAttr = " data-enrich='" + (logFcVal > 0 ? "enriched" : "depleted") + "'";
+                }
+                h.push("<tr" + enrichAttr + ">");
+                var geneId = row[0];
+                if (geneId.indexOf("|") > -1)
+                    geneId = geneId.split("|")[0];
+                var geneSym = row[1];
+                h.push("<td><a data-gene='"+geneId+"' class='link tpLoadGeneLink'>"+geneSym+"</a>");
+                if (hubUrl!==null) {
+                    var fullHubUrl = hubUrl+"&position="+geneSym+"&singleSearch=knownCanonical";
+                    h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to UCSC Genome Browser' href='"+fullHubUrl+"'>Genome</a>");
+                }
+                h.push("</td>");
+                for (var j = 2; j < row.length; j++) {
+                    var val = row[j];
+                    h.push("<td>");
+                    if (val.startsWith("./")) {
+                        var imgUrl = val.replace("./", db.url+"/");
+                        var imgHtml = '<img width="100px" src="'+imgUrl+'">';
+                        val = "<a data-toggle='tooltip' data-placement='auto' class='tpPlots link' target=_blank title='"+imgHtml+"' href='"+ imgUrl + "'>plot</a>";
+                    }
+                    if (j===geneListCol || j===exprCol)
+                        geneListFormat(h, val, geneSym);
+                    else if (j===pValCol)
+                        h.push(parseFloat(val).toPrecision(5));
+                    else
+                        geneListFormat(h, val, geneSym);
+                    h.push("</td>");
+                }
+                h.push("</tr>");
+            }
+            return h.join("");
+        }
+
+        htmls.push("<tbody>");
+        htmls.push(buildRowsHtml(allDataRows.slice(0, MAX_UNFILTERED_ROWS)));
         htmls.push("</tbody>");
         htmls.push("</table>");
 
+        var totalRows = allDataRows.length;
         if (totalRows > MAX_UNFILTERED_ROWS)
-            htmls.push("<p style='color:#888; font-size:85%; margin-top:4px'>Showing top "+MAX_UNFILTERED_ROWS+" of "+totalRows+" rows — use the table filter to narrow results.</p>");
+            htmls.push("<p id='tpMarkerRowNote-"+markerListIdx+"' style='color:#888; font-size:85%; margin-top:4px'>Showing top "+MAX_UNFILTERED_ROWS+" of "+totalRows+" rows. Use the filter above to search all rows.</p>");
 
         // sub function ----
         function onMarkerGeneClick(ev) {
@@ -11502,6 +11529,32 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         $("[data-column='1']").trigger("sort"); // this seems to work!
         if (doDescSort)
             $("[data-column='1']").trigger("sort"); // second click...
+
+        // When there are more rows than MAX_UNFILTERED_ROWS, re-render from the full
+        // dataset on filter changes so all rows are searchable, not just the first 200.
+        if (totalRows > MAX_UNFILTERED_ROWS) {
+            // Unbind tablesorter's own filter listeners so they don't conflict with ours
+            $table.find(".tablesorter-filter").off("keyup.tsfilter search.tsfilter input.tsfilter change.tsfilter keyup.tablesorter search.tablesorter input.tablesorter change.tablesorter");
+            var filterTimer = null;
+            $table.find(".tablesorter-filter").on("keyup search", function() {
+                var query = $(this).val().trim().toLowerCase();
+                clearTimeout(filterTimer);
+                filterTimer = setTimeout(function() {
+                    var subset;
+                    if (query === "") {
+                        subset = allDataRows.slice(0, MAX_UNFILTERED_ROWS);
+                        $("#tpMarkerRowNote-"+markerListIdx).show();
+                    } else {
+                        subset = allDataRows.filter(function(r) {
+                            return r.some(function(cell) { return String(cell).toLowerCase().indexOf(query) !== -1; });
+                        });
+                        $("#tpMarkerRowNote-"+markerListIdx).hide();
+                    }
+                    $table.find("tbody").html(buildRowsHtml(subset));
+                    $(".tpLoadGeneLink").off("click").on("click", onMarkerGeneClick);
+                }, 300);
+            });
+        }
 
 $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
         activateTooltip(".link");

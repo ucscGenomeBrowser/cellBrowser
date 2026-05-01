@@ -4866,9 +4866,10 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         "lineAlpha", "lineWidth", "lineColor",
         # the following are there only for old datasets, they are now nested under "facets"
         # they are just here for backwards-compatibility and will eventually get removed
-        "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays", 
+        "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays",
         # facets are taking their place now
-        "facets", "multiModal", "showHeatmap"]:
+        "facets", "multiModal", "showHeatmap",
+        ]:
         copyConf(inConf, outConf, tag)
 
     if "name" not in outConf:
@@ -6427,7 +6428,7 @@ def copyMarkers(outDir):
         localSrc = join(MARKER_SOURCE_DIR, fname)
         if isfile(localSrc):
             logging.info("Copying marker database from %s" % localSrc)
-            if (localSrc!=destPath):
+            if not os.path.samefile(localSrc, destPath):
                 shutil.copy(localSrc, destPath)
             present.append(fname)
         else:
@@ -6627,8 +6628,8 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         "ext/jquery.sparkline.min.js",
         "ext/jquery.overlayScrollbars.min.js", # 1.6.2 from https://cdnjs.com/libraries/overlayscrollbars
         "ext/jquery.event.drag-2.3.0.js", # for slickgrid 2.4.5
-        #"ext/jquery.tablesorter.js",
-        #"ext/jquery.tablesorter.widgets.js",
+        "ext/jquery.tablesorter.js",
+        "ext/jquery.tablesorter.widgets.js",
         #"ext/jquery.tablesorter.pager.js",
         "ext/lz-string.js",  # 1.4.4, https://raw.githubusercontent.com/pieroxy/lz-string/master/libs/lz-string.js
         "ext/slick.core.js",
