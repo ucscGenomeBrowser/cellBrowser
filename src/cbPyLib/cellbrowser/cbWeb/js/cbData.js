@@ -240,8 +240,26 @@ var cbUtil = (function () {
                 var dec = new TextDecoder("utf-8");
                 binData = dec.decode(arr);
             }
-            else if (this._arrType!=="string")
+            else if (this._arrType!=="string") {
+                // For URLs ending in .gz (e.g. coords.bin.gz), we may receive either
+                // the raw gzip stream (typical with Apache, since .gz is not re-compressed)
+                // or auto-decompressed bytes (if the server set Content-Encoding: gzip).
+                // Detect the gzip magic header (0x1f 0x8b) to handle both cases.
+                var urlPath = this._url.split("?")[0];
+                if (urlPath.endsWith(".gz")) {
+                    var bytes = new Uint8Array(binData);
+                    if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
+                        // pako returns a Uint8Array that may be a view into a
+                        // larger pre-allocated pool, so .buffer can be longer
+                        // than the actual data and not a multiple of 4. Slice
+                        // out exactly the decompressed bytes into a fresh
+                        // ArrayBuffer before constructing the typed array.
+                        var ungz = pako.ungzip(bytes);
+                        binData = ungz.buffer.slice(ungz.byteOffset, ungz.byteOffset + ungz.byteLength);
+                    }
+                }
                 binData = new this._arrType(binData);
+            }
         }
 
         this._onDone(binData, this._otherInfo);
@@ -462,6 +480,7 @@ function CbDbFile(url) {
         if (self.name!='') {
             // start loading gene offsets in the background now, because this takes a while
             var osUrl = cbUtil.joinPaths([this.url, "exprMatrix.json"]);
+            if (md5) osUrl += "?" + md5;
             cbUtil.loadJson(osUrl, gotMatrix, true);
         } else {
             gotOneFile();
@@ -551,7 +570,10 @@ function CbDbFile(url) {
             }
         }
 
-        var binUrl = cbUtil.joinPaths([self.url, "coords", coordInfo.name, "coords.bin"]);
+        // coords.bin was renamed to coords.bin.gz in cbBuild — see coordInfo.gzip in dataset.json.
+        // Old datasets without the gzip flag continue to serve the uncompressed coords.bin.
+        var binFname = coordInfo.gzip ? "coords.bin.gz" : "coords.bin";
+        var binUrl = cbUtil.joinPaths([self.url, "coords", coordInfo.name, binFname]);
         if (coordInfo.md5)
             binUrl += "?"+coordInfo.md5;
         var arrType = cbUtil.makeType(coordInfo.type || "float64");
@@ -570,6 +592,7 @@ function CbDbFile(url) {
             onTracesDone(self.traces);
         }
         var fileUrl = cbUtil.joinPaths([self.url, "traces.json"]);
+        if (self.conf.md5) fileUrl += "?" + self.conf.md5;
         cbUtil.loadJson(fileUrl, onFileDone, true);
     };
 

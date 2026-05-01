@@ -151,6 +151,8 @@ var cellbrowser = function() {
         "OMIM" : "https://omim.org/entry/", // OMIM ID
         "COSMIC" : "http://cancer.sanger.ac.uk/cosmic/gene/analysis?ln=", // gene symbol
         "SFARI" : "https://gene.sfari.org/database/human-gene/", // gene symbol
+        "GeneCards" : "https://www.genecards.org/cgi-bin/carddisp.pl?gene=", // gene symbol
+        "ZFIN" : "https://zfin.org/", // ZFIN ID
         "BrainSpLMD" : "http://www.brainspan.org/lcm/search?exact_match=true&search_type=gene&search_term=", // entrez
         "BrainSpMouseDev" : "http://developingmouse.brain-map.org/gene/show/", // internal Brainspan ID
         "Eurexp" : "http://www.eurexpress.org/ee/databases/assay.jsp?assayID=", // internal ID
@@ -1556,7 +1558,13 @@ var cellbrowser = function() {
                 shortLabel:"Overview",
                 name:openDsInfo.name,
                 hasFiles:openDsInfo.hasFiles,
-                body_parts:["summary"],
+                body_parts:openDsInfo.body_parts || ["summary"],
+                diseases:openDsInfo.diseases,
+                organisms:openDsInfo.organisms,
+                life_stages:openDsInfo.life_stages,
+                domains:openDsInfo.domains,
+                sources:openDsInfo.sources,
+                assay:openDsInfo.assay,
                 isSummary:true,
                 abstract:openDsInfo.abstract
             });
@@ -1973,8 +1981,14 @@ var cellbrowser = function() {
             rowType = "meta";
             findCellsUpdateRowType(rowIdx, rowType);
             findCellsUpdateMetaCombo(rowIdx, metaInfo.index);
-            var enumIdx = findMetaValIndex(metaInfo, query[op]);
-            $("#tpSelectMetaValueEnum_"+rowIdx).val(enumIdx);
+            if (metaInfo.valCounts !== undefined) {
+                // enum field: restore selected option
+                var enumIdx = findMetaValIndex(metaInfo, query[op]);
+                $("#tpSelectMetaValueEnum_"+rowIdx).val(enumIdx);
+            } else {
+                // numeric field: restore value in text input
+                $('#tpSelectValue_'+rowIdx).val(query[op]);
+            }
         }
         $("#tpSelectOperator_"+rowIdx).val(op);
 
@@ -2160,12 +2174,12 @@ var cellbrowser = function() {
     }
 
     function addNewAnnotation(fieldLabel, newMetaValue, cellIds) {
-        var metaInfo;
+        var metaInfo = findCustomFieldByLabel(fieldLabel);
         let cellCount = db.conf.sampleCount;
-        if (!db.getMetaFields()[0].isCustom) {
-            // add a new enum meta field
+        if (!metaInfo) {
+            var fieldName = generateCustomFieldName();
             metaInfo = {
-                name:"custom",
+                name: fieldName,
                 label: fieldLabel,
                 type: "enum",
                 arr : Array.from(new Uint8Array(cellCount)), // cannot JSON-serialize Typed Arrays
@@ -2173,55 +2187,51 @@ var cellbrowser = function() {
                     shortLabels : ["No annotation"]
                 },
                 valCounts : [ ["No annotation", cellCount]]
-            }
+            };
             db.addCustomMetaField(metaInfo);
             rebuildMetaPanel();
             activateTab("meta");
-        } else
-            metaInfo = db.getMetaFields()[0];
+        }
 
         metaInfo.ui.shortLabels.push( newMetaValue );
         let newValIdx = metaInfo.valCounts.length;
         metaInfo.valCounts.push( [newMetaValue, cellIds.length]);
-        // update the "No annotation" count
         let noAnnotCount = metaInfo.valCounts[0][1];
         metaInfo.valCounts[0][1] = noAnnotCount - cellIds.length;
 
         let arr = metaInfo.arr;
         for (let i=0; i<cellIds.length; i++)
             arr[cellIds[i]] = newValIdx;
-        // need to update the value histogram
         db.metaHist[metaInfo.name] = makeFieldHistogram(metaInfo, cellIds, arr);
-        updateMetaBarManyCells(cellIds); // redo, as we rebuilt the meta panel
-
-        var jsonStr = JSON.stringify(metaInfo);
-        var comprStr = LZString.compress(jsonStr);
-        localStorage.setItem(db.name+"|custom", comprStr);
-        }
+        updateMetaBarManyCells(cellIds);
+        saveCustomFieldsToStorage();
+        return metaInfo.name;
+    }
 
     function onSelectNameClick() {
         /* Edit > Name selection */
-
         let title = "Annotate selected "+gSampleDesc+"s";
-
         let htmls = [];
         htmls.push('<p>There are '+renderer.getSelection().length+' '+gSampleDesc+' in the current selection.</p>');
 
-        htmls.push('<p><b>Name of annotation field</b>:<br>');
-        htmls.push('<input class="tpDialogInput" id="tpFieldLabel" type="text" value="My custom annotations"></p>');
+        var existingLabels = getCustomFields().map(function(f) { return f.label; });
+        var defaultLabel = existingLabels.length > 0 ? existingLabels[0] : "My custom annotations";
+        htmls.push('<p><b>Annotation field</b>:<br>');
+        htmls.push('<input class="tpDialogInput" id="tpFieldLabel" type="text" list="tpFieldLabelList" value="'+defaultLabel+'">');
+        htmls.push('<datalist id="tpFieldLabelList">');
+        existingLabels.forEach(function(lbl) { htmls.push('<option value="'+lbl+'">'); });
+        htmls.push('</datalist></p>');
         htmls.push('<p><b>Annotate selected cells as:</b><br>');
         htmls.push('<input class="tpDialogInput" id="tpMetaVal" type="text"></p>');
-        htmls.push('<p>Remove annotations later by clicking <b>Tools > Remove all annotations</b>.</p>');
 
         var dlgHeight = 400;
         var dlgWidth = 800;
         var buttons = [
-            //"Close and remove all annotations" : function() {
-                //db.getMetaFields().shift();
-                //rebuildMetaPanel();
-                //localStorage.removeItem(db.name+"|custom");
-                //resetCustomAnnotations();
-            //},
+        {text:"Manage Annotations...", click: function() {
+                $( this ).dialog( "close" );
+                onCustomAnnotationsManagerClick();
+            }
+        },
         {text:"OK", click: function() {
                 let fieldLabel = $('#tpFieldLabel').val();
                 if (fieldLabel==="")
@@ -2229,10 +2239,9 @@ var cellbrowser = function() {
                 let newMetaValue = $("#tpMetaVal").val();
                 if (newMetaValue==="")
                     return;
-
-                addNewAnnotation(fieldLabel, newMetaValue, renderer.getSelection());
+                var fieldName = addNewAnnotation(fieldLabel, newMetaValue, renderer.getSelection());
                 $( this ).dialog( "close" );
-                colorByMetaField("custom");
+                colorByMetaField(fieldName);
             }
         }];
         showDialogBox(htmls, title, {showClose:true, height:dlgHeight, width:dlgWidth, buttons:buttons});
@@ -2574,17 +2583,342 @@ var cellbrowser = function() {
         rebuildMetaPanel();
         changeUrl({"meta":null});
         colorByDefaultField();
+        localStorage.removeItem(db.name+"|customFields");
         localStorage.removeItem(db.name+"|custom");
     }
 
     function onCustomAnnotationsClick() {
-        /* */
-        if (!db.getMetaFields()[0].isCustom) {
+        if (getCustomFields().length === 0) {
             alert("You have currently no custom annotations. Select a few cells and use Edit > Name selection "+
                     "to create a custom annotation field.");
         } else {
             resetCustomAnnotations();
         }
+    }
+
+    function getCustomFields() {
+        return db.getMetaFields().filter(function(f) { return f.isCustom; });
+    }
+
+    function findCustomFieldByLabel(label) {
+        var fields = getCustomFields();
+        for (var i = 0; i < fields.length; i++)
+            if (fields[i].label === label) return fields[i];
+        return null;
+    }
+
+    function generateCustomFieldName() {
+        var names = {};
+        getCustomFields().forEach(function(f) { names[f.name] = true; });
+        if (!names["custom"]) return "custom";
+        var i = 1;
+        while (names["custom_" + i]) i++;
+        return "custom_" + i;
+    }
+
+    function saveCustomFieldsToStorage() {
+        var fields = getCustomFields();
+        if (fields.length === 0) { localStorage.removeItem(db.name + "|customFields"); return; }
+        var obj = {};
+        for (var i = 0; i < fields.length; i++) obj[fields[i].name] = fields[i];
+        localStorage.setItem(db.name + "|customFields", LZString.compress(JSON.stringify(obj)));
+    }
+
+    function loadCustomFieldsFromStorage() {
+        var data = localStorage.getItem(db.name + "|customFields");
+        if (data) {
+            var fields = JSON.parse(LZString.decompress(data));
+            var names = Object.keys(fields).reverse();
+            for (var i = 0; i < names.length; i++)
+                db.conf.metaFields.unshift(fields[names[i]]);
+            return;
+        }
+        var oldData = localStorage.getItem(db.name + "|custom");
+        if (oldData) {
+            var metaInfo = JSON.parse(LZString.decompress(oldData));
+            db.conf.metaFields.unshift(metaInfo);
+            saveCustomFieldsToStorage();
+            localStorage.removeItem(db.name + "|custom");
+        }
+    }
+
+    function removeOneCustomAnnotation(fieldName) {
+        db.conf.metaFields = db.getMetaFields().filter(function(f) { return !(f.isCustom && f.name === fieldName); });
+        saveCustomFieldsToStorage();
+        rebuildMetaPanel();
+        var remaining = getCustomFields();
+        if (remaining.length > 0) colorByMetaField(remaining[0].name);
+        else { changeUrl({"meta": null}); colorByDefaultField(); }
+    }
+
+    function onExportAnnotationsClick() {
+        var fields = getCustomFields();
+        if (fields.length === 0) {
+            alert("No custom annotations to export. Create some first using Edit > Name selection.");
+            return;
+        }
+        var lines = [];
+        var headers = ["cell_index"].concat(fields.map(function(f) { return f.label; }));
+        lines.push(headers.join("\t"));
+        var cellCount = db.conf.sampleCount;
+        for (var i = 0; i < cellCount; i++) {
+            var row = [i];
+            for (var j = 0; j < fields.length; j++) {
+                var intVal = fields[j].arr[i];
+                row.push(fields[j].ui.shortLabels[intVal]);
+            }
+            lines.push(row.join("\t"));
+        }
+        var blob = new Blob([lines.join("\n")], {type: "text/plain;charset=utf-8"});
+        saveAs(blob, (db.name || "annotations") + ".custom_annotations.tsv");
+    }
+
+    function buildAnnotMgrTable() {
+        var fields = getCustomFields();
+        var container = $('#tpAnnotMgrTable');
+        container.empty();
+        if (fields.length === 0) {
+            container.html('<p style="color:#888;margin:8px 0">No custom annotation fields. Use <b>Edit &gt; Name selection</b> to create one.</p>');
+            return;
+        }
+        var htmls = [];
+        htmls.push('<table style="width:100%;border-collapse:collapse">');
+        htmls.push('<tr>' +
+            '<th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc">Field label</th>' +
+            '<th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc">Values</th>' +
+            '<th style="border-bottom:1px solid #ccc"></th></tr>');
+
+        fields.forEach(function(f) {
+            var activeVals = f.valCounts.filter(function(v) { return v[1] > 0 && v[0] !== "No annotation"; });
+            var valCount = activeVals.length;
+            // field header row
+            htmls.push('<tr class="tpAnnotFieldRow" data-field-name="'+f.name+'" style="border-top:1px solid #ddd">');
+            htmls.push('<td style="padding:6px 8px">');
+            htmls.push('<span class="tpAnnotToggle" style="cursor:pointer;margin-right:6px;display:inline-block;width:1em">&#9658;</span>');
+            htmls.push('<span class="tpAnnotFieldLabel">'+f.label+'</span>');
+            htmls.push('<input class="tpAnnotFieldInput tpDialogInput" style="display:none;width:160px" value="'+f.label+'">');
+            htmls.push('</td>');
+            htmls.push('<td style="padding:6px 8px;color:#888;font-size:0.9em">'+valCount+' value'+(valCount===1?'':'s')+'</td>');
+            htmls.push('<td style="padding:6px 8px;white-space:nowrap">');
+            htmls.push('<button class="tpAnnotRenameBtn" style="margin-right:4px">Rename</button>');
+            htmls.push('<button class="tpAnnotSaveBtn" style="display:none;margin-right:4px">Save</button>');
+            htmls.push('<button class="tpAnnotCancelBtn" style="display:none;margin-right:4px">Cancel</button>');
+            htmls.push('<button class="tpAnnotRemoveBtn">Remove</button>');
+            htmls.push('</td></tr>');
+
+            // value rows (hidden by default)
+            f.valCounts.forEach(function(vc, intKey) {
+                if (intKey === 0 || vc[1] === 0) return; // skip "No annotation" and empty
+                htmls.push('<tr class="tpAnnotValRow" data-field-name="'+f.name+'" data-int-key="'+intKey+'" style="display:none;background:#f9f9f9">');
+                htmls.push('<td style="padding:4px 8px 4px 32px">');
+                htmls.push('<span class="tpAnnotValLabel">'+vc[0]+'</span>');
+                htmls.push('<input class="tpAnnotValInput tpDialogInput" style="display:none;width:150px" value="'+vc[0]+'">');
+                htmls.push('</td>');
+                htmls.push('<td style="padding:4px 8px;color:#aaa;font-size:0.85em">'+vc[1]+' cell'+(vc[1]===1?'':'s')+'</td>');
+                htmls.push('<td style="padding:4px 8px;white-space:nowrap">');
+                htmls.push('<button class="tpAnnotValRenameBtn" style="margin-right:4px">Rename</button>');
+                htmls.push('<button class="tpAnnotValSaveBtn" style="display:none;margin-right:4px">Save</button>');
+                htmls.push('<button class="tpAnnotValCancelBtn" style="display:none;margin-right:4px">Cancel</button>');
+                htmls.push('<button class="tpAnnotValDeleteBtn">Delete</button>');
+                htmls.push('</td></tr>');
+            });
+        });
+        htmls.push('</table>');
+        container.html(htmls.join(''));
+
+        // --- field row handlers ---
+        container.find('.tpAnnotToggle').click(function() {
+            var fieldName = $(this).closest('tr').data('field-name');
+            var valRows = container.find('.tpAnnotValRow[data-field-name="'+fieldName+'"]');
+            var isOpen = valRows.first().is(':visible');
+            valRows.toggle(!isOpen);
+            $(this).html(isOpen ? '&#9658;' : '&#9660;');
+        });
+
+        container.find('.tpAnnotRenameBtn').click(function() {
+            var row = $(this).closest('tr');
+            row.find('.tpAnnotFieldLabel').hide();
+            row.find('.tpAnnotFieldInput').show().focus().select();
+            $(this).hide();
+            row.find('.tpAnnotSaveBtn, .tpAnnotCancelBtn').show();
+        });
+        container.find('.tpAnnotFieldInput').keydown(function(e) {
+            if (e.which === 13) $(this).closest('tr').find('.tpAnnotSaveBtn').click();
+        });
+        container.find('.tpAnnotSaveBtn').click(function() {
+            var row = $(this).closest('tr');
+            var fieldName = row.data('field-name');
+            var newLabel = row.find('.tpAnnotFieldInput').val().trim();
+            if (!newLabel) return;
+            var metaInfo = db.getMetaFields().find(function(f) { return f.name === fieldName; });
+            if (metaInfo) {
+                metaInfo.label = newLabel;
+                saveCustomFieldsToStorage();
+                rebuildMetaPanel();
+                if (gLegend.metaInfo && gLegend.metaInfo.name === fieldName)
+                    colorByMetaField(fieldName);
+            }
+            row.find('.tpAnnotFieldLabel').text(newLabel).show();
+            row.find('.tpAnnotFieldInput').hide();
+            row.find('.tpAnnotRenameBtn').show();
+            row.find('.tpAnnotSaveBtn, .tpAnnotCancelBtn').hide();
+        });
+        container.find('.tpAnnotCancelBtn').click(function() {
+            var row = $(this).closest('tr');
+            row.find('.tpAnnotFieldLabel').show();
+            row.find('.tpAnnotFieldInput').hide();
+            row.find('.tpAnnotRenameBtn').show();
+            row.find('.tpAnnotSaveBtn, .tpAnnotCancelBtn').hide();
+        });
+        container.find('.tpAnnotRemoveBtn').click(function() {
+            var fieldName = $(this).closest('tr').data('field-name');
+            removeOneCustomAnnotation(fieldName);
+            buildAnnotMgrTable();
+        });
+
+        // --- value row handlers ---
+        container.find('.tpAnnotValRenameBtn').click(function() {
+            var row = $(this).closest('tr');
+            row.find('.tpAnnotValLabel').hide();
+            row.find('.tpAnnotValInput').show().focus().select();
+            $(this).hide();
+            row.find('.tpAnnotValSaveBtn, .tpAnnotValCancelBtn').show();
+        });
+        container.find('.tpAnnotValInput').keydown(function(e) {
+            if (e.which === 13) $(this).closest('tr').find('.tpAnnotValSaveBtn').click();
+        });
+        container.find('.tpAnnotValSaveBtn').click(function() {
+            var row = $(this).closest('tr');
+            var fieldName = row.data('field-name');
+            var intKey = parseInt(row.data('int-key'));
+            var newName = row.find('.tpAnnotValInput').val().trim();
+            if (!newName) return;
+            var metaInfo = db.getMetaFields().find(function(f) { return f.name === fieldName; });
+            if (metaInfo) {
+                metaInfo.ui.shortLabels[intKey] = newName;
+                metaInfo.valCounts[intKey][0] = newName;
+                saveCustomFieldsToStorage();
+                if (gLegend.metaInfo && gLegend.metaInfo.name === fieldName)
+                    colorByMetaField(fieldName);
+            }
+            row.find('.tpAnnotValLabel').text(newName).show();
+            row.find('.tpAnnotValInput').hide();
+            row.find('.tpAnnotValRenameBtn').show();
+            row.find('.tpAnnotValSaveBtn, .tpAnnotValCancelBtn').hide();
+        });
+        container.find('.tpAnnotValCancelBtn').click(function() {
+            var row = $(this).closest('tr');
+            row.find('.tpAnnotValLabel').show();
+            row.find('.tpAnnotValInput').hide();
+            row.find('.tpAnnotValRenameBtn').show();
+            row.find('.tpAnnotValSaveBtn, .tpAnnotValCancelBtn').hide();
+        });
+        container.find('.tpAnnotValDeleteBtn').click(function() {
+            var row = $(this).closest('tr');
+            var fieldName = row.data('field-name');
+            var intKey = parseInt(row.data('int-key'));
+            var metaInfo = db.getMetaFields().find(function(f) { return f.name === fieldName; });
+            if (metaInfo) deleteAnnotationValue(intKey, metaInfo);
+            buildAnnotMgrTable();
+        });
+    }
+
+    function onCustomAnnotationsManagerClick() {
+        var htmls = [];
+        htmls.push('<div style="margin-bottom:12px">');
+        htmls.push('<button id="tpAnnotImportBtn">Import from file</button>');
+        htmls.push('<input type="file" id="tpAnnotImportFile" style="display:none" accept=".tsv,.txt,.csv">');
+        htmls.push(' &nbsp;<button id="tpAnnotExportBtn">Export to file</button>');
+        htmls.push('</div>');
+        htmls.push('<div id="tpAnnotMgrTable"></div>');
+
+        var buttons = [
+            {text: "Remove all", click: function() {
+                if (getCustomFields().length === 0) return;
+                if (!confirm("Remove all custom annotation fields?")) return;
+                resetCustomAnnotations();
+                buildAnnotMgrTable();
+            }},
+            {text: "Close", click: function() { $(this).dialog("close"); }}
+        ];
+        showDialogBox(htmls, "Custom Annotations", {height: 420, width: 560, buttons: buttons});
+        buildAnnotMgrTable();
+
+        $('#tpAnnotExportBtn').click(onExportAnnotationsClick);
+        $('#tpAnnotImportBtn').click(function() { $('#tpAnnotImportFile').click(); });
+        $('#tpAnnotImportFile').change(function() {
+            var file = this.files[0];
+            if (!file) return;
+            Papa.parse(file, {
+                skipEmptyLines: true,
+                complete: function(results) {
+                    var err = importAnnotationsFromParsed(results.data);
+                    if (err) { alert(err); return; }
+                    buildAnnotMgrTable();
+                },
+                error: function(err) { alert("Could not parse file: " + err.message); }
+            });
+        });
+    }
+
+    function importAnnotationsFromParsed(rows) {
+        if (rows.length < 2)
+            return "File has no data rows.";
+        var header = rows[0];
+        if (header[0] !== "cell_index")
+            return "First column must be 'cell_index'. Got: '" + header[0] + "'";
+        var fieldLabels = header.slice(1);
+        if (fieldLabels.length === 0)
+            return "File must have at least one annotation column after 'cell_index'.";
+
+        var cellCount = db.conf.sampleCount;
+
+        for (var col = 0; col < fieldLabels.length; col++) {
+            var label = fieldLabels[col];
+            var arr = new Array(cellCount).fill(0);
+            var valIndex = {"No annotation": 0};
+            var valCounts = [["No annotation", 0]];
+            var nextIdx = 1;
+
+            for (var r = 1; r < rows.length; r++) {
+                var row = rows[r];
+                var cellIdx = parseInt(row[0]);
+                if (isNaN(cellIdx) || cellIdx < 0 || cellIdx >= cellCount) continue;
+                var val = (row[col + 1] || "").trim();
+                if (!val || val === "No annotation") { arr[cellIdx] = 0; continue; }
+                if (!(val in valIndex)) {
+                    valIndex[val] = nextIdx++;
+                    valCounts.push([val, 0]);
+                }
+                arr[cellIdx] = valIndex[val];
+            }
+            // tally counts
+            for (var i = 0; i < arr.length; i++)
+                valCounts[arr[i]][1]++;
+
+            // remove existing field with same label (if any), then add new one
+            db.conf.metaFields = db.getMetaFields().filter(function(f) {
+                return !(f.isCustom && f.label === label);
+            });
+
+            var fieldName = generateCustomFieldName();
+            var metaInfo = {
+                name: fieldName,
+                label: label,
+                type: "enum",
+                arr: arr,
+                ui: {shortLabels: valCounts.map(function(v) { return v[0]; })},
+                valCounts: valCounts
+            };
+            db.addCustomMetaField(metaInfo);
+        }
+
+        saveCustomFieldsToStorage();
+        rebuildMetaPanel();
+        activateTab("meta");
+        var firstField = getCustomFields()[0];
+        if (firstField) colorByMetaField(firstField.name);
+        return null;
     }
 
     function onRenameClustersClick() {
@@ -2868,7 +3202,7 @@ var cellbrowser = function() {
          htmls.push('<li class="dropdown">');
            htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false">File</a>');
            htmls.push('<ul class="dropdown-menu">');
-             htmls.push('<li><a href="#" id="tpOpenDatasetLink"><span class="dropmenu-item-label">Open dataset...</span><span class="dropmenu-item-content">o</span></a></li>');
+             htmls.push('<li><a href="#" id="tpOpenDatasetLink" class="dropmenu-item"><span class="dropmenu-item-label">Open dataset...</span><span class="dropmenu-item-content">o</span></a></li>');
              //htmls.push('<li class="dropdown-submenu"><a tabindex="0" href="#">Download Data</a>');
                //htmls.push('<ul class="dropdown-menu" id="tpDownloadMenu">');
                  //htmls.push('<li><a href="#" id="tpDownload_matrix">Gene Expression Matrix</a></li>');
@@ -2885,15 +3219,15 @@ var cellbrowser = function() {
          htmls.push('<li class="dropdown">');
          htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false">Edit</a>');
          htmls.push('<ul class="dropdown-menu">');
-         htmls.push('<li><a id="tpSelectAll" href="#"><span class="dropmenu-item-label">Select all visible</span><span class="dropmenu-item-content">s a</span></a></li>');
-         htmls.push('<li><a id="tpSelectNone" href="#"><span class="dropmenu-item-label">Select none</span><span class="dropmenu-item-content">s n</span></a></li>');
-         htmls.push('<li><a id="tpSelectInvert" href="#"><span class="dropmenu-item-label">Invert selection</span><span class="dropmenu-item-content">s i</span></a></li>');
-         htmls.push('<li><a id="tpSelectName" href="#"><span class="dropmenu-item-label">Name selection...</span><span class="dropmenu-item-content">s s</span></a></li>');
+         htmls.push('<li><a id="tpSelectAll" href="#" class="dropmenu-item"><span class="dropmenu-item-label">Select all visible</span><span class="dropmenu-item-content">s a</span></a></li>');
+         htmls.push('<li><a id="tpSelectNone" href="#" class="dropmenu-item"><span class="dropmenu-item-label">Select none</span><span class="dropmenu-item-content">s n</span></a></li>');
+         htmls.push('<li><a id="tpSelectInvert" href="#" class="dropmenu-item"><span class="dropmenu-item-label">Invert selection</span><span class="dropmenu-item-content">s i</span></a></li>');
+         htmls.push('<li><a id="tpSelectName" href="#" class="dropmenu-item"><span class="dropmenu-item-label">Name selection...</span><span class="dropmenu-item-content">s s</span></a></li>');
          htmls.push('<li><a id="tpExportIds" href="#">Export selected...</a></li>');
-         htmls.push('<li><a id="tpSelectComplex" href="#"><span class="dropmenu-item-label">Find cells...</span><span class="dropmenu-item-content">f c</span></a></li>');
+         htmls.push('<li><a id="tpSelectComplex" href="#" class="dropmenu-item"><span class="dropmenu-item-label">Find cells...</span><span class="dropmenu-item-content">f c</span></a></li>');
          //htmls.push('<li><a id="tpMark" href="#"><span class="dropmenu-item-label">Mark selected</span><span class="dropmenu-item-content">h m</span></a></li>');
          //htmls.push('<li><a id="tpMarkClear" href="#"><span class="dropmenu-item-label">Clear marks</span><span class="dropmenu-item-content">c m</span></a></li>');
-         htmls.push('<li><a id="tpSelectById" href="#">Find by ID...<span class="dropmenu-item-content">f i</span></a></li>');
+         htmls.push('<li><a id="tpSelectById" href="#" class="dropmenu-item">Find by ID...<span class="dropmenu-item-content">f i</span></a></li>');
          htmls.push('</ul>'); // View dropdown
          htmls.push('</li>'); // View dropdown
 
@@ -2901,18 +3235,18 @@ var cellbrowser = function() {
          htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false">View</a>');
          htmls.push('<ul class="dropdown-menu">');
 
-         htmls.push('<li><a href="#" id="tpZoomPlus"><span class="dropmenu-item-label">Zoom in</span><span class="dropmenu-item-content">+</span></a></li>');
-         htmls.push('<li><a href="#" id="tpZoomMinus"><span class="dropmenu-item-label">Zoom out</span><span class="dropmenu-item-content">-</span></a></li>');
-         htmls.push('<li><a href="#" id="tpZoom100Menu"><span class="dropmenu-item-label">Zoom 100%</span><span class="dropmenu-item-content">space</span></a></li>');
-         htmls.push('<li><a href="#" id="tpSplitMenu"><span id="tpSplitMenuEntry" class="dropmenu-item-label">Split screen</span><span class="dropmenu-item-content">t</span></a></li>');
-         htmls.push('<li><a href="#" id="tpHeatMenu"><span id="tpHeatMenuEntry" class="dropmenu-item-label">Toggle Heatmap</span><span class="dropmenu-item-content">h</span></a></li>');
+         htmls.push('<li><a href="#" id="tpZoomPlus" class="dropmenu-item"><span class="dropmenu-item-label">Zoom in</span><span class="dropmenu-item-content">+</span></a></li>');
+         htmls.push('<li><a href="#" id="tpZoomMinus" class="dropmenu-item"><span class="dropmenu-item-label">Zoom out</span><span class="dropmenu-item-content">-</span></a></li>');
+         htmls.push('<li><a href="#" id="tpZoom100Menu" class="dropmenu-item"><span class="dropmenu-item-label">Zoom 100%</span><span class="dropmenu-item-content">space</span></a></li>');
+         htmls.push('<li><a href="#" id="tpSplitMenu" class="dropmenu-item"><span id="tpSplitMenuEntry" class="dropmenu-item-label">Split screen</span><span class="dropmenu-item-content">t</span></a></li>');
+         htmls.push('<li><a href="#" id="tpHeatMenu" class="dropmenu-item"><span id="tpHeatMenuEntry" class="dropmenu-item-label">Toggle Heatmap</span><span class="dropmenu-item-content">h</span></a></li>');
 
          htmls.push('<li><hr class="half-rule"></li>');
 
          //htmls.push('<li><a href="#" id="tpOnlySelectedButton">Show only selected</a></li>');
          //htmls.push('<li><a href="#" id="tpFilterButton">Hide selected '+gSampleDesc+'s</a></li>');
          //htmls.push('<li><a href="#" id="tpShowAllButton">Show all '+gSampleDesc+'</a></li>');
-         htmls.push('<li><a href="#" id="tpHideShowLabels"><span id="tpHideMenuEntry">Hide labels</span><span class="dropmenu-item-content">c l</span></a></li>');
+         htmls.push('<li><a href="#" id="tpHideShowLabels" class="dropmenu-item"><span id="tpHideMenuEntry">Hide labels</span><span class="dropmenu-item-content">c l</span></a></li>');
          htmls.push(`<li><a href="#" id="tpToggleDarkMode"><span id="tpDarkMenuEntry">Enable ${lightMode === 1 ? "Dark" : "Light"} Mode</span><span class="dropmenu-item-content"></span></a></li>`);
          
          htmls.push('</ul>'); // View dropdown-menu
@@ -2922,7 +3256,7 @@ var cellbrowser = function() {
          htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false">Tools</a>');
          htmls.push('<ul class="dropdown-menu">');
          //htmls.push('<li><a href="#" id="tpRenameClusters">Rename clusters...<span class="dropmenu-item-content"></span></a></li>');
-         htmls.push('<li><a href="#" id="tpCustomAnnots">Remove all custom annotations<span class="dropmenu-item-content"></span></a></li>');
+         htmls.push('<li><a href="#" id="tpCustomAnnotsMgr" class="dropmenu-item"><span class="dropmenu-item-label">Custom Annotations...</span><span class="dropmenu-item-content">c a</span></a></li>');
          //htmls.push('<li><a href="#" id="tpCluster">Run clustering...<span class="dropmenu-item-content"></span></a></li>');
          htmls.push('<li class="disabled"><a href="#" id="tpSetBackground">Set as background cells<span class="dropmenu-item-content">b s</span></a></li>');
          htmls.push('<li class="disabled"><a href="#" id="tpResetBackground">Reset background cells<span class="dropmenu-item-content">b r</span></a></li>');
@@ -2936,6 +3270,7 @@ var cellbrowser = function() {
          htmls.push('<li><a href="#" id="tpAboutButton">About</a></li>');
          htmls.push('<li><a href="https://cellbrowser.readthedocs.io/en/master/interface.html" target=_blank id="tpQuickstartButton">How to use this website</a></li>');
          htmls.push('<li><a href="#" id="tpTutorialButton">Interactive Tutorial</a></li>');
+         htmls.push('<li><a href="#" id="tpKeyboardShortcuts" class="dropmenu-item"><span class="dropmenu-item-label">Keyboard Shortcuts</span><span class="dropmenu-item-content">?</span></a></li>');
          htmls.push('<li><a target=_blank href="https://cells-submit.gi.ucsc.edu" id="tpSubmitButton">Upload your own data</a></li>');
          htmls.push('<li><a target=_blank href="https://github.com/ucscGenomeBrowser/cellBrowser#readme" id="tpGithubButton">Setup your own cell browser</a></li>');
          htmls.push('</ul>'); // Help dropdown-menu
@@ -2967,6 +3302,7 @@ var cellbrowser = function() {
        $('#tpMarkClear').click( onMarkClearClick );
        $('#tpTutorialButton').click( function()  { showIntro(false); } );
        $('#tpAboutButton').click( onAboutClick );
+       $('#tpKeyboardShortcuts').click( onKeyboardShortcutsClick );
        $('#tpOpenDatasetLink').click( openCurrentDataset );
        $('#tpSaveImage').click( onSaveAsClick );
        $('#tpSaveImageSvg').click( onSaveAsSvgClick );
@@ -2978,7 +3314,7 @@ var cellbrowser = function() {
 
 
        $('#tpRenameClusters').click( onRenameClustersClick );
-       $('#tpCustomAnnots').click( onCustomAnnotationsClick );
+       $('#tpCustomAnnotsMgr').click( onCustomAnnotationsManagerClick );
        $('#tpSetBackground').click( onBackgroudSetClick );
        $('#tpResetBackground').click( onBackgroudResetClick );
        //$('#tpCluster').click( onRunClusteringClick );
@@ -3089,7 +3425,7 @@ var cellbrowser = function() {
         }
 
         var label = url;
-        if (url.endsWith("coords.bin"))
+        if (url.endsWith("coords.bin") || url.endsWith("coords.bin.gz"))
             label = "Loading Coordinates";
         else if (url.endsWith(".bin"))
             label = "Loading cell annotations";
@@ -5012,6 +5348,10 @@ var cellbrowser = function() {
             $(".ui-widget-overlay").on("click", function() {
                 $("#tpDialog").dialog("close");
             });
+            $("#tpDialog").on("keydown", "input", function(e) {
+                if (e.which === 13)
+                    $("#tpDialog").closest(".ui-dialog").find(".ui-dialog-buttonpane button:contains('OK')").click();
+            });
         };
         $( "#tpDialog" ).dialog(dialogOpts);
     }
@@ -6385,12 +6725,7 @@ var cellbrowser = function() {
 
         renderer.setPos(null, metaBarWidth+metaBarMargin);
 
-        let binData = localStorage.getItem(db.name+"|custom");
-        if (binData) {
-            let jsonStr = LZString.decompress(binData);
-            let customMeta = JSON.parse(jsonStr);
-            db.conf.metaFields.unshift(customMeta);
-        }
+        loadCustomFieldsFromStorage();
 
         cartLoad(db);
         if (getVar("exprGene")) {
@@ -8456,7 +8791,8 @@ var cellbrowser = function() {
 
             var addClass = "";
             var addTitle="";
-            htmls.push("<div class='tpMetaBox' data-field-name='"+metaInfo.name+"' id='tpMetaBox_"+i+"'>");
+            var customAttr = metaInfo.isCustom ? " data-is-custom='true'" : "";
+            htmls.push("<div class='tpMetaBox' data-field-name='"+metaInfo.name+"' id='tpMetaBox_"+i+"'"+customAttr+">");
             if (isGrey) {
                 addClass=" tpMetaLabelGrey";
                 addTitle=" title='This field contains too many different values. You cannot click it to color on it.'";
@@ -8515,9 +8851,10 @@ var cellbrowser = function() {
         $.contextMenu( menuOpt );
 
         var menuItemsCust = [{name: "Copy field value to clipboard"},
-            {name: "Remove custom annotations"}];
+            {name: "Remove this annotation field"},
+            {name: "Remove all annotation fields"}];
         var menuOptCust = {
-            selector: "#tpMetaBox_custom",
+            selector: ".tpMetaBox[data-is-custom]",
             items: menuItemsCust,
             className: 'contextmenu-customwidth',
             callback: onMetaRightClick
@@ -9094,6 +9431,64 @@ var cellbrowser = function() {
 
     }
 
+    function onKeyboardShortcutsClick() {
+        var sections = [
+            {title: "Navigation", shortcuts: [
+                ["space",         "Reset zoom to 100%"],
+                ["+",             "Zoom in"],
+                ["-",             "Zoom out"],
+                ["↑ ↓ ← → / i j k l", "Pan"],
+                ["z",             "Zoom mode"],
+                ["m",             "Move/pan mode"],
+            ]},
+            {title: "Selection", shortcuts: [
+                ["s",             "Select mode"],
+                ["s a",           "Select all visible"],
+                ["s n",           "Select none"],
+                ["s i",           "Invert selection"],
+                ["s s",           "Name selection (annotate)"],
+            ]},
+            {title: "View", shortcuts: [
+                ["t",             "Toggle split screen"],
+                ["h",             "Toggle heatmap"],
+                ["c l",           "Hide / show labels"],
+            ]},
+            {title: "Search & Navigate", shortcuts: [
+                ["g",             "Focus gene search"],
+                ["m",             "Open metadata field picker"],
+                ["d",             "Open dataset picker"],
+                ["o",             "Open dataset dialog"],
+                ["f c",           "Find cells..."],
+                ["f i",           "Find by ID..."],
+            ]},
+            {title: "Annotations", shortcuts: [
+                ["c a",           "Custom Annotations manager"],
+            ]},
+            {title: "Background", shortcuts: [
+                ["b s",           "Set selected as background"],
+                ["b r",           "Reset background"],
+            ]},
+        ];
+
+        var htmls = [];
+        htmls.push('<div style="display:flex;flex-wrap:wrap;gap:16px">');
+        sections.forEach(function(sec) {
+            htmls.push('<div style="min-width:220px;flex:1">');
+            htmls.push('<div style="font-weight:bold;margin-bottom:6px;border-bottom:1px solid #ddd;padding-bottom:3px">'+sec.title+'</div>');
+            htmls.push('<table style="border-collapse:collapse;width:100%">');
+            sec.shortcuts.forEach(function(pair) {
+                htmls.push('<tr>');
+                htmls.push('<td style="padding:2px 10px 2px 0;white-space:nowrap;font-family:monospace;font-size:0.9em;color:#444">'+pair[0]+'</td>');
+                htmls.push('<td style="padding:2px 0;color:#555;font-size:0.9em">'+pair[1]+'</td>');
+                htmls.push('</tr>');
+            });
+            htmls.push('</table></div>');
+        });
+        htmls.push('</div>');
+
+        showDialogBox(htmls, "Keyboard Shortcuts", {showOk: true, height: 480, width: 660});
+    }
+
     function setupKeyboard() {
     /* bind the keyboard shortcut keys */
         phoneHome();
@@ -9113,6 +9508,7 @@ var cellbrowser = function() {
         Mousetrap.bind('s a', onSelectAllClick);
         Mousetrap.bind('s i', onSelectInvertClick);
         Mousetrap.bind('s s', onSelectNameClick);
+        Mousetrap.bind('c a', onCustomAnnotationsManagerClick);
 
         Mousetrap.bind('b s', onBackgroudSetClick);
         Mousetrap.bind('b r', onBackgroudResetClick);
@@ -9142,6 +9538,8 @@ var cellbrowser = function() {
         Mousetrap.bind('j', function() { renderer.movePerc(-0.1, 0); renderer.drawDots(); } );
         Mousetrap.bind('l', function() { renderer.movePerc(0.1, 0); renderer.drawDots(); } );
         Mousetrap.bind('k', function() { renderer.movePerc(0, -0.1); renderer.drawDots(); } );
+
+        Mousetrap.bind('?', onKeyboardShortcutsClick);
 
         //Mousetrap.stopCallback = function(e, element, combo) {
             //var doStop = (element.tagName == 'INPUT' || element.tagName == 'SELECT' || element.tagName == 'TEXTAREA' || (element.contentEditable && element.contentEditable == 'true'));
@@ -9348,19 +9746,16 @@ var cellbrowser = function() {
 
     function onMetaRightClick (key, options) {
     /* user right-clicks on a meta field */
-        var metaName = options.$trigger[0].id.split("_")[1];
-
-        //if (key==0) {
-            //gCurrentDataset.labelField = gCurrentDataset.metaFields[metaIdx];
-            //gClusterMids = null; // force recalc
-            //plotDots();
-            //renderer.render(stage);
-            //updateMenu();
-        //}
+        var triggerEl = options.$trigger[0];
+        var metaIdx = triggerEl.id.split("_")[1];
+        var fieldName = triggerEl.getAttribute('data-field-name');
         if (key===0) {
-            copyToClipboard("#tpMeta_"+metaName);
+            copyToClipboard("#tpMeta_"+metaIdx);
+        } else if (key===1) {
+            removeOneCustomAnnotation(fieldName);
+        } else if (key===2) {
+            resetCustomAnnotations();
         }
-
     }
 
     //function onLegendRightClick (key, options) {
@@ -9877,15 +10272,38 @@ var cellbrowser = function() {
         activateTooltip(".tpLegendLabel");
         activateTooltip(".tpLegendCount");
 
-        // setup the right-click menu
-        //var menuItems = [{name: "Hide "+gSampleDesc+"s with this value"}, {name:"Show only "+gSampleDesc+"s with this value"}];
-        //var menuOpt = {
-            //selector: ".tpLegend",
-            //items: menuItems,
-            //className: 'contextmenu-customwidth',
-            //callback: onLegendRightClick
-        //};
-        //$.contextMenu( menuOpt );
+        // setup the right-click menu for custom annotation values
+        $.contextMenu('destroy', '.tpLegend');
+        $.contextMenu({
+            selector: ".tpLegend",
+            build: function($trigger, e) {
+                if (!gLegend.metaInfo || !gLegend.metaInfo.isCustom) return false;
+                var intKey = parseInt($trigger[0].id.split("_")[1]);
+                if (intKey === 0) return false; // no actions on "No annotation"
+                var metaInfo = gLegend.metaInfo;
+                var items = {};
+                items["rename"] = {name: "Rename this value"};
+                items["delete"] = {name: "Delete this value (reassign to 'No annotation')"};
+                var otherItems = {};
+                var hasOthers = false;
+                for (var i = 1; i < metaInfo.valCounts.length; i++) {
+                    if (i === intKey || metaInfo.valCounts[i][1] === 0) continue;
+                    otherItems["reassign_"+i] = {name: metaInfo.valCounts[i][0]};
+                    hasOthers = true;
+                }
+                if (hasOthers)
+                    items["reassign"] = {name: "Reassign cells to", items: otherItems};
+                return {items: items, className: 'contextmenu-customwidth', callback: onLegendValueRightClick};
+            }
+        });
+
+        // double-click a legend label to rename a custom annotation value
+        $('.tpLegendLabel').on("dblclick", function() {
+            if (!gLegend.metaInfo || !gLegend.metaInfo.isCustom) return;
+            var intKey = parseInt($(this).data('intkey'));
+            if (intKey === 0) return;
+            renameAnnotationValue(intKey);
+        });
 
         // activate the color pickers
         for (let i = 0; i < colors.length; i++) {
@@ -9907,6 +10325,72 @@ var cellbrowser = function() {
         }
 
         buildViolinPlot();
+    }
+
+    function onLegendValueRightClick(key, options) {
+        var intKey = parseInt(options.$trigger[0].id.split("_")[1]);
+        if (key === "rename") {
+            renameAnnotationValue(intKey);
+        } else if (key === "delete") {
+            deleteAnnotationValue(intKey);
+        } else if (key.indexOf("reassign_") === 0) {
+            var toIntKey = parseInt(key.split("_")[1]);
+            reassignAnnotationValue(intKey, toIntKey);
+        }
+    }
+
+    function renameAnnotationValue(intKey, metaInfo) {
+        if (!metaInfo) metaInfo = gLegend.metaInfo;
+        var oldName = metaInfo.ui.shortLabels[intKey];
+        var htmls = [];
+        htmls.push('<p><b>New name:</b><br>');
+        htmls.push('<input class="tpDialogInput" id="tpRenameVal" type="text" value="'+oldName+'">');
+        htmls.push('</p>');
+        var buttons = [{text:"OK", click: function() {
+            var newName = $('#tpRenameVal').val().trim();
+            if (!newName) return;
+            metaInfo.ui.shortLabels[intKey] = newName;
+            metaInfo.valCounts[intKey][0] = newName;
+            saveCustomFieldsToStorage();
+            $(this).dialog("close");
+            colorByMetaField(metaInfo.name);
+        }}];
+        showDialogBox(htmls, 'Rename "'+oldName+'"', {showClose:true, height:200, width:400, buttons:buttons});
+        $('#tpRenameVal').focus().select();
+    }
+
+    function deleteAnnotationValue(intKey, metaInfo) {
+        if (!metaInfo) metaInfo = gLegend.metaInfo;
+        var arr = metaInfo.arr;
+        var deletedCount = 0;
+        for (var i = 0; i < arr.length; i++) {
+            if (arr[i] === intKey) {
+                arr[i] = 0;
+                deletedCount++;
+            }
+        }
+        metaInfo.valCounts[0][1] += deletedCount;
+        metaInfo.valCounts[intKey][1] = 0;
+        saveCustomFieldsToStorage();
+        db.metaHist[metaInfo.name] = null;
+        colorByMetaField(metaInfo.name);
+    }
+
+    function reassignAnnotationValue(fromIntKey, toIntKey, metaInfo) {
+        if (!metaInfo) metaInfo = gLegend.metaInfo;
+        var arr = metaInfo.arr;
+        var movedCount = 0;
+        for (var i = 0; i < arr.length; i++) {
+            if (arr[i] === fromIntKey) {
+                arr[i] = toIntKey;
+                movedCount++;
+            }
+        }
+        metaInfo.valCounts[toIntKey][1] += movedCount;
+        metaInfo.valCounts[fromIntKey][1] = 0;
+        saveCustomFieldsToStorage();
+        db.metaHist[metaInfo.name] = null;
+        colorByMetaField(metaInfo.name);
     }
 
     function onColorPickerChange(color, ev) {
@@ -10123,7 +10607,6 @@ var cellbrowser = function() {
         if (db===null) // users moved the mouse while the db is still loading
             return;
 
-        $('#tpMeta_custom').html("");
         $(".tpMetaValue").html("");
 
         var fieldCount = db.getMetaFields();
@@ -10136,22 +10619,21 @@ var cellbrowser = function() {
 
     function updateMetaBarCustomFields(cellId) {
         /* update custom meta fields with custom data */
-        if (!db.getMetaFields()[0].isCustom)
-            return;
-
-        let metaInfo = db.getMetaFields()[0];
-        let intVal = metaInfo.arr[cellId];
-        let strVal = metaInfo.ui.shortLabels[intVal];
-        let rowDiv = $('#tpMeta_custom').html(strVal);
+        var allFields = db.getMetaFields();
+        for (var i = 0; i < allFields.length; i++) {
+            var metaInfo = allFields[i];
+            if (!metaInfo.isCustom) continue;
+            var intVal = metaInfo.arr[cellId];
+            var strVal = metaInfo.ui.shortLabels[intVal];
+            $('#tpMeta_'+i).html(strVal);
+        }
     }
 
     function updateMetaBarOneCell(cellInfo, otherCellCount) {
         /* update the meta bar with meta data from a single cellId */
         $('#tpMetaTitle').text(METABOXTITLE);
 
-        let customCount = 0;
-        if (db.getMetaFields()[0].isCustom)
-            customCount = 1;
+        let customCount = getCustomFields().length;
 
         let fieldInfos = db.getMetaFields();
 
@@ -10167,7 +10649,7 @@ var cellbrowser = function() {
                     plotTrace(fieldValue);
             }
 
-            let rowDiv = $('#tpMeta_'+i);
+            let rowDiv = $('#tpMeta_'+metaIdx);
             if (fieldValue.startsWith("http") && fieldValue.endsWith(".png")) {
                 rowDiv.css('height', "40px");
                 rowDiv.html("<img src='"+fieldValue+"'></img>");
@@ -10322,7 +10804,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         if (labelField === db.conf.labelField) {
             if (db.conf.topMarkers!==undefined && db.conf.topMarkers[clusterName]!==undefined) {
-                labelLines.push("Top enriched/depleted markers: "+db.conf.topMarkers[clusterName].join(", "));
+                labelLines.push("Top enriched markers: "+db.conf.topMarkers[clusterName].join(", "));
             }
             labelLines.push("");
 
@@ -10668,7 +11150,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         if(DEBUG) console.log("building marker genes window for "+clusterName);
         var htmls = [];
-        htmls.push("<div id='tpPaneHeader' style='padding:0.4em 1em'>");
+        htmls.push("<div style='padding: 0 1em'>");
+        htmls.push("<div id='tpPaneHeader' style='padding: 0.4em 0'>");
 
         var buttons = [];
 
@@ -10726,6 +11209,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         }
 
         htmls.push("</div>"); // tabs
+        htmls.push("</div>"); // padding wrapper
 
         var winWidth = window.innerWidth - 0.10*window.innerWidth;
         var winHeight = window.innerHeight - 0.10*window.innerHeight;
@@ -10806,7 +11290,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var hprdCol = null;
         var geneListCol = null;
         var exprCol = null;
-        var pValCol = null
+        var pValCol = null;
+        var logFcCol = null;
         var doDescSort = false;
         for (var i = 1; i < headerRow.length; i++) {
             var colLabel = headerRow[i];
@@ -10822,7 +11307,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
             var width = null;
             if (colLabel==="_geneLists") {
-                colLabel = "Gene Lists";
+                colLabel = "Phenotype and Disease";
                 geneListCol = i;
             }
             else if (colLabel==="pVal" || /[pP].[Vv]al.*/.test(colLabel)) {
@@ -10841,6 +11326,16 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 hprdCol = i;
                 colLabel = "Protein Class (HPRD)";
                 width = "200px";
+            }
+            else if (colLabel==="_zfin") {
+                colLabel = "ZFIN";
+            }
+            else if (colLabel==="_geneCards") {
+                colLabel = "GeneCards";
+            }
+
+            if (logFcCol === null && /log.*fc/i.test(colLabel)) {
+                logFcCol = i;
             }
 
             var addStr = "";
@@ -10864,6 +11359,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var MAX_UNFILTERED_ROWS = 200;
         var renderedRows = 0;
         var totalRows = 0; // count non-empty rows for "showing N of M" note
+        var enrichedCount = 0;
+        var depletedCount = 0;
 
         htmls.push("<tbody>");
         for (let i = 1; i < rows.length; i++) {
@@ -10879,7 +11376,17 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
             renderedRows++;
 
-            htmls.push("<tr>");
+            var enrichAttr = "";
+            if (logFcCol !== null && logFcCol < row.length) {
+                var logFcVal = parseFloat(row[logFcCol]);
+                if (!isNaN(logFcVal)) {
+                    var enrichLabel = logFcVal > 0 ? "enriched" : "depleted";
+                    enrichAttr = " data-enrich='" + enrichLabel + "'";
+                    if (enrichLabel === "enriched") enrichedCount++;
+                    else depletedCount++;
+                }
+            }
+            htmls.push("<tr" + enrichAttr + ">");
             var geneId = row[0];
 
             // old marker files still have the format geneId|sym, so tolerate this here
@@ -10953,7 +11460,35 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         }
         // ----
 
+        var btnGroupId = "tpEnrichBtns-"+markerListIdx;
+        if (logFcCol !== null && enrichedCount > 0 && depletedCount > 0) {
+            var btnHtml = "<div style='margin-bottom:6px'>" +
+                "<div id='"+btnGroupId+"' class='btn-group btn-group-xs' role='group'>" +
+                "<button type='button' class='btn btn-default active' data-val='all'>All</button>" +
+                "<button type='button' class='btn btn-default' data-val='enriched'>Enriched (logFC &gt; 0)</button>" +
+                "<button type='button' class='btn btn-default' data-val='depleted'>Depleted (logFC &lt; 0)</button>" +
+                "</div></div>";
+            htmls.unshift(btnHtml);
+        }
+
         $("#"+divId).html(htmls.join(""));
+
+        if (logFcCol !== null && enrichedCount > 0 && depletedCount > 0) {
+            $("#"+btnGroupId+" button").on("click", function() {
+                $("#"+btnGroupId+" button").removeClass("active");
+                $(this).addClass("active");
+                var val = $(this).data("val");
+                var $rows = $("#"+tableId+" tbody tr");
+                if (val === "all") {
+                    $rows.show();
+                } else {
+                    $rows.each(function() {
+                        $(this).toggle($(this).data("enrich") === val);
+                    });
+                }
+            });
+        }
+
         var sortOpt = {};
         var tableOpt = { sortList: [[pValCol,0]], theme: "bootstrap", widgets : [ "uitheme", "filter", "columns", "zebra" ],
         };

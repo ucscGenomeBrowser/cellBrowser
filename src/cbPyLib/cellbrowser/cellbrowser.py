@@ -2733,9 +2733,17 @@ def writeCoords(coordName, coords, sampleNames, coordBinFname, coordInfo, textOu
         debugFh.close()
         logging.info("DEBUG: wrote %s" % debugFh.name)
     renameFile(tmpFname, coordBinFname)
-    
-    md5 = md5WithPython(coordBinFname)
+
+    # gzip coords.bin -> coords.bin.gz. Named .gz so Apache mod_deflate doesn't try to
+    # re-compress it on the wire. The JS reader (cbData.js) ungzips with pako.
+    # Compresses well on datasets with many hidden cells (long HIDDENCOORD runs).
+    coordBinGz = runGzip(coordBinFname)
+    if isfile(coordBinFname):
+        os.remove(coordBinFname)
+
+    md5 = md5WithPython(coordBinGz)
     coordInfo["md5"] = md5[:MD5LEN]
+    coordInfo["gzip"] = True
 
     coordInfo["minX"] = minX
     coordInfo["maxX"] = maxX
@@ -3087,6 +3095,12 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac):
 
     data, newHeaders = parseMarkerTable(filename, geneToSym)
 
+    logFcIdx = None
+    for idx, h in enumerate(newHeaders):
+        if re.search(r'log.*fc', h.split("|")[0], re.IGNORECASE):
+            logFcIdx = idx
+            break
+
     logging.debug("Splitting cluster markers into directory %s" % (outDir))
     fileCount = 0
     sanNames = set()
@@ -3128,7 +3142,17 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac):
             logging.error("Marker table contains these genes, they were skipped, they are not in the matrix: %s" % (",".join(missGeneIds)))
             #logging.error("Use --force to accept this.")
 
-        topSyms = [row[1] for row in rows[:topMarkerCount]]
+        if logFcIdx is not None:
+            enrichedRows = []
+            for row in rows:
+                try:
+                    if float(row[logFcIdx]) > 0:
+                        enrichedRows.append(row)
+                except (ValueError, IndexError):
+                    pass
+            topSyms = [row[1] for row in enrichedRows[:topMarkerCount]]
+        else:
+            topSyms = [row[1] for row in rows[:topMarkerCount]]
         topMarkers[clusterName] = topSyms
 
         ofh.close()
@@ -3920,6 +3944,7 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
     matType = matrixToBin(outMatrixFname, geneToSym, binMat, binMatIndex, discretBinMat, \
             discretMatrixIndex, metaSampleNames, matType=matType, genesAreRanges=genesAreRanges,
             geneAnnots=geneAnnots)
+    outConf["fileVersions"]["exprMatrix"] = getFileVersion(binMatIndex)
 
     # these are the Javascript type names, not the python ones (they are also better to read than the Python ones)
     if matType=="int" or matType=="forceInt":
@@ -5870,8 +5895,11 @@ def rebuildFlatIndex(outDir):
 
 def checkDsCase(inConfFname, relPath, inConfig):
     """ relPath should not be uppercase for top-level datasets at UCSC, as we use the hostname part """
+    # grandfathered datasets that predate the onlyLower enforcement
+    legacyUpperNames = {"adultPancreas"}
     if not "/" in relPath and getConfig("onlyLower", False) and \
-            "name" in inConfig and inConfig["name"].isupper():
+            "name" in inConfig and inConfig["name"] != inConfig["name"].lower() and \
+            inConfig["name"] not in legacyUpperNames:
         errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
                 "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
 
@@ -6399,7 +6427,8 @@ def copyMarkers(outDir):
         localSrc = join(MARKER_SOURCE_DIR, fname)
         if isfile(localSrc):
             logging.info("Copying marker database from %s" % localSrc)
-            shutil.copy(localSrc, destPath)
+            if (localSrc!=destPath):
+                shutil.copy(localSrc, destPath)
             present.append(fname)
         else:
             srcUrl = MARKER_SOURCE_URL + fname
@@ -6574,7 +6603,7 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         "ext/OverlayScrollbars.min.css", # 1.6.2, from https://cdnjs.com/libraries/overlayscrollbars
         #"ext/theme.default.css", #  tablesorter
         "ext/theme.bootstrap_3.css", #  tablesorter
-        "ext/jquery.tablesorter.pager.css", # tablesorter pager addon
+        #"ext/jquery.tablesorter.pager.css", # tablesorter pager addon
         "css/cellBrowser.css"
         ]
 
@@ -6598,9 +6627,9 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         "ext/jquery.sparkline.min.js",
         "ext/jquery.overlayScrollbars.min.js", # 1.6.2 from https://cdnjs.com/libraries/overlayscrollbars
         "ext/jquery.event.drag-2.3.0.js", # for slickgrid 2.4.5
-        "ext/jquery.tablesorter.js",
-        "ext/jquery.tablesorter.widgets.js",
-        "ext/jquery.tablesorter.pager.js",
+        #"ext/jquery.tablesorter.js",
+        #"ext/jquery.tablesorter.widgets.js",
+        #"ext/jquery.tablesorter.pager.js",
         "ext/lz-string.js",  # 1.4.4, https://raw.githubusercontent.com/pieroxy/lz-string/master/libs/lz-string.js
         "ext/slick.core.js",
         "ext/slick.cellrangedecorator.js", "ext/slick.cellrangeselector.js", "ext/slick.cellselectionmodel.js",
