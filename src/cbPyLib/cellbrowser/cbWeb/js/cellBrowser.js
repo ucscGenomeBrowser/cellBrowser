@@ -10224,7 +10224,6 @@ var cellbrowser = function() {
                 prec = 1+countLeadingZerosAfterDecimal(freq) // one more digit than the smallest frequency
 
             htmls.push("<span class='tpLegendCount' title='"+count+" of "+sum+"'>"+freq.toFixed(prec)+"%</span>");
-            htmls.push("</span>");
 
             htmls.push("</div>");
         }
