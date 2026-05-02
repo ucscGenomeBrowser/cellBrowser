@@ -9007,6 +9007,7 @@ var cellbrowser = function() {
         htmls.push("<li><a href='#tpAnnotTab'>Annotation</a></li>");
         htmls.push("<li><a href='#tpGeneTab'>"+getGeneLabel()+"</a></li>");
         htmls.push("<li><a href='#tpLayoutTab'>"+(db.conf.coordLabel || "Layout")+"</a></li>");
+        htmls.push("<li><a href='#tpToolsTab'>Tools</a></li>");
         htmls.push("</ul>");
 
         htmls.push("<div id='tpAnnotTab'>");
@@ -9058,6 +9059,14 @@ var cellbrowser = function() {
         buildLayoutCombo(db.conf.coordLabel, htmls, db.conf.coords, "tpLayoutCombo", 0, 2);
         htmls.push("</div>"); // tpLayoutTab
 
+        htmls.push("<div id='tpToolsTab'>");
+        htmls.push("<div style='padding:8px'>");
+        htmls.push("<div style='margin-bottom:8px'><b>Annotations</b></div>");
+        htmls.push("<button id='tpToolsNameSel' style='width:100%;margin-bottom:6px'>Name Selection</button>");
+        htmls.push("<button id='tpToolsCustomAnnot' style='width:100%'>Manage Custom Annotations</button>");
+        htmls.push("</div>");
+        htmls.push("</div>"); // tpToolsTab
+
         htmls.push("</div>"); // tpLeftSidebar
 
         $(document.body).append(htmls.join(""));
@@ -9098,6 +9107,9 @@ var cellbrowser = function() {
 
         $("#tpLeftTabs").tabs();
         activateTab();
+
+        $("#tpToolsNameSel").click(onSelectNameClick);
+        $("#tpToolsCustomAnnot").click(onCustomAnnotationsManagerClick);
 
         $('.tpGeneBarCell').click( onGeneClick );
         $('#tpChangeGenes').click( onChangeGenesClick );
