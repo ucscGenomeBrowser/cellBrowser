@@ -1795,6 +1795,20 @@ var cellbrowser = function() {
             //}
         //}
         //updateLegendGrandCheckbox();
+
+        if (renderer.dragMode === "clusterSelect") {
+            var cols = renderer.col.arr;
+            var selectedColIndices = new Set();
+            selection.forEach(function(cellId) { selectedColIndices.add(cols[cellId]); });
+            var cbEls = document.getElementsByClassName("tpLegendCheckbox");
+            for (var i = 0; i < cbEls.length; i++) {
+                var cbEl = cbEls[i];
+                var valIdx = parseInt(cbEl.getAttribute("data-value-index"));
+                var isChecked = cellIds.length > 0 && selectedColIndices.has(valIdx);
+                cbEl.checked = isChecked;
+                gLegend.rows[i].isChecked = isChecked;
+            }
+        }
     }
 
     function onRadiusAlphaChange(radius, alpha) {
