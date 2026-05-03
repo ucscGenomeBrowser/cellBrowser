@@ -166,6 +166,8 @@ function MaxPlot(div, top, left, width, height, args) {
             this.childPlot.setLightMode(mode);
         }
 
+        self._labelCache = null; // label colors changed, invalidate bitmap cache
+
         this.drawDots();
     }
 
@@ -406,6 +408,9 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // the background image for spatial mode
         self.background = null;
+
+        // label bitmap cache: { key → {canvas, textWidth} }; null = needs rebuild
+        self._labelCache = null;
 
         self.activateMode(getAttr(args, "mode", "move"));
 
@@ -1687,31 +1692,17 @@ function MaxPlot(div, top, left, width, height, args) {
             return undefined;
 
         if(DEBUG) console.time("labels");
+
+        // Lazy-init the bitmap cache on first use after a reset.
+        // Key: "<text>|<n|g>|<lightMode>" so light/dark and grey-annot variants are separate.
+        if (!self._labelCache) self._labelCache = {};
+
+        // We need ctx.font set for measureText even though we draw via drawImage below.
+        const FONT = "bold "+gTextSize+"px Sans-serif";
+        const CACHE_PAD = 8; // padding around each glyph to give room for shadow/stroke bleed
+
         ctx.save();
-        ctx.font = "bold "+gTextSize+"px Sans-serif"
-        ctx.globalAlpha = 1.0;
-
-        //ctx.strokeStyle = '#EEEEEE';
-        if (doGrey===undefined) {
-            ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
-            ctx.lineWidth = 5;
-            ctx.miterLimit =2;
-        }
-        //else
-            //ctx.strokeStyle = "rgba(20, 20, 20, 0.3)";
-
-        ctx.textBaseline = "top";
-
-        if (doGrey===undefined) {
-            ctx.fillStyle = "rgba(0,0,0,0.8)";
-            ctx.shadowBlur=6;
-            ctx.shadowColor="white";
-        }
-        else {
-            ctx.fillStyle = self.isLight() ? "rgba(0,0,0,1.0)" : "rgba(255,255,255,1.0)";
-        }
-
-        ctx.textAlign = "left";
+        ctx.font = FONT;
 
         var addMargin = 1; // how many pixels to extend the bbox around the text, make clicking easier
         var bboxArr = []; // array of click hit boxes
@@ -1723,18 +1714,42 @@ function MaxPlot(div, top, left, width, height, args) {
                 continue;
             }
 
-            var x = coord[0];
-            var y = coord[1];
-            var text = coord[2];
+            var origX = coord[0];
+            var y     = coord[1];
+            var text  = coord[2];
 
-            var textWidth = Math.round(ctx.measureText(text).width);
-            // move x to the left, so text is centered on x
-            x = x - Math.round(textWidth*0.5);
+            // --- bitmap cache lookup / build ---
+            var cacheKey = text + "|" + (doGrey ? "g" : "n") + "|" + self.lightMode;
+            var entry = self._labelCache[cacheKey];
 
-            var textX1 = x;
-            var textY1 = y;
-            var textX2 = Math.round(x+textWidth);
-            var textY2 = y+gTextSize;
+            if (!entry) {
+                var textWidth = Math.round(ctx.measureText(text).width);
+                var oc    = document.createElement('canvas');
+                oc.width  = textWidth + CACHE_PAD * 2;
+                oc.height = gTextSize  + CACHE_PAD * 2;
+                var octx  = oc.getContext('2d');
+                octx.font         = FONT;
+                octx.textBaseline = "top";
+                octx.textAlign    = "left";
+                if (doGrey===undefined) {
+                    octx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+                    octx.lineWidth   = 5;
+                    octx.miterLimit  = 2;
+                    octx.fillStyle   = "rgba(0,0,0,0.8)";
+                    octx.shadowBlur  = 6;
+                    octx.shadowColor = "white";
+                    octx.strokeText(text, CACHE_PAD, CACHE_PAD);
+                    octx.fillText  (text, CACHE_PAD, CACHE_PAD);
+                } else {
+                    octx.fillStyle = self.isLight() ? "rgba(0,0,0,1.0)" : "rgba(255,255,255,1.0)";
+                    octx.fillText(text, CACHE_PAD, CACHE_PAD);
+                }
+                entry = { canvas: oc, textWidth: textWidth };
+                self._labelCache[cacheKey] = entry;
+            }
+
+            // center label on origX, align top to y (matching original behaviour)
+            var x = origX - Math.round(entry.textWidth * 0.5);
 
             // don't draw labels where the midpoint is off-screen
             if (x<0 || y<0 || x>winWidth || y>winHeight) {
@@ -1742,11 +1757,9 @@ function MaxPlot(div, top, left, width, height, args) {
                 continue;
             }
 
+            ctx.drawImage(entry.canvas, x - CACHE_PAD, y - CACHE_PAD);
 
-            ctx.strokeText(text,x,y);
-            ctx.fillText(text,x,y);
-
-            bboxArr.push( [textX1-addMargin, textY1-addMargin, textX2+addMargin, textY2+addMargin] );
+            bboxArr.push( [x-addMargin, y-addMargin, x+entry.textWidth+addMargin, y+gTextSize+addMargin] );
         }
         ctx.restore();
         if(DEBUG) console.timeEnd("labels");
