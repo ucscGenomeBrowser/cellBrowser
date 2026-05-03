@@ -4595,6 +4595,7 @@ var cellbrowser = function() {
 
        var rendConf = makeRendConf(db.conf, db.conf.sampleCount);
        renderer.initPlot(rendConf);
+       renderer.clear(); // remove stale image from previous dataset while new one loads
 
        if (db.conf.showLabels===false || db.conf.labelField===undefined || db.conf.labelField===null) {
            renderer.setLabelField(null);
@@ -5035,19 +5036,15 @@ var cellbrowser = function() {
             keyName = "color";
         var rows = legend.rows;
         var palIdx = 0;
-        var hasNan = false;
         for (let i = 0; i < rows.length; i++) {
             var colorVal = null;
             var legendRow = rows[i];
-            // any meta legend with a "special" value, so 0 or empty gets grey
-            if ((i==0 && legendRow.label == "0" && legend.type=="expr" && !hasNan) || 
+            // special bins (noExpr=0, nan) always get the null color regardless of position
+            if ((legendRow.strKey === "noExpr" && legend.type=="expr") ||
                 (likeEmptyString(legendRow.label) && legend.type=="meta")) {
                 colorVal = cNullColor;
-            // gene expression diagrams: grey if NA
-            } else if ((legendRow.label == "NaN" && legend.type=="expr")) {
-                //legendRow.label = "NaN";
+            } else if (legendRow.strKey === "nan" && legend.type=="expr") {
                 colorVal = cNullColor;
-                hasNan = true;
             } else if (colors) {
                 colorVal = colors[palIdx];
                 palIdx++;
@@ -5076,14 +5073,10 @@ var cellbrowser = function() {
         // do not get a color from the palette, e.g. "Unknown" and "0" rows
         //var n = rows.length;
         var n = rows.length;
-        var hasSpecialBin = false;
         for (var row of rows) {
-            if (row.strKey==="noExpr" || row.strKey=="NaN")
-                hasSpecialBin = true;
+            if (row.strKey === "noExpr" || row.strKey === "nan")
+                n--;
         }
-
-        if (hasSpecialBin)
-            n--;
 
         var pal = null;
         var usePredefined = false;
