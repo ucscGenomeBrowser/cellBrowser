@@ -73,6 +73,8 @@ var cellbrowser = function() {
         // it's a global variable as the dialog is not a class (yet?) and it's the only piece of data
         // it is a subset of dataset.json , e.g. name, description, cell count, etc.
 
+    var gSearchServerAvailable = null; // null=unknown, true=server present, false=use local fallback
+
     // depending on the type of data, single cell or bulk RNA-seq, we call a circle a
     // "sample" or a "cell". This will adapt help menus, menus, etc.
     var gSampleDesc = "cell";
@@ -1220,6 +1222,7 @@ var cellbrowser = function() {
             let sourceStr = getFacetString(dataset, "sources");
 
             var line = "<a id='tpDatasetButton_"+i+"' "+
+                "data-name='"+dataset.name+"' "+
                 "data-body='"+bodyPartStr+"' "+
                 "data-dis='"+disStr+"' "+
                 "data-org='"+orgStr+"' "+
@@ -1292,6 +1295,13 @@ var cellbrowser = function() {
             valLabels[key] = label;
         }
         return Object.entries(valLabels);
+    }
+
+    function probeSearchServer(onDone) {
+        if (gSearchServerAvailable !== null) { onDone(gSearchServerAvailable); return; }
+        $.ajax({ url: "/api/search", method: "HEAD" })
+            .done(function() { gSearchServerAvailable = true;  onDone(true); })
+            .fail(function() { gSearchServerAvailable = false; onDone(false); });
     }
 
     function filterDatasetsDom() {
@@ -1389,12 +1399,13 @@ var cellbrowser = function() {
             /* build html for a faceting filter */
             if (filterVals.length==0)
                 return false;
-            html.push("<span style='margin-right:5px'>"+filterLabel+":</span>");
+            html.push("<div style='min-width:0'>");
+            html.push("<div style='margin-bottom:2px; font-size:12px; color:#555'>"+filterLabel+"</div>");
             let selPar = getVarSafe(urlVar);
             if (selPar && selPar!=="")
                 filtList = selPar.split("|");
             buildComboBox(html, comboId, filterVals, filtList, comboLabel, 200, {multi:true});
-            html.push("&nbsp;&nbsp;");
+            html.push("</div>");
             return true;
         }
 
@@ -1462,6 +1473,50 @@ var cellbrowser = function() {
             filterDatasetsDom();
         }
 
+        function applySearchResults(nameSet) {
+            var matchCount = 0;
+            $(".tpListItem").each(function() {
+                if (this.getAttribute("data-body") === "summary") return;
+                var name = this.getAttribute("data-name");
+                if (name && nameSet[name] !== undefined) {
+                    this.style.display = "";
+                    matchCount++;
+                } else {
+                    this.style.display = "none";
+                }
+            });
+            $("#tpDatasetCount").text("(" + matchCount + " datasets match)");
+        }
+
+        function runServerSearch(q) {
+            $.getJSON("/api/search", { q: q }, function(results) {
+                var nameSet = {};
+                results.forEach(function(r) { nameSet[r.name] = r.score; });
+                applySearchResults(nameSet);
+            });
+        }
+
+        function runLocalSearch(q) {
+            var lq = q.toLowerCase();
+            var nameSet = {};
+            for (var i = 0; i < datasetList.length; i++) {
+                var ds = datasetList[i];
+                if (ds.isSummary) continue;
+                var hay = [
+                    ds.shortLabel || "",
+                    (ds.organisms || []).join(" "),
+                    (ds.body_parts || []).join(" "),
+                    (ds.diseases || []).join(" "),
+                    (ds.tags || []).join(" "),
+                    ds.lab || "",
+                    ds.submitter || ""
+                ].join(" ").toLowerCase();
+                if (hay.indexOf(lq) !== -1)
+                    nameSet[ds.name] = 1;
+            }
+            applySearchResults(nameSet);
+        }
+
         // -- end inline functions
 
         gOpenDataset = openDsInfo;
@@ -1512,18 +1567,28 @@ var cellbrowser = function() {
             if (bodyParts.length!==0 || diseases.length!==0 || organisms.length!==0 || projects.length!==0 || domains.length!==0 || lifeStages.length!==0 || sources.length!==0)
                 doFilters = true;
 
+            noteLines.push("<div style='margin-bottom:6px; display:flex; align-items:center; gap:8px'>" +
+                "<input id='tpDatasetSearch' type='search' placeholder='Search datasets...' " +
+                "style='width:250px; padding:4px 8px; font-size:13px; border:1px solid #ccc; border-radius:3px'>" +
+                "<span id='tpDatasetCount' style='white-space:nowrap; color:#666; font-size:12px'></span>" +
+                "</div>");
+
             if (doFilters) {
-                noteLines.push("<div style='margin-right: 10px; font-weight: bold'>Filters: <span id='tpDatasetCount'></span></div>");
+                noteLines.push("<details id='tpFilterDetails' style='margin-bottom:6px'>" +
+                    "<summary style='cursor:pointer; font-weight:bold; color:#444; padding:2px 0; list-style:none; display:flex; align-items:center'>" +
+                    "<span class='tpFilterArrow' style='display:inline-block; margin-right:5px; font-size:10px'>&#9654;</span>Filters</summary>" +
+                    "<div style='display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding-top:8px'>");
 
                 buildFilter(noteLines, bodyParts, "Organ", "body", "tpBodyCombo", "select organs...");
                 buildFilter(noteLines, diseases, "Disease", "dis", "tpDisCombo", "select diseases...");
                 buildFilter(noteLines, organisms, "Species", "org", "tpOrgCombo", "select species...");
                 buildFilter(noteLines, projects, "Project", "proj", "tpProjCombo", "select project...");
-                noteLines.push("<div style='height:4px'></div>");
                 buildFilter(noteLines, lifeStages, "Life Stages", "stage", "tpStageCombo", "select stage...");
                 buildFilter(noteLines, domains, "Scient. Domain", "dom", "tpDomCombo", "select domain...");
                 buildFilter(noteLines, assays, "Assay", "assay", "tpAssayCombo", "select assay...");
                 buildFilter(noteLines, sources, "Source DB", "source", "tpSourceCombo", "select db...");
+
+                noteLines.push("</div></details>");
             }
         }
 
@@ -1661,7 +1726,28 @@ var cellbrowser = function() {
             activateFilterCombo(domains, "tpDomCombo");
             activateFilterCombo(assays, "tpAssayCombo");
             activateFilterCombo(sources, "tpSourceCombo");
+            $('#tpFilterDetails').on('toggle', function() {
+                $(this).find('.tpFilterArrow').css('transform', this.open ? 'rotate(90deg)' : '');
+            });
         }
+
+        var searchTimer = null;
+        probeSearchServer(function(hasServer) {
+            $("#tpDatasetSearch").on("input", function() {
+                var q = $(this).val().trim();
+                clearTimeout(searchTimer);
+                if (q === "") {
+                    filterDatasetsDom();
+                    return;
+                }
+                searchTimer = setTimeout(function() {
+                    if (hasServer)
+                        runServerSearch(q);
+                    else
+                        runLocalSearch(q);
+                }, 200);
+            });
+        });
 
         $('.tpBackLink').click( function(ev) {
             let openDatasetName = $(ev.target).attr('data-open-dataset');
@@ -2225,6 +2311,10 @@ var cellbrowser = function() {
 
     function onSelectNameClick() {
         /* Edit > Name selection */
+        if (renderer.getSelection().length === 0) {
+            alert("No "+gSampleDesc+"s are selected. Please select "+gSampleDesc+"s before annotating.");
+            return;
+        }
         let title = "Annotate selected "+gSampleDesc+"s";
         let htmls = [];
         htmls.push('<p>There are '+renderer.getSelection().length+' '+gSampleDesc+' in the current selection.</p>');
