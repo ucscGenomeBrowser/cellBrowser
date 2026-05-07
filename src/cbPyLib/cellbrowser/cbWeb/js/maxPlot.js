@@ -166,6 +166,8 @@ function MaxPlot(div, top, left, width, height, args) {
             this.childPlot.setLightMode(mode);
         }
 
+        self._labelCache = null; // label colors changed, invalidate bitmap cache
+
         this.drawDots();
     }
 
@@ -247,6 +249,20 @@ function MaxPlot(div, top, left, width, height, args) {
             selectDiv.style.display  = "none";
             selectDiv.style.pointerEvents = "none";
             self.div.appendChild(selectDiv);
+
+            var lassoCanvas = document.createElement('canvas');
+            lassoCanvas.style.position = "absolute";
+            lassoCanvas.style.top = "0px";
+            lassoCanvas.style.left = "0px";
+            lassoCanvas.style.width = width + "px";
+            lassoCanvas.style.height = height + "px";
+            lassoCanvas.style.pointerEvents = "none";
+            lassoCanvas.style.display = "none";
+            lassoCanvas.width = width;
+            lassoCanvas.height = height;
+            self.div.appendChild(lassoCanvas);
+            self.lassoCanvas = lassoCanvas;
+            self.lassoCtx = lassoCanvas.getContext("2d");
 
             // callbacks when user clicks or hovers over label or cell
             self.onLabelClick = null; // called on label click, args: text of label and event
@@ -377,8 +393,9 @@ function MaxPlot(div, top, left, width, height, args) {
         self.doDrawLabels = true;  // should cluster labels be drawn?
         self.initPort(args);
 
-        // mouse drag mode: can be "select", "move" or "zoom"
+        // mouse drag mode: can be "select", "move", "zoom" or "lasso"
         self.dragMode = "select";
+        self.lassoPath = [];
 
         // for zooming and panning
         self.mouseDownX = null;
@@ -391,6 +408,9 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // the background image for spatial mode
         self.background = null;
+
+        // label bitmap cache: { key → {canvas, textWidth} }; null = needs rebuild
+        self._labelCache = null;
 
         self.activateMode(getAttr(args, "mode", "move"));
 
@@ -1039,14 +1059,30 @@ function MaxPlot(div, top, left, width, height, args) {
         var zoomButton = createButton(bSize, bSize, "mpIconModeZoom", "Zoom-to-rectangle mode. Keyboard: Windows/Command or z", null, "img/zoom.png", 4, 4);
         zoomButton.addEventListener ('click', function() { self.activateMode("zoom")}, false);
 
+        var lassoButton = createButton(bSize, bSize, "mpIconModeLasso",
+            "Lasso select mode: draw a freehand shape to select cells",
+            null, "img/lasso.png", 0, 4, true);
+        lassoButton.addEventListener('click', function() { self.activateMode("lasso"); }, false);
+
+        var clusterSelectButton = createButton(bSize, bSize, "mpIconModeClusterSelect",
+            "Cluster select mode: click a cell or label to select all cells in its cluster. Shift+click to add clusters to selection.",
+            null, "img/marker.png", 0, 4, true);
+        clusterSelectButton.addEventListener('click', function() {
+            self.activateMode("clusterSelect");
+        }, false);
+
         self.icons = {};
         self.icons["move"] = moveButton;
         self.icons["select"] = selectButton;
+        self.icons["lasso"] = lassoButton;
+        self.icons["clusterSelect"] = clusterSelectButton;
         self.icons["zoom"] = zoomButton;
 
         //ctrlDiv.innerHTML = htmls.join("");
         ctrlDiv.appendChild(moveButton);
         ctrlDiv.appendChild(selectButton);
+        ctrlDiv.appendChild(lassoButton);
+        ctrlDiv.appendChild(clusterSelectButton);
         ctrlDiv.appendChild(zoomButton);
 
         self.div.appendChild(ctrlDiv);
@@ -1656,31 +1692,17 @@ function MaxPlot(div, top, left, width, height, args) {
             return undefined;
 
         if(DEBUG) console.time("labels");
+
+        // Lazy-init the bitmap cache on first use after a reset.
+        // Key: "<text>|<n|g>|<lightMode>" so light/dark and grey-annot variants are separate.
+        if (!self._labelCache) self._labelCache = {};
+
+        // We need ctx.font set for measureText even though we draw via drawImage below.
+        const FONT = "bold "+gTextSize+"px Sans-serif";
+        const CACHE_PAD = 8; // padding around each glyph to give room for shadow/stroke bleed
+
         ctx.save();
-        ctx.font = "bold "+gTextSize+"px Sans-serif"
-        ctx.globalAlpha = 1.0;
-
-        //ctx.strokeStyle = '#EEEEEE';
-        if (doGrey===undefined) {
-            ctx.strokeStyle = "rgba(200, 200, 200, 0.3)";
-            ctx.lineWidth = 5;
-            ctx.miterLimit =2;
-        }
-        //else
-            //ctx.strokeStyle = "rgba(20, 20, 20, 0.3)";
-
-        ctx.textBaseline = "top";
-
-        if (doGrey===undefined) {
-            ctx.fillStyle = "rgba(0,0,0,0.8)";
-            ctx.shadowBlur=6;
-            ctx.shadowColor="white";
-        }
-        else {
-            ctx.fillStyle = self.isLight() ? "rgba(0,0,0,1.0)" : "rgba(255,255,255,1.0)";
-        }
-
-        ctx.textAlign = "left";
+        ctx.font = FONT;
 
         var addMargin = 1; // how many pixels to extend the bbox around the text, make clicking easier
         var bboxArr = []; // array of click hit boxes
@@ -1692,18 +1714,42 @@ function MaxPlot(div, top, left, width, height, args) {
                 continue;
             }
 
-            var x = coord[0];
-            var y = coord[1];
-            var text = coord[2];
+            var origX = coord[0];
+            var y     = coord[1];
+            var text  = coord[2];
 
-            var textWidth = Math.round(ctx.measureText(text).width);
-            // move x to the left, so text is centered on x
-            x = x - Math.round(textWidth*0.5);
+            // --- bitmap cache lookup / build ---
+            var cacheKey = text + "|" + (doGrey ? "g" : "n") + "|" + self.lightMode;
+            var entry = self._labelCache[cacheKey];
 
-            var textX1 = x;
-            var textY1 = y;
-            var textX2 = Math.round(x+textWidth);
-            var textY2 = y+gTextSize;
+            if (!entry) {
+                var textWidth = Math.round(ctx.measureText(text).width);
+                var oc    = document.createElement('canvas');
+                oc.width  = textWidth + CACHE_PAD * 2;
+                oc.height = gTextSize  + CACHE_PAD * 2;
+                var octx  = oc.getContext('2d');
+                octx.font         = FONT;
+                octx.textBaseline = "top";
+                octx.textAlign    = "left";
+                if (doGrey===undefined) {
+                    octx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+                    octx.lineWidth   = 5;
+                    octx.miterLimit  = 2;
+                    octx.fillStyle   = "rgba(0,0,0,0.8)";
+                    octx.shadowBlur  = 6;
+                    octx.shadowColor = "white";
+                    octx.strokeText(text, CACHE_PAD, CACHE_PAD);
+                    octx.fillText  (text, CACHE_PAD, CACHE_PAD);
+                } else {
+                    octx.fillStyle = self.isLight() ? "rgba(0,0,0,1.0)" : "rgba(255,255,255,1.0)";
+                    octx.fillText(text, CACHE_PAD, CACHE_PAD);
+                }
+                entry = { canvas: oc, textWidth: textWidth };
+                self._labelCache[cacheKey] = entry;
+            }
+
+            // center label on origX, align top to y (matching original behaviour)
+            var x = origX - Math.round(entry.textWidth * 0.5);
 
             // don't draw labels where the midpoint is off-screen
             if (x<0 || y<0 || x>winWidth || y>winHeight) {
@@ -1711,11 +1757,9 @@ function MaxPlot(div, top, left, width, height, args) {
                 continue;
             }
 
+            ctx.drawImage(entry.canvas, x - CACHE_PAD, y - CACHE_PAD);
 
-            ctx.strokeText(text,x,y);
-            ctx.fillText(text,x,y);
-
-            bboxArr.push( [textX1-addMargin, textY1-addMargin, textX2+addMargin, textY2+addMargin] );
+            bboxArr.push( [x-addMargin, y-addMargin, x+entry.textWidth+addMargin, y+gTextSize+addMargin] );
         }
         ctx.restore();
         if(DEBUG) console.timeEnd("labels");
@@ -3434,6 +3478,44 @@ function MaxPlot(div, top, left, width, height, args) {
         self._selUpdate();
     };
 
+    this.selectInLasso = function(path) {
+        /* select all cells whose center falls inside the polygon defined by path.
+           path is an array of [x, y] canvas-pixel coordinate pairs. */
+        var poly;
+        if (this.usesWebGL()) {
+            poly = path.map(function(pt) {
+                var px = pt[0], py = pt[1];
+                var flipY = self.canvas.height - py;
+                var glX = px / self.canvas.width * 2 - 1;
+                var glY = flipY / self.canvas.height * 2 - 1;
+                return self.port.projection.getCoordinates(glX, glY);
+            });
+        } else {
+            poly = path;
+        }
+
+        function pointInPoly(x, y) {
+            var inside = false;
+            for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+                var xi = poly[i][0], yi = poly[i][1];
+                var xj = poly[j][0], yj = poly[j][1];
+                if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi))
+                    inside = !inside;
+            }
+            return inside;
+        }
+
+        var coords = this.usesWebGL() ? self.coords.gl : self.coords.px;
+        for (var i = 0; i < coords.length / 2; i++) {
+            var x = coords[2 * i];
+            var y = coords[2 * i + 1];
+            if (isHidden(x, y, i)) continue;
+            if (pointInPoly(x, y))
+                self.selCells.add(i);
+        }
+        self._selUpdate();
+    };
+
     this.hasSelected = function() {
         return (self.selCells.size!==0)
     }
@@ -3842,7 +3924,21 @@ function MaxPlot(div, top, left, width, height, args) {
                 const yDiff = (self.usesWebGL() ? self.lastMouseY : self.mouseDownY) - clientY;
                 self.panBy(xDiff, yDiff);
             }
-            else  {
+            else if (self.dragMode === "lasso") {
+               var cx = clientX - self.left;
+               var cy = clientY - self.top;
+               self.lassoPath.push([cx, cy]);
+               var lctx = self.lassoCtx;
+               lctx.clearRect(0, 0, self.lassoCanvas.width, self.lassoCanvas.height);
+               lctx.beginPath();
+               lctx.strokeStyle = "rgba(0,0,0,0.8)";
+               lctx.lineWidth = 1.5;
+               lctx.setLineDash([4, 3]);
+               lctx.moveTo(self.lassoPath[0][0], self.lassoPath[0][1]);
+               for (var k = 1; k < self.lassoPath.length; k++)
+                   lctx.lineTo(self.lassoPath[k][0], self.lassoPath[k][1]);
+               lctx.stroke();
+            } else  {
                // zooming or selecting
                var forceAspect = false;
                var anyKey = (ev.metaKey || ev.altKey || ev.shiftKey);
@@ -3920,6 +4016,18 @@ function MaxPlot(div, top, left, width, height, args) {
        var x2 = clientX - canvasLeft;
        var y2 = clientY - canvasTop;
 
+       // lasso select: close polygon and select enclosed cells
+       if (self.dragMode === "lasso" && self.lassoPath.length > 2) {
+           self.selectClear(true);
+           self.selectInLasso(self.lassoPath);
+           self.lassoPath = [];
+           self.lassoCtx.clearRect(0, 0, self.lassoCanvas.width, self.lassoCanvas.height);
+           self.mouseDownX = null;
+           self.mouseDownY = null;
+           self.drawDots();
+           return;
+       }
+
        // user did not move the mouse, so this is a click
        if (mouseDidNotMove) {
             // recognize a double click -> zoom
@@ -3928,6 +4036,28 @@ function MaxPlot(div, top, left, width, height, args) {
                 self.lastClick = [-1,-1];
             } else {
                 self.lastClick = [x2, y2];
+            }
+
+            if (self.dragMode === "clusterSelect") {
+                var clusterCellIds = self.cellsAt(x2, y2);
+                if (clusterCellIds !== null && clusterCellIds.length > 0) {
+                    if (!ev.shiftKey)
+                        self.selectClear(true);
+                    var colIdx = self.col.arr[clusterCellIds[0]];
+                    self.selectByColor(colIdx);
+                    self.drawDots();
+                } else {
+                    var csLabelInfo = self.labelAt(x2, y2);
+                    if (csLabelInfo !== null && self.doDrawLabels && self.onLabelClick !== null)
+                        self.onLabelClick(csLabelInfo[0], csLabelInfo[1], ev);
+                    else {
+                        self.selectClear();
+                        self.drawDots();
+                    }
+                }
+                self.mouseDownX = null;
+                self.mouseDownY = null;
+                return;
             }
 
             var labelInfo = self.labelAt(x2, y2);
@@ -4145,6 +4275,10 @@ function MaxPlot(div, top, left, width, height, args) {
             cursor = "zoom-in"
         else if (modeName=="select")
             cursor = 'crosshair';
+        else if (modeName === "lasso")
+            cursor = 'crosshair';
+        else if (modeName === "clusterSelect")
+            cursor = 'crosshair';
         //else
             //cursor= 'default';
 
@@ -4157,7 +4291,18 @@ function MaxPlot(div, top, left, width, height, args) {
             self.icons["move"].style.backgroundColor = this.isLight() ? gButtonBackground : gButtonDarkBackground;
             self.icons["zoom"].style.backgroundColor = this.isLight() ? gButtonBackground : gButtonDarkBackground;
             self.icons["select"].style.backgroundColor = this.isLight() ? gButtonBackground : gButtonDarkBackground;
+            if (self.icons["lasso"])
+                self.icons["lasso"].style.backgroundColor = this.isLight() ? gButtonBackground : gButtonDarkBackground;
+            if (self.icons["clusterSelect"])
+                self.icons["clusterSelect"].style.backgroundColor = this.isLight() ? gButtonBackground : gButtonDarkBackground;
             self.icons[modeName].style.backgroundColor = this.isLight() ? gButtonBackgroundClicked : gButtonDarkBackgroundClicked;
+        }
+        if (self.lassoCanvas) {
+            self.lassoCanvas.style.display = (modeName === "lasso") ? "block" : "none";
+            if (modeName !== "lasso") {
+                self.lassoPath = [];
+                self.lassoCtx.clearRect(0, 0, self.lassoCanvas.width, self.lassoCanvas.height);
+            }
         }
         if (self.childPlot)
             self.childPlot.activateMode(modeName);
