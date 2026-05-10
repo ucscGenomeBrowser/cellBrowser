@@ -7094,6 +7094,54 @@ var cellbrowser = function() {
         $("#"+id).trigger("chosen:updated");
     }
 
+    function updateCollectionComboNested(id, gpConf, currentDsName) {
+        /* For datasets 3+ levels deep: build an optgroup dropdown showing all
+           subcollections under the grandparent, each with their leaf datasets.
+           Fires parallel requests (one per subcollection). */
+        var subColls = gpConf.datasets;
+        var total = subColls.length;
+        var loaded = 0;
+        var collData = {};
+
+        function tryRender() {
+            loaded++;
+            if (loaded < total) return;
+
+            var htmls = [];
+            for (var i = 0; i < subColls.length; i++) {
+                var sc = subColls[i];
+                var leaves = collData[sc.name];
+                if (!leaves || leaves.length === 0) continue;
+
+                htmls.push("<optgroup label='" + sc.shortLabel + "'>");
+                for (var j = 0; j < leaves.length; j++) {
+                    var ds = leaves[j];
+                    var selStr = (ds.name === currentDsName) ? " selected" : "";
+                    var val = ds.name + "?" + ds.md5;
+                    htmls.push("<option value='" + val + "'" + selStr + ">"
+                        + ds.shortLabel + "</option>");
+                }
+                htmls.push("</optgroup>");
+            }
+            $('#' + id).html(htmls.join(""));
+            $("#" + id).trigger("chosen:updated");
+        }
+
+        for (var i = 0; i < subColls.length; i++) {
+            (function(sc) {
+                if (sc.isCollection) {
+                    loadCollectionInfo(sc.name, function(conf) {
+                        collData[sc.name] = conf.datasets || [];
+                        tryRender();
+                    });
+                } else {
+                    collData[sc.name] = [sc];
+                    tryRender();
+                }
+            })(subColls[i]);
+        }
+    }
+
     /* ----- PEAK LIST START ----- */
 
     function buildPeakList(htmls) {
@@ -8836,11 +8884,14 @@ var cellbrowser = function() {
 
         var nameParts = dataset.name.split("/");
         var parentName = null;
+        var grandparentName = null;
         if (nameParts.length > 1) {
             //buildCollectionCombo(htmls, "tpCollectionCombo", 330, nextLeft, 0);
             buildCollectionCombo(htmls, "tpCollectionCombo", 330, null, 0);
             nameParts.pop();
             parentName = nameParts.join("/");
+            if (nameParts.length > 1)
+                grandparentName = nameParts.slice(0, nameParts.length - 1).join("/");
         }
 
         htmls.push("</div>");
@@ -8864,11 +8915,17 @@ var cellbrowser = function() {
 
         activateCombobox("tpLayoutCombo", layoutComboWidth);
 
-        if (parentName!==null) {
+        if (parentName !== null) {
             activateCombobox("tpCollectionCombo", collectionComboWidth);
-            loadCollectionInfo( parentName, function(dataset) {
-                updateCollectionCombo("tpCollectionCombo", dataset);
-            });
+            if (grandparentName !== null) {
+                loadCollectionInfo(grandparentName, function(gpConf) {
+                    updateCollectionComboNested("tpCollectionCombo", gpConf, db.conf.name);
+                });
+            } else {
+                loadCollectionInfo(parentName, function(parentConf) {
+                    updateCollectionCombo("tpCollectionCombo", parentConf);
+                });
+            }
         }
 
         // selective gene or ATAC Color by search box
