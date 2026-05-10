@@ -1473,16 +1473,48 @@ var cellbrowser = function() {
             filterDatasetsDom();
         }
 
-        function applySearchResults(nameSet) {
+        function applySearchResults(nameSet, childMap) {
+            childMap = childMap || {};
+            $(".tpSearchChild").remove();
             var matchCount = 0;
             $(".tpListItem").each(function() {
                 if (this.getAttribute("data-body") === "summary") return;
                 var name = this.getAttribute("data-name");
-                if (name && nameSet[name] !== undefined) {
-                    this.style.display = "";
-                    matchCount++;
-                } else {
-                    this.style.display = "none";
+                var shown = name && (nameSet[name] !== undefined || childMap[name]);
+                this.style.display = shown ? "" : "none";
+                if (!shown) return;
+                matchCount++;
+                if (childMap[name]) {
+                    var children = childMap[name];
+                    var n = children.length;
+                    var $details = $('<details class="tpSearchChild" style="border-left:3px solid #ddd; margin:0 0 2px 8px; padding-left:8px"></details>');
+                    var $summary = $('<summary style="cursor:pointer; padding:4px 0; color:#555; font-size:12px; list-style:none; display:flex; align-items:center; gap:6px">' +
+                        '<span class="badge" style="background:#888">' + n + '</span>' +
+                        ' matching sub-dataset' + (n > 1 ? 's' : '') +
+                        ' <span class="tpChildArrow" style="font-size:10px; display:inline-block">&#9654;</span>' +
+                        '</summary>');
+                    var $childList = $('<div style="padding-top:4px"></div>');
+                    children.forEach(function(child) {
+                        var label = child.shortLabel || child.name.split('/').pop();
+                        var $item = $('<a role="button" class="list-group-item tpDatasetButton" style="padding:4px 8px; font-size:13px"></a>')
+                            .html('<button type="button" class="btn btn-primary btn-xs load-dataset">Open</button>' + label);
+                        $item.on('click', function() {
+                            var info = { name: child.name, shortLabel: child.shortLabel,
+                                         md5: child.md5 || '', hasFiles: ["datasetDesc"] };
+                            openDatasetLoadPane(info);
+                        });
+                        $item.find('button').on('click', function(ev) {
+                            ev.stopPropagation();
+                            loadDataset(child.name, true, child.md5);
+                            $(".ui-dialog-content").dialog("close");
+                        });
+                        $childList.append($item);
+                    });
+                    $details.append($summary).append($childList);
+                    $details.on('toggle', function() {
+                        $(this).find('.tpChildArrow').css('transform', this.open ? 'rotate(90deg)' : '');
+                    });
+                    $(this).after($details);
                 }
             });
             $("#tpDatasetCount").text("(" + matchCount + " datasets match)");
@@ -1491,8 +1523,15 @@ var cellbrowser = function() {
         function runServerSearch(q) {
             $.getJSON("/api/search", { q: q }, function(results) {
                 var nameSet = {};
-                results.forEach(function(r) { nameSet[r.name] = r.score; });
-                applySearchResults(nameSet);
+                var childMap = {};
+                results.forEach(function(r) {
+                    nameSet[r.name] = r.score;
+                    if (r.parent) {
+                        if (!childMap[r.parent]) childMap[r.parent] = [];
+                        childMap[r.parent].push(r);
+                    }
+                });
+                applySearchResults(nameSet, childMap);
             });
         }
 
@@ -1737,6 +1776,7 @@ var cellbrowser = function() {
                 var q = $(this).val().trim();
                 clearTimeout(searchTimer);
                 if (q === "") {
+                    $(".tpSearchChild").remove();
                     filterDatasetsDom();
                     return;
                 }
