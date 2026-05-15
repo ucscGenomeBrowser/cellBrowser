@@ -11846,8 +11846,8 @@ $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
                 var datasetName = hostParts[0];
                 hostParts.shift();
                 myUrl.hostname = hostParts.join(".");
-                var newUrl = myUrl+"?ds="+datasetName;
-                window.location.replace(newUrl);
+                myUrl.search = "ds="+datasetName;
+                window.location.replace(myUrl.href);
                 return true;
             }
         return false;
