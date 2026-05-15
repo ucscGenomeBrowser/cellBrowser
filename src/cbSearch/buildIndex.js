@@ -45,6 +45,7 @@ function loadDatasets(rootConf) {
         docs.push({
             id:           ds.name,
             name:         ds.name,
+            parent:       ds.name.indexOf('/') !== -1 ? ds.name.split('/')[0] : '',
             shortLabel:   ds.shortLabel || conf.shortLabel || '',
             md5:          ds.md5 || conf.md5 || '',
             // publication
@@ -95,7 +96,7 @@ function buildIndex() {
                  'geo_series', 'arrayexpress', 'sra_study', 'bioproject',
                  'ega_study', 'ega_dataset', 'hca_dcp', 'zenodo', 'dbgap',
                  'pmid', 'pmcid', 'doi', 'tags'],
-        storeFields: ['name', 'shortLabel', 'md5'],
+        storeFields: ['name', 'shortLabel', 'md5', 'parent'],
         searchOptions: {
             boost:  { title: 3, shortLabel: 3,
                       geo_series: 2, arrayexpress: 2, sra_study: 2, bioproject: 2,

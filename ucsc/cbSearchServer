@@ -1,0 +1,81 @@
+#!/bin/bash
+# Manage the Cell Browser dataset search server (Node.js, port 3001)
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SERVER="$SCRIPT_DIR/../src/cbSearch/server.js"
+PORT=3001
+LOG=/tmp/cbSearch.log
+PIDFILE=/tmp/cbSearch.pid
+
+get_pid() {
+    lsof -ti:$PORT 2>/dev/null
+}
+
+cmd="${1:-help}"
+
+case "$cmd" in
+    start)
+        if pid=$(get_pid); then
+            echo "Server already running (PID $pid)"
+            exit 0
+        fi
+        cd "$(dirname "$SERVER")"
+        nohup node server.js > "$LOG" 2>&1 &
+        pid=$!
+        # wait up to 5s for the process to stay alive and bind to the port
+        for i in $(seq 1 5); do
+            sleep 1
+            if ! kill -0 "$pid" 2>/dev/null; then
+                echo "Process exited immediately. Check $LOG"
+                exit 1
+            fi
+            if get_pid > /dev/null; then
+                echo "Started (PID $pid) — log: $LOG"
+                exit 0
+            fi
+        done
+        echo "Started (PID $pid) but port $PORT not bound yet — check $LOG"
+        ;;
+    stop)
+        if pid=$(get_pid); then
+            kill "$pid"
+            echo "Stopped (PID $pid)"
+            rm -f "$PIDFILE"
+        else
+            echo "Server is not running"
+        fi
+        ;;
+    restart)
+        "$0" stop
+        sleep 1
+        "$0" start
+        ;;
+    status)
+        if pid=$(get_pid); then
+            echo "Running (PID $pid)"
+        else
+            echo "Not running"
+        fi
+        ;;
+    log)
+        tail -f "$LOG"
+        ;;
+    rebuild)
+        if ! get_pid > /dev/null; then
+            echo "Server is not running — start it first"
+            exit 1
+        fi
+        curl -s -X POST "http://localhost:$PORT/rebuild"
+        echo
+        ;;
+    *)
+        echo "Usage: $(basename "$0") {start|stop|restart|status|log|rebuild}"
+        echo ""
+        echo "  start    Start the search server in the background"
+        echo "  stop     Stop the search server"
+        echo "  restart  Stop then start"
+        echo "  status   Show whether the server is running"
+        echo "  log      Tail the server log"
+        echo "  rebuild  Trigger a search index rebuild (server must be running)"
+        ;;
+esac

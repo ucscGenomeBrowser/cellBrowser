@@ -152,7 +152,7 @@ function MaxPlot(div, top, left, width, height, args) {
         // Adjust the canvas' colors
         /** @type {HTMLCanvasElement} */
         const canvas = this.canvas;
-        if(this.usesWebGL()) {
+        if(self.usesWebGL()) {
             if(canvas.style.backgroundColor !== "transparent") {
                 // All webGL canvas should be transparent, so this should not be called
                 canvas.style.backgroundColor = this.isLight() ? "black" : "white";
@@ -179,8 +179,6 @@ function MaxPlot(div, top, left, width, height, args) {
         self.mode = defaultDrawMode;
     }
 
-    self.usesWebGL = function() {return !(self.mode === 0 || self.mode === 1)}
-
     this.isLight = function() {return this.lightMode === 1;}
 
     // the rest of the initialization is done at the end of this file,
@@ -206,9 +204,9 @@ function MaxPlot(div, top, left, width, height, args) {
         this.canvDiv = canvDiv;
         div.appendChild(canvDiv);
 
-        if(this.usesWebGL()) [self.bgCtx, self.bgCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, false, 'mpBackgroundCanvas', 1);
+        if(self.usesWebGL()) [self.bgCtx, self.bgCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, false, 'mpBackgroundCanvas', 1);
         [self.ctx, self.canvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, self.usesWebGL(), 'mpCanvas', self.mode);
-        if(this.usesWebGL()) [self.labelCtx, self.labelCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, true, 'mpLabelCanvas', 1);
+        if(self.usesWebGL()) [self.labelCtx, self.labelCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, true, 'mpLabelCanvas', 1);
 
         /* Transparent overlay div used to show the active-screen border in
          * split screen mode. Sits above all canvases via z-index so the
@@ -304,7 +302,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     function isHidden(x, y, i) {
         /* special coords are used for circles that are off-screen or otherwise not visible */
-        if(self.usesWebGL()) {
+        if (self.usesWebGL()) {
             // Check if current cell is hidden, if applicable
             if(i !== undefined) {
                 /** @type {Uint8Array} */
@@ -344,6 +342,9 @@ function MaxPlot(div, top, left, width, height, args) {
         return greyArray;
     }
 
+    this.usesWebGL = function() {
+        return !(self.mode === 0 || self.mode === 1)
+    };
 
     this.initPort = function(args) {
         /* init all viewport related state (zoom, radius, alpha) */
@@ -415,7 +416,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.activateMode(getAttr(args, "mode", "move"));
 
         // If WebGL is being used to draw, initialize its program
-        if(this.usesWebGL()) {
+        if(self.usesWebGL()) {
             this.initWebGLProgram();
         }
     };
@@ -636,9 +637,9 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     this.clear = function() {
-        if(this.usesWebGL()) clearCanvas(this.bgCtx, this.bgCanvas.width, this.bgCanvas.height, false);
-        clearCanvas(self.ctx, self.canvas.width, self.canvas.height, this.usesWebGL());
-        if(this.usesWebGL()) clearCanvas(this.labelCtx, this.labelCanvas.width, this.labelCanvas.height, true);
+        if(self.usesWebGL()) clearCanvas(this.bgCtx, this.bgCanvas.width, this.bgCanvas.height, false);
+        clearCanvas(self.ctx, self.canvas.width, self.canvas.height, self.usesWebGL());
+        if(self.usesWebGL()) clearCanvas(this.labelCtx, this.labelCanvas.width, this.labelCanvas.height, true);
     };
 
     this.setTitle = function (text) {
@@ -2335,7 +2336,7 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.background===undefined || self.background===null)
             self.background = {};
         self.background.image = img;
-        if (this.usesWebGL()) {
+        if (self.usesWebGL()) {
             self.scaleBackground(self.background, self.port.initZoom, self.port.projection);
         } else if (self.coords) {
             // For canvas-2D, scaleBackground alone isn't enough: setCoords already ran
@@ -2539,7 +2540,7 @@ function MaxPlot(div, top, left, width, height, args) {
      */
     this.bindBuffer = (vec_size, attribute, data, type, normalize = false) => {
         // Safety check: this only makes sense in WebGL space
-        if(!this.usesWebGL()) {
+        if(!self.usesWebGL()) {
             throw new Error("Error: Attempted to bind buffer outside of WebGL drawing mode");
         }
 
@@ -2594,7 +2595,7 @@ function MaxPlot(div, top, left, width, height, args) {
        self.canvas.height = canvHeight;
        self.canvas.width = width;
        self.canvas.style.height = canvHeight+"px";
-       if(this.usesWebGL()) {
+       if(self.usesWebGL()) {
            self.bgCanvas.width = width;
            self.bgCanvas.height = canvHeight;
            self.bgCanvas.style.width = width+"px";
@@ -2660,7 +2661,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.quickResize(width, height);
 
-        if(this.usesWebGL()) {
+        if(self.usesWebGL()) {
             // If we're drawing using WebGL, we have to reset the viewport
             this.ctx.viewport(0, 0, this.canvas.width, this.canvas.height);
         }else {
@@ -2730,7 +2731,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
        var count = 0;
 
-        if(this.usesWebGL()) {
+        if(self.usesWebGL()) {
             count = coords.length / 2;
         } else {
             for (var i = 0; i < coords.length/2; i++) {
@@ -2741,7 +2742,7 @@ function MaxPlot(div, top, left, width, height, args) {
             }
         }
 
-       setStatus(count+ (this.usesWebGL() ? " " : " visible ") + self.gSampleDescription+"s loaded");
+       setStatus(count+ (self.usesWebGL() ? " " : " visible ") + self.gSampleDescription+"s loaded");
 
        if (opts.lines)
            self._setLines(opts["lines"], opts);
@@ -2772,7 +2773,7 @@ function MaxPlot(div, top, left, width, height, args) {
        self.col.arr = colorArr;
 
         // When using WebGL, this involves calculating and binding the color buffer
-        if(this.usesWebGL()) {
+        if(self.usesWebGL()) {
             this.bindColors();
         }
     };
@@ -2794,7 +2795,7 @@ function MaxPlot(div, top, left, width, height, args) {
            $(self.flipBookEl).on("slidestart", onChangeFlipBook);
         }
 
-        if(this.usesWebGL()) {
+        if(self.usesWebGL()) {
             this.bindColors();
         }
     };
@@ -2802,7 +2803,7 @@ function MaxPlot(div, top, left, width, height, args) {
     // If using webGL, calculates what points have what colors.
     // Also calculates depth values, which are related to color
     this.bindColors = function() {
-        if(!this.usesWebGL()) {
+        if(!self.usesWebGL()) {
             return;
         }
 
@@ -2849,7 +2850,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     // Upload the a_Selected buffer to GPU. Called whenever selCells changes.
     this._bindSelected = function() {
-        if(!this.usesWebGL()) return;
+        if(!self.usesWebGL()) return;
         if(!this.coords.selected) return;
         const sel = this.selCells, buf = this.coords.selected;
         for(let i = 0; i < buf.length; i++) buf[i] = sel.has(i) ? 1 : 0;
@@ -2863,7 +2864,7 @@ function MaxPlot(div, top, left, width, height, args) {
         // Zoom factor is calculated differently depending on whether or not WebGL is being used
         let zoomFact;
 
-        if(this.usesWebGL()) {
+        if(self.usesWebGL()) {
             const p = self.port.projection;
             const initSpan = 2;
             const currentSpan = p.width;
@@ -2886,7 +2887,7 @@ function MaxPlot(div, top, left, width, height, args) {
             baseRadius = 0.7;
 
         const newRadius = baseRadius * Math.sqrt(zoomFact) * radiusMult;
-        const radius = this.usesWebGL() ? newRadius : Math.floor(newRadius);
+        const radius = self.usesWebGL() ? newRadius : Math.floor(newRadius);
 
         // the higher the zoom factor, the higher the alpha value
         var zoomFrac = Math.min(1.0, zoomFact/100.0); // zoom as fraction, max is 1.0
@@ -2959,7 +2960,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // Draw background
         // When using WebGL, we use a different canvas and different viewport
-        if(this.usesWebGL()) {
+        if(self.usesWebGL()) {
             this.scaleBackground(self.background, self.port.initZoom, self.port.projection);
             drawBackground(self.bgCtx, self.background);
         } else {
@@ -3000,7 +3001,7 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.coords.lines) {
             if(DEBUG) console.time("draw lines");
             // If we're using webGL, we must scale the lines and draw to a separate canvas
-            if(this.usesWebGL()) {
+            if(self.usesWebGL()) {
                 const projZoom = self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height);
                 self.coords.pxLines = scaleLines(self.coords.lines, projZoom, self.canvas.width, self.canvas.height);
                 drawLines(self.labelCtx, self.coords.pxLines, self.canvas.width, self.canvas.height, self.coords.lineAttrs);
@@ -3031,13 +3032,13 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.doDrawLabels && self.plotLabels && self.plotLabels.length > 0) {
             self.plotPxLabels = scaleLabels(
                 self.plotLabels,
-                this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
+                self.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
                 self.port.radius,
                 self.canvas.width,
                 self.canvas.height
             );
             self.plotLabelBbox = drawLabels(
-                this.usesWebGL() ? this.labelCtx : self.ctx,
+                self.usesWebGL() ? this.labelCtx : self.ctx,
                 self.plotPxLabels,
                 self.canvas.width,
                 self.canvas.height,
@@ -3048,12 +3049,12 @@ function MaxPlot(div, top, left, width, height, args) {
         // draw annotations - look like labels, but cannot be clicked
         self.coords.pxAnnots = scaleLabels(
             self.coords.coordInfo.annots,
-            this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
+            self.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
             self.port.radius,
             self.canvas.width,
             self.canvas.height
         );
-        drawLabels(this.usesWebGL() ? this.labelCtx : self.ctx, self.coords.pxAnnots, self.canvas.width, self.canvas.height, self.port.zoomFact, true);
+        drawLabels(self.usesWebGL() ? this.labelCtx : self.ctx, self.coords.pxAnnots, self.canvas.width, self.canvas.height, self.port.zoomFact, true);
     };
 
     this.cellsAtPixel = function(x, y) {
@@ -3114,7 +3115,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // Sync the child panel (split screen).
         if (self.childPlot) {
-            if (this.usesWebGL()) {
+            if (self.usesWebGL()) {
                 // Spatial datasets give the child its own projection — reset it too.
                 if (self.childPlot.port.projection !== self.port.projection)
                     self.childPlot.port.projection.reset();
@@ -3145,7 +3146,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var pxMaxY = Math.max(y1, y2);
 
         // This is calculated differently depending on if we're using a WebGL canvas
-        if(this.usesWebGL()) {
+        if(self.usesWebGL()) {
             // Convert the pixel coordinates to clip space
             const glMinX = pxMinX / self.canvas.width * 2 - 1;
             const glMaxX = pxMaxX / self.canvas.width * 2 - 1;
@@ -3202,7 +3203,7 @@ function MaxPlot(div, top, left, width, height, args) {
      * */
 
         // This is calculated differently depending on if the draw program uses WebGL
-        if(this.usesWebGL()) {
+        if(self.usesWebGL()) {
             // Calculate where xPx and yPx exist relative to the canvas
             const x = (xPx !== undefined && xPx !== null) ? xPx / self.canvas.width * 2 - 1 : 0;
             const y = (yPx !== undefined && yPx !== null) ? -(yPx / self.canvas.height * 2 - 1) : 0;
@@ -3251,7 +3252,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         // a special case for connected plots that are not sharing our pixel coordinates
         if (self.childPlot && self.coords===self.childPlot.coords) {
-            if (this.usesWebGL()) {
+            if (self.usesWebGL()) {
                 // Spatial datasets give the child its own projection — mirror the scale op.
                 if (self.childPlot.port.projection !== self.port.projection)
                     self.childPlot.port.projection.scale(zoomFact, x, y);
@@ -3380,7 +3381,7 @@ function MaxPlot(div, top, left, width, height, args) {
     this.selectVisible = function() {
         /* add all visible cells to selection */
         var selCells = self.selCells;
-        const coords = this.usesWebGL() ? self.coords.gl : self.coords.px;
+        const coords = self.usesWebGL() ? self.coords.gl : self.coords.px;
         for (var i = 0; i < self.getCount(); i++) {
             var x = coords[2*i];
             var y = coords[2*i+1];
@@ -3446,7 +3447,7 @@ function MaxPlot(div, top, left, width, height, args) {
         let maxY = Math.max(y1, y2);
 
         // If webGL is being used, rescale to clip space
-        if(this.usesWebGL()) {
+        if(self.usesWebGL()) {
             // Invert y coordinate (makes rescaling easier)
             // Note: this does make minY ≥ maxY, but this will become moot soon
             minY = this.canvas.height - minY;
@@ -3463,7 +3464,7 @@ function MaxPlot(div, top, left, width, height, args) {
         }
 
         if(DEBUG) console.time("select");
-        const coords = this.usesWebGL() ? self.coords.gl : self.coords.px;
+        const coords = self.usesWebGL() ? self.coords.gl : self.coords.px;
         for (let i = 0; i < coords.length/2; i++) {
             const x = coords[2*i];
             const y = coords[2*i+1];
@@ -3482,7 +3483,7 @@ function MaxPlot(div, top, left, width, height, args) {
         /* select all cells whose center falls inside the polygon defined by path.
            path is an array of [x, y] canvas-pixel coordinate pairs. */
         var poly;
-        if (this.usesWebGL()) {
+        if (self.usesWebGL()) {
             poly = path.map(function(pt) {
                 var px = pt[0], py = pt[1];
                 var flipY = self.canvas.height - py;
@@ -3505,7 +3506,7 @@ function MaxPlot(div, top, left, width, height, args) {
             return inside;
         }
 
-        var coords = this.usesWebGL() ? self.coords.gl : self.coords.px;
+        var coords = self.usesWebGL() ? self.coords.gl : self.coords.px;
         for (var i = 0; i < coords.length / 2; i++) {
             var x = coords[2 * i];
             var y = coords[2 * i + 1];
@@ -3556,7 +3557,7 @@ function MaxPlot(div, top, left, width, height, args) {
             self.coords.origAll = cloneArray(self.coords.orig);
         var coords = self.coords.orig;
 
-        if(this.usesWebGL()){
+        if(self.usesWebGL()){
             // Add any non-selected cells to the hidden array
             /** @type {Uint8Array} */
             let hidden = this.coords.hidden;
@@ -3589,7 +3590,7 @@ function MaxPlot(div, top, left, width, height, args) {
         var selCells = self.selCells;
         var coords = self.coords.orig;
 
-        if(this.usesWebGL()) {
+        if(self.usesWebGL()) {
             // Add any selected cells to the hidden array
             /** @type {Uint8Array} */
             let hidden = this.coords.hidden;
@@ -3618,7 +3619,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.unhideAll = function() {
         /* undo the hide operation */
-        if(this.usesWebGL()) {
+        if(self.usesWebGL()) {
             this.coords.hidden.fill(0);
             this.bindBuffer(1, this.a_Hidden, this.coords.hidden, self.ctx.UNSIGNED_BYTE);
         } else {
@@ -3638,7 +3639,7 @@ function MaxPlot(div, top, left, width, height, args) {
     this.getVisibleCount = function() {
         /* return number of cells that are visible */
         let count = 0;
-        let coords = this.usesWebGL() ? self.coords.gl : self.coords.orig;
+        let coords = self.usesWebGL() ? self.coords.gl : self.coords.orig;
         for (var i = 0; i < coords.length/2; i++) {
             if (!isHidden(coords[2*i], coords[2*i+1], i))
                 count++;
@@ -3736,7 +3737,7 @@ function MaxPlot(div, top, left, width, height, args) {
     this.cellsAt = function(x, y) {
         /* check which cell's bounding boxes contain (x, y), return a list of the cell IDs, sorted by distance */
         //if(DEBUG) console.time("cellSearch");
-        const coords = this.usesWebGL() ? this.coords.gl : this.coords.px;
+        const coords = self.usesWebGL() ? this.coords.gl : this.coords.px;
         if (coords === null || coords === undefined)
             return null;
         var possIds = [];
@@ -3748,7 +3749,7 @@ function MaxPlot(div, top, left, width, height, args) {
                continue;
 
             // If webGL is being used, we have to translate the clip space coordiante to pixel space
-            if(this.usesWebGL()) {
+            if(self.usesWebGL()) {
                 const [glX, glY] = self.port.projection.multiply(pxX, pxY);
                 pxX = (glX + 1) / 2 * self.canvas.width;
                 pxY = ((glY + 1) / 2 * -self.canvas.height) + self.canvas.height;
@@ -4168,7 +4169,7 @@ function MaxPlot(div, top, left, width, height, args) {
     };
 
     this.setupMouse = function() {
-        const canvas = this.usesWebGL() ? this.labelCanvas : this.canvas;
+        const canvas = self.usesWebGL() ? this.labelCanvas : this.canvas;
        // setup the mouse callbacks
        canvas.addEventListener('mousedown', self.onMouseDown);
        canvas.addEventListener("mousemove", self.onMouseMove);
@@ -4218,7 +4219,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.plotPxLabels = scaleLabels(
             self.plotLabels,
-            this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
+            self.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
             self.port.radius,
             self.canvas.width,
             self.canvas.height
@@ -4227,7 +4228,7 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.coords.annots) {
             let pxAnnots = scaleLabels(
                 self.coords.annots,
-                this.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
+                self.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
                 self.port.radius,
                 self.canvas.width,
                 self.canvas.height
@@ -4408,7 +4409,7 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.onNoLabelHover = self.onNoLabelHover;
         plot2.onActiveChange = self.onActiveChange;
 
-        if(this.usesWebGL()) {
+        if(self.usesWebGL()) {
             // Initialiaze WebGL buffers on child plot
             plot2.bindBuffer(2, plot2.a_Position, plot2.coords.gl, plot2.ctx.FLOAT);
 
