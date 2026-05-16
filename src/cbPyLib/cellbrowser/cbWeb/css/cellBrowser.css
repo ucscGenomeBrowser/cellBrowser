@@ -705,3 +705,6 @@ th[role=columnheader]:not(.no-sort):hover:after {
   /* Support for IE. */
   font-feature-settings: 'liga';
 }
+/* dataset search result highlighting */
+.tpDatasetLabel mark { background: #fff176; color: inherit; padding: 0 1px; border-radius: 2px; }
+.list-group-item.active .tpDatasetLabel mark { background: #ffe57f; }
