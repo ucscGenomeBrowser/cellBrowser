@@ -1636,8 +1636,11 @@ var cellbrowser = function() {
                     children.forEach(function(child) {
                         var label = child.shortLabel || child.name.split('/').pop();
                         var highlightedLabel = terms.length > 0 ? highlightTerms(label, terms) : label;
+                        var childResult = resultMap[child.name];
+                        var childSnippet = (childResult && terms.length > 0) ? getMatchSnippet(childResult, terms) : "";
                         var $item = $('<a role="button" class="list-group-item tpDatasetButton" style="padding:4px 8px; font-size:13px"></a>')
-                            .html('<button type="button" class="btn btn-primary btn-xs load-dataset">Open</button>' + highlightedLabel);
+                            .html('<button type="button" class="btn btn-primary btn-xs load-dataset">Open</button>' + highlightedLabel +
+                                  (childSnippet ? '<div class="tpSearchHint" style="font-size:11px; color:#888; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">' + childSnippet + '</div>' : ''));
                         $item.on('click', function() {
                             var info = { name: child.name, shortLabel: child.shortLabel,
                                          md5: child.md5 || '', hasFiles: ["datasetDesc"] };
