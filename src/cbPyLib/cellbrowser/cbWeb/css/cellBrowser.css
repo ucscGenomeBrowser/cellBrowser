@@ -166,7 +166,7 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 .ui-tooltip { font-size: 13px }
 #tpButtonInfo { height: 24px; border-radius: 4px; padding-top: 3px }
 .tpDialogInput { margin-left: 12px; margin-top: 5px; margin-bottom: 12px; }
-#tpDialog { z-index: 1001; }}
+#tpDialog { z-index: 1001; }
 
 .tpIconButton { 
         padding: 1px 2px 1px 2px; 
@@ -225,7 +225,6 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 .tooltip .tooltip-inner { 
         min-width: 220px; 
         border-radius: 0; 
-        background-opacity: 50%;
         text-align: left
 }
 
@@ -278,7 +277,7 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         padding-left:1px; 
         padding-right:1px; 
         border: 1px solid #AAA;
-        background: #F6;
+        background: #f6f6f6;
         /*color:#AAAAAA; */
         display: inline-block;
 }
@@ -495,7 +494,7 @@ button { line-height: 12px }
 /* bootstraps badges are too dark */
 .list-group-item.active>.badge { background-color: darkgrey; color:white }
 /* bootstrap's small buttons have a lot of padding, for the toolbar, that's too much */
-.noPad {padding:0 2 0 2}
+.noPad {padding:0 2px 0 2px}
 
 /* make the navbar dividers smaller */
 .half-rule { 
