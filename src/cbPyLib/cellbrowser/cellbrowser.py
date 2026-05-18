@@ -5904,6 +5904,79 @@ def checkDsCase(inConfFname, relPath, inConfig):
         errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
                 "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
 
+def _descFieldAsStr(val):
+    " normalize a desc.json field value to a plain string — handles lists, numbers, None "
+    if val is None:
+        return ""
+    if isinstance(val, list):
+        return " ".join(str(v) for v in val if v)
+    return str(val)
+
+def _collectSearchDocs(conf, outDir, docs):
+    " recursively collect searchable dataset fields from dataset.json + desc.json files "
+    for ds in conf.get("datasets", []):
+        dsDir = join(outDir, ds["name"])
+        confPath = join(dsDir, "dataset.json")
+        descPath = join(dsDir, "desc.json")
+        if not isfile(confPath):
+            continue
+        dsConf = readJson(confPath)
+        desc = readJson(descPath) if isfile(descPath) else {}
+        if dsConf.get("datasets"):
+            _collectSearchDocs(dsConf, outDir, docs)
+        name = ds["name"]
+        paperUrl = _descFieldAsStr(desc.get("paper_url"))
+        paperParts = paperUrl.split(" ")
+        paperLabel = " ".join(paperParts[1:]) if len(paperParts) > 1 else ""
+        authors = " ".join(filter(None, [_descFieldAsStr(desc.get("authors")),
+                                         _descFieldAsStr(desc.get("author"))]))
+        institution = " ".join(filter(None, [_descFieldAsStr(desc.get("institution")),
+                                             _descFieldAsStr(desc.get("institute"))]))
+        docs.append({
+            "id":           name,
+            "name":         name,
+            "parent":       name.split("/")[0] if "/" in name else "",
+            "shortLabel":   ds.get("shortLabel") or dsConf.get("shortLabel", ""),
+            "md5":          ds.get("md5") or dsConf.get("md5", ""),
+            "title":        _descFieldAsStr(desc.get("title")),
+            "abstract":     _descFieldAsStr(desc.get("abstract")),
+            "snippet":      _descFieldAsStr(desc.get("abstract"))[:300],
+            "paper":        paperLabel,
+            "doi":          _descFieldAsStr(desc.get("doi")),
+            "pmid":         _descFieldAsStr(desc.get("pmid")),
+            "pmcid":        _descFieldAsStr(desc.get("pmcid")),
+            "geo_series":   _descFieldAsStr(desc.get("geo_series")),
+            "arrayexpress": _descFieldAsStr(desc.get("arrayexpress")),
+            "sra_study":    _descFieldAsStr(desc.get("sra_study")),
+            "bioproject":   _descFieldAsStr(desc.get("bioproject")),
+            "ega_study":    _descFieldAsStr(desc.get("ega_study")),
+            "ega_dataset":  _descFieldAsStr(desc.get("ega_dataset")),
+            "hca_dcp":      _descFieldAsStr(desc.get("hca_dcp")),
+            "zenodo":       _descFieldAsStr(desc.get("zenodo")),
+            "dbgap":        _descFieldAsStr(desc.get("dbgap")),
+            "authors":      authors,
+            "institution":  institution,
+            "lab":          _descFieldAsStr(desc.get("lab")) or dsConf.get("lab", ""),
+            "submitter":    _descFieldAsStr(desc.get("submitter")) or dsConf.get("submitter", ""),
+            "organisms":    " ".join(dsConf.get("organisms") or []),
+            "body_parts":   " ".join(dsConf.get("body_parts") or []),
+            "diseases":     " ".join(dsConf.get("diseases") or []),
+            "tags":         " ".join(dsConf.get("tags") or []),
+        })
+
+def buildSearchJson(outDir):
+    " write search.json to outDir: a JSON array of all searchable dataset fields "
+    rootConfPath = join(outDir, "dataset.json")
+    if not isfile(rootConfPath):
+        logging.warn("buildSearchJson: %s not found, skipping" % rootConfPath)
+        return
+    rootConf = readJson(rootConfPath)
+    docs = []
+    _collectSearchDocs(rootConf, outDir, docs)
+    outPath = join(outDir, "search.json")
+    writeJson(docs, outPath)
+    logging.info("Wrote %s (%d datasets)" % (outPath, len(docs)))
+
 def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None):
     " build browser from config files confFnames into directory outDir and serve on port "
     outDir = resolveOutDir(outDir)
@@ -5972,6 +6045,8 @@ def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None
         rebuildCollections(dataRoot, outDir, todoConfigs)
     else:
         rebuildFlatIndex(outDir)
+
+    buildSearchJson(outDir)
 
     cbUpgrade(outDir, doData=False)
 
@@ -6638,6 +6713,7 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         "ext/tiny-queue.js", "ext/science.v1.js", "ext/reorder.v1.js",  # commit d51dda9ad5cfb987b9e7f2d7bd81bb9bbea82dfe
         "ext/scaleColorPerceptual.js",  # https://github.com/politiken-journalism/scale-color-perceptual tag 1.1.2
         "ext/drawImage-clipper.js", # Safari Monkeypatch https://gist.github.com/Kaiido/ca9c837382d89b9d0061e96181d1d862
+        "ext/minisearch.min.js",  # MiniSearch full-text search, used for client-side dataset search
         ]
 
     # we are starting to have way too many .js files. Reduce all external ones to a single file
