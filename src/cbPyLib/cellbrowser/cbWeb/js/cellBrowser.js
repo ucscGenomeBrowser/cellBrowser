@@ -11910,7 +11910,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             });
         }
 
-$(".tpLoadGeneLink").on("click", onMarkerGeneClick);
+        $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
         activateTooltip(".link");
 
         var ttOpt = {"html": true, "animation": false, "delay":{"show":100, "hide":100} };
