@@ -4395,6 +4395,7 @@ var cellbrowser = function() {
 
             buildWatermark(renderer);
             buildLegendBar();
+            renderer.hideFlipbook();
             onDone();
 
             // update the "recent genes" div
