@@ -9012,7 +9012,7 @@ var cellbrowser = function() {
         if (db.conf.markers && db.conf.markers.length > 0) {
             var labelMetaInfo = db.findMetaInfo(db.conf.labelField);
             var clusterLabels = (labelMetaInfo && labelMetaInfo.ui && labelMetaInfo.ui.shortLabels) ? labelMetaInfo.ui.shortLabels : [];
-            htmls.push('<button id="tpClusterMarkersBtn" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding:0 8px" title="Open Cluster Markers for a cell type">Cluster Markers &#9662;</button>');
+            htmls.push('<button id="tpClusterMarkersBtn" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Cluster Markers for a cell type">Cluster Markers</button>');
             // dropdown list is appended to body and positioned via JS to avoid wrapper div affecting button alignment
             var listHtmls = ['<div id="tpClusterMarkersList" style="display:none;position:fixed;z-index:9999;background:white;border:1px solid #ccc;border-radius:3px;max-height:300px;overflow-y:auto;min-width:150px;box-shadow:2px 2px 5px rgba(0,0,0,0.2)">'];
             for (var i = 0; i < clusterLabels.length; i++) {
@@ -9133,7 +9133,7 @@ var cellbrowser = function() {
                 list.toggle();
             });
             $(document).on('click', '.tpClusterMarkersItem', function() {
-                var clusterName = $(this).data('cluster');
+                var clusterName = $(this).attr('data-cluster');
                 $('#tpClusterMarkersList').hide();
                 onClusterNameClick(clusterName, clusterName, {});
             });
