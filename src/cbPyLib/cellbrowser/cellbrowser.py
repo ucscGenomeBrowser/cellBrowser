@@ -4180,7 +4180,7 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, out
         checkClusterNames(markerFname, clusterNames, clusterLabels, doAbort)
         doAbort = False
 
-        newDict = {"name" : sanitizeName(clusterName), "shortLabel" : markerLabel}
+        newDict = {"name" : sanitizeName(clusterName), "shortLabel" : markerLabel, "clusterList": list(clusterNames)}
         if "selectOnClick" in markerInfo:
             newDict["selectOnClick"] = markerInfo["selectOnClick"]
         newMarkers.append( newDict )

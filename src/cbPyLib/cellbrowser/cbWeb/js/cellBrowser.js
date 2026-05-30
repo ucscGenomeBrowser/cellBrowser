@@ -9011,7 +9011,8 @@ var cellbrowser = function() {
 
         if (db.conf.markers && db.conf.markers.length > 0) {
             var labelMetaInfo = db.findMetaInfo(db.conf.labelField);
-            var clusterLabels = (labelMetaInfo && labelMetaInfo.ui && labelMetaInfo.ui.shortLabels) ? labelMetaInfo.ui.shortLabels : [];
+            var clusterLabels = (labelMetaInfo && labelMetaInfo.ui && labelMetaInfo.ui.shortLabels) ? labelMetaInfo.ui.shortLabels :
+                (db.conf.markers[0].clusterList || []);
             htmls.push('<button id="tpClusterMarkersBtn" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Cluster Markers for a cell type">Cluster Markers</button>');
             // dropdown list is appended to body and positioned via JS to avoid wrapper div affecting button alignment
             var listHtmls = ['<div id="tpClusterMarkersList" style="display:none;position:fixed;z-index:9999;background:white;border:1px solid #ccc;border-radius:3px;max-height:300px;overflow-y:auto;min-width:150px;box-shadow:2px 2px 5px rgba(0,0,0,0.2)">'];
@@ -9135,7 +9136,7 @@ var cellbrowser = function() {
             $(document).on('click', '.tpClusterMarkersItem', function() {
                 var clusterName = $(this).attr('data-cluster');
                 $('#tpClusterMarkersList').hide();
-                onClusterNameClick(clusterName, clusterName, {});
+                onClusterNameClick(clusterName, clusterName, {}, true);
             });
             $(document).click(function() {
                 $('#tpClusterMarkersList').hide();
@@ -11493,42 +11494,44 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         switchToHeat();
     }
 
-    function onClusterNameClick(clusterName, clusterLabel, event) {
+    function onClusterNameClick(clusterName, clusterLabel, event, skipFieldCheck) {
         /* build and open the dialog with the marker genes table for a given cluster */
-        var metaInfo = getClusterFieldInfo();
-        var isNumber = false;
-        var nameIdx = null;
-        if (metaInfo.type == "int" || metaInfo.type == "float") {
-            isNumber = true;
-        } else {
-            nameIdx = metaInfo.ui.shortLabels.indexOf(clusterName);
-        }
-        if (event.altKey || event.shiftKey) {
-            db.loadMetaVec(metaInfo, function(values) {
-                var clusterCells = [];
-                for (var i = 0, I = values.length; i < I; i++) {
-                    if (isNumber && metaInfo.origVals[i].toFixed(2) == clusterName) {
-                        clusterCells.push(i);
-                    } else if (!isNumber && values[i] == nameIdx) {
-                        clusterCells.push(i);
+        if (!skipFieldCheck) {
+            var metaInfo = getClusterFieldInfo();
+            var isNumber = false;
+            var nameIdx = null;
+            if (metaInfo.type == "int" || metaInfo.type == "float") {
+                isNumber = true;
+            } else {
+                nameIdx = metaInfo.ui.shortLabels.indexOf(clusterName);
+            }
+            if (event.altKey || event.shiftKey) {
+                db.loadMetaVec(metaInfo, function(values) {
+                    var clusterCells = [];
+                    for (var i = 0, I = values.length; i < I; i++) {
+                        if (isNumber && metaInfo.origVals[i].toFixed(2) == clusterName) {
+                            clusterCells.push(i);
+                        } else if (!isNumber && values[i] == nameIdx) {
+                            clusterCells.push(i);
+                        }
                     }
-                }
-                if (event.altKey) {
-                    renderer.selectSet(clusterCells);
-                } else if (event.shiftKey) {
-                    var selection = renderer.getSelection();
-                    selection = selection.concat(clusterCells);
-                    renderer.selectSet(selection);
-                }
-                renderer.drawDots();
-            });
-            return;
-        }
+                    if (event.altKey) {
+                        renderer.selectSet(clusterCells);
+                    } else if (event.shiftKey) {
+                        var selection = renderer.getSelection();
+                        selection = selection.concat(clusterCells);
+                        renderer.selectSet(selection);
+                    }
+                    renderer.drawDots();
+                });
+                return;
+            }
 
-        // if current label field does not have markers, do nothing else
-        if (metaInfo.name != renderer.getLabelField()) {
-            alert("There are no markers for this field");
-            return;
+            // if current label field does not have markers, do nothing else
+            if (metaInfo.name != renderer.getLabelField()) {
+                alert("There are no markers for this field");
+                return;
+            }
         }
 
         var tabInfo = db.conf.markers; // list with (label, subdirectory)
@@ -11601,7 +11604,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var title = "Cluster markers for &quot;"+clusterName+"&quot;";
 
         var metaInfo = getClusterFieldInfo();
-        if (metaInfo.ui.longLabels) {
+        if (metaInfo && metaInfo.ui && metaInfo.ui.longLabels) {
             //var nameIdx = cbUtil.findIdxWhereEq(metaInfo.ui.shortLabels, 0, clusterName);
             //var acronyms = db.conf.acronyms;
             //title += " - "+acronyms[clusterName];
