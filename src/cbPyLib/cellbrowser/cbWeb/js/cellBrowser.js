@@ -11895,16 +11895,26 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             $table.find(".tablesorter-filter").off("keyup.tsfilter search.tsfilter input.tsfilter change.tsfilter keyup.tablesorter search.tablesorter input.tablesorter change.tablesorter");
             var filterTimer = null;
             $table.find(".tablesorter-filter").on("keyup search", function() {
-                var query = $(this).val().trim().toLowerCase();
                 clearTimeout(filterTimer);
                 filterTimer = setTimeout(function() {
+                    // collect per-column queries; table col 0 maps to data cols 0+1, col N maps to data col N+1
+                    var colQueries = [];
+                    $table.find(".tablesorter-filter").each(function() {
+                        colQueries.push($(this).val().trim().toLowerCase());
+                    });
+                    var hasFilter = colQueries.some(function(q) { return q !== ""; });
                     var subset;
-                    if (query === "") {
+                    if (!hasFilter) {
                         subset = allDataRows.slice(0, MAX_UNFILTERED_ROWS);
                         $("#tpMarkerRowNote-"+markerListIdx).show();
                     } else {
                         subset = allDataRows.filter(function(r) {
-                            return r.some(function(cell) { return String(cell).toLowerCase().indexOf(query) !== -1; });
+                            return colQueries.every(function(q, c) {
+                                if (q === "") return true;
+                                // table col 0 = data cols 0 (geneId) and 1 (symbol); col N = data col N+1
+                                if (c === 0) return String(r[0]).toLowerCase().indexOf(q) !== -1 || String(r[1]).toLowerCase().indexOf(q) !== -1;
+                                return r[c + 1] !== undefined && String(r[c + 1]).toLowerCase().indexOf(q) !== -1;
+                            });
                         });
                         $("#tpMarkerRowNote-"+markerListIdx).hide();
                     }
