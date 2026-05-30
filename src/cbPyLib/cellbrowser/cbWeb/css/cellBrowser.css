@@ -504,10 +504,10 @@ button { line-height: 12px }
     margin-bottom: 0;
 }
 
-#tpToolBar { margin-left: 5px; margin-top: 1px}
+#tpToolBar { margin-left: 5px; margin-top: 1px; display: flex; align-items: center; }
 #tpToolBar button, #tpToolBar a.ui-button { margin-right: 0; vertical-align: middle; }
-#tpClusterMarkersBtn { padding-left: 8px; padding-right: 18px; position: relative; }
-#tpClusterMarkersBtn::after { content: "\25BE"; position: absolute; right: 5px; top: 50%; transform: translateY(-50%); line-height: 1; }
+#tpClusterMarkersBtn { padding-left: 8px; padding-right: 22px; position: relative; }
+#tpClusterMarkersBtn::after { content: "\25BE"; position: absolute; right: 7px; top: 50%; transform: translateY(-50%); line-height: 1; }
 
 #tpCanvas { }
 

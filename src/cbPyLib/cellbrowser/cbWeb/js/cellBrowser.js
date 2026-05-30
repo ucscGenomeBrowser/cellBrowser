@@ -2014,7 +2014,7 @@ var cellbrowser = function() {
         htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Hide selected cells" id="tpHideSel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Hide selected</button>');
         htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Hide all unselected cells" id="tpOnlySel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Only show selected</button>');
         htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Show all cells that were hidden before" id="tpShowAll" type="button" class="gradientBackground ui-button ui-widget ui-corner-all" data-placement="bottom">Show all</button>');
-        htmls.push('<span style="display:inline-block; margin-right:6px"></span>');
+        htmls.push('<span id="tpSelSpacer" style="display:none; margin-right:6px"></span>');
         //htmls.push('');
         getById('tpToolBar').insertAdjacentHTML('afterbegin', htmls.join(""));
         getById('tpHideSel').addEventListener('click', onHideSelClick);
@@ -8998,7 +8998,7 @@ var cellbrowser = function() {
         var htmls = [];
 
         htmls.push("<div id='tpToolBar' style='position:absolute;left:"+fromLeft+"px;top:"+fromTop+"px'>");
-        htmls.push('<button title="More info about this dataset: abstract, methods, data download, etc." id="tpButtonInfo" type="button" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" data-placement="bottom">Info &amp; Download</button>');
+        htmls.push('<button title="More info about this dataset: abstract, methods, data download, etc." id="tpButtonInfo" type="button" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left:3px; height: 24px; border-radius:3px; padding-top:3px" data-placement="bottom">Info &amp; Download</button>');
 
         if (!getVar("suppressOpenButton", false))
             htmls.push('<button id="tpOpenDatasetButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open another dataset" data-placement="bottom">Open...</button>');
@@ -9050,7 +9050,7 @@ var cellbrowser = function() {
         var grandparentName = null;
         if (nameParts.length > 1) {
             //buildCollectionCombo(htmls, "tpCollectionCombo", 330, nextLeft, 0);
-            buildCollectionCombo(htmls, "tpCollectionCombo", 330, null, 0);
+            buildCollectionCombo(htmls, "tpCollectionCombo", 330, null, 3);
             nameParts.pop();
             parentName = nameParts.join("/");
             if (nameParts.length > 1)
