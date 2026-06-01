@@ -1383,6 +1383,7 @@ def metaToBin(inDir, inConf, outConf, fname, outDir):
     """
     colorFname = inConf.get("colors")
     enumFields = inConf.get("enumFields")
+    skipFields = set(sanitizeName(f) for f in (inConf.get("skipFields") or []))
 
     logging.info("Converting to numbers and compressing meta data fields")
     makeDir(outDir)
@@ -1414,6 +1415,10 @@ def metaToBin(inDir, inConf, outConf, fname, outDir):
         validFieldNames.add(fieldName)
 
         cleanFieldName = sanitizeName(fieldName.split("|")[0])
+
+        if cleanFieldName in skipFields:
+            logging.info("Field %s: skipping (listed in skipFields)" % cleanFieldName)
+            continue
 
         forceType = None
         if (cleanFieldName in sanEnumFields):
@@ -4157,9 +4162,10 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, out
     newMarkers = []
     #doAbort = True # only the first marker file leads to abort, we're more tolerant for the others
     doAbort = False # temp hack # because of single cell cluster filtering in cbScanpy
-    topMarkersDone = False
+    # determine which markers entry drives topMarkers: the one flagged primary:true, else the first
+    primaryIdx = next((i for i, m in enumerate(markerFnames) if m.get("primary")), 0)
     for markerIdx, markerInfo in enumerate(markerFnames):
-        
+
         if type(markerInfo)!=type(dict()):
             errAbort("The 'markers' setting in cellbrowser.conf is not a dictionary but must be a dictionary with keys 'file' and 'label'.")
 
@@ -4172,10 +4178,8 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, out
 
         isAtac = inConf.get("atacSearch")
         clusterNames, topMarkers = splitMarkerTable(markerFname, geneToSym, matrixGeneIds, markerDir, isAtac)
-        # only use the top markers of the first marker file
-        if not topMarkersDone:
+        if markerIdx == primaryIdx:
             outConf["topMarkers"] = topMarkers
-            topMarkersDone = True
 
         checkClusterNames(markerFname, clusterNames, clusterLabels, doAbort)
         doAbort = False
