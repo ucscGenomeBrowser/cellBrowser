@@ -4944,7 +4944,7 @@ var cellbrowser = function() {
         if (sortBy==="name") {
             // index 2 is the label
             rows.sort(function(a, b) { return naturalSort(a.label, b.label); });
-        } else if (sortBy==="count") {
+        } else if (sortBy==="count" || sortBy==="freq") {
             // sort this list by count = index 3
             rows.sort(function(a, b) { return b.count - a.count; }); // reverse-sort by count
         } else {
