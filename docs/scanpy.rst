@@ -11,7 +11,7 @@ A standard Scanpy pipeline
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Requirements: Python3 with Scanpy installed, see their `installation instructions <https://scanpy.readthedocs.io/en/latest/installation.html>`_ for information about setting up Scanpy.
-As part of the Scanpy installion process, ensure that the igraph library is also installed.
+As part of the Scanpy installation process, ensure that the igraph library is also installed.
 It's needed for the most basic scanpy features even though it's not an official requirement.
 The command ``pip install scanpy[louvain]`` will make sure that igraph is installed.
 

@@ -46,7 +46,7 @@ if len(dsList) == 0:
 
 colors = dict()
 if args.colors:
-    # get suffix of colors file to know delimeter, i.e. tab-sep vs comma-sep
+    # get suffix of colors file to know delimiter, i.e. tab-sep vs comma-sep
     # From https://stackoverflow.com/questions/541390/extracting-extension-from-filename-in-python
     cFtype = pathlib.Path(args.colors).suffix
     if cFtype == ".csv":

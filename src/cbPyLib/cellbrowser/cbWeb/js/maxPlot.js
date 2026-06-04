@@ -582,7 +582,7 @@ function MaxPlot(div, top, left, width, height, args) {
         /**
          * Gets the location of the specified GLSL attribute
          * 
-         * @param {String} name Attribue name
+         * @param {String} name Attribute name
          * @returns Attribute location
          */
         const getAttribute = (name) => {
@@ -1401,7 +1401,7 @@ function MaxPlot(div, top, left, width, height, args) {
         const spanX = maxX - minX;
         const spanY = maxY - minY;
 
-        // Scale coordiantes to fit [-1, 1] (accounting for the radius)
+        // Scale coordinates to fit [-1, 1] (accounting for the radius)
         const margin = self.port.radius;
         const canvas = self.canvas;
         const trueHalfSpanX = 1 - ((2 * margin) / canvas.width);
@@ -1995,7 +1995,7 @@ function MaxPlot(div, top, left, width, height, args) {
        debug("Drawing "+coordColors.length+" coords with drawImg renderer, radius="+radius);
 
        var diam = Math.round(2 * radius);
-       var tileWidth = diam + 2; // must add one pixel on each side, space for antialising
+       var tileWidth = diam + 2; // must add one pixel on each side, space for antialiasing
        var tileHeight = tileWidth; // otherwise circles look cut off
 
        let templates = makeCircleTemplates(radius, tileWidth, tileHeight, colors, fatIdx);
@@ -2512,7 +2512,7 @@ function MaxPlot(div, top, left, width, height, args) {
     this.setCoordsWebGL = function() {
         /* Scale coords and labels to fit to WebGL clip space. Bind the results to the a_Position attribute */
 
-        // Scale coordiantes to clip space
+        // Scale coordinates to clip space
         const coords = scaleCoordsWebGL(self.coords.orig);
         self.coords.gl = coords;
 
@@ -3748,7 +3748,7 @@ function MaxPlot(div, top, left, width, height, args) {
             if (isHidden(pxX, pxY, i))
                continue;
 
-            // If webGL is being used, we have to translate the clip space coordiante to pixel space
+            // If webGL is being used, we have to translate the clip space coordinate to pixel space
             if(self.usesWebGL()) {
                 const [glX, glY] = self.port.projection.multiply(pxX, pxY);
                 pxX = (glX + 1) / 2 * self.canvas.width;
@@ -4410,7 +4410,7 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.onActiveChange = self.onActiveChange;
 
         if(self.usesWebGL()) {
-            // Initialiaze WebGL buffers on child plot
+            // Initialize WebGL buffers on child plot
             plot2.bindBuffer(2, plot2.a_Position, plot2.coords.gl, plot2.ctx.FLOAT);
 
             plot2.bindColors();     // binds a_Color and a_ColID
@@ -4651,7 +4651,7 @@ class Matrix4 {
         [sl, sb] = this.getCoordinates(l, b);
         [sr, st] = this.getCoordinates(r, t);
     } else {
-        // No rescale requested. Just use given coordiantes
+        // No rescale requested. Just use given coordinates
         [sl, sb] = [l, b];
         [sr, st] = [r, t];
     }

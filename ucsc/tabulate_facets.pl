@@ -116,7 +116,7 @@ my %assays = ();
 # In Perl each subdocument is converted into a hash, and a key named 'name'
 # contains the cellBrowser "dataset name"
 # 
-# There _may_ alos be key => value pairs:
+# There _may_ also be key => value pairs:
 # "body_parts": [
 #    "brain"
 #  ],
@@ -174,7 +174,7 @@ sub extract_facets {
     # The Global hashes are actually hashes of array references
     # here the hash key is the _value_ from the JSON facet, and
     # the hash value we store is a an array of all the dataset
-    # names that use this specific value (technicaly, an array reference)
+    # names that use this specific value (technically, an array reference)
     foreach my $value ( @facet_list ) {
         push( @{ ${$dsc_of{$facet}}{$value} }, $name );
     }

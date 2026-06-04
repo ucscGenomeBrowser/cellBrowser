@@ -83,11 +83,11 @@ def main():
             final_index = int(len(fsplit)-2)
             # Had to do this next part in two lines as I couldn't get slicing to work on one line
             # This gets rid of the /usr/local/apache/htdocs-cells bit
-            indicies = fsplit[5:]
+            indices = fsplit[5:]
             # This gets ride of the /dataset.json at the end
-            indicies = indicies[:-1]
+            indices = indices[:-1]
             # from https://stackoverflow.com/questions/12453580/how-do-i-concatenate-items-in-a-list-to-a-single-string
-            dname = '/'.join(indicies)
+            dname = '/'.join(indices)
             # I think at least one of the entries is empty, so skip over that
             if dname != '':
                 # Check to see if an RR dataset is has a desc/cellbrowser.conf file on hgwdev

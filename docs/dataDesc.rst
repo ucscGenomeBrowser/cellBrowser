@@ -71,6 +71,6 @@ The following tags contain a list of key-value information::
 - ``supplFiles``: additional files that should be copied and be shown in the 'Download' section, like protocols, Seurat 
   or Scanpy files, e.g. ``supplFiles=[{'file':'seurat3.rds', 'label':'Seurat3 RDS'}]``
 
-The folllowing tags contain only ``True`` or ``False``::
+The following tags contain only ``True`` or ``False``::
 
 - ``hideDownload=True``: do not show the download instructions.
