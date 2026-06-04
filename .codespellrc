@@ -1,0 +1,5 @@
+[codespell]
+skip = .git,.gitignore,.gitattributes,*.pdf,*.svg,*.css,*.min.*,*-min.*,*.pack.js,*.json,*.json.gz,*.gz,*.tsv,*.csv,*.png,*.jpg,*.ico,*.woff,*.woff2,*.ttf,*.eot,*.h5ad,*.rds,*.tags,*.sizes,*/ext/*,*/node_modules/*,*/cellbrowserData/*,*/sampleData/*,versioneer.py,*/_version.py,*/build/*,docs/_build/*,docs/build/*,docs/images/*,*/cbWeb/genes/*
+check-hidden = true
+# ignore-regex =
+# ignore-words-list =
