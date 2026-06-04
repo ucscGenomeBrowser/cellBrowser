@@ -11617,6 +11617,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         //if (acronyms!==undefined && clusterName in acronyms)
             //title += " - "+acronyms[clusterName];
         showDialogBox(htmls, title, {width: winWidth, height:winHeight, "buttons":buttons});
+        hideTooltip();
         $(".ui-widget-content").css("padding", "0");
         $("#tabs").tabs();
     }
