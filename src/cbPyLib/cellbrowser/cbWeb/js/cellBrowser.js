@@ -73,7 +73,9 @@ var cellbrowser = function() {
         // it's a global variable as the dialog is not a class (yet?) and it's the only piece of data
         // it is a subset of dataset.json , e.g. name, description, cell count, etc.
 
-    var gSearchServerAvailable = null; // null=unknown, true=server present, false=use local fallback
+    var gSearchIndex = null;         // MiniSearch instance, built on first use
+    var gSearchIndexLoading = false; // true while search.json is being fetched
+    var gSearchIndexCallbacks = [];  // queued callbacks waiting for the index
 
     // depending on the type of data, single cell or bulk RNA-seq, we call a circle a
     // "sample" or a "cell". This will adapt help menus, menus, etc.
@@ -796,8 +798,7 @@ var cellbrowser = function() {
             $( "#tabLink3" ).hide();
         } else {
             if (desc.hideDownload===true || desc.hideDownload=="True" || desc.hideDownload=="true") {
-                htmls.push("The downloads section has been deactivated by the authors.");
-                htmls.push("Please contact the dataset authors to get access.");
+                htmls.push("The downloads section has been deactivated by the authors. Please contact the dataset authors to get access.");
                 $( "#pane3" ).html(htmls.join(""));
                 $( "#pane3" ).show();
                 $( "#tabLink3" ).show();
@@ -1258,7 +1259,8 @@ var cellbrowser = function() {
                     //htmls.push("<span class='badge'>"+tag+"</span>");
                 //}
             //}
-            htmls.push(dataset.shortLabel+"</a>");
+            var labelAttr = dataset.shortLabel.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+            htmls.push('<span class="tpDatasetLabel" data-label="' + labelAttr + '">' + dataset.shortLabel + '</span></a>');
         }
         htmls.push("</div>"); // list-group
         return selIdx;
@@ -1297,11 +1299,125 @@ var cellbrowser = function() {
         return Object.entries(valLabels);
     }
 
-    function probeSearchServer(onDone) {
-        if (gSearchServerAvailable !== null) { onDone(gSearchServerAvailable); return; }
-        $.ajax({ url: "/api/search", method: "HEAD" })
-            .done(function() { gSearchServerAvailable = true;  onDone(true); })
-            .fail(function() { gSearchServerAvailable = false; onDone(false); });
+    function loadSearchIndex(onDone) {
+        /* fetch search.json once and build a MiniSearch index; cache for the session */
+        if (gSearchIndex) { onDone(gSearchIndex); return; }
+        gSearchIndexCallbacks.push(onDone);
+        if (gSearchIndexLoading) return;
+        gSearchIndexLoading = true;
+        $.getJSON("search.json", function(docs) {
+            var ms = new MiniSearch({
+                fields: ['shortLabel', 'title', 'abstract', 'paper', 'organisms', 'body_parts',
+                         'diseases', 'lab', 'submitter', 'authors', 'institution',
+                         'geo_series', 'arrayexpress', 'sra_study', 'bioproject',
+                         'ega_study', 'ega_dataset', 'hca_dcp', 'zenodo', 'dbgap',
+                         'pmid', 'pmcid', 'doi', 'tags'],
+                storeFields: ['name', 'shortLabel', 'md5', 'parent', 'title', 'authors', 'institution', 'lab', 'submitter', 'paper',
+                             'geo_series', 'pmid', 'pmcid', 'doi',
+                             'arrayexpress', 'sra_study', 'bioproject', 'ega_study', 'ega_dataset', 'hca_dcp', 'zenodo', 'dbgap',
+                             'snippet'],
+                searchOptions: {
+                    boost: { title: 3, shortLabel: 3,
+                             geo_series: 2, arrayexpress: 2, sra_study: 2, bioproject: 2,
+                             ega_study: 2, ega_dataset: 2, hca_dcp: 2, zenodo: 2, dbgap: 2,
+                             pmid: 2, pmcid: 2, doi: 2 },
+                    fuzzy:  0.2,
+                    prefix: true,
+                }
+            });
+            ms.addAll(docs);
+            gSearchIndex = ms;
+            gSearchIndexLoading = false;
+            gSearchIndexCallbacks.forEach(function(cb) { cb(ms); });
+            gSearchIndexCallbacks = [];
+        }).fail(function() {
+            // search.json absent — fall back to local substring search
+            gSearchIndexLoading = false;
+            gSearchIndexCallbacks.forEach(function(cb) { cb(null); });
+            gSearchIndexCallbacks = [];
+        });
+    }
+
+    function highlightTerms(html, terms) {
+        /* wrap each term in <mark> tags, skipping matches inside HTML tag attributes */
+        if (!terms || terms.length === 0) return html;
+        var escaped = terms.map(function(t) {
+            return t.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+        });
+        var re = new RegExp('(' + escaped.join('|') + ')(?![^<]*>)', 'gi');
+        return html.replace(re, '<mark>$1</mark>');
+    }
+
+    function extractSnippet(text, terms, maxLen) {
+        /* return a context window around the first matching term, with the term highlighted */
+        if (!text) return '';
+        var ltext = text.toLowerCase();
+        var bestPos = -1;
+        for (var i = 0; i < terms.length; i++) {
+            var pos = ltext.indexOf(terms[i]);
+            if (pos !== -1 && (bestPos === -1 || pos < bestPos))
+                bestPos = pos;
+        }
+        var start, end, truncated;
+        if (bestPos === -1) {
+            // term not found literally (fuzzy/prefix match or match is beyond stored text)
+            return 'Match beyond available preview…';
+        } else {
+            var contextBefore = Math.floor(maxLen / 3);
+            start = Math.max(0, bestPos - contextBefore);
+            end = Math.min(text.length, start + maxLen);
+        }
+        var snippet = (start > 0 ? '…' : '') + text.substring(start, end) + (end < text.length ? '…' : '');
+        return highlightTerms(snippet, terms);
+    }
+
+    function getMatchSnippet(result, terms) {
+        /* return an HTML snippet showing where the match occurred, or '' if only the label matched */
+        var labelFields = {shortLabel: true, name: true, parent: true, md5: true};
+        var matchedNonLabel = [];
+        Object.keys(result.match || {}).forEach(function(term) {
+            (result.match[term] || []).forEach(function(field) {
+                if (!labelFields[field] && matchedNonLabel.indexOf(field) === -1)
+                    matchedNonLabel.push(field);
+            });
+        });
+        if (matchedNonLabel.length === 0) return '';
+        // accessions: show highlighted value with a label prefix
+        var accessions = [
+            ['geo_series',   'GEO'],
+            ['pmid',         'PubMed'],
+            ['pmcid',        'PMC'],
+            ['doi',          'DOI'],
+            ['arrayexpress', 'ArrayExpress'],
+            ['sra_study',    'SRA'],
+            ['bioproject',   'BioProject'],
+            ['ega_study',    'EGA Study'],
+            ['ega_dataset',  'EGA Dataset'],
+            ['hca_dcp',      'HCA'],
+            ['zenodo',       'Zenodo'],
+            ['dbgap',        'dbGaP'],
+        ];
+        for (var i = 0; i < accessions.length; i++) {
+            var field = accessions[i][0], label = accessions[i][1];
+            if (matchedNonLabel.indexOf(field) !== -1 && result[field])
+                return label + ': ' + highlightTerms(result[field], terms);
+        }
+        // text fields: show a context window with the match highlighted
+        if (matchedNonLabel.indexOf('authors') !== -1 && result.authors)
+            return extractSnippet(result.authors, terms, 50);
+        if (matchedNonLabel.indexOf('institution') !== -1 && result.institution)
+            return extractSnippet(result.institution, terms, 50);
+        if (matchedNonLabel.indexOf('lab') !== -1 && result.lab)
+            return extractSnippet(result.lab, terms, 50);
+        if (matchedNonLabel.indexOf('submitter') !== -1 && result.submitter)
+            return extractSnippet(result.submitter, terms, 50);
+        if (matchedNonLabel.indexOf('paper') !== -1 && result.paper)
+            return extractSnippet(result.paper, terms, 60);
+        if (matchedNonLabel.indexOf('title') !== -1 && result.title)
+            return extractSnippet(result.title, terms, 70);
+        if (matchedNonLabel.indexOf('abstract') !== -1 && result.snippet)
+            return 'Abstract: ' + extractSnippet(result.snippet, terms, 80);
+        return '';
     }
 
     function filterDatasetsDom() {
@@ -1419,7 +1535,7 @@ var cellbrowser = function() {
                 }
             });
             $(".list-group-item").click( function (ev) {
-                selDatasetIdx = parseInt($(ev.target).data('datasetid')); // index of clicked dataset
+                selDatasetIdx = parseInt($(this).data('datasetid')); // index of clicked dataset
                 $(".list-group-item").removeClass("active");
                 $('#tpDatasetButton_'+selDatasetIdx).bsButton("toggle"); // had to rename .button() in index.html
                 var datasetInfo = datasetList[selDatasetIdx];
@@ -1473,9 +1589,17 @@ var cellbrowser = function() {
             filterDatasetsDom();
         }
 
-        function applySearchResults(nameSet, childMap) {
+        function applySearchResults(nameSet, childMap, resultMap, terms) {
             childMap = childMap || {};
+            resultMap = resultMap || {};
+            terms = terms || [];
             $(".tpSearchChild").remove();
+            $(".tpSearchHint").remove();
+            // restore any previously highlighted labels
+            $(".tpDatasetLabel").each(function() {
+                var orig = this.getAttribute("data-label");
+                if (orig) this.innerHTML = orig;
+            });
             var matchCount = 0;
             $(".tpListItem").each(function() {
                 if (this.getAttribute("data-body") === "summary") return;
@@ -1484,6 +1608,20 @@ var cellbrowser = function() {
                 this.style.display = shown ? "" : "none";
                 if (!shown) return;
                 matchCount++;
+                // highlight shortLabel and show match hint
+                if (terms.length > 0) {
+                    var $label = $(this).find(".tpDatasetLabel");
+                    if ($label.length) {
+                        var orig = $label.attr("data-label") || $label.html();
+                        $label.html(highlightTerms(orig, terms));
+                    }
+                    var result = resultMap[name];
+                    if (result) {
+                        var snippet = getMatchSnippet(result, terms);
+                        if (snippet)
+                            $(this).append('<div class="tpSearchHint" style="font-size:11px; color:#888; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">' + snippet + '</div>');
+                    }
+                }
                 if (childMap[name]) {
                     var children = childMap[name];
                     var n = children.length;
@@ -1496,8 +1634,12 @@ var cellbrowser = function() {
                     var $childList = $('<div style="padding-top:4px"></div>');
                     children.forEach(function(child) {
                         var label = child.shortLabel || child.name.split('/').pop();
+                        var highlightedLabel = terms.length > 0 ? highlightTerms(label, terms) : label;
+                        var childResult = resultMap[child.name];
+                        var childSnippet = (childResult && terms.length > 0) ? getMatchSnippet(childResult, terms) : "";
                         var $item = $('<a role="button" class="list-group-item tpDatasetButton" style="padding:4px 8px; font-size:13px"></a>')
-                            .html('<button type="button" class="btn btn-primary btn-xs load-dataset">Open</button>' + label);
+                            .html('<button type="button" class="btn btn-primary btn-xs load-dataset">Open</button>' + highlightedLabel +
+                                  (childSnippet ? '<div class="tpSearchHint" style="font-size:11px; color:#888; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">' + childSnippet + '</div>' : ''));
                         $item.on('click', function() {
                             var info = { name: child.name, shortLabel: child.shortLabel,
                                          md5: child.md5 || '', hasFiles: ["datasetDesc"] };
@@ -1520,21 +1662,6 @@ var cellbrowser = function() {
             $("#tpDatasetCount").text("(" + matchCount + " datasets match)");
         }
 
-        function runServerSearch(q) {
-            $.getJSON("/api/search", { q: q }, function(results) {
-                var nameSet = {};
-                var childMap = {};
-                results.forEach(function(r) {
-                    nameSet[r.name] = r.score;
-                    if (r.parent) {
-                        if (!childMap[r.parent]) childMap[r.parent] = [];
-                        childMap[r.parent].push(r);
-                    }
-                });
-                applySearchResults(nameSet, childMap);
-            });
-        }
-
         function runLocalSearch(q) {
             var lq = q.toLowerCase();
             var nameSet = {};
@@ -1554,6 +1681,29 @@ var cellbrowser = function() {
                     nameSet[ds.name] = 1;
             }
             applySearchResults(nameSet);
+        }
+
+        function runSearch(q) {
+            loadSearchIndex(function(ms) {
+                if (ms) {
+                    var results = ms.search(q, { limit: 50 });
+                    var nameSet = {};
+                    var childMap = {};
+                    var resultMap = {};
+                    var terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+                    results.forEach(function(r) {
+                        nameSet[r.name] = r.score;
+                        resultMap[r.name] = r;
+                        if (r.parent) {
+                            if (!childMap[r.parent]) childMap[r.parent] = [];
+                            childMap[r.parent].push(r);
+                        }
+                    });
+                    applySearchResults(nameSet, childMap, resultMap, terms);
+                } else {
+                    runLocalSearch(q);
+                }
+            });
         }
 
         // -- end inline functions
@@ -1771,22 +1921,20 @@ var cellbrowser = function() {
         }
 
         var searchTimer = null;
-        probeSearchServer(function(hasServer) {
-            $("#tpDatasetSearch").on("input", function() {
-                var q = $(this).val().trim();
-                clearTimeout(searchTimer);
-                if (q === "") {
-                    $(".tpSearchChild").remove();
-                    filterDatasetsDom();
-                    return;
-                }
-                searchTimer = setTimeout(function() {
-                    if (hasServer)
-                        runServerSearch(q);
-                    else
-                        runLocalSearch(q);
-                }, 200);
-            });
+        $("#tpDatasetSearch").on("input", function() {
+            var q = $(this).val().trim();
+            clearTimeout(searchTimer);
+            if (q === "") {
+                $(".tpSearchChild").remove();
+                $(".tpSearchHint").remove();
+                $(".tpDatasetLabel").each(function() {
+                    var orig = this.getAttribute("data-label");
+                    if (orig) this.innerHTML = orig;
+                });
+                filterDatasetsDom();
+                return;
+            }
+            searchTimer = setTimeout(function() { runSearch(q); }, 200);
         });
 
         $('.tpBackLink').click( function(ev) {
@@ -1866,7 +2014,7 @@ var cellbrowser = function() {
         htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Hide selected cells" id="tpHideSel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Hide selected</button>');
         htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Hide all unselected cells" id="tpOnlySel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Only show selected</button>');
         htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Show all cells that were hidden before" id="tpShowAll" type="button" class="gradientBackground ui-button ui-widget ui-corner-all" data-placement="bottom">Show all</button>');
-        htmls.push('<span style="display:inline-block; margin-right:6px"></span>');
+        htmls.push('<span id="tpSelSpacer" style="display:none; margin-right:6px"></span>');
         //htmls.push('');
         getById('tpToolBar').insertAdjacentHTML('afterbegin', htmls.join(""));
         getById('tpHideSel').addEventListener('click', onHideSelClick);
@@ -3485,7 +3633,7 @@ var cellbrowser = function() {
        $(document).click ( function() { doHover= false; });
 
        // when user releases the mouse outside the canvas, remove the zooming marquee
-       $(document).mouseup ( function(ev) { if (ev.target.nodeName!=="canvas") { renderer.resetMarquee(); }} );
+       $(document).mouseup ( function(ev) { if (ev.target.nodeName!=="canvas" && renderer) { renderer.resetMarquee(); }} );
 
        $('[data-submenu]').submenupicker();
 
@@ -4247,6 +4395,7 @@ var cellbrowser = function() {
 
             buildWatermark(renderer);
             buildLegendBar();
+            renderer.hideFlipbook();
             onDone();
 
             // update the "recent genes" div
@@ -4795,7 +4944,7 @@ var cellbrowser = function() {
         if (sortBy==="name") {
             // index 2 is the label
             rows.sort(function(a, b) { return naturalSort(a.label, b.label); });
-        } else if (sortBy==="count") {
+        } else if (sortBy==="count" || sortBy==="freq") {
             // sort this list by count = index 3
             rows.sort(function(a, b) { return b.count - a.count; }); // reverse-sort by count
         } else {
@@ -8849,7 +8998,7 @@ var cellbrowser = function() {
         var htmls = [];
 
         htmls.push("<div id='tpToolBar' style='position:absolute;left:"+fromLeft+"px;top:"+fromTop+"px'>");
-        htmls.push('<button title="More info about this dataset: abstract, methods, data download, etc." id="tpButtonInfo" type="button" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" data-placement="bottom">Info &amp; Download</button>');
+        htmls.push('<button title="More info about this dataset: abstract, methods, data download, etc." id="tpButtonInfo" type="button" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left:3px; height: 24px; border-radius:3px; padding-top:3px" data-placement="bottom">Info &amp; Download</button>');
 
         if (!getVar("suppressOpenButton", false))
             htmls.push('<button id="tpOpenDatasetButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open another dataset" data-placement="bottom">Open...</button>');
@@ -8859,6 +9008,21 @@ var cellbrowser = function() {
 
         //if (!db.conf.atacSearch)
         htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Violin Plot Viewer" data-placement="bottom">Gene Expression Plots</button>');
+
+        if (db.conf.markers && db.conf.markers.length > 0) {
+            var labelMetaInfo = db.findMetaInfo(db.conf.labelField);
+            var clusterLabels = (labelMetaInfo && labelMetaInfo.ui && labelMetaInfo.ui.shortLabels) ? labelMetaInfo.ui.shortLabels :
+                (db.conf.markers[0].clusterList || []);
+            var clusterMarkersLabel = db.conf.clusterMarkersLabel || db.conf.markers[0].shortLabel || "Cluster Markers";
+            htmls.push('<button id="tpClusterMarkersBtn" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Cluster Markers for a cell type">'+clusterMarkersLabel+'</button>');
+            // dropdown list is appended to body and positioned via JS to avoid wrapper div affecting button alignment
+            var listHtmls = ['<div id="tpClusterMarkersList" style="display:none;position:fixed;z-index:9999;background:white;border:1px solid #ccc;border-radius:3px;max-height:300px;overflow-y:auto;min-width:150px;box-shadow:2px 2px 5px rgba(0,0,0,0.2)">'];
+            for (var i = 0; i < clusterLabels.length; i++) {
+                listHtmls.push('<div class="tpClusterMarkersItem" data-cluster="' + clusterLabels[i].replace(/"/g, '&quot;') + '" style="padding:4px 8px;cursor:pointer;font-size:12px;white-space:nowrap">' + clusterLabels[i] + '</div>');
+            }
+            listHtmls.push('</div>');
+            $('body').append(listHtmls.join(''));
+        }
 
         if (db.conf.showHeatmap)
             htmls.push('<button id="tpHeatButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Show Heatmap" data-placement="bottom">Heatmap</button>');
@@ -8887,7 +9051,7 @@ var cellbrowser = function() {
         var grandparentName = null;
         if (nameParts.length > 1) {
             //buildCollectionCombo(htmls, "tpCollectionCombo", 330, nextLeft, 0);
-            buildCollectionCombo(htmls, "tpCollectionCombo", 330, null, 0);
+            buildCollectionCombo(htmls, "tpCollectionCombo", 330, null, 3);
             nameParts.pop();
             parentName = nameParts.join("/");
             if (nameParts.length > 1)
@@ -8961,6 +9125,24 @@ var cellbrowser = function() {
         $('#tpOpenDatasetButton').click(openCurrentDataset);
         $('#tpOpenExprButton').click(buildExprViewWindow);
         if (db.conf.showHeatmap) $('#tpHeatButton').click(switchToHeat);
+
+        if (db.conf.markers && db.conf.markers.length > 0) {
+            $('#tpClusterMarkersBtn').click(function(e) {
+                e.stopPropagation();
+                var list = $('#tpClusterMarkersList');
+                var rect = this.getBoundingClientRect();
+                list.css({top: rect.bottom + 'px', left: rect.left + 'px'});
+                list.toggle();
+            });
+            $(document).on('click', '.tpClusterMarkersItem', function() {
+                var clusterName = $(this).attr('data-cluster');
+                $('#tpClusterMarkersList').hide();
+                onClusterNameClick(clusterName, clusterName, {}, true);
+            });
+            $(document).click(function() {
+                $('#tpClusterMarkersList').hide();
+            });
+        }
     }
 
     function metaFieldToLabel(fieldName) {
@@ -10323,10 +10505,9 @@ var cellbrowser = function() {
         if (gLegend.type === "meta" && gLegend.metaInfo && gLegend.metaInfo.type === "enum") {
             htmls.push('<div id="tpValueFilter" style="margin-top:6px;margin-bottom:3px">');
             htmls.push('<div style="font-size:11px;font-weight:bold;color:#555;margin-bottom:3px">Filter by value:</div>');
-            htmls.push('<input type="text" id="tpValueSearch" list="tpValueList" autocomplete="off" '+
+            htmls.push('<input type="text" id="tpValueSearch" autocomplete="off" '+
                        'placeholder="Search..." '+
                        'style="width:100%;box-sizing:border-box;font-size:12px;padding:2px 4px"/>');
-            htmls.push('<datalist id="tpValueList"></datalist>');
             htmls.push('</div>');
         }
 
@@ -11314,42 +11495,44 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         switchToHeat();
     }
 
-    function onClusterNameClick(clusterName, clusterLabel, event) {
+    function onClusterNameClick(clusterName, clusterLabel, event, skipFieldCheck) {
         /* build and open the dialog with the marker genes table for a given cluster */
-        var metaInfo = getClusterFieldInfo();
-        var isNumber = false;
-        var nameIdx = null;
-        if (metaInfo.type == "int" || metaInfo.type == "float") {
-            isNumber = true;
-        } else {
-            nameIdx = metaInfo.ui.shortLabels.indexOf(clusterName);
-        }
-        if (event.altKey || event.shiftKey) {
-            db.loadMetaVec(metaInfo, function(values) {
-                var clusterCells = [];
-                for (var i = 0, I = values.length; i < I; i++) {
-                    if (isNumber && metaInfo.origVals[i].toFixed(2) == clusterName) {
-                        clusterCells.push(i);
-                    } else if (!isNumber && values[i] == nameIdx) {
-                        clusterCells.push(i);
+        if (!skipFieldCheck) {
+            var metaInfo = getClusterFieldInfo();
+            var isNumber = false;
+            var nameIdx = null;
+            if (metaInfo.type == "int" || metaInfo.type == "float") {
+                isNumber = true;
+            } else {
+                nameIdx = metaInfo.ui.shortLabels.indexOf(clusterName);
+            }
+            if (event.altKey || event.shiftKey) {
+                db.loadMetaVec(metaInfo, function(values) {
+                    var clusterCells = [];
+                    for (var i = 0, I = values.length; i < I; i++) {
+                        if (isNumber && metaInfo.origVals[i].toFixed(2) == clusterName) {
+                            clusterCells.push(i);
+                        } else if (!isNumber && values[i] == nameIdx) {
+                            clusterCells.push(i);
+                        }
                     }
-                }
-                if (event.altKey) {
-                    renderer.selectSet(clusterCells);
-                } else if (event.shiftKey) {
-                    var selection = renderer.getSelection();
-                    selection = selection.concat(clusterCells);
-                    renderer.selectSet(selection);
-                }
-                renderer.drawDots();
-            });
-            return;
-        }
+                    if (event.altKey) {
+                        renderer.selectSet(clusterCells);
+                    } else if (event.shiftKey) {
+                        var selection = renderer.getSelection();
+                        selection = selection.concat(clusterCells);
+                        renderer.selectSet(selection);
+                    }
+                    renderer.drawDots();
+                });
+                return;
+            }
 
-        // if current label field does not have markers, do nothing else
-        if (metaInfo.name != renderer.getLabelField()) {
-            alert("There are no markers for this field");
-            return;
+            // if current label field does not have markers, do nothing else
+            if (metaInfo.name != renderer.getLabelField()) {
+                alert("There are no markers for this field");
+                return;
+            }
         }
 
         var tabInfo = db.conf.markers; // list with (label, subdirectory)
@@ -11422,13 +11605,13 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var title = "Cluster markers for &quot;"+clusterName+"&quot;";
 
         var metaInfo = getClusterFieldInfo();
-        if (metaInfo.ui.longLabels) {
-            //var nameIdx = cbUtil.findIdxWhereEq(metaInfo.ui.shortLabels, 0, clusterName);
-            //var acronyms = db.conf.acronyms;
-            //title += " - "+acronyms[clusterName];
-            var longLabel = metaInfo.ui.longLabels[nameIdx];
-            if (clusterName!==longLabel)
-                title += " - "+metaInfo.ui.longLabels[nameIdx];
+        if (metaInfo && metaInfo.ui && metaInfo.ui.longLabels) {
+            var nameIdx = metaInfo.ui.shortLabels.indexOf(clusterName);
+            if (nameIdx !== -1) {
+                var longLabel = metaInfo.ui.longLabels[nameIdx];
+                if (longLabel && clusterName !== longLabel)
+                    title += " - " + longLabel;
+            }
         }
 
         //if (acronyms!==undefined && clusterName in acronyms)
@@ -11563,77 +11746,74 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var hubUrl = makeHubUrl();
 
         var MAX_UNFILTERED_ROWS = 200;
-        var renderedRows = 0;
-        var totalRows = 0; // count non-empty rows for "showing N of M" note
         var enrichedCount = 0;
         var depletedCount = 0;
 
-        htmls.push("<tbody>");
+        // collect all non-empty data rows for full-dataset filtering
+        var allDataRows = [];
         for (let i = 1; i < rows.length; i++) {
             var row = rows[i];
-            if ((row.length===1) && row[0]==="") // papaparse sometimes adds empty lines to files
-                continue;
-
-            totalRows++;
-
-            // cap unfiltered view to avoid slow DOM rendering
-            if (renderedRows >= MAX_UNFILTERED_ROWS)
-                continue;
-
-            renderedRows++;
-
-            var enrichAttr = "";
+            if ((row.length===1) && row[0]==="") continue;
+            allDataRows.push(row);
             if (logFcCol !== null && logFcCol < row.length) {
                 var logFcVal = parseFloat(row[logFcCol]);
                 if (!isNaN(logFcVal)) {
-                    var enrichLabel = logFcVal > 0 ? "enriched" : "depleted";
-                    enrichAttr = " data-enrich='" + enrichLabel + "'";
-                    if (enrichLabel === "enriched") enrichedCount++;
+                    if (logFcVal > 0) enrichedCount++;
                     else depletedCount++;
                 }
             }
-            htmls.push("<tr" + enrichAttr + ">");
-            var geneId = row[0];
-
-            // old marker files still have the format geneId|sym, so tolerate this here
-            if (geneId.indexOf("|") > -1)
-                geneId = geneId.split("|")[0];
-
-            var geneSym = row[1];
-            htmls.push("<td><a data-gene='"+geneId+"' class='link tpLoadGeneLink'>"+geneSym+"</a>");
-            if (hubUrl!==null) {
-                var fullHubUrl = hubUrl+"&position="+geneSym+"&singleSearch=knownCanonical";
-                htmls.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to UCSC Genome Browser' href='"+fullHubUrl+"'>Genome</a>");
-            }
-            htmls.push("</td>");
-
-            for (var j = 2; j < row.length; j++) {
-                var val = row[j];
-                htmls.push("<td>");
-                // added for the autism dataset, allows to add mouse overs with images
-                // field has to start with ./
-                if (val.startsWith("./")) {
-                    var imgUrl = val.replace("./", db.url+"/");
-                    var imgHtml = '<img width="100px" src="'+imgUrl+'">';
-                    val = "<a data-toggle='tooltip' data-placement='auto' class='tpPlots link' target=_blank title='"+imgHtml+"' href='"+ imgUrl + "'>plot</a>";
-                }
-                if (j===geneListCol || j===exprCol)
-                    geneListFormat(htmls, val, geneSym);
-                else if (j===pValCol)
-                    htmls.push(parseFloat(val).toPrecision(5)); // five digits ought to be enough for everyone
-                else
-                    //htmls.push(val);
-                    geneListFormat(htmls, val, geneSym);
-                htmls.push("</td>");
-            }
-            htmls.push("</tr>");
         }
 
+        function buildRowsHtml(subset) {
+            var h = [];
+            for (var i = 0; i < subset.length; i++) {
+                var row = subset[i];
+                var enrichAttr = "";
+                if (logFcCol !== null && logFcCol < row.length) {
+                    var logFcVal = parseFloat(row[logFcCol]);
+                    if (!isNaN(logFcVal))
+                        enrichAttr = " data-enrich='" + (logFcVal > 0 ? "enriched" : "depleted") + "'";
+                }
+                h.push("<tr" + enrichAttr + ">");
+                var geneId = row[0];
+                if (geneId.indexOf("|") > -1)
+                    geneId = geneId.split("|")[0];
+                var geneSym = row[1];
+                h.push("<td><a data-gene='"+geneId+"' class='link tpLoadGeneLink'>"+geneSym+"</a>");
+                if (hubUrl!==null) {
+                    var fullHubUrl = hubUrl+"&position="+geneSym+"&singleSearch=knownCanonical";
+                    h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to UCSC Genome Browser' href='"+fullHubUrl+"'>Genome</a>");
+                }
+                h.push("</td>");
+                for (var j = 2; j < row.length; j++) {
+                    var val = row[j];
+                    h.push("<td>");
+                    if (val.startsWith("./")) {
+                        var imgUrl = val.replace("./", db.url+"/");
+                        var imgHtml = '<img width="100px" src="'+imgUrl+'">';
+                        val = "<a data-toggle='tooltip' data-placement='auto' class='tpPlots link' target=_blank title='"+imgHtml+"' href='"+ imgUrl + "'>plot</a>";
+                    }
+                    if (j===geneListCol || j===exprCol)
+                        geneListFormat(h, val, geneSym);
+                    else if (j===pValCol)
+                        h.push(parseFloat(val).toPrecision(5));
+                    else
+                        geneListFormat(h, val, geneSym);
+                    h.push("</td>");
+                }
+                h.push("</tr>");
+            }
+            return h.join("");
+        }
+
+        htmls.push("<tbody>");
+        htmls.push(buildRowsHtml(allDataRows.slice(0, MAX_UNFILTERED_ROWS)));
         htmls.push("</tbody>");
         htmls.push("</table>");
 
+        var totalRows = allDataRows.length;
         if (totalRows > MAX_UNFILTERED_ROWS)
-            htmls.push("<p style='color:#888; font-size:85%; margin-top:4px'>Showing top "+MAX_UNFILTERED_ROWS+" of "+totalRows+" rows — use the table filter to narrow results.</p>");
+            htmls.push("<p id='tpMarkerRowNote-"+markerListIdx+"' style='color:#888; font-size:85%; margin-top:4px'>Showing top "+MAX_UNFILTERED_ROWS+" of "+totalRows+" rows. Use the filter above to search all rows.</p>");
 
         // sub function ----
         function onMarkerGeneClick(ev) {
@@ -11709,7 +11889,43 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         if (doDescSort)
             $("[data-column='1']").trigger("sort"); // second click...
 
-$(".tpLoadGeneLink").on("click", onMarkerGeneClick);
+        // When there are more rows than MAX_UNFILTERED_ROWS, re-render from the full
+        // dataset on filter changes so all rows are searchable, not just the first 200.
+        if (totalRows > MAX_UNFILTERED_ROWS) {
+            // Unbind tablesorter's own filter listeners so they don't conflict with ours
+            $table.find(".tablesorter-filter").off("keyup.tsfilter search.tsfilter input.tsfilter change.tsfilter keyup.tablesorter search.tablesorter input.tablesorter change.tablesorter");
+            var filterTimer = null;
+            $table.find(".tablesorter-filter").on("keyup search", function() {
+                clearTimeout(filterTimer);
+                filterTimer = setTimeout(function() {
+                    // collect per-column queries; table col 0 maps to data cols 0+1, col N maps to data col N+1
+                    var colQueries = [];
+                    $table.find(".tablesorter-filter").each(function() {
+                        colQueries.push($(this).val().trim().toLowerCase());
+                    });
+                    var hasFilter = colQueries.some(function(q) { return q !== ""; });
+                    var subset;
+                    if (!hasFilter) {
+                        subset = allDataRows.slice(0, MAX_UNFILTERED_ROWS);
+                        $("#tpMarkerRowNote-"+markerListIdx).show();
+                    } else {
+                        subset = allDataRows.filter(function(r) {
+                            return colQueries.every(function(q, c) {
+                                if (q === "") return true;
+                                // table col 0 = data cols 0 (geneId) and 1 (symbol); col N = data col N+1
+                                if (c === 0) return String(r[0]).toLowerCase().indexOf(q) !== -1 || String(r[1]).toLowerCase().indexOf(q) !== -1;
+                                return r[c + 1] !== undefined && String(r[c + 1]).toLowerCase().indexOf(q) !== -1;
+                            });
+                        });
+                        $("#tpMarkerRowNote-"+markerListIdx).hide();
+                    }
+                    $table.find("tbody").html(buildRowsHtml(subset));
+                    $(".tpLoadGeneLink").off("click").on("click", onMarkerGeneClick);
+                }, 300);
+            });
+        }
+
+        $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
         activateTooltip(".link");
 
         var ttOpt = {"html": true, "animation": false, "delay":{"show":100, "hide":100} };
@@ -11891,8 +12107,8 @@ $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
                 var datasetName = hostParts[0];
                 hostParts.shift();
                 myUrl.hostname = hostParts.join(".");
-                var newUrl = myUrl+"?ds="+datasetName;
-                window.location.replace(newUrl);
+                myUrl.search = "ds="+datasetName;
+                window.location.replace(myUrl.href);
                 return true;
             }
         return false;
@@ -11941,6 +12157,8 @@ $(".tpLoadGeneLink").on("click", onMarkerGeneClick);
         buildMenuBar();
 
         var datasetName = getDatasetNameFromUrl()
+        if (datasetName === "whole-brain-perturb" && window.location.hostname === "cells.ucsc.edu")
+            window.location.replace("https://cells-test.gi.ucsc.edu/?ds=" + datasetName);
         // pre-load dataset.json here?
         menuBarHeight = $('#tpMenuBar').outerHeight(true);
 
