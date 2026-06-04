@@ -12189,8 +12189,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         buildMenuBar();
 
         var datasetName = getDatasetNameFromUrl()
-        if (datasetName === "whole-brain-perturb" && window.location.hostname === "cells.ucsc.edu")
-            window.location.replace("https://cells-test.gi.ucsc.edu/?ds=" + datasetName);
         // pre-load dataset.json here?
         menuBarHeight = $('#tpMenuBar').outerHeight(true);
 
