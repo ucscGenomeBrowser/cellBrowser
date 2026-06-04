@@ -808,7 +808,7 @@ var cellbrowser = function() {
                 htmls.push("This information can also be accessed while viewing a dataset by clicking the 'Info &amp; Downloads' button.</p>");
                 htmls.push("<p><b>To bulk download all datasets in this collection via rsync:</b><br>");
                 htmls.push("<code style='display:inline-block; background:#f4f4f4; border:1px solid #ddd; padding:4px 8px; border-radius:3px; font-size:12px; user-select:all'>");
-                htmls.push("rsync --avzp hgdownload.gi.ucsc.edu::cells/"+datasetInfo.name+"/ ./"+datasetInfo.name+"/");
+                htmls.push("rsync -avzp hgdownload.gi.ucsc.edu::cells/"+datasetInfo.name+"/ ./"+datasetInfo.name+"/");
                 htmls.push("</code></p>");
                 $( "#pane3" ).html(htmls.join(""));
                 $( "#pane3" ).show();
@@ -865,7 +865,7 @@ var cellbrowser = function() {
 
                 htmls.push("<p><b>Bulk download via rsync:</b><br>");
                 htmls.push("<code style='display:inline-block; background:#f4f4f4; border:1px solid #ddd; padding:4px 8px; border-radius:3px; font-size:12px; user-select:all'>");
-                htmls.push("rsync --avzp hgdownload.gi.ucsc.edu::cells/"+datasetInfo.name+"/ ./"+datasetInfo.name+"/");
+                htmls.push("rsync -avzp hgdownload.gi.ucsc.edu::cells/"+datasetInfo.name+"/ ./"+datasetInfo.name+"/");
                 htmls.push("</code></p>");
 
                 $( "#pane3" ).html(htmls.join(""));
