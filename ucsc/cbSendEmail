@@ -119,10 +119,11 @@ GSHEET_CREDS = "/hive/data/inside/cells/gsheet-credentials.json"
 GSHEET_GID = 1584536607  # "2026" sheet
 
 
-def append_to_gsheet(paper_link, email_addr, title_summary):
+def append_to_gsheet(paper_link, email_addr, title_summary, dataset_name):
     """
     Append a row to the Google Sheets tracking spreadsheet.
-    Columns: Release Month, Directory, Version, Status, Priority, Wrangler, Contributor Email, Notes
+    Columns: Release Month, Directory (dataset short name), Version, Status,
+    Priority, Wrangler, Contributor Email, Notes
     """
     try:
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -133,9 +134,9 @@ def append_to_gsheet(paper_link, email_addr, title_summary):
 
         today_str = date.today().strftime("%B %Y")  # e.g. "April 2026"
         notes = f"{title_summary}; {paper_link}"
-        row = [today_str, "", "", "emailed", "", "Max", email_addr, notes]
+        row = [today_str, dataset_name, "", "emailed", "", "Max", email_addr, notes]
 
-        ws.append_row(row, value_input_option="RAW")
+        ws.append_row(row, value_input_option="RAW", table_range="A1")
         print(f"  Appended row to Google Sheet '{ws.title}'")
     except Exception as e:
         print(f"Warning: Could not append to Google Sheet: {e}", file=sys.stderr)
@@ -745,6 +746,7 @@ Please rewrite this email to make it specific to this paper. Reference specific 
 If the abstract suggests that the paper contains ATAC-seq or Chip-Seq or "chromatin accessibility" data or other cis-regulatory data, replace the placeholder "UCSC Genome Browser tracks note for ATAC-seq datasets" with a text like the following: "Since your paper seems to include Chip-Seq or ATAC-seq data, note that we have support for this assay: You can send us your bigWig files and we convert them to UCSC Genome Browser Tracks, that can be loaded from the single cell browser or can be loaded via the UCSC Genome Browser public hubs page."
 
 IMPORTANT: Your response must be in this exact format with no other text:
+DATASET_NAME: <the exact dataset shortname you used to replace $DATASET_NAME>
 SUBJECT: UCSC Cell browser for <summarize paper with 2-5 words> preprint
 BODY:
 [personalized email body here]
@@ -767,10 +769,14 @@ BODY:
                 raise  # Re-raise on final attempt
 
     # Parse the response
-    result = {"subject": "", "body": ""}
+    result = {"subject": "", "body": "", "dataset_name": dataset_name or ""}
     for block in response.content:
         if block.type == "text":
             text = block.text
+            # Extract dataset name
+            ds_match = re.search(r'^DATASET_NAME:\s*(.+?)(?:\n|$)', text, re.MULTILINE)
+            if ds_match:
+                result["dataset_name"] = ds_match.group(1).strip()
             # Extract subject
             subject_match = re.search(r'^SUBJECT:\s*(.+?)(?:\n|$)', text, re.MULTILINE)
             if subject_match:
@@ -779,6 +785,12 @@ BODY:
             body_match = re.search(r'BODY:\s*\n(.*)', text, re.DOTALL)
             if body_match:
                 result["body"] = body_match.group(1).strip()
+
+    # Fallback: pull the name out of the body if Claude omitted the DATASET_NAME line
+    if not result["dataset_name"] and result["body"]:
+        body_match = re.search(r'dataset name ["“]([a-z0-9-]+)["”]', result["body"])
+        if body_match:
+            result["dataset_name"] = body_match.group(1).strip()
 
     return result
 
@@ -1109,6 +1121,13 @@ def main():
         print(f"Error personalizing email: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # The dataset shortname must be recorded so the upload can be tracked later.
+    ds_name = personalized.get("dataset_name", "").strip()
+    if not ds_name:
+        print("\nError: Could not determine the suggested dataset name.", file=sys.stderr)
+        print("Rerun with --name <dataset-name> to set it explicitly.", file=sys.stderr)
+        sys.exit(1)
+
     personalized["body"] = personalized["body"]+"\n\n\n"+identifier
     # Collect all email addresses
     all_recipients = email_list.copy()
@@ -1119,6 +1138,7 @@ def main():
     # Display the email for user approval
     print("\n" + "=" * 60)
     print(f"Email to: {to_line}")
+    print(f"Dataset name: {ds_name}")
     print("=" * 60)
     print(f"Subject: {personalized['subject']}")
     print("-" * 60)
@@ -1144,7 +1164,7 @@ def main():
             print(f"  Recorded {email_addr} in {EMAILED_TSV}")
         # Append to Google Sheet
         paper_link = f"https://doi.org/{record.get('doi', identifier)}" if record.get('doi') else identifier
-        append_to_gsheet(paper_link, ", ".join(email_list), paper_title)
+        append_to_gsheet(paper_link, ", ".join(email_list), paper_title, ds_name)
     else:
         print(f"Failed to send email", file=sys.stderr)
         sys.exit(1)
