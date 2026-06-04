@@ -233,7 +233,7 @@ var cbUtil = (function () {
             if (this._arrType==="comprText") {
                 var arr = pako.ungzip(binData);
                 // https://stackoverflow.com/questions/6965107/converting-between-strings-and-arraybuffers
-                // convert byte array to strin
+                // convert byte array to string
                 // I used the apply() function originally, that's more compatible, but leads to a
                 // stack overflow in bigger datasets
                 //binData = String.fromCharCode.apply(null, arr);

@@ -1140,7 +1140,7 @@ def typeForStrings(strings):
         return "float"
     return "int"
 
-emptyVals = ["", "null", "none", "None", "unknown", "nd", "n.d.", "Unknown", "NaN", "NA", "undefined", "Na", "na"]
+emptyVals = ["", "null", "none", "None", "unknown", "nd", "n.d.", "Unknown", "NaN", "NA", "undefined", "Na", "na"]  # codespell:ignore nd
 
 def likeEmptyString(val):
     " returns true if string is a well-known synonym of 'unknown' or 'NaN'. ported from cellbrowser.js "
@@ -6795,7 +6795,7 @@ def cbMake(outDir, devMode=False):
     cbUpgrade(outDir, devMode=devMode)
 
 #def makeDatasetListJsons(datasets, outDir):
-#    " recusively write dataset.json files from datasets to outDir "
+#    " recursively write dataset.json files from datasets to outDir "
 #    for dataset in datasets:
 #        if "children" in dataset:
 #            makeDatasetListJsons(dataset["children"], join(outDir, dataset["name"]))

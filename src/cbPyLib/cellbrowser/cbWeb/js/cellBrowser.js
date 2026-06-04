@@ -6377,7 +6377,7 @@ var cellbrowser = function() {
     function likeEmptyString(label) {
     /* some special values like "undefined" and empty string get colored in grey  */
         return (label===null || label.trim()==="" || label==="none" || label==="None" || label==="unknown" ||
-            label==="nd" || label==="n.d." ||
+            label==="nd" || label==="n.d." || // codespell:ignore nd
             label==="Unknown" || label==="NaN" || label==="NA" || label==="undefined" || label==="Na");
     }
 

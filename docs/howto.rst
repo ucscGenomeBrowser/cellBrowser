@@ -20,7 +20,7 @@ You can go from an RDS file to cell browser for a dataset in three easy steps:
 Step 1: Export an RDS file of your Seurat object
 """"
 
-From within R, run this command to create an RDS file fo your dataset::
+From within R, run this command to create an RDS file of your dataset::
 
   saveRDS(objName, "myDataset.rds")
 

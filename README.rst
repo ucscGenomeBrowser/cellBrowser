@@ -40,7 +40,7 @@ If you use the UCSC Cell Browser in your research, please cite
 If you are also using data from a specific dataset we host, please also cite
 the original authors of that dataset (visible under 'Info & Download' while viewing that dataset).
 
-This is a viewer for a static, precomputed layout. If you're looking for an interative layout, where you can 
+This is a viewer for a static, precomputed layout. If you're looking for an interactive layout, where you can 
 move the cells around and run some algorithms interactively, try Chan-Zuckerberg's own cellxgene or Spring.
 Another website with both datasets and some analysis is `Scope <http://scope.aertslab.org/>`_. There are many other
 similar websites now, usually with a few dozen datasets.
