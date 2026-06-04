@@ -8976,17 +8976,18 @@ var cellbrowser = function() {
             //getById("tpGeneExprLimitApply").disabled = isDisabled;
         //});
         
-        // use the current gene
-        let geneId = getVar("gene", null);
-        
-        // if there is none, pick a reasonable default gene and meta var
-        if (geneId===null && db.conf.quickGenes)
-            geneId = db.conf.quickGenes[0][0];
-        if (geneId==null)
-            geneId = db.getRandomLocus();
-
-        // URL variables can override the defaults
-        let geneIds = getVar("exprGene", geneId).split(" ");
+        // URL variables override everything; otherwise load all quickGenes; last resort: single gene
+        let geneIds;
+        if (getVar("exprGene", null) !== null) {
+            geneIds = getVar("exprGene", null).split(" ");
+        } else if (db.conf.quickGenes && db.conf.quickGenes.length > 0) {
+            geneIds = db.conf.quickGenes.map(function(qg) { return qg[0]; });
+        } else {
+            let geneId = getVar("gene", null);
+            if (geneId === null)
+                geneId = db.getRandomLocus();
+            geneIds = [geneId];
+        }
 
         buildGeneExprPlotsAddGenes(geneIds, metaName); 
     }
