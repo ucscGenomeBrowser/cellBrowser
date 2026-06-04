@@ -483,7 +483,7 @@ def importCellrangerMatrix(inDir, outDir):
 
     # ugly code warning
     if len(matFnames1)!=0:
-        # cellranger 1/2 mtx files are not gziped
+        # cellranger 1/2 mtx files are not gzipped
         assert(len(matFnames1)==1)
         matFname = matFnames1[0]
         logging.info("Found %s" % matFname)

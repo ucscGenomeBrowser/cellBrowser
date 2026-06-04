@@ -1,7 +1,7 @@
 ``cbTool``: combine and convert your data
 =====
 
-The script ``cbTool`` included in the Cell Browser package includes a number of utilties
+The script ``cbTool`` included in the Cell Browser package includes a number of utilities
 for combining or converting your data. These different functions and how to use them are
 described below. 
 

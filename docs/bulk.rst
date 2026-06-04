@@ -30,4 +30,4 @@ All datasets also have a meta.tsv file with the cell-level metadata.
 
 The json file should be very self-explanatory.
 
-Please let us know if you use this. We love hearing feedback and like to report re-use of the dataset collection to NIMH.
+Please let us know if you use this. We love hearing feedback and like to report reuse of the dataset collection to NIMH.

@@ -182,7 +182,7 @@ def writeBarChartDesc(hubDir, hubName, hubUrl, refHtmlFname):
 
 <h2>Methods</h2>
 <p>The annotation files that associate cells to cluster names were parsed. Then the expression matrix was read.
-For each gene, the expresssion values for all cells from a cluster were read and sorted.
+For each gene, the expression values for all cells from a cluster were read and sorted.
 The median of this sorted list was written to a bigBed file.</p>
 
 <h2>Data Access</h2>
@@ -222,7 +222,7 @@ tracks</a>. There are three different types of view sub tracks in this track:</a
 <p><b>BAM Reads:</b> Alignable regions are shown in black, unalignable regions
 between two alignable ones shown with thin lines. For configuration options,
 see <a href="https://genome.ucsc.edu/goldenpath/help/hgBamTrackHelp.html">the
-BAM tracks help page</a>. By default, these tracks are hideen, set any of them to "squish" or "pack" (=clickable) on the track configuration page to see the reads. Click reads to show the alignment and read group.</p>
+BAM tracks help page</a>. By default, these tracks are hidden, set any of them to "squish" or "pack" (=clickable) on the track configuration page to see the reads. Click reads to show the alignment and read group.</p>
 
 <p><b>Coverage:</b> bar graphs indicate the number of reads at this base pair.
 You may want to switch on auto-scaling of the y axis. For configuration

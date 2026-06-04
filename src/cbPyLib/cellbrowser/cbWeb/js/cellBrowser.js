@@ -4468,7 +4468,7 @@ var cellbrowser = function() {
         if (newRadius)
             opts["radius"] = newRadius;
 
-        // label text can be overriden by the user cart
+        // label text can be overridden by the user cart
         var labelField = db.conf.labelField;
 
         if (clusterInfo) {
@@ -5203,7 +5203,7 @@ var cellbrowser = function() {
     }
 
     function getTextWidth(text, font) {
-        // re-use canvas object for better performance
+        // reuse canvas object for better performance
         // http://stackoverflow.com/questions/118241/calculate-text-width-with-javascript
         var canvas = getTextWidth.canvas || (getTextWidth.canvas = document.createElement("canvas"));
         var context = canvas.getContext("2d");
@@ -6497,7 +6497,7 @@ var cellbrowser = function() {
         if (sortBy===undefined && oldSortBy!==undefined)
             sortBy = oldSortBy;
 
-        // default sorting can be specfied with "sortBy" in cellbrowser.conf
+        // default sorting can be specified with "sortBy" in cellbrowser.conf
         if (sortBy===undefined && metaInfo.sortBy)
             sortBy = metaInfo.sortBy;
         if (sortBy!==undefined && sortBy!=="freq" && sortBy!=="name" && sortBy!=="none") {
@@ -8612,7 +8612,7 @@ var cellbrowser = function() {
                 alert("This gene is already on the plot");
         }
 
-        // pull out necesssary data from exprData object
+        // pull out necessary data from exprData object
         let cellCounts = exprData.cellCounts;
 
         let rows = exprData.rows; // one row per meta data value (e.g. cell type)
@@ -9559,7 +9559,7 @@ var cellbrowser = function() {
               },
               {
                 element: document.querySelector('#tpGeneTab'),
-                intro: "Color by gene: Click a gene from the list of pre-selected dataset genes or search for a gene in the dropdown to color by it.<br>",
+                intro: "Color by gene: Click a gene from the list of preselected dataset genes or search for a gene in the dropdown to color by it.<br>",
                 position: 'auto'
               },
               {
@@ -10003,7 +10003,7 @@ var cellbrowser = function() {
         var ret = {};
         ret.list = countList;
         ret.isSortedByName = isSortedByName;
-        // pallette should be a gradient for data types where this makes sense
+        // palette should be a gradient for data types where this makes sense
         return ret;
     }
 
@@ -11998,7 +11998,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
            urlVars = {}; // ignore all current vars
        }
 
-       // overwrite everthing that we got
+       // overwrite everything that we got
        for (var key in vars) {
            var val = vars[key];
            if (val===null || val==="") {

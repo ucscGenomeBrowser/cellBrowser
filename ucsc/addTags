@@ -97,7 +97,7 @@ for line in dfh:
                     newVal = splitLine[n]
                     if dataType=="list":
                         #vals = splitLine[n].strip().split(',')
-                        # code adapated from https://stackoverflow.com/questions/4071396/split-by-comma-and-strip-whitespace-in-python
+                        # code adapted from https://stackoverflow.com/questions/4071396/split-by-comma-and-strip-whitespace-in-python
                         vals = [x.strip() for x in newVal.split(',')]
                         valStr = str(vals)
                     elif dataType=="str":
@@ -134,7 +134,7 @@ for line in dfh:
                     # find those tags we've referenced in the header
                     if confTag == tag:
                         # take the values from datasetFile and add to output string
-                        # code adapated from https://stackoverflow.com/questions/4071396/split-by-comma-and-strip-whitespace-in-python
+                        # code adapted from https://stackoverflow.com/questions/4071396/split-by-comma-and-strip-whitespace-in-python
                         oldVal = splitTag[1].strip()
                         if "[" in oldVal:
                             vals = [x.strip() for x in splitLine[n].split(',')]

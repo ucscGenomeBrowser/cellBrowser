@@ -185,7 +185,7 @@ var cbUtil = (function () {
         var binData = this.response;
 
         if (!binData) {
-          alert("internal error when loading "+url+": no reponse from server?");
+          alert("internal error when loading "+url+": no response from server?");
           return;
         }
 
@@ -266,7 +266,7 @@ var cbUtil = (function () {
     };
 
     my.searchKeys = function(geneIdx, searchStr)  {
-        /* search the keys of an object for matches. Uses a strategy adapted for gene identifers and symbols:
+        /* search the keys of an object for matches. Uses a strategy adapted for gene identifiers and symbols:
          * - ignore case
          * - prefix search
          * - if not match, try suffix search
@@ -352,7 +352,7 @@ var cbUtil = (function () {
     };
 
     my.arrSub = function (a, b) {
-        /* substract array b from array a, modifying a in place. Return a. */
+        /* subtract array b from array a, modifying a in place. Return a. */
         if (a.length !== b.length)
             alert("cbUtil.arrAdd: input arrays must have same size");
         for (var i=0; i < a.length; i++)
@@ -361,7 +361,7 @@ var cbUtil = (function () {
     };
 
     my.arrSubMult = function (a, bArrs) {
-        /* substract all arrays in bArrs from array a, modifying a in place. Return a. */
+        /* subtract all arrays in bArrs from array a, modifying a in place. Return a. */
         for (var bi=0; bi < bArrs.length; bi++) {
             var a = cbUtil.arrSub(a, bArrs[bi]);
         }
@@ -410,7 +410,7 @@ function CbDbFile(url) {
     // indices, resolve sample indices to sample names load meta for a given
     // cell index
     var self = this; // this has two conflicting meanings in javascript.
-    // To make it a little more readble, we use 'self' to refer to object variables and 'this' to refer to the calling object
+    // To make it a little more readable, we use 'self' to refer to object variables and 'this' to refer to the calling object
 
     const DEBUG = false;
 
@@ -671,14 +671,14 @@ function CbDbFile(url) {
 
             var bytes = comprBytes; // some Apache/InternetBrowser combinations silently uncompress
             var comprView = new Uint8Array(comprBytes);
-            // magic bytes of gzip are 1f, 8b, and we assume little endianess
+            // magic bytes of gzip are 1f, 8b, and we assume little endianness
             if (comprView[0]===0x1f && comprView[1]===0x8b) {
                 try {
                     bytes = pako.ungzip(comprBytes);
                 }
                 catch(err) {
                     alert("Error when decompressing a file. This has to do with your Apache config or your "+
-                             " internet browser and incorrect compresssion http headers. "+
+                             " internet browser and incorrect compression http headers. "+
                              "Please contact cells@ucsc.edu, we can help you solve this. "+err);
                 }
             }
@@ -1020,15 +1020,15 @@ function CbDbFile(url) {
      * - chr1|1000|2000 chrom range
      * - sums of either of these, e.g. PITX1+OTX2 or chr1|1000|2000+chr2|1000|2000
      * - a single gene or locus name, prefixed by "+", to add to the current array
-     * - a single gene or locus name, prefixed by "-", to substract from the current array
+     * - a single gene or locus name, prefixed by "-", to subtract from the current array
 
      * "strategy" can be "cells" or "range" or "none". If "cells", bins will have an ideally equal number of cells.
-     * if "range", bins will have an equal range between min-max (and somtimes no cells at all). If undefined,
+     * if "range", bins will have an equal range between min-max (and sometimes no cells at all). If undefined,
      * is "cells". "none" switches off discretization.
      * */
 
         function allRangesDone() {
-            /* sum/substract all arrays and call the callback */
+            /* sum/subtract all arrays and call the callback */
             // create a summarized gene desc
             let geneDescs = [];
             let arrs = [];

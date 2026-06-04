@@ -82,7 +82,7 @@ Or, if you don't have a webserver already, start the built-in one:
   cbBuild -o /myHtmlFiles -p 8888
 
 
-How to configue a basic cbSeurat pipeline
+How to configure a basic cbSeurat pipeline
 ^^^^
 
 Running ``cbSeurat`` will run a basic Seurat pipeline with the default settings. ``cbSeurat`` can be configured through a `seurat.conf <https://github.com/maximilianh/cellBrowser/blob/master/src/cbPyLib/cellbrowser/sampleConfig/seurat.conf>`_.
@@ -185,7 +185,7 @@ Next, go into the output directory specified in the ``cbScanpy`` command and bui
   cd scanpy-out
   cbBuild -o ~/public_html/cb
 
-How to configue a basic cbScanpy pipeline
+How to configure a basic cbScanpy pipeline
 ^^^^
 
 Running ``cbSeurat`` will run a basic Scanpy pipeline with the default settings. ``cbScanpy`` can be configured through a `scanpy.conf <https://github.com/maximilianh/cellBrowser/blob/master/src/cbPyLib/cellbrowser/sampleConfig/scanpy.conf>`_.
@@ -398,7 +398,7 @@ You will the following three files:
 
 * Expression matrix with cell names as columns and peak ranges as rows. 
 * Cell annotations/metadata
-* Layout coordinats (e.g. UMAP)
+* Layout coordinates (e.g. UMAP)
 
 The peaks must be encoded in the expression matrix in the format chr:start-end, e.g. "chr1:1000-2000".
 
@@ -414,8 +414,8 @@ Examples:
 
 ::
 
- cbGenes fetch gencode-34        # geneId -> symbol mapping for human gencode relase 34
- cbGenes fetch hg38.gencode-34   # gene -> chrom mapping for human gencode relase 34
+ cbGenes fetch gencode-34        # geneId -> symbol mapping for human gencode release 34
+ cbGenes fetch hg38.gencode-34   # gene -> chrom mapping for human gencode release 34
 
 Both files are required for this to work.
 

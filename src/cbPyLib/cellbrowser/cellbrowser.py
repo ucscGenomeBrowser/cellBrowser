@@ -3035,7 +3035,7 @@ def parseMarkerTable(filename, geneToSym):
         try:
             scoreVal = float(row[scoreIdx])
         except ValueError:
-            logging.error("File %s, column %d: value is not a number but we expect a number in this colum."
+            logging.error("File %s, column %d: value is not a number but we expect a number in this column."
                     "Columns should be: cluster, gene, score. '%s' is not a score`" %
                     (filename, scoreIdx+1, row[scoreIdx]))
             raise
@@ -5453,7 +5453,7 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     from the AnnData object (other than 'louvain' to also save (eg: batches, ...)).
     This can also be a dict of name -> label, if you want to have more human-readable names.
     :param nb_marker: number of cluster markers to store. Default: 50
-    :param atac: assume that the file is an ATAC seq file, chnages the cellbrowser.conf output file
+    :param atac: assume that the file is an ATAC seq file, changes the cellbrowser.conf output file
     :param layer: specify the layer to use in the anndata object
 
     """
@@ -5521,7 +5521,7 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
 
     ##Check for cluster markers
     if (markerField not in adata.uns or clusterField is not None) and not skipMarkers:
-        logging.warn("Couldnt find list of cluster marker genes in the h5ad file in adata.uns with the key '%s'. "
+        logging.warn("Couldn't find list of cluster marker genes in the h5ad file in adata.uns with the key '%s'. "
             "In the future, from Python, try running sc.tl.rank_genes_groups(adata) to "
             "create the cluster annotation and write the h5ad file then." % markerField)
         logging.info("Filtering for >5 cells then do sc.tl.rank_genes_groups for meta field '%s'" % clusterField)
@@ -6107,7 +6107,7 @@ def serve(outDir, port):
 
 def serveDirect(outDir, port):
     """ run a webserver on localhost with a port, fork/detach as a daemon, and
-    write PID into <tempdir>/cellbrowser.pid. NOT USED FOR NOW - Jupyther/ipython/Rstudio don't like this  """
+    write PID into <tempdir>/cellbrowser.pid. NOT USED FOR NOW - Jupyter/ipython/Rstudio don't like this  """
     # mostly copied from
     # http://code.activestate.com/recipes/66012-fork-a-daemon-process-on-unix/
     # do the UNIX double-fork magic, see Stevens' "Advanced 
@@ -6259,7 +6259,7 @@ def importLoom(inFname, reqCoords=False):
     return ad
 
 def adataStringFix(adata):
-    " some h5ad files read from 10X MTX have bytestrings in them instread of normal strings "
+    " some h5ad files read from 10X MTX have bytestrings in them instead of normal strings "
     if not type(adata.var.index[0])==str:
         logging.warn("Workaround: Converting byte strings in adata.var.index to normal strings")
         adata.var.index = adata.var.index.str.decode("utf-8")
@@ -6953,7 +6953,7 @@ def addMetaToAnnData(adata, fname):
         logging.info("%d meta data columns after setting in anndata object" % len(adata.obs.index))
 
     except ValueError:
-        logging.warn("Could not merge h5ad and meta data, skipping h5ad meta and using only provided meta. Most likly this happens when the field names in the h5ad and the meta file overlap")
+        logging.warn("Could not merge h5ad and meta data, skipping h5ad meta and using only provided meta. Most likely this happens when the field names in the h5ad and the meta file overlap")
         adata.obs = df2
 
     return adata
@@ -7061,7 +7061,7 @@ def cbScanpy(matrixFname, inMeta, inCluster, confFname, figDir, logFname, skipMa
 
     #useRaw = conf["useRaw"]
     #if useRaw and not bigDataset:
-        #adata.raw = adata # this is doing much more than assigning, it calls implicitely a function that copies
+        #adata.raw = adata # this is doing much more than assigning, it calls implicitly a function that copies
         ## a few things around. See the anndata source code under basic.py
     #else:
         #bigDataset = True

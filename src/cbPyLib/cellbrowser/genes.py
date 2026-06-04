@@ -35,8 +35,8 @@ def cbGenes_parseArgs():
 
     Examples (common):
     %prog fetch                   # show the files that are available for the 'build' command
-    %prog fetch gencode-34        # geneId -> symbol mapping for human gencode relase 34
-    %prog fetch hg38.gencode-34   # gene -> chrom mapping for human gencode relase 34
+    %prog fetch gencode-34        # geneId -> symbol mapping for human gencode release 34
+    %prog fetch hg38.gencode-34   # gene -> chrom mapping for human gencode release 34
     %prog ls
     %prog guess genes.txt mouse   # guess the best gencode version for this file
     %prog check features.tsv.gz gencode-40 # check if the genes match gencode-40 and which ones don't
