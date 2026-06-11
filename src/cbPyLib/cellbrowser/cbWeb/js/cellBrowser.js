@@ -6112,21 +6112,50 @@ var cellbrowser = function() {
         }
     }
 
-    function addDatasetCounts(cellTypes) {
+    function addDatasetCounts(cellTypes, onDone) {
     /* Pre-compute per-item count of genes present in the current dataset's expression matrix.
-     * Stores result as item._dsCount. Falls back to total gene count if matrix not yet loaded. */
-        for (var i = 0; i < cellTypes.length; i++) {
-            var item = cellTypes[i];
-            if (!db.geneSyns) {
-                item._dsCount = item.genes.length;
-            } else {
+     * Stores result as item._dsCount. Falls back to total gene count if matrix not yet loaded.
+     * Processes in batches with setTimeout yields to keep the UI responsive on large databases.
+     * Calls onDone (if given) when the full array has been processed. */
+        if (!db.geneSyns) {
+            for (var k = 0; k < cellTypes.length; k++) {
+                cellTypes[k]._dsCount = cellTypes[k].genes.length;
+            }
+            if (onDone) onDone();
+            return;
+        }
+
+        // Set-based membership check is O(1) per gene, vs. O(N) for findGenesExact's linear scan.
+        // The geneSyns array entries are [synonymLowercase, geneId], so the synonyms are already lowercased.
+        var geneSet = new Set();
+        for (var s = 0; s < db.geneSyns.length; s++) geneSet.add(db.geneSyns[s][0]);
+
+        var batchSize = 100;
+        var i = 0;
+        function processBatch() {
+            var end = Math.min(i + batchSize, cellTypes.length);
+            for (; i < end; i++) {
+                var item = cellTypes[i];
                 var count = 0;
                 for (var j = 0; j < item.genes.length; j++) {
-                    if (item.genes[j] && db.findGenesExact(item.genes[j]).length > 0) count++;
+                    var g = item.genes[j];
+                    if (g && geneSet.has(g.toLowerCase())) count++;
                 }
                 item._dsCount = count;
             }
+            if (i < cellTypes.length) {
+                setTimeout(processBatch, 0);
+            } else if (onDone) {
+                onDone();
+            }
         }
+        processBatch();
+    }
+
+    function deferIdle(fn) {
+    /* Run fn during the next idle period, or on next tick if requestIdleCallback isn't supported. */
+        if (window.requestIdleCallback) window.requestIdleCallback(fn);
+        else setTimeout(fn, 0);
     }
 
     function buildMarkerBrowseTree(cellTypes, query) {
@@ -6341,8 +6370,14 @@ var cellbrowser = function() {
             cbUtil.loadJson(url, function(rawData) {
                 if (!rawData) return;
                 gMarkerBrowseCellTypes = flattenMarkerData(rawData);
-                addDatasetCounts(gMarkerBrowseCellTypes);
+                // Render immediately with fallback (total-gene) counts so the dialog is interactive.
                 updateMarkerBrowseTree("");
+                // Compute per-dataset counts in the background, then refresh the tree once they're in.
+                deferIdle(function() {
+                    addDatasetCounts(gMarkerBrowseCellTypes, function() {
+                        if (gMarkerBrowseCellTypes) updateMarkerBrowseTree($("#tpMarkerBrowseSearch").val() || "");
+                    });
+                });
             });
         });
 
@@ -6367,9 +6402,15 @@ var cellbrowser = function() {
             cbUtil.loadJson(gMarkerBrowseSelectedUrl, function(rawData) {
                 if (!rawData) return;
                 gMarkerBrowseCellTypes = flattenMarkerData(rawData);
-                addDatasetCounts(gMarkerBrowseCellTypes);
                 updateMarkerBrowseTree("");
                 restoreMarkerBrowseSelection();
+                deferIdle(function() {
+                    addDatasetCounts(gMarkerBrowseCellTypes, function() {
+                        if (!gMarkerBrowseCellTypes) return;
+                        updateMarkerBrowseTree($("#tpMarkerBrowseSearch").val() || "");
+                        restoreMarkerBrowseSelection();
+                    });
+                });
             });
         }
     }
