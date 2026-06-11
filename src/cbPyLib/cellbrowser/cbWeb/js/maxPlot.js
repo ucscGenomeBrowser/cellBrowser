@@ -1490,14 +1490,15 @@ function MaxPlot(div, top, left, width, height, args) {
            count++;
        }
 
-       // overdraw the selection as black rectangles on top
+       // overdraw the selection as black rectangles on top, at 2x radius so they stand out
        //if (fatIdx===null) {
            ctx.globalAlpha = 0.7;
            ctx.fillStyle= self.isLight() ? "black" : "white";
+           var selRadius = radius * 2, selDblSize = selRadius * 2;
             selCells.forEach(function(cellId) {
                let pxX = pxCoords[2*cellId];
                let pxY = pxCoords[2*cellId+1];
-               ctx.fillRect(pxX-radius, pxY-radius, dblSize, dblSize);
+               ctx.fillRect(pxX-selRadius, pxY-selRadius, selDblSize, selDblSize);
                count += 1;
             })
        //}
@@ -2021,21 +2022,19 @@ function MaxPlot(div, top, left, width, height, args) {
        if (origCoordColors)
             coordColors = origCoordColors;
 
-       // overdraw the selection on top: as circles with black outlines
+       // overdraw the selection on top: as circles with black outlines, scaled 2x so they stand out
        ctx.globalAlpha = 0.7;
-       var selImgIdx = templates.selImgIdx; // second-to last template is the black outline, see makeCircleTemplates()
+       var selImgIdx = templates.selImgIdx;
+       var selRadius = radius * 2;
+       var selTileSize = selRadius * 2 + 2;
        selCells.forEach(function(cellId) {
            let pxX = pxCoords[2*cellId];
            let pxY = pxCoords[2*cellId+1];
            if (isHidden(pxX, pxY))
                 return;
-           // make sure that old leftover overlapping black circles don't shine through and redraw the circle
-           // slow, but not sure what else I can do...
            let col = coordColors[cellId];
-           ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
-
-           // and draw the outline
-           ctx.drawImage(off, selImgIdx * tileWidth, 0, tileWidth, tileHeight, pxX - radius -1, pxY - radius-1, tileWidth, tileHeight);
+           ctx.drawImage(off, col * tileWidth, 0, tileWidth, tileHeight, pxX - selRadius - 1, pxY - selRadius - 1, selTileSize, selTileSize);
+           ctx.drawImage(off, selImgIdx * tileWidth, 0, tileWidth, tileHeight, pxX - selRadius - 1, pxY - selRadius - 1, selTileSize, selTileSize);
         });
 
        ctx.restore();
@@ -2153,8 +2152,10 @@ function MaxPlot(div, top, left, width, height, args) {
             ctx.drawArrays(self.ctx.POINTS, 0, count);
         }
         if(selCells.size > 0) {
+            ctx.uniform1f(self.u_Radius, radius * 2);
             ctx.uniform1f(self.u_Layer, 2);
             ctx.drawArrays(self.ctx.POINTS, 0, count);
+            ctx.uniform1f(self.u_Radius, radius);
         }
         if(WEBGL_DEBUG) {
             ctx.finish();
@@ -2257,17 +2258,24 @@ function MaxPlot(div, top, left, width, height, args) {
                count++;
        }
 
-       // overdraw the selection as black pixels
+       // overdraw the selection as black 3x3 blocks so they're visible at radius=0
         if (fatIdx===null) {
             selCells.forEach(function(cellId) {
                let pxX = pxCoords[2*cellId];
                let pxY = pxCoords[2*cellId+1];
                if (isHidden(pxX, pxY))
                     return;
-               let p = 4 * (pxY*width+pxX); // pointer to red value of pixel at x,y
-               cData[p] = 0;
-               cData[p+1] = 0;
-               cData[p+2] = 0;
+               for (let dy = -1; dy <= 1; dy++) {
+                   for (let dx = -1; dx <= 1; dx++) {
+                       let nx = pxX + dx, ny = pxY + dy;
+                       if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+                       let p = 4 * (ny*width+nx);
+                       cData[p] = 0;
+                       cData[p+1] = 0;
+                       cData[p+2] = 0;
+                       cData[p+3] = 255;
+                   }
+               }
             })
         }
 

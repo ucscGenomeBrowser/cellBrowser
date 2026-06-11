@@ -9017,17 +9017,18 @@ var cellbrowser = function() {
             //getById("tpGeneExprLimitApply").disabled = isDisabled;
         //});
         
-        // use the current gene
-        let geneId = getVar("gene", null);
-        
-        // if there is none, pick a reasonable default gene and meta var
-        if (geneId===null && db.conf.quickGenes)
-            geneId = db.conf.quickGenes[0][0];
-        if (geneId==null)
-            geneId = db.getRandomLocus();
-
-        // URL variables can override the defaults
-        let geneIds = getVar("exprGene", geneId).split(" ");
+        // URL variables override everything; otherwise load all quickGenes; last resort: single gene
+        let geneIds;
+        if (getVar("exprGene", null) !== null) {
+            geneIds = getVar("exprGene", null).split(" ");
+        } else if (db.conf.quickGenes && db.conf.quickGenes.length > 0) {
+            geneIds = db.conf.quickGenes.map(function(qg) { return qg[0]; });
+        } else {
+            let geneId = getVar("gene", null);
+            if (geneId === null)
+                geneId = db.getRandomLocus();
+            geneIds = [geneId];
+        }
 
         buildGeneExprPlotsAddGenes(geneIds, metaName); 
     }
@@ -11658,6 +11659,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         //if (acronyms!==undefined && clusterName in acronyms)
             //title += " - "+acronyms[clusterName];
         showDialogBox(htmls, title, {width: winWidth, height:winHeight, "buttons":buttons});
+        hideTooltip();
         $(".ui-widget-content").css("padding", "0");
         $("#tabs").tabs();
     }
@@ -11714,6 +11716,28 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             sortOrderNum = 1;
 
         var tableId = "tpMarkerTable-"+markerListIdx;
+
+        // Optional column reordering: build permutation from markerInfo.columnOrder
+        var symColIdx = 1; // default: symbol is at col 1
+        var reorderRow = null;
+        if (markerInfo.columnOrder) {
+            var nameToIdx = {};
+            for (var ci = 0; ci < headerRow.length; ci++)
+                nameToIdx[headerRow[ci].split("|")[0]] = ci;
+            var perm = [0]; // col 0 (id/geneId) always first
+            markerInfo.columnOrder.forEach(function(name) {
+                var idx = nameToIdx[name];
+                if (idx !== undefined && idx !== 0) perm.push(idx);
+            });
+            for (var ci = 1; ci < headerRow.length; ci++)
+                if (perm.indexOf(ci) === -1) perm.push(ci);
+            symColIdx = perm.indexOf(1);
+            reorderRow = function(row) {
+                return perm.map(function(pi) { return row[pi] !== undefined ? row[pi] : ""; });
+            };
+            headerRow = reorderRow(headerRow);
+        }
+
         //htmls.push("<table class='table' data-sortlist='[[1,1],[4,0]]' id='tpMarkerTable'>");
         htmls.push("<table class='table' data-sortlist='[["+sortColumn+","+sortOrder+"]]' id='"+tableId+"'>");
         htmls.push("<thead>");
@@ -11778,7 +11802,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 htmls.push("<th"+addStr+">");
             else
                 htmls.push("<th style='width:"+width+"'"+addStr+">");
-            colLabel = colLabel.replace(/_/g, " ");
+            if (markerInfo.columnLabels && markerInfo.columnLabels[colLabel])
+                colLabel = markerInfo.columnLabels[colLabel];
+            else
+                colLabel = colLabel.replace(/_/g, " ");
             htmls.push(colLabel);
             htmls.push("</th>");
         }
@@ -11805,6 +11832,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             }
         }
 
+        if (reorderRow)
+            allDataRows = allDataRows.map(reorderRow);
+
         function buildRowsHtml(subset) {
             var h = [];
             for (var i = 0; i < subset.length; i++) {
@@ -11819,27 +11849,29 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 var geneId = row[0];
                 if (geneId.indexOf("|") > -1)
                     geneId = geneId.split("|")[0];
-                var geneSym = row[1];
-                h.push("<td><a data-gene='"+geneId+"' class='link tpLoadGeneLink'>"+geneSym+"</a>");
-                if (hubUrl!==null) {
-                    var fullHubUrl = hubUrl+"&position="+geneSym+"&singleSearch=knownCanonical";
-                    h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to UCSC Genome Browser' href='"+fullHubUrl+"'>Genome</a>");
-                }
-                h.push("</td>");
-                for (var j = 2; j < row.length; j++) {
+                var geneSym = row[symColIdx];
+                for (var j = 1; j < row.length; j++) {
                     var val = row[j];
                     h.push("<td>");
-                    if (val.startsWith("./")) {
-                        var imgUrl = val.replace("./", db.url+"/");
-                        var imgHtml = '<img width="100px" src="'+imgUrl+'">';
-                        val = "<a data-toggle='tooltip' data-placement='auto' class='tpPlots link' target=_blank title='"+imgHtml+"' href='"+ imgUrl + "'>plot</a>";
+                    if (j === symColIdx) {
+                        h.push("<a data-gene='"+geneId+"' class='link tpLoadGeneLink'>"+geneSym+"</a>");
+                        if (hubUrl!==null) {
+                            var fullHubUrl = hubUrl+"&position="+geneSym+"&singleSearch=knownCanonical";
+                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to UCSC Genome Browser' href='"+fullHubUrl+"'>Genome</a>");
+                        }
+                    } else {
+                        if (val.startsWith("./")) {
+                            var imgUrl = val.replace("./", db.url+"/");
+                            var imgHtml = '<img width="100px" src="'+imgUrl+'">';
+                            val = "<a data-toggle='tooltip' data-placement='auto' class='tpPlots link' target=_blank title='"+imgHtml+"' href='"+ imgUrl + "'>plot</a>";
+                        }
+                        if (j===geneListCol || j===exprCol)
+                            geneListFormat(h, val, geneSym);
+                        else if (j===pValCol)
+                            h.push(parseFloat(val).toPrecision(5));
+                        else
+                            geneListFormat(h, val, geneSym);
                     }
-                    if (j===geneListCol || j===exprCol)
-                        geneListFormat(h, val, geneSym);
-                    else if (j===pValCol)
-                        h.push(parseFloat(val).toPrecision(5));
-                    else
-                        geneListFormat(h, val, geneSym);
                     h.push("</td>");
                 }
                 h.push("</tr>");
@@ -12198,8 +12230,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         buildMenuBar();
 
         var datasetName = getDatasetNameFromUrl()
-        if (datasetName === "whole-brain-perturb" && window.location.hostname === "cells.ucsc.edu")
-            window.location.replace("https://cells-test.gi.ucsc.edu/?ds=" + datasetName);
         // pre-load dataset.json here?
         menuBarHeight = $('#tpMenuBar').outerHeight(true);
 
