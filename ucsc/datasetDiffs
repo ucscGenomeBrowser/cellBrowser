@@ -1,44 +1,33 @@
 #! /usr/bin/env python3
 
-import argparse, threading, sys, tempfile
+import argparse, threading, sys, tempfile, os
 from json import load
-from subprocess import Popen,PIPE
+from subprocess import Popen, PIPE
 import subprocess
-from operator import eq
-from os import unlink, mkdir
-import logging
+
 
 def threader(to_fetch, mach_djson, hidden):
-    """
-    use multithreading to grab contents of urls or files
-    """
-    # from: https://stackoverflow.com/questions/16181121/a-very-simple-multithreading-parallel-url-fetching-without-queue
-    threads = [threading.Thread(target=fetch_data, args=(to_fetch[d],d,mach_djson, hidden)) for d in to_fetch]
+    """Use multithreading to grab contents of files."""
+    threads = [threading.Thread(target=fetch_data, args=(to_fetch[d], d, mach_djson, hidden)) for d in to_fetch]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
 
 def fetch_data(loc, dname, out_dict, hidden):
-    """
-    Gets content url or and saves to given dict where key is the dataset name and
-    value is the json contents
-
-    also indicates if dataset is hidden on one of the various machines
-    """
-    djson = load(open(loc,"r"))
+    """Loads a dataset.json file and saves its contents to out_dict; records hidden datasets."""
+    with open(loc, "r") as f:
+        djson = load(f)
     out_dict[dname] = djson
-
     if 'hide' in djson.values():
         hidden.add(dname)
 
 def print_diffs(key, mach1_name, mach1_val, mach2_name, mach2_val):
-    """Print out values that differ between two machines, e.g. cells-beta and cells-test"""
+    """Print out values that differ between two machines."""
     print(key, "\n", mach1_name + ": ", mach1_val, "\n", mach2_name + ": ", mach2_val)
 
 def process_dict(mach1_name, mach1_dict, mach2_name, mach2_dict):
-    """Processes a dictionary, printing out differenting values if needed.
-       Or continuing to process if it finds another dictionary."""
+    """Processes a dictionary, printing out differing values if needed."""
     for key in mach1_dict.keys():
         mach1_val = mach1_dict[key]
         mach2_val = mach2_dict[key]
@@ -50,46 +39,29 @@ def process_dict(mach1_name, mach1_dict, mach2_name, mach2_dict):
 
 def compare_machines(mach1_dict, mach1_name, mach2_dict, mach2_name, verbose=False):
     """
-    - Takes a dictionary containing dataset.json for each dataset on two machines
-    - Prints those that are different between the two machines and highlights if
-      a dataset exists on one machine but not the other
-    - 'Verbose' mode prints the exact diffs, otherwise just prints the dataset name
+    Prints datasets that differ between two machines. Highlights datasets that
+    exist on one machine but not the other. Verbose mode prints field-level diffs.
     """
-
     print(f'\nDatasets with diffs between {mach1_name} + {mach2_name}:')
 
-	# Sort the datasets alphabetically
+    # Sort the datasets alphabetically
     sorted_datasets = sorted(mach2_dict.keys())
 
     for dataset in sorted_datasets:
-        # Check if the overall dicts are the same for a dataset on test/beta
-        # If not, we'll go through and print out only those values that are different
         try:
-            if not eq(mach1_dict[dataset], mach2_dict[dataset]):
-                # Print dataset name
+            if mach1_dict[dataset] != mach2_dict[dataset]:
                 print(dataset)
-
-                # Script has option to print only names of datasets that have diffs
-                # This whole chunk gets skipped if that's the case
                 if verbose:
                     for key in mach2_dict[dataset].keys():
-                        # Check if current value is a dict and if so, process that a certain way
                         if isinstance(mach2_dict[dataset][key], dict):
                             process_dict(mach2_name, mach2_dict[dataset][key], mach1_name, mach1_dict[dataset][key])
-                        # Otherwise check to see if values for test/beta are different
-                        # and print only the diffs
                         else:
                             try:
                                 val1 = mach1_dict[dataset][key]
                                 val2 = mach2_dict[dataset][key]
                                 if val1 != val2:
-                                    # The value for this keys if often large and bloats the results
-                                    # making it difficult to actually see the diffs. Only print a
-                                    # message saying this value differs for test/beta.
                                     if key == "metaFields":
                                         print(key, mach1_name + " and " + mach2_name + " differ")
-                                    # Otherwise print out the field that differs and what the values
-                                    # are for test/beta
                                     else:
                                         print_diffs(key, mach2_name, val2, mach1_name, val1)
                             except KeyError:
@@ -97,170 +69,132 @@ def compare_machines(mach1_dict, mach1_name, mach2_dict, mach2_name, verbose=Fal
         except KeyError:
             print(dataset, f'present on {mach1_name}, but not on {mach2_name} or vice versa')
 
-# Set up script arguments
+
 parser = argparse.ArgumentParser(
     formatter_class=argparse.RawDescriptionHelpFormatter,
-    description="Shows diffs between cells-test and cells-beta. By default shows only names ")
-parser.add_argument("-r","--run", action='store_true',
-    help='run script to looks for diffs')
-parser.add_argument("-s","--stats", action='store_true',
-    help='Print stats about the number of datasets/collections on each machine')
-parser.add_argument("-d","--hidden", action='store_true',
-    help='Print datasets that are hidden on each machine')
-parser.add_argument("-v","--verbose", action='store_true',
-    help='Print datasets that are hidden on each machine')
+    description="Shows diffs between cells-test and cells-beta. By default shows only names.")
+parser.add_argument("-r", "--run", action='store_true',
+    help='run script to look for diffs')
+parser.add_argument("-s", "--stats", action='store_true',
+    help='print stats about the number of datasets/collections on each machine')
+parser.add_argument("-d", "--hidden", action='store_true',
+    help='print datasets that are hidden on each machine')
+parser.add_argument("-v", "--verbose", action='store_true',
+    help='print field-level diffs for datasets that differ')
 args = parser.parse_args()
 
+
 def main():
-    """Main function of datasetDiffs. Runs all of the other functions of the program."""
-    # Script only runs if option to run is set via -r/--run
-    if args.run == True:
-        # Open dataset.json on both dev and beta
-        # Hard coded since I don't think you'd ever be able to reasonably compare
-        # two arbitrary hosts or collections of datasets?
-        # Loading them as dictionaries via json.load
-        ct_hide = set()
-        ct_djson = dict()
-        ct_loc = dict()
-        ct_base = "/usr/local/apache/htdocs-cells/"
-        bash_cmd = 'find ' + ct_base + ' -name dataset.json | cut -f6- -d "/" | sed "s/\/dataset.json//g" | sort'
-        p = Popen([bash_cmd], shell=True, stdout=PIPE, stderr=PIPE)
-        cmdout, cmderr = p.communicate()
-        ct_datasets = set(cmdout.decode().strip().split('\n'))
-        ct_datasets.remove('dataset.json')
-        for dname in ct_datasets:
-            ct_loc[dname] = ct_base + dname + "/dataset.json"
-        threader(ct_loc, ct_djson, ct_hide)
-        # dicts/sets to hold everything
-        cb_hide = set() # hidden cells-beta datasets
-        cb_djson = dict() # holds contents of json for each cells-beta dataset
-        cb_loc = dict()
-        # get list of all datasets on cells-beta
-        cb_base = '/usr/local/apache/htdocs-cells-beta/'
-        bash_cmd = 'find ' + cb_base + ' -name dataset.json | cut -f6- -d "/" | sed "s/\/dataset.json//g" | sort'
-        p = Popen([bash_cmd], shell=True, stdout=PIPE, stderr=PIPE)
-        cmdout, cmderr = p.communicate()
-        cb_datasets = set(cmdout.decode().strip().split('\n'))
-        cb_datasets.remove('dataset.json')
-        for dname in cb_datasets:
-            cb_loc[dname] = cb_base + dname + "/dataset.json"
-        threader(cb_loc, cb_djson, cb_hide)
-
-        # dicts/sets to hold everything
-        rr_hide = set() # holds hidden rr datasets
-        rr_djson = dict() # holds contents of json files for each rr dataset
-        rr_datasets = set() # holds names of all datasets on rr
-        rr_paths = dict() # file paths to process via multithreading
-        # Get list of dataset.json files for rr
-        cmd = ['ssh', 'qateam@hgw0.soe.ucsc.edu', 'find', ct_base, '-name',\
-        'dataset.json', '|', 'cut', '-f', '6-', '-d', '"/"']
-        p = Popen(cmd, shell=False, stdout=PIPE, stderr=PIPE)
-        cmdout, cmderr = p.communicate()
-        rr_files = set(cmdout.decode().rstrip().split('\n'))
-        tmp = tempfile.NamedTemporaryFile(prefix='cb_', delete=False)
-        tmp.write(cmdout)
-        #tmp = open("/data/tmp/filesForRsync.txt", "wb")
-        #tmp.write(cmdout)
-        tmp.flush()
-
-        # Wanted to use TemporaryDirectory here but couldn't get it to work
-        rr_base = '/data/tmp/cb_tmp_new'
-        # Make the new directory, continue on if dir already exists
-        try:
-            mkdir(rr_base)
-        except OSError:
-            pass
-        rsync_cmd = ['rsync', '--files-from=' + tmp.name, \
-        'qateam@hgw0.soe.ucsc.edu:/usr/local/apache/htdocs-cells/', rr_base]
-        print("running ", rsync_cmd)
-        #rsync_p = Popen(rsync_cmd, shell=True, stdout=PIPE, stderr=PIPE)
-        #rsync_cmdout, rsync_cmderr = p.communicate()
-        subprocess.run(rsync_cmd, check=True)
-        tmp.close()
-
-        #if p.returncode != 0:
-            #logging.error("error when running: "+repr(" ".join(rsync_cmd)))
-            #assert(False)
-        # go through rr_files
-        for fname in rr_files:
-            # turn full path name into a simple dataset name
-            fsplit = fname.strip().split('/')
-            # from https://stackoverflow.com/questions/12453580/how-do-i-concatenate-items-in-a-list-to-a-single-string
-            dname = '/'.join(fsplit[:-1])
-            if dname != '':
-                # now turn dataset name into url
-                dpath = rr_base + '/' + dname  + '/dataset.json'
-                # add that url to a dict
-                rr_paths[dname] = dpath
-                rr_datasets.add(dname)
-        threader(rr_paths, rr_djson, rr_hide)
-
-        # Close out our tmp file
-        tmp.close()
-        #unlink(tmp.name)
-
-        if args.hidden:
-            if len(ct_hide) != 0:
-                print("cells-test hidden datasets:")
-                for dataset in sorted(list(ct_hide)):
-                    print(dataset)
-                print("\n")            
-            if len(cb_hide) != 0:
-                print("cells-beta hidden datasets:")
-                for dataset in sorted(list(cb_hide)):
-                    print(dataset)
-                print("\n")
-            if  len(rr_hide) != 0:
-                print("cells hidden datasets:")
-                for dataset in sorted(list(rr_hide)):
-                    print(dataset)
-                print("\n")
-
-        # Print out only datasets on cells-test only
-        dev_only = sorted(list(x for x in ct_datasets.difference(cb_datasets) if "/" not in x))
-        # Only print something if there are actually datasets on cells-test only
-        if len(dev_only) != 0:
-            print("Datasets on cells-test only:")
-            for dataset in dev_only:
-                print(dataset)
-            print("\n")
-        # Now datasets on cells-beta only
-        beta_only = sorted(list(x for x in cb_datasets.difference(rr_datasets) if "/" not in x))
-        if len(beta_only) != 0:
-            print("Datasets on cells-beta, but not on RR:")
-            for dataset in beta_only:
-                print(dataset)
-            print("\n") 
-
-        # Compare cells-test to cells-beta datasets
-        print('Verbose Mode "on": ')        
-        print(args.verbose)
-        compare_machines(ct_djson, "cells-test", cb_djson, "cells-beta", args.verbose)
-        # And then cells-beta to cells
-        compare_machines(cb_djson, "cells-beta", rr_djson, "cells", args.verbose)
-
-        # make sets of only top-level datasets
-        # from: https://stackoverflow.com/questions/33944647/what-is-the-most-pythonic-way-to-filter-a-set
-        ct_top = set(x for x in ct_datasets if "/" not in x)
-        cb_top = set(x for x in cb_datasets if "/" not in x)
-        rr_top = set(x for x in rr_datasets if "/" not in x)
-
-        # Print stats about number of datasets on each machine if arg set
-        if args.stats:
-            # top-level datasets, or those w/o a '/' in their name
-            print("Num of top-level datasets/collections")
-            print("\tcells-test:", len(ct_top))
-            print("\tcells-beta:", len(cb_top))
-            print("\tcells:", len(rr_top))
-            # Now all datasets
-            print("Num of datasets (including those in collections):")
-            print("\tcells-test:", len(ct_datasets))
-            print("\tcells-beta:", len(cb_datasets))
-            print("\tcells:", len(rr_datasets))
-
-    else:
+    if not args.run:
         parser.print_help(sys.stderr)
         exit(1)
+
+    ct_hide = set()
+    ct_djson = dict()
+    ct_loc = dict()
+    ct_base = "/usr/local/apache/htdocs-cells/"
+    bash_cmd = 'find ' + ct_base + ' -name dataset.json | cut -f6- -d "/" | sed "s/\/dataset.json//g" | sort'
+    p = Popen([bash_cmd], shell=True, stdout=PIPE, stderr=PIPE)
+    cmdout, cmderr = p.communicate()
+    ct_datasets = set(cmdout.decode().strip().split('\n'))
+    ct_datasets.remove('dataset.json')
+    for dname in ct_datasets:
+        ct_loc[dname] = ct_base + dname + "/dataset.json"
+    threader(ct_loc, ct_djson, ct_hide)
+
+    cb_hide = set()
+    cb_djson = dict()
+    cb_loc = dict()
+    cb_base = '/usr/local/apache/htdocs-cells-beta/'
+    bash_cmd = 'find ' + cb_base + ' -name dataset.json | cut -f6- -d "/" | sed "s/\/dataset.json//g" | sort'
+    p = Popen([bash_cmd], shell=True, stdout=PIPE, stderr=PIPE)
+    cmdout, cmderr = p.communicate()
+    cb_datasets = set(cmdout.decode().strip().split('\n'))
+    cb_datasets.remove('dataset.json')
+    for dname in cb_datasets:
+        cb_loc[dname] = cb_base + dname + "/dataset.json"
+    threader(cb_loc, cb_djson, cb_hide)
+
+    rr_hide = set()
+    rr_djson = dict()
+    rr_datasets = set()
+    rr_paths = dict()
+    cmd = ['ssh', 'qateam@hgw0.soe.ucsc.edu', 'find', ct_base, '-name',
+        'dataset.json', '|', 'cut', '-f', '6-', '-d', '"/"']
+    p = Popen(cmd, shell=False, stdout=PIPE, stderr=PIPE)
+    cmdout, cmderr = p.communicate()
+    rr_files = set(cmdout.decode().rstrip().split('\n'))
+
+    with tempfile.NamedTemporaryFile(prefix='cb_', delete=False) as tmp:
+        tmp.write(cmdout)
+        tmp.flush()
+        tmp_name = tmp.name
+
+    rr_base = '/data/tmp/cb_tmp_new'
+    os.makedirs(rr_base, exist_ok=True)
+    rsync_cmd = ['rsync', '--files-from=' + tmp_name,
+        'qateam@hgw0.soe.ucsc.edu:/usr/local/apache/htdocs-cells/', rr_base]
+    print("running ", rsync_cmd)
+    subprocess.run(rsync_cmd, check=True)
+    os.unlink(tmp_name)
+
+    for fname in rr_files:
+        fsplit = fname.strip().split('/')
+        dname = '/'.join(fsplit[:-1])
+        if dname != '':
+            dpath = rr_base + '/' + dname + '/dataset.json'
+            rr_paths[dname] = dpath
+            rr_datasets.add(dname)
+    threader(rr_paths, rr_djson, rr_hide)
+
+    if args.hidden:
+        if ct_hide:
+            print("cells-test hidden datasets:")
+            for dataset in sorted(ct_hide):
+                print(dataset)
+            print("\n")
+        if cb_hide:
+            print("cells-beta hidden datasets:")
+            for dataset in sorted(cb_hide):
+                print(dataset)
+            print("\n")
+        if rr_hide:
+            print("cells hidden datasets:")
+            for dataset in sorted(rr_hide):
+                print(dataset)
+            print("\n")
+
+    dev_only = sorted(x for x in ct_datasets.difference(cb_datasets) if "/" not in x)
+    if dev_only:
+        print("Datasets on cells-test only:")
+        for dataset in dev_only:
+            print(dataset)
+        print("\n")
+
+    beta_only = sorted(x for x in cb_datasets.difference(rr_datasets) if "/" not in x)
+    if beta_only:
+        print("Datasets on cells-beta, but not on RR:")
+        for dataset in beta_only:
+            print(dataset)
+        print("\n")
+
+    compare_machines(ct_djson, "cells-test", cb_djson, "cells-beta", args.verbose)
+    compare_machines(cb_djson, "cells-beta", rr_djson, "cells", args.verbose)
+
+    ct_top = set(x for x in ct_datasets if "/" not in x)
+    cb_top = set(x for x in cb_datasets if "/" not in x)
+    rr_top = set(x for x in rr_datasets if "/" not in x)
+
+    if args.stats:
+        print("Num of top-level datasets/collections")
+        print("\tcells-test:", len(ct_top))
+        print("\tcells-beta:", len(cb_top))
+        print("\tcells:", len(rr_top))
+        print("Num of datasets (including those in collections):")
+        print("\tcells-test:", len(ct_datasets))
+        print("\tcells-beta:", len(cb_datasets))
+        print("\tcells:", len(rr_datasets))
+
 
 if __name__ == "__main__":
     main()
