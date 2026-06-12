@@ -8999,7 +8999,7 @@ var cellbrowser = function() {
 
         activateGeneCombo("tpGeneExprGeneCombo", onGeneExprGeneComboChange);
 
-        activateCombobox("tpGeneExprMetaCombo", metaBarWidth-10);
+        activateCombobox("tpGeneExprMetaCombo", 200);
 
         $("#tpGeneExprMetaCombo").change( onGeneExprMetaComboChange );
 
