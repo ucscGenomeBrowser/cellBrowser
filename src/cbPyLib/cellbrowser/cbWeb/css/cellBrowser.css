@@ -34,14 +34,18 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         display:flex;
         flex-direction: row;
         flex-flow: wrap;
-        height:100%;
+        flex: 1;
+        min-height: 0;
         padding-top:10px;
-        overflow: scroll;
+        overflow: auto;
 }
 
 #tpExprViewContent {
         padding: 6px;
         height: 100%;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box;
 }
 
 #tpGeneExprLabel {
@@ -418,6 +422,8 @@ input[type=checkbox], input[type=radio] {
 }
 
 .tpMetaBox { font-size: 13px; cursor:default; overflow:hidden }
+.tpConstantFields { font-size: 10px; color: #888; padding: 3px 2px 5px 2px; border-bottom: 1px solid #ddd; margin-bottom: 4px; line-height: 1.4em; word-break: break-word; }
+#tpCellCount { position: fixed; bottom: 6px; left: 50%; transform: translateX(-50%); font-size: 11px; color: #555; background: rgba(255,255,255,0.75); padding: 2px 7px; border-radius: 3px; pointer-events: none; z-index: 10; }
 .tpMetaHover { 
         color: white; 
         background-color: #333 !important;

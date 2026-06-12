@@ -1984,7 +1984,25 @@ var cellbrowser = function() {
         /* show all cells, hidden or not. Do not touch the selection. */
         renderer.unhideAll();
         renderer.drawDots();
-        $("#tpShowAll").hide()
+        $("#tpShowAll").hide();
+        updateCellCount();
+    }
+
+    function updateCellCount() {
+        /* update the cell count display below the UMAP */
+        var el = getById("tpCellCount");
+        if (!el || !renderer) return;
+        var visCount   = renderer.getVisibleCount();
+        var totalCount = renderer.getCount();
+        var selCount   = renderer.getSelection().length;
+        var parts = [];
+        if (visCount < totalCount)
+            parts.push(prettyNumber(visCount) + " of " + prettyNumber(totalCount) + " " + gSampleDesc + "s shown");
+        else
+            parts.push(prettyNumber(totalCount) + " " + gSampleDesc + "s");
+        if (selCount > 0)
+            parts.push(prettyNumber(selCount) + " selected");
+        el.textContent = parts.join(" | ");
     }
 
     function updateSelectionButtons() {
@@ -2003,6 +2021,7 @@ var cellbrowser = function() {
         } else {
             $(".tpSelectButton").hide();
         }
+        updateCellCount();
     }
 
     function buildSelectActions() {
@@ -4784,6 +4803,7 @@ var cellbrowser = function() {
 
 
                renderer.setTitle("Dataset: "+makeFullLabel(db));
+               updateCellCount();
 
                if (selList)
                    findCellsMatchingQueryList(selList, function (cellIds) {
@@ -7021,6 +7041,10 @@ var cellbrowser = function() {
             activateTooltip(".mpButton");
             renderer.activateSliders();
 
+            var cellCountDiv = document.createElement('div');
+            cellCountDiv.id = "tpCellCount";
+            document.body.appendChild(cellCountDiv);
+
             self.tooltipDiv = makeTooltipCont();
             document.body.appendChild(self.tooltipDiv);
 
@@ -8902,7 +8926,8 @@ var cellbrowser = function() {
         changeUrl({"exprGene":null, "exprMeta":null});
         getById("tpExprView").remove();
         window.violinCharts = [];
-        window.removeEventListener("keyup", onEscapeCloseExprView); 
+        window.removeEventListener("keyup", onEscapeCloseExprView);
+        db.exprData = null;
     }
 
     function onEscapeCloseExprView(e) {
@@ -8957,24 +8982,19 @@ var cellbrowser = function() {
 
         buildMetaFieldCombo(htmls, "tpGeneExprMetaComboBox", "tpGeneExprMetaCombo", 0, metaName, "noNums");
         htmlAddInfoIcon(htmls, "Expression data can only be split by categorical fields. Numerical fields are not shown here.");
-        
+
 
         htmls.push('<button id="tpGeneExprAddMulti" style="padding-left: 15px; padding-right: 15px; padding-bottom: 5px; padding-top: 5px; margin-left: 15px">Add multiple genes</button>');
 
-        //htmls.push('<input style="margin-left:4em" type="checkbox" id="tpGeneExprYLimitCheck"></input>');
-        //htmls.push('<label style="margin-left:0.6em" for="tpGeneExprYLimitCheck">Set maximum to</label>');
-        //htmls.push('<input style="margin-left:0.6em" type="text" id="tpGeneExprYLimit" size="7"></input>');
-        //htmls.push('<button style="margin-left:0.6em" type="button" id="tpGeneExprLimitApply">Apply</button>');
-        //htmls.push('<button style="margin-left:2em" type="button" data-type="violin" id="tpGeneExprFlipType">Show Violins</button>');
-
         htmls.push("</div>"); //tpExprViewHeader
 
-        htmls.push('<div style="display:flex; flex-direction: row; flex-flow: wrap; height:100%; padding-top:10px" id="tpExprViewPlot"></div>'); // empty div, will be filled later
+        htmls.push('<div id="tpExprViewPlot"></div>'); // empty div, will be filled later
 
         htmls.push("</div>"); //tpExprViewContent
         htmls.push("</div>"); //tpExprView
 
         $(document.body).append(htmls.join(""));
+        hideTooltip();
         window.addEventListener("keyup", onEscapeCloseExprView);
 
         activateGeneCombo("tpGeneExprGeneCombo", onGeneExprGeneComboChange);
@@ -8986,6 +9006,7 @@ var cellbrowser = function() {
         $("#tpBackToCb").click( closeExprView );
         $('#tpCloseButton').click( closeExprView );
         $('#tpGeneExprAddMulti').click( onGeneExprAddGenesClick  );
+
 
         /*
         $('#tpGeneExprFlipType').click( function() { 
@@ -9017,12 +9038,15 @@ var cellbrowser = function() {
             //getById("tpGeneExprLimitApply").disabled = isDisabled;
         //});
         
-        // URL variables override everything; otherwise load all quickGenes; last resort: single gene
+        // URL variables override everything; otherwise load quickGenes (only first for large datasets); last resort: single gene
         let geneIds;
         if (getVar("exprGene", null) !== null) {
             geneIds = getVar("exprGene", null).split(" ");
         } else if (db.conf.quickGenes && db.conf.quickGenes.length > 0) {
-            geneIds = db.conf.quickGenes.map(function(qg) { return qg[0]; });
+            if (db.conf.sampleCount > 500000)
+                geneIds = [db.conf.quickGenes[0][0]];
+            else
+                geneIds = db.conf.quickGenes.map(function(qg) { return qg[0]; });
         } else {
             let geneId = getVar("gene", null);
             if (geneId === null)
@@ -9198,6 +9222,16 @@ var cellbrowser = function() {
 
     function buildMetaPanel(htmls) {
         /* add html strings for the meta panel to the left side bar */
+
+        // show constant fields (single-value fields removed from coloring) as a compact note at the top
+        var constantFields = db.conf.constantFields;
+        if (constantFields && Object.keys(constantFields).length > 0) {
+            var parts = [];
+            for (var key in constantFields)
+                parts.push(key.replace(/_/g, " ") + ": " + constantFields[key]);
+            htmls.push("<div class='tpConstantFields'>All cells &mdash; " + parts.join(" | ") + "</div>");
+        }
+
         var metaFields = db.conf.metaFields;
         for (var i = 0; i < metaFields.length; i++) {
             var metaInfo = metaFields[i];
