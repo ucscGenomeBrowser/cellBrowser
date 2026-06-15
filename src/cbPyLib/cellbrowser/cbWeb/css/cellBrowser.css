@@ -30,18 +30,64 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         display: flex;
         align-items: center;
         flex-wrap: wrap;
+        align-content: flex-start;
+        row-gap: 4px;
         padding-bottom: 6px;
 }
 
 #tpExprViewHeader .hasTooltip {
         display: inline-flex;
         align-items: center;
-        padding: 0 2px;
+        padding: 0 6px 0 2px;
+}
+
+/* Force Selectize to match Chosen's 25px height in the dot plot header.
+   selectize.bootstrap3.css sets min-height:34px which must be overridden. */
+#tpExprViewHeader .selectize-control {
+        height: 25px;
+}
+#tpExprViewHeader .selectize-input {
+        height: 25px !important;
+        min-height: 25px !important;
+        padding-top: 0;
+        padding-bottom: 0;
+        padding-right: 22px;
+        line-height: 24px;
+}
+
+/* Equalize font size — Selectize defaults to 14px, Chosen to 13px */
+#tpExprViewHeader .chosen-single {
+        font-size: 14px;
+}
+
+/* Both dropdowns use identical CSS triangles — 8px wide x 5px tall at right: 10px */
+#tpExprViewHeader .selectize-control.single .selectize-input:after {
+        border-width: 5px 4px 0 4px;
+        right: 10px;
+}
+
+/* Replace Chosen's sprite arrow with a CSS triangle matching Selectize */
+#tpExprViewHeader .chosen-single div b {
+        background: none !important;
+        position: relative;
+}
+#tpExprViewHeader .chosen-single div b::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        right: 10px;
+        width: 0;
+        height: 0;
+        margin-top: -2.5px;
+        border-style: solid;
+        border-width: 5px 4px 0 4px;
+        border-color: #888 transparent transparent transparent;
 }
 
 #tpGeneExprMetaLabel {
         margin-left: 6px;
         margin-right: 6px;
+        margin-bottom: 0;
 }
 
 #tpExprViewPlot {
@@ -57,6 +103,7 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 
 #tpGeneExprLabel {
         margin-right: 6px;
+        margin-bottom: 0;
 }
 
 .tpTitle {
@@ -75,6 +122,7 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 .selectize-control.single .selectize-input:after {
         border-color: #888 transparent transparent transparent;
 }
+
 
 #tpLegendBar { 
         cursor:default; 
