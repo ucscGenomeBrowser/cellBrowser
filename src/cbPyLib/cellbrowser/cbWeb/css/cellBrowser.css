@@ -35,9 +35,13 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         padding-bottom: 6px;
 }
 
-#tpExprViewHeader .hasTooltip {
+.hasTooltip {
         display: inline-flex;
         align-items: center;
+        vertical-align: 0px;
+}
+
+#tpExprViewHeader .hasTooltip {
         padding: 0 6px 0 2px;
 }
 
@@ -84,6 +88,24 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         border-color: #888 transparent transparent transparent;
 }
 
+/* Replace Chosen sprite arrow globally with matching CSS triangle */
+.chosen-container-single .chosen-single div b {
+        background: none !important;
+        position: relative;
+}
+.chosen-container-single .chosen-single div b::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        right: 6px;
+        width: 0;
+        height: 0;
+        margin-top: -2.5px;
+        border-style: solid;
+        border-width: 5px 4px 0 4px;
+        border-color: #888 transparent transparent transparent;
+}
+
 #tpGeneExprMetaLabel {
         margin-left: 6px;
         margin-right: 6px;
@@ -118,9 +140,11 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         margin-right: 6px;
 }
 
-/* selectize dropdown triangle is black by default, make light grey like chosen's triangle */
+/* selectize dropdown triangle: grey color, match dot-plot arrow size and position */
 .selectize-control.single .selectize-input:after {
         border-color: #888 transparent transparent transparent;
+        border-width: 5px 4px 0 4px;
+        right: 13px;
 }
 
 
@@ -468,7 +492,17 @@ input[type=checkbox], input[type=radio] {
         margin: 0 2px 0 0;
 }
 
-#tpGeneTab, #tpAnnotTab, #tpLayoutTab { 
+#tpRecentGenes,
+#tpQuickGenes,
+#tpMarkerSection {
+        padding-left: 4px;
+}
+
+#tpQuickGenes {
+        margin-top: 4px;
+}
+
+#tpGeneTab, #tpAnnotTab, #tpLayoutTab {
         border-top: 1px solid #AAA;
         padding:0;
         padding-top: 5px;
