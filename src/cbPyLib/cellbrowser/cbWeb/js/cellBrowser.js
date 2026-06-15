@@ -11186,12 +11186,14 @@ var cellbrowser = function() {
     }
 
     function showTooltip(x, y, labelStr) {
-    $("#tpTooltip").css({
-        "display":"block",
-        "left" : x,
-        "top" : y,
-        "z-index" : "10000019"
-       }).html(labelStr);
+        /* suppress tooltip whenever any dialog or overlay panel is open */
+        if ($("#tpDialog").is(":visible") || $("#tpExprView").is(":visible")) return;
+        $("#tpTooltip").css({
+            "display":"block",
+            "left" : x,
+            "top" : y,
+            "z-index" : "10000019"
+           }).html(labelStr);
     }
 
     function hideTooltip() {
