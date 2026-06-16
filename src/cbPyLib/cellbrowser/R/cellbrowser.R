@@ -1,6 +1,110 @@
 # Build a UCSC cell browser website from a \code{Seurat} object
 #
 NULL
+
+#' Convert a \code{SpatialExperiment} object to a \code{Seurat} object
+#'
+#' Detects whether the object is a Visium or Xenium experiment based on the
+#' spatial coordinate column names, then dispatches to the appropriate helper.
+#' Spatial coordinates are stored as a dimensionality reduction named "spatial"
+#' so that \code{ExportToCellbrowser} exports them as a layout.
+#'
+#' @param spe A \code{SpatialExperiment} object
+#' @return A \code{Seurat} object
+#'
+SpatialExperimentToSeurat <- function(spe) {
+    if (!requireNamespace("SpatialExperiment", quietly = TRUE)) {
+        stop("Package 'SpatialExperiment' is required to convert SpatialExperiment objects. ",
+             "Install with: BiocManager::install('SpatialExperiment')")
+    }
+    coord_cols <- colnames(SpatialExperiment::spatialCoords(spe))
+    if (all(c("x_centroid", "y_centroid") %in% coord_cols)) {
+        message("Detected Xenium SpatialExperiment")
+        return(.xeniumSpeToSeurat(spe))
+    } else {
+        message("Detected Visium SpatialExperiment")
+        return(.visiumSpeToSeurat(spe))
+    }
+}
+
+.xeniumSpeToSeurat <- function(spe) {
+    counts_mat    <- SummarizedExperiment::assay(spe, "counts")
+    metadata      <- SummarizedExperiment::colData(spe)
+    coords        <- SpatialExperiment::spatialCoords(spe)
+
+    # Xenium cell IDs contain special characters; sanitize with make.names()
+    colnames(counts_mat)  <- make.names(colnames(counts_mat))
+    metadata_df           <- as.data.frame(metadata)
+    rownames(metadata_df) <- make.names(rownames(metadata_df))
+    # SPE Xenium coords have no rownames; assign from original cell names
+    coords_df             <- as.data.frame(coords)
+    rownames(coords_df)   <- make.names(colnames(spe))
+
+    seurat_obj <- CreateSeuratObject(counts = counts_mat)
+    seurat_obj@meta.data <- cbind(
+        seurat_obj@meta.data,
+        metadata_df[rownames(seurat_obj@meta.data), ]
+    )
+
+    seurat_obj@meta.data$x_centroid <- coords_df[rownames(seurat_obj@meta.data), "x_centroid"]
+    seurat_obj@meta.data$y_centroid <- coords_df[rownames(seurat_obj@meta.data), "y_centroid"]
+
+    spatial_mat <- as.matrix(seurat_obj@meta.data[, c("x_centroid", "y_centroid")])
+    colnames(spatial_mat) <- c("spatial_1", "spatial_2")
+    seurat_obj[["spatial"]] <- CreateDimReducObject(
+        embeddings = spatial_mat, key = "spatial_", assay = "RNA"
+    )
+
+    seurat_obj <- NormalizeData(seurat_obj)
+    seurat_obj <- FindVariableFeatures(seurat_obj)
+    seurat_obj <- ScaleData(seurat_obj)
+    seurat_obj <- RunPCA(seurat_obj)
+
+    message("Xenium conversion complete: ", ncol(seurat_obj), " cells, ", nrow(seurat_obj), " genes")
+    return(seurat_obj)
+}
+
+.visiumSpeToSeurat <- function(spe) {
+    counts_mat <- SummarizedExperiment::assay(spe, "counts")
+    coords     <- SpatialExperiment::spatialCoords(spe)
+    metadata   <- SummarizedExperiment::colData(spe)
+
+    seurat_obj <- CreateSeuratObject(
+        counts    = counts_mat,
+        meta.data = as.data.frame(metadata)
+    )
+
+    # Try direct barcode matching first; fall back to stripping sample suffixes
+    # (e.g. "ACGTACGT_sample1" in the Seurat object vs "ACGTACGT" in the SPE)
+    coords_df <- as.data.frame(coords)
+    if (all(rownames(seurat_obj@meta.data) %in% rownames(coords_df))) {
+        matched_coords <- coords_df[rownames(seurat_obj@meta.data), ]
+    } else {
+        message("Direct barcode matching failed; retrying with suffix stripping")
+        cell_prefixes  <- sub("_.*", "", rownames(seurat_obj@meta.data))
+        matched_coords <- coords_df[cell_prefixes, ]
+        if (anyNA(matched_coords[, 1]))
+            warning("Some spatial coordinates could not be matched to cell barcodes")
+    }
+
+    seurat_obj@meta.data$imagerow <- matched_coords[, 1]
+    seurat_obj@meta.data$imagecol <- matched_coords[, 2]
+
+    spatial_mat <- as.matrix(seurat_obj@meta.data[, c("imagecol", "imagerow")])
+    colnames(spatial_mat) <- c("spatial_1", "spatial_2")
+    seurat_obj[["spatial"]] <- CreateDimReducObject(
+        embeddings = spatial_mat, key = "spatial_", assay = "RNA"
+    )
+
+    seurat_obj <- NormalizeData(seurat_obj)
+    seurat_obj <- FindVariableFeatures(seurat_obj)
+    seurat_obj <- ScaleData(seurat_obj)
+    seurat_obj <- RunPCA(seurat_obj)
+
+    message("Visium conversion complete: ", ncol(seurat_obj), " cells, ", nrow(seurat_obj), " genes")
+    return(seurat_obj)
+}
+
 #' used by ExportToCellbrowser:
 #' Return a matrix object from a Seurat object or show an error message
 #'
@@ -12,7 +116,12 @@ findMatrices = function(object, slotNames ) {
   slotMatrices = list()
   slots <- list()
   for (slotName in slotNames) {
-      mat <- GetAssayData(object = object, slot = slotName)
+      # work around the pointless deprecation warning which triggers errors in Seurat5/R4.1 installs
+      if (packageVersion("Seurat") >= "5.0.0") {
+          mat <- LayerData(object = object, layer = slotName)
+        } else {
+          mat <- GetAssayData(object = object, slot = slotName)
+      }
       if (slotName == "scale.data")
           slotName <- "scale" #  dots in filenames are not good
       # do not use any prefixes if we export just a single matrix (stay compatible with old code)

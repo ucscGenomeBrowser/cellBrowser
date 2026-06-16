@@ -1,37 +1,30 @@
 #! /usr/bin/env python3
 
-import sys,argparse,re
+import sys, argparse, re, json, operator
 from collections import OrderedDict
 from os.path import join, basename, dirname, isfile
 from pathlib import Path
-import json
-import operator
 
 # These two functions copied and modified from cellbrowser.py
 def readLines(lines, fname):
     "recursively read lines from fname"
-    for line in open(fname):
-        line = line.rstrip("\r\n")
-        lines.append(line)
+    with open(fname) as f:
+        for line in f:
+            lines.append(line.rstrip("\r\n"))
     return lines
 
 def loadConfig(fname):
-    """ parse python in fname and return variables as dictionary.
-    add the directory of fname to the dict as 'inDir'.
-    """
-
+    """ parse python in fname and return variables as dictionary. """
     if fname.endswith(".json"):
-        return json.load(open(fname))
+        with open(fname) as f:
+            return json.load(f)
 
     conf = OrderedDict()
-
     g = {}
     g["fileBase"] = basename(fname).split('.')[0]
     g["dirName"] = basename(dirname(fname))
-
     lines = readLines([], fname)
     exec("\n".join(lines), g, conf)
-
     return conf
 
 def main():
@@ -47,7 +40,6 @@ def main():
     parser.add_argument('-k', '--sortField', action='store', help='name of field to sort on')
     args = parser.parse_args()
 
-    # From https://stackoverflow.com/questions/541390/extracting-extension-from-filename-in-python
     dFtype = Path(args.datasetFile).suffix
 
     if dFtype == ".csv":
@@ -58,77 +50,61 @@ def main():
         print("datasetFile must have tsv or csv file extension")
         exit(1)
 
-    # Turn input tags into a list
     if "," in args.tag:
         tags = args.tag.split(",")
     else:
         tags = args.tag.split()
     tagIndex = dict()
 
-    dfh = open(args.datasetFile)
-    # If datasets file has info for the tag already
-    # get column num so we can replace it
-    header = dfh.readline().rstrip().split(dsep)
-    if not header[0].startswith("#"):
-        print("First line needs to be a header line with column names and must start with '#'")
-        exit(1)
-    #header = ["#datasetName"]
-    # Want to get index for each input tag
-    for tag in tags:
-        try:
-            n = header.index(tag)
-            tagIndex[tag] = n
-        # If it's not there, we'll just tack it on to the end
-        except ValueError:
-            header.append(tag)
-            n = header.index(tag)
-            tagIndex[tag] = n
-    # Want the header in the output file so print that here
-    print(*header, sep=dsep)
+    with open(args.datasetFile) as dfh:
+        header = dfh.readline().rstrip().split(dsep)
+        if not header[0].startswith("#"):
+            print("First line needs to be a header line with column names and must start with '#'")
+            exit(1)
 
-    # Now process rest of datasetFile
-    outRows = []
-    for line in dfh:
-        if not line.startswith('#'):
-            # split our line to pull out the dataset name
-            splitLine = line.rstrip().split(dsep)
-            dname = splitLine[0]
+        for tag in tags:
+            try:
+                n = header.index(tag)
+                tagIndex[tag] = n
+            except ValueError:
+                header.append(tag)
+                n = header.index(tag)
+                tagIndex[tag] = n
+        print(*header, sep=dsep)
 
-            # set up confName based on input options, default is to modify the cellbrowser.conf
-            if args.descConf:
-                confName = join("/hive/data/inside/cells/datasets",dname,"desc.conf")
-            elif args.json:
-                confName = join("/usr/local/apache/htdocs-cells/",dname,"dataset.json")
-            else:
-                confName = join("/hive/data/inside/cells/datasets",dname,"cellbrowser.conf")
+        outRows = []
+        for line in dfh:
+            if not line.startswith('#'):
+                splitLine = line.rstrip().split(dsep)
+                dname = splitLine[0]
 
-            # check if confName is an actual file, otherwise skip that dataset
-            if isfile(confName):
-                conf = loadConfig(confName)
-                for tag in tagIndex:
-                    n = tagIndex[tag]
-                    if tag in conf.keys():
-                        tagVal = str(conf[tag])
-                        # remove all the extra characters from the line
-                        tagVal = re.sub('[\[\]\'"]','',tagVal)
-                        # Case where we're replacing what's there
-                        if n <= len(splitLine) - 1:
-                            splitLine[n] = tagVal
-                        # Case where we're tacking the tag onto the end of our file
+                if args.descConf:
+                    confName = join("/hive/data/inside/cells/datasets", dname, "desc.conf")
+                elif args.json:
+                    confName = join("/usr/local/apache/htdocs-cells/", dname, "dataset.json")
+                else:
+                    confName = join("/hive/data/inside/cells/datasets", dname, "cellbrowser.conf")
+
+                if isfile(confName):
+                    conf = loadConfig(confName)
+                    for tag in tagIndex:
+                        n = tagIndex[tag]
+                        if tag in conf:
+                            tagVal = str(conf[tag])
+                            tagVal = re.sub('[\[\]\'"]', '', tagVal)
+                            if n <= len(splitLine) - 1:
+                                splitLine[n] = tagVal
+                            else:
+                                splitLine.append(tagVal)
                         else:
-                            splitLine.append(tagVal)
-                    else:
-                        splitLine.append("")
-                outRows.append(splitLine)
-                #print(*splitLine, sep='\t')
-            else:
-                sys.stderr.write('Warning: "' + dname + '" does not have a cellbrowser.conf and/or desc.conf. You might want to double check your input file.\n')
+                            splitLine.append("")
+                    outRows.append(splitLine)
+                else:
+                    sys.stderr.write('Warning: "' + dname + '" does not have a cellbrowser.conf and/or desc.conf. You might want to double check your input file.\n')
 
     if args.sort:
         if args.sortField:
             sortIdx = tagIndex[args.sortField]
-            print(outRows)
-            print(sortIdx)
             outRows.sort(key=operator.itemgetter(sortIdx))
         else:
             outRows.sort()

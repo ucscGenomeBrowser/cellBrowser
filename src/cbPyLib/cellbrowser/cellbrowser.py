@@ -645,7 +645,7 @@ def cbScanpy_parseArgs():
             help="do not try to calculate cluster-specific marker genes. Only useful for the rare datasets where a bug in scanpy crashes the marker gene calculation.")
 
     parser.add_option("-f", "--matrixFormat", dest="matrixFormat", action="store",
-            help="Output matrix file format. 'mtx' or 'tsv'. default: tsv",)
+            help="Output matrix file format. 'mtx' or 'tsv'. default: mtx",)
 
     parser.add_option("", "--copyMatrix", dest="copyMatrix", action="store_true",
             help="Instead of reading the input matrix into scanpy and then writing it back out, just copy the input matrix. Only works if the input matrix is gzipped and in the right format and a tsv or csv file, not mtx or h5-based files.")
@@ -845,7 +845,7 @@ def parseIntoColumns(fname):
     headers = ifh.readline().rstrip("\r\n").split(sep)
     if headers[0]=="":
         headers[0]="cell_id" # some tolerance, for R
-    headers = [h.split("|")[0] for h in headers]
+    #headers = [h.split("|")[0] for h in headers]
 
     for i, h in enumerate(headers):
         if h=="":
@@ -925,6 +925,28 @@ def readGeneToSym(fname):
         assert(False) # symbols file does not have a header like #geneId<tab>symbol
     logging.debug("Found symbols for %d genes" % len(d))
     return d
+
+def readGeneAnnots(fname):
+    " read a gene annotations TSV file. First column is gene identifier, remaining columns are annotations. "
+    " returns (annotHeaders, geneToAnnots) where annotHeaders is a list of column names "
+    " and geneToAnnots maps gene name -> list of annotation values "
+    logging.info("Reading gene annotations from %s" % fname)
+    geneToAnnots = {}
+    annotHeaders = None
+    firstRow = True
+
+    for row in lineFileNextRow(fname, headerIsRow=True):
+        if firstRow:
+            annotHeaders = list(row[1:])
+            firstRow = False
+            continue
+        gene = row[0]
+        annots = list(row[1:])
+        geneToAnnots[gene] = annots
+
+    logging.info("Read annotations for %d genes, %d annotation fields: %s" %
+        (len(geneToAnnots), len(annotHeaders), ", ".join(annotHeaders)))
+    return annotHeaders, geneToAnnots
 
 #def getDecilesList_np(values):
     #deciles = np.percentile( values, [0,10,20,30,40,50,60,70,80,90,100] )
@@ -1361,6 +1383,7 @@ def metaToBin(inDir, inConf, outConf, fname, outDir):
     """
     colorFname = inConf.get("colors")
     enumFields = inConf.get("enumFields")
+    skipFields = set(sanitizeName(f) for f in (inConf.get("skipFields") or []))
 
     logging.info("Converting to numbers and compressing meta data fields")
     makeDir(outDir)
@@ -1392,6 +1415,10 @@ def metaToBin(inDir, inConf, outConf, fname, outDir):
         validFieldNames.add(fieldName)
 
         cleanFieldName = sanitizeName(fieldName.split("|")[0])
+
+        if cleanFieldName in skipFields:
+            logging.info("Field %s: skipping (listed in skipFields)" % cleanFieldName)
+            continue
 
         forceType = None
         if (cleanFieldName in sanEnumFields):
@@ -2113,6 +2140,20 @@ def exprEncode(geneDesc, exprArr, matType):
     logging.debug("raw - compression factor of %s: %f, before %d, after %d"% (geneDesc, fact, len(geneStr), len(geneCompr)))
     return geneCompr, minVal
 
+def parseRange(chromRange):
+    # chromRange can be in format chr:start-end or chr_start_end or chr-start-end
+    if ":" in chromRange:
+        chrom, startEnd = chromRange.split(":")
+        start, end = startEnd.split("-")
+    elif "_" in chromRange:
+        chrom, start, end = chromRange.split("_")
+    else:
+        chrom, start, end = chromRange.split("-") # chrom names must be in format chrom:start-end or chrom_start_end or chrom-start-end. Broken? Email us at cells@ucsc.edu
+
+    start = int(start)
+    end = int(end)
+    return chrom, start, end
+
 def indexAtacOffsetsByChrom(exprIndex):
     """ given a dict with name -> (offset, len) and name being a string of chrom:start-end,
     reformat the dict to one with chrom -> [ [start, end, offset, len], ... ] and return it.
@@ -2120,17 +2161,7 @@ def indexAtacOffsetsByChrom(exprIndex):
     """
     byChrom = defaultdict(list)
     for chromRange, (offs, dataLen) in iterItems(exprIndex):
-        # chromRange can be in format chr:start-end or chr_start_end or chr-start-end
-        if ":" in chromRange:
-            chrom, startEnd = chromRange.split(":")
-            start, end = startEnd.split("-")
-        elif "_" in chromRange:
-            chrom, start, end = chromRange.split("_")
-        else:
-            chrom, start, end = chromRange.split("-") # chrom names must be in format chrom:start-end or chrom_start_end or chrom-start-end. Broken? Email us at cells@ucsc.edu
-
-        start = int(start)
-        end = int(end)
+        chrom, start, end = parseRange(chromRange)
         byChrom[chrom].append( (start, end, offs, dataLen) )
 
     # sort by start
@@ -2140,7 +2171,7 @@ def indexAtacOffsetsByChrom(exprIndex):
     return dict(byChrom)
 
 def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJsonFname, \
-        metaSampleNames, matType=None, genesAreRanges=False):
+        metaSampleNames, matType=None, genesAreRanges=False, geneAnnots=None):
     """ convert gene expression vectors to vectors of deciles
         and make json gene symbol -> (file offset, line length)
     """
@@ -2196,6 +2227,8 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     allMin = 99999999
     noSymFound = 0
+    noAnnotCount = 0
+    noAnnotGenes = []
     for geneId, sym, exprArr in matReader.iterRows():
         geneCount += 1
 
@@ -2228,7 +2261,20 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
             else:
                 exprArr = [exprArr[i] for i in idxList]
 
-        exprStr, minVal = exprEncode(geneId, exprArr, matType)
+        geneDesc = geneId
+        if geneAnnots is not None:
+            annots = geneAnnots.get(sym) if sym else None
+            if annots is None:
+                annots = geneAnnots.get(geneId)
+            if annots:
+                geneDesc = json.dumps([geneId] + annots)
+            else:
+                geneDesc = json.dumps([geneId])
+                noAnnotCount += 1
+                if len(noAnnotGenes) < 10:
+                    noAnnotGenes.append(sym or geneId)
+
+        exprStr, minVal = exprEncode(geneDesc, exprArr, matType)
         exprIndex[key] = (ofh.tell(), len(exprStr))
         ofh.write(exprStr)
 
@@ -2243,6 +2289,10 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
     if noSymFound!=0:
         logging.warn("No symbol found for %d genes" % noSymFound)
 
+    if noAnnotCount > 0:
+        logging.warn("No gene annotations found for %d genes. First %d: %s" %
+            (noAnnotCount, len(noAnnotGenes), ", ".join(noAnnotGenes)))
+
     if genesAreRanges:
         logging.info("ATAC-mode is one. Assuming that genes are in format chrom:start-end or chrom_start_end or chrom-start-end")
         exprIndex = indexAtacOffsetsByChrom(exprIndex)
@@ -2252,7 +2302,7 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
                     " is not set. Please add this option or contact us if you are confused about this error.")
 
     if highCount==0:
-        logging.warn("No single value in the matrix is > 100. It looks like this "
+        logging.warn("No single value in the matrix is > 100. If this is an RNA-seq expression matrix, it looks like this "
         "matrix has been log'ed. Our recommendation for visual inspection is to not transform matrices")
 
     if len(exprIndex)==0:
@@ -2337,6 +2387,7 @@ def parseOneColorFile(fname):
     " read key-val file that defines colors "
     logging.debug("Parsing color file %s" % fname)
     lineNo = 0
+    dataLineNo = 0
     newDict = dict()
     invColumns = False
 
@@ -2347,8 +2398,9 @@ def parseOneColorFile(fname):
         if len(row)!=2:
             errAbort("color file %s - line %d does not contain exactly two fields: %s" % (fname, lineNo, row))
         metaVal, color = row
+        dataLineNo += 1
 
-        if metaVal.lower().startswith("color") or metaVal.lower().startswith("colour"):
+        if dataLineNo == 1 and (metaVal.lower().startswith("color") or metaVal.lower().startswith("colour")):
             # tolerate a header line, otherwise will stop with "color not found"
             invColumns = True
             continue
@@ -2586,10 +2638,14 @@ def metaReorderFilter(matrixFname, metaFname, fixedMetaFname, keepFields):
 
     # find fields that contain only a single value
     skipFields = set()
+    maxValCount = max(len(matrixSampleNames) - 100, int(len(matrixSampleNames) * 0.9))
     for fieldIdx, values in iterItems(fieldValues):
         #logging.debug("fieldIdx %d, values %s" % (fieldIdx, values))
+        if fieldIdx==0:
+            # don't do any of this for the sampleId field
+            continue
+        fieldName = headers[fieldIdx]
         if len(values)==1:
-            fieldName = headers[fieldIdx]
             logging.info("Field %d, '%s', has only a single value. Removing this field from meta data." %
                     (fieldIdx, fieldName))
             if fieldName in keepFields:
@@ -2597,6 +2653,10 @@ def metaReorderFilter(matrixFname, metaFname, fixedMetaFname, keepFields):
                     "but check with submitter if this makes sense." % fieldName)
             else:
                 skipFields.add(fieldIdx)
+        elif len(values)>maxValCount:
+            logging.info("Field %d, '%s', has more than %d different values. Too many. Removing this field from meta data." %
+                    (fieldIdx, fieldName, maxValCount))
+            skipFields.add(fieldIdx)
 
     # write the header line, removing unused fields
     ofh.write("\t".join(sliceRow(headers, skipFields)))
@@ -3029,7 +3089,7 @@ def parseMarkerTable(filename, geneToSym):
 
     return data, newHeaders
 
-def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir):
+def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac):
     """ split .tsv on first field and create many files in outDir with columns 2-end.
         Returns the names of the clusters and a dict topMarkers with clusterName -> list of five top marker genes.
     """
@@ -3039,6 +3099,12 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir):
         return
 
     data, newHeaders = parseMarkerTable(filename, geneToSym)
+
+    logFcIdx = None
+    for idx, h in enumerate(newHeaders):
+        if re.search(r'log.*fc', h.split("|")[0], re.IGNORECASE):
+            logFcIdx = idx
+            break
 
     logging.debug("Splitting cluster markers into directory %s" % (outDir))
     fileCount = 0
@@ -3059,9 +3125,20 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir):
         for row in rows:
             row[2] = "%0.5E" % row[2] # limit score to 5 digits
             geneId = row[0]
-            if geneId not in matrixGeneIds:
-                missGeneIds.add(geneId)
-                continue
+            if isAtac:
+                chrom, findStart, findEnd = parseRange(geneId)
+                foundPeak = False
+                for start, end, offset, length in matrixGeneIds[chrom]:
+                    if findStart==start and findEnd==end:
+                        foundPeak = True
+                        break
+                if not foundPeak:
+                    errAbort("Cannot find peak %s in matrix" % geneId)
+                row[1] = "%s:%d-%d" % (chrom, start, end) # nicer for the display
+            else:
+                if geneId not in matrixGeneIds:
+                    missGeneIds.add(geneId)
+                    continue
 
             ofh.write("\t".join(row))
             ofh.write("\n")
@@ -3070,7 +3147,17 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir):
             logging.error("Marker table contains these genes, they were skipped, they are not in the matrix: %s" % (",".join(missGeneIds)))
             #logging.error("Use --force to accept this.")
 
-        topSyms = [row[1] for row in rows[:topMarkerCount]]
+        if logFcIdx is not None:
+            enrichedRows = []
+            for row in rows:
+                try:
+                    if float(row[logFcIdx]) > 0:
+                        enrichedRows.append(row)
+                except (ValueError, IndexError):
+                    pass
+            topSyms = [row[1] for row in enrichedRows[:topMarkerCount]]
+        else:
+            topSyms = [row[1] for row in rows[:topMarkerCount]]
         topMarkers[clusterName] = topSyms
 
         ofh.close()
@@ -3383,6 +3470,11 @@ def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=No
                     for img in imageSet.get("images"):
                         copyImageFile(inDir, img, imageDir, doneNames, imageSetFnames)
 
+
+    if "hubUrl" in outConf and "hubUrl" not in summInfo:
+        summInfo['hubUrl'] = outConf["hubUrl"]
+    if "ucscDb" in outConf and "ucscDb" not in summInfo:
+        summInfo['ucscDb'] = outConf["ucscDb"]
 
     # if we have a desc.conf: with so much data now in other files, generate the md5 from the data
     # itself not just the desc.conf
@@ -3846,8 +3938,18 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
 
     genesAreRanges = (inConf.get("atacSearch")!=None)
 
+    # read gene annotations if configured
+    geneAnnots = None
+    if "geneAnnots" in inConf:
+        annotFname = getAbsPath(inConf, "geneAnnots")
+        geneAnnotHeaders, geneAnnots = readGeneAnnots(annotFname)
+        outConf["geneAnnotFields"] = geneAnnotHeaders
+        outConf["fileVersions"]["geneAnnots"] = getFileVersion(annotFname)
+
     matType = matrixToBin(outMatrixFname, geneToSym, binMat, binMatIndex, discretBinMat, \
-            discretMatrixIndex, metaSampleNames, matType=matType, genesAreRanges=genesAreRanges)
+            discretMatrixIndex, metaSampleNames, matType=matType, genesAreRanges=genesAreRanges,
+            geneAnnots=geneAnnots)
+    outConf["fileVersions"]["exprMatrix"] = getFileVersion(binMatIndex)
 
     # these are the Javascript type names, not the python ones (they are also better to read than the Python ones)
     if matType=="int" or matType=="forceInt":
@@ -3908,6 +4010,7 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
     useTwoBytes = False # to save space, coordinates are reduced to the range 0-65535
 
     hasLabels = False
+    labelVals = []
     if "labelField" in inConf and inConf["labelField"] is not None:
         hasLabels = True
         clusterLabelField = inConf["labelField"]
@@ -4059,9 +4162,10 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, out
     newMarkers = []
     #doAbort = True # only the first marker file leads to abort, we're more tolerant for the others
     doAbort = False # temp hack # because of single cell cluster filtering in cbScanpy
-    topMarkersDone = False
+    # determine which markers entry drives topMarkers: the one flagged primary:true, else the first
+    primaryIdx = next((i for i, m in enumerate(markerFnames) if m.get("primary")), 0)
     for markerIdx, markerInfo in enumerate(markerFnames):
-        
+
         if type(markerInfo)!=type(dict()):
             errAbort("The 'markers' setting in cellbrowser.conf is not a dictionary but must be a dictionary with keys 'file' and 'label'.")
 
@@ -4072,18 +4176,21 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, out
         markerDir = join(outDir, "markers", clusterName)
         makeDir(markerDir)
 
-        clusterNames, topMarkers = splitMarkerTable(markerFname, geneToSym, matrixGeneIds, markerDir)
-        # only use the top markers of the first marker file
-        if not topMarkersDone:
+        isAtac = inConf.get("atacSearch")
+        clusterNames, topMarkers = splitMarkerTable(markerFname, geneToSym, matrixGeneIds, markerDir, isAtac)
+        if markerIdx == primaryIdx:
             outConf["topMarkers"] = topMarkers
-            topMarkersDone = True
 
         checkClusterNames(markerFname, clusterNames, clusterLabels, doAbort)
         doAbort = False
 
-        newDict = {"name" : sanitizeName(clusterName), "shortLabel" : markerLabel}
+        newDict = {"name" : sanitizeName(clusterName), "shortLabel" : markerLabel, "clusterList": list(clusterNames)}
         if "selectOnClick" in markerInfo:
             newDict["selectOnClick"] = markerInfo["selectOnClick"]
+        if "columnOrder" in markerInfo:
+            newDict["columnOrder"] = markerInfo["columnOrder"]
+        if "columnLabels" in markerInfo:
+            newDict["columnLabels"] = markerInfo["columnLabels"]
         newMarkers.append( newDict )
 
     outConf["markers"] = newMarkers
@@ -4393,7 +4500,6 @@ def readOldSampleNames(datasetDir, lastConf):
         sampleNameFname = join(datasetDir, "metaFields", lastConf["metaFields"][0]["name"]+".bin.gz")
         logging.debug("Reading meta sample names from %s" % sampleNameFname)
 
-    # python3's gzip has 'text mode' but python2 doesn't have that so decode explicitly
     metaSampleNames = []
     if isfile(sampleNameFname):
         for line in openFile(sampleNameFname):
@@ -4700,6 +4806,20 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     doMatrix, sampleNames = matrixOrSamplesHaveChanged(datasetDir, inMatrixFname, outMatrixFname, outConf)
     doMeta = metaHasChanged(datasetDir, outMetaFname)
 
+    # check if geneAnnots file is new or has changed, requiring matrix rebuild
+    if not doMatrix and "geneAnnots" in inConf:
+        annotFname = getAbsPath(inConf, "geneAnnots")
+        if isfile(annotFname):
+            oldConfFname = join(datasetDir, "dataset.json")
+            if isfile(oldConfFname):
+                lastConf = readJson(oldConfFname)
+                oldFV = lastConf.get("fileVersions", {})
+                if "geneAnnots" not in oldFV or oldFV["geneAnnots"]["md5"] != getFileVersion(annotFname)["md5"]:
+                    logging.info("geneAnnots file is new or has changed, must rebuild matrix")
+                    doMatrix = True
+            else:
+                doMatrix = True
+
     geneToSym = -1 # -1 = "we have not read any", "None" would mean "there are no gene symbols to map to"
 
     if not doMeta:
@@ -4750,13 +4870,14 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         "clusterField", "defColorField", "xenaPhenoId", "xenaId", "hubUrl", "showLabels", "ucscDb",
         "unit", "violinField", "visibility", "coordLabel", "lineWidth", "hideDataset", "hideDownload",
         "metaBarWidth", "supplFiles", "defQuantPal", "defCatPal", "clusterPngDir", "wrangler", "shepherd",
-        "binStrategy", "split",
+        "binStrategy", "split", "display",
         "lineAlpha", "lineWidth", "lineColor",
         # the following are there only for old datasets, they are now nested under "facets"
         # they are just here for backwards-compatibility and will eventually get removed
-        "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays", 
+        "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays",
         # facets are taking their place now
-        "facets", "multiModal"]:
+        "facets", "multiModal", "showHeatmap",
+        ]:
         copyConf(inConf, outConf, tag)
 
     if "name" not in outConf:
@@ -5382,11 +5503,11 @@ def scanpyToCellbrowser(adata, path, datasetName, metaFields=None, clusterField=
     mat = adata.X
     logging.info("Matrix has size (%d cells, %d genes)" % (mat.shape[0], mat.shape[1]))
 
-    if matrixFormat=="tsv" or matrixFormat is None:
+    if matrixFormat=="tsv":
         matFname = join(outDir, 'exprMatrix.tsv.gz')
         if not skipMatrix:
             anndataMatrixToTsv(adata, matFname)
-    elif matrixFormat=="mtx":
+    elif matrixFormat=="mtx" or matrixFormat is None:
         if not skipMatrix:
             anndataMatrixToMtx(adata, outDir)
         configData["exprMatrix"] = "matrix.mtx.gz"
@@ -5783,10 +5904,86 @@ def rebuildFlatIndex(outDir):
 
 def checkDsCase(inConfFname, relPath, inConfig):
     """ relPath should not be uppercase for top-level datasets at UCSC, as we use the hostname part """
+    # grandfathered datasets that predate the onlyLower enforcement
+    legacyUpperNames = {"adultPancreas"}
     if not "/" in relPath and getConfig("onlyLower", False) and \
-            "name" in inConfig and inConfig["name"].isupper():
+            "name" in inConfig and inConfig["name"] != inConfig["name"].lower() and \
+            inConfig["name"] not in legacyUpperNames:
         errAbort("dataset name or directory name should not contain uppercase characters, as these do not work "
                 "if the dataset name is specified in the URL hostname itself (e.g. cortex-dev.cells.ucsc.edu)")
+
+def _descFieldAsStr(val):
+    " normalize a desc.json field value to a plain string — handles lists, numbers, None "
+    if val is None:
+        return ""
+    if isinstance(val, list):
+        return " ".join(str(v) for v in val if v)
+    return str(val)
+
+def _collectSearchDocs(conf, outDir, docs):
+    " recursively collect searchable dataset fields from dataset.json + desc.json files "
+    for ds in conf.get("datasets", []):
+        dsDir = join(outDir, ds["name"])
+        confPath = join(dsDir, "dataset.json")
+        descPath = join(dsDir, "desc.json")
+        if not isfile(confPath):
+            continue
+        dsConf = readJson(confPath)
+        desc = readJson(descPath) if isfile(descPath) else {}
+        if dsConf.get("datasets"):
+            _collectSearchDocs(dsConf, outDir, docs)
+        name = ds["name"]
+        paperUrl = _descFieldAsStr(desc.get("paper_url"))
+        paperParts = paperUrl.split(" ")
+        paperLabel = " ".join(paperParts[1:]) if len(paperParts) > 1 else ""
+        authors = " ".join(filter(None, [_descFieldAsStr(desc.get("authors")),
+                                         _descFieldAsStr(desc.get("author"))]))
+        institution = " ".join(filter(None, [_descFieldAsStr(desc.get("institution")),
+                                             _descFieldAsStr(desc.get("institute"))]))
+        docs.append({
+            "id":           name,
+            "name":         name,
+            "parent":       name.split("/")[0] if "/" in name else "",
+            "shortLabel":   ds.get("shortLabel") or dsConf.get("shortLabel", ""),
+            "md5":          ds.get("md5") or dsConf.get("md5", ""),
+            "title":        _descFieldAsStr(desc.get("title")),
+            "abstract":     _descFieldAsStr(desc.get("abstract")),
+            "snippet":      _descFieldAsStr(desc.get("abstract"))[:300],
+            "paper":        paperLabel,
+            "doi":          _descFieldAsStr(desc.get("doi")),
+            "pmid":         _descFieldAsStr(desc.get("pmid")),
+            "pmcid":        _descFieldAsStr(desc.get("pmcid")),
+            "geo_series":   _descFieldAsStr(desc.get("geo_series")),
+            "arrayexpress": _descFieldAsStr(desc.get("arrayexpress")),
+            "sra_study":    _descFieldAsStr(desc.get("sra_study")),
+            "bioproject":   _descFieldAsStr(desc.get("bioproject")),
+            "ega_study":    _descFieldAsStr(desc.get("ega_study")),
+            "ega_dataset":  _descFieldAsStr(desc.get("ega_dataset")),
+            "hca_dcp":      _descFieldAsStr(desc.get("hca_dcp")),
+            "zenodo":       _descFieldAsStr(desc.get("zenodo")),
+            "dbgap":        _descFieldAsStr(desc.get("dbgap")),
+            "authors":      authors,
+            "institution":  institution,
+            "lab":          _descFieldAsStr(desc.get("lab")) or dsConf.get("lab", ""),
+            "submitter":    _descFieldAsStr(desc.get("submitter")) or dsConf.get("submitter", ""),
+            "organisms":    " ".join(dsConf.get("organisms") or []),
+            "body_parts":   " ".join(dsConf.get("body_parts") or []),
+            "diseases":     " ".join(dsConf.get("diseases") or []),
+            "tags":         " ".join(dsConf.get("tags") or []),
+        })
+
+def buildSearchJson(outDir):
+    " write search.json to outDir: a JSON array of all searchable dataset fields "
+    rootConfPath = join(outDir, "dataset.json")
+    if not isfile(rootConfPath):
+        logging.warn("buildSearchJson: %s not found, skipping" % rootConfPath)
+        return
+    rootConf = readJson(rootConfPath)
+    docs = []
+    _collectSearchDocs(rootConf, outDir, docs)
+    outPath = join(outDir, "search.json")
+    writeJson(docs, outPath)
+    logging.info("Wrote %s (%d datasets)" % (outPath, len(docs)))
 
 def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None):
     " build browser from config files confFnames into directory outDir and serve on port "
@@ -5857,12 +6054,17 @@ def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None
     else:
         rebuildFlatIndex(outDir)
 
+    buildSearchJson(outDir)
+
     cbUpgrade(outDir, doData=False)
 
     outIndexFname = join(outDir, "js", "cellBrowser.js")
     if not isfile(outIndexFname):
         logging.info("%s does not exist: running cbUpgrade now to make sure there are static js/css files" % outIndexFname)
         cbUpgrade(outDir, doData=False, doCode=True)
+
+    if not isdir(join(outDir, "downloads", "markers")):
+        copyMarkers(outDir)
 
     if port:
         print("Interrupt this process, e.g. with Ctrl-C, to stop the webserver")
@@ -6272,6 +6474,67 @@ def copyAndReplace(inFname, outDir):
         ofh.write(data)
     logging.debug("Wrote version string %s into file %s, source was %s" % (repr(versionStr), inFname, outFname))
 
+MARKER_SOURCE_URL = "https://cells-test.gi.ucsc.edu/markers/"
+MARKER_SOURCE_DIR = "/usr/local/apache/htdocs-cells/downloads/markers/"
+
+MARKER_DB_FILES = [
+    {"fname": "cellMarker2.0_human.json", "label": "CellMarker 2.0 (Human)", "species": "human",
+     "dbUrl": "http://bio-bigdata.hrbmu.edu.cn/CellMarker/",
+     "paperUrl": "https://doi.org/10.1093/nar/gkac947"},
+    {"fname": "cellMarker2.0_mouse.json", "label": "CellMarker 2.0 (Mouse)", "species": "mouse",
+     "dbUrl": "http://bio-bigdata.hrbmu.edu.cn/CellMarker/",
+     "paperUrl": "https://doi.org/10.1093/nar/gkac947"},
+    {"fname": "panglaoDb_human.json",     "label": "PanglaoDB (Human)",      "species": "human",
+     "dbUrl": "https://panglaodb.se/",
+     "paperUrl": "https://doi.org/10.1093/database/baz046"},
+    {"fname": "panglaoDb_mouse.json",     "label": "PanglaoDB (Mouse)",      "species": "mouse",
+     "dbUrl": "https://panglaodb.se/",
+     "paperUrl": "https://doi.org/10.1093/database/baz046"},
+    {"fname": "singleCellBase_human.json","label": "singleCellBase (Human)", "species": "human",
+     "dbUrl": "http://cloud.capitalbiotech.com/SingleCellBase/",
+     "paperUrl": "https://doi.org/10.1186/s40364-023-00523-3"},
+    {"fname": "singleCellBase_mouse.json","label": "singleCellBase (Mouse)", "species": "mouse",
+     "dbUrl": "http://cloud.capitalbiotech.com/SingleCellBase/",
+     "paperUrl": "https://doi.org/10.1186/s40364-023-00523-3"},
+]
+
+def copyMarkers(outDir):
+    """ Copy precomputed marker gene JSON files to outDir/downloads/markers/.
+        Copies from MARKER_SOURCE_DIR if available, otherwise downloads from MARKER_SOURCE_URL. """
+    markerDir = join(outDir, "downloads", "markers")
+    makeDir(markerDir)
+
+    present = []
+    for entry in MARKER_DB_FILES:
+        fname = entry["fname"]
+        destPath = join(markerDir, fname)
+        localSrc = join(MARKER_SOURCE_DIR, fname)
+        if isfile(localSrc):
+            logging.info("Copying marker database from %s" % localSrc)
+            if not os.path.samefile(localSrc, destPath):
+                shutil.copy(localSrc, destPath)
+            present.append(fname)
+        else:
+            srcUrl = MARKER_SOURCE_URL + fname
+            logging.info("Downloading marker database %s" % srcUrl)
+            data = downloadUrlBinary(srcUrl)
+            if data is not None:
+                with open(destPath, "wb") as fh:
+                    fh.write(data)
+                present.append(fname)
+            else:
+                logging.warning("Could not find marker file locally or download from %s" % srcUrl)
+
+    indexData = [
+        {"name": e["fname"], "label": e["label"], "species": e["species"],
+         "dbUrl": e["dbUrl"], "paperUrl": e["paperUrl"]}
+        for e in MARKER_DB_FILES if e["fname"] in present
+    ]
+    indexPath = join(markerDir, "index.json")
+    with open(indexPath, "w") as fh:
+        json.dump(indexData, fh, indent=2)
+    logging.info("Marker gene databases in %s: %s" % (markerDir, [d["name"] for d in indexData]))
+
 def copyStatic(baseDir, outDir):
     " copy all js, css and img files to outDir "
     logging.info("Copying js, css and img files to %s" % outDir)
@@ -6285,6 +6548,7 @@ def copyStatic(baseDir, outDir):
     copyAllFiles(baseDir, "genes", outDir, ext=".json.gz")
 
     copyAndReplace(join(baseDir, "js", "cellBrowser.js"), join(outDir, "js"))
+    copyMarkers(outDir)
 
 def writeVersionedLink(ofh, mask, webDir, relFname, addVersion=True):
     " write sprintf-formatted mask to ofh, but add ?md5 to jsFname first. Goal is to force cache reload in browser. "
@@ -6457,6 +6721,7 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         "ext/tiny-queue.js", "ext/science.v1.js", "ext/reorder.v1.js",  # commit d51dda9ad5cfb987b9e7f2d7bd81bb9bbea82dfe
         "ext/scaleColorPerceptual.js",  # https://github.com/politiken-journalism/scale-color-perceptual tag 1.1.2
         "ext/drawImage-clipper.js", # Safari Monkeypatch https://gist.github.com/Kaiido/ca9c837382d89b9d0061e96181d1d862
+        "ext/minisearch.min.js",  # MiniSearch full-text search, used for client-side dataset search
         ]
 
     # we are starting to have way too many .js files. Reduce all external ones to a single file
@@ -6489,6 +6754,25 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
     ofh.write('<body>\n')
     #ofh.write('<div id="tpWait">Please wait. Cell Browser is loading...</div>\n')
     ofh.write('</body>\n')
+    # try to always force a fresh reload of the index.html page
+    ofh.write('''<script>
+       // Bust cache on every load
+       //(function() {
+       //  const url = new URL(window.location.href);
+       //  url.searchParams.set("nc", performance.now()); // high-precision unique
+       //  if (!window.location.search.includes("nc=")) {
+       //    window.location.replace(url.toString());
+       //  }
+       //})();
+       
+       // Prevent bfcache restore
+       window.onpageshow = function(e) {
+         if (e.persisted) {
+           window.location.reload();
+         }
+       };
+</script>
+   ''')
     ofh.write('<script>\n')
     ofh.write("var rootMd5 = '%s';\n" % md5[:MD5LEN])
     ofh.write('cellbrowser.main(rootMd5);\n')
@@ -6545,7 +6829,8 @@ def cbUpgrade(outDir, doData=True, doCode=False, devMode=False, port=None):
     if doCode or devMode:
         copyStatic(webDir, outDir)
 
-    makeIndexHtml(webDir, outDir, devMode=devMode)
+    if not devMode:
+        makeIndexHtml(webDir, outDir, devMode=devMode)
 
     if port:
         print("Interrupt this process, e.g. with Ctrl-C, to stop the webserver")
@@ -6561,7 +6846,11 @@ def cbUpgradeCli():
     if len(args)!=0:
         errAbort("This command does not accept arguments without options. Did you mean: -o <outDir> ? ")
 
-    cbUpgrade(outDir, doCode=options.addCode, devMode=options.devMode, port=options.port)
+    doData = True
+    if (options.addCode and options.devMode):
+        doData = False
+
+    cbUpgrade(outDir, doData=doData, doCode=options.addCode, devMode=options.devMode, port=options.port)
 
 def parseGeneLocs(db, geneType):
     """

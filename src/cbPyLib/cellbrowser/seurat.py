@@ -6,6 +6,7 @@ from os.path import join, basename, dirname, isfile, isdir, relpath, abspath, ge
 from .cellbrowser import copyPkgFile, writeCellbrowserConf, pipeLog, makeDir, maybeLoadConfig, errAbort, popen
 from .cellbrowser import setDebug, build, isDebugMode, generateHtmls, runCommand, copyFileIfDiffSize
 from .cellbrowser import generateQuickGenes
+import cellbrowser.geneinfo as gi
 
 
 def parseArgs():
@@ -387,6 +388,9 @@ def cbImportSeurat_parseArgs(showHelp=False):
     parser.add_option("", "--markerFile", dest="markerFile", action="store",
             help="Instead of calculating cluster markers again, use this file. Format: cluster,gene,pVal + any other fields. Or alternatively the native Seurat cluster markers format, as created by write.table")
 
+    parser.add_option("", "--annotMarkers", dest="annotMarkers", action="store_true",
+            help="annotate marker genes with disease info, etc. - same as cbMarkerAnnotate")
+
     parser.add_option("", "--useMtx", dest="useMtx", action="store_true",
             help="Write a .mtx.gz file, instead of a tsv.gz file. Necessary for big datasets.")
 
@@ -421,7 +425,7 @@ def readExportScript(cmds):
     cmds.insert(0, 'library(Matrix, warn.conflicts=FALSE)')
     cmds.insert(0, 'library(R.utils, warn.conflicts=FALSE)')
     # we need a few packages for the export. Install them unless already installed
-    cmds.insert(0, 'install.packages(setdiff(c("jpeg", "R.utils", "Matrix", "dplyr"), rownames(installed.packages())), repos="http://cran.us.r-project.org")')
+    cmds.insert(0, 'install.packages(setdiff(c("jpeg", "R.utils", "Matrix", "dplyr", "presto"), rownames(installed.packages())), repos="http://cran.us.r-project.org")')
 
     assert(len(cmds)!=0)
     return cmds
@@ -498,7 +502,8 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
         cmds.append("names <- load('%s')" % inFname)
         cmds.append("sobj <- get(names[1])")
 
-    cmds.append("if (class(sobj)!='seurat' && class(sobj)[1]!='Seurat') { stop('The input .rds file does not seem to contain a Seurat object') }")
+    cmds.append("if ('SpatialExperiment' %in% class(sobj)) { sobj <- SpatialExperimentToSeurat(sobj) }")
+    cmds.append("if (class(sobj)!='seurat' && class(sobj)[1]!='Seurat') { stop('The input .rds file does not seem to contain a Seurat or SpatialExperiment object') }")
     skipStr = str(skipMatrix).upper()
     skipMarkerStr = str(skipMarkers).upper()
 
@@ -528,8 +533,21 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
 
     writeRScript(cmds, scriptPath, "cbImportSeurat")
     runRscript(scriptPath, logPath)
-    if not isfile(metaPath):
+    confPath = join(outDir, "cellbrowser.conf")
+    if not isfile(metaPath) or not isfile(confPath):
         errAbort("R script did not complete successfully. Check %s and analysisLog.txt." % scriptPath)
+
+    # add a comment with the command line to cellbrowser.conf
+    confData = open(confPath, "r").read()
+    confFh = open(confPath, "w")
+    # copied from cellbrowser.py:writeCellbrowserConf()
+    cmdLine = " ".join(sys.argv)
+    dateStr = datetime.datetime.now().isoformat()
+    confFh.write("#Command was: "+cmdLine+"\n")
+    confFh.write("#Time: "+dateStr+"\n")
+    confFh.write(confData)
+    confFh.close()
+
 
     descDict = None
     if inFormat=="rds":
@@ -545,6 +563,13 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
     fh = open(cbConfPath, "a")
     fh.write("\nquickGenesFile = 'quickGenes.tsv'\n")
     fh.close()
+
+    if not options.skipMarkers and options.annotMarkers and os.path.isfile(join(outDir, "markers.tsv")):
+        gi.cbMarkerAnnotate(join(outDir, "markers.tsv"),\
+            join(outDir,"markers.annot.tmp"), gi.BRAINSPANMOUSEDEV, gi.HGNC,\
+            gi.MGIORTHO, gi.EUREXPRESS, gi.BRAINSPANLMD, gi.HPO, gi.COSMIC,\
+            gi.OMIM, gi.SFARI, gi.HPRD)
+        os.rename(join(outDir,"markers.annot.tmp"), join(outDir, "markers.tsv"))
 
     generateHtmls(datasetName, outDir, desc = descDict)
 

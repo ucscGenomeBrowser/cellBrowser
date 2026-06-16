@@ -1,153 +1,209 @@
 #! /usr/bin/env python3
 
-import sys,argparse
+import sys, argparse, json, os
 from collections import OrderedDict
-from os.path import join, basename, dirname
+from os.path import join, basename, dirname, exists, realpath
 from pathlib import Path
 
-# These two functions copied and modified from cellbrowser.py
+# allow importing from the cellbrowser package alongside this script
+_scriptDir = dirname(realpath(__file__))
+sys.path.insert(0, join(_scriptDir, '..', 'src', 'cbPyLib'))
+
 def readLines(lines, fname):
     " recursively read lines from fname, understands lines like #include 'filename.conf' "
     for line in open(fname):
         line = line.rstrip("\r\n")
         if line.startswith("#include"):
-            newFname = splitOnce(line, " ")[1]
-            newFname = newFname.strip('"').strip("'")
+            newFname = line.split(" ", 1)[1].strip('"').strip("'")
             lines.extend(readLines(lines, newFname))
         else:
             lines.append(line)
     return lines
 
 def loadConfig(fname):
-    """ parse python in fname and return variables as dictionary.
-    add the directory of fname to the dict as 'inDir'.
-    """
-
+    """ parse python in fname and return variables as dictionary. """
     conf = OrderedDict()
-
     g = {}
     g["fileBase"] = basename(fname).split('.')[0]
     g["dirName"] = basename(dirname(fname))
-
     lines = readLines([], fname)
     exec("\n".join(lines), g, conf)
-
     return conf
 
-# Set up script arguments
+def computeValue(rawStr, dataType):
+    " convert a raw TSV string into a typed Python value "
+    if dataType == "list":
+        return [x.strip() for x in rawStr.split(',')]
+    elif dataType == "str":
+        return rawStr
+    elif dataType == "int":
+        return int(rawStr)
+    elif dataType == "float":
+        return float(rawStr)
+    else:
+        raise ValueError("Unknown dataType after pipe character: %s" % dataType)
+
+def valueToConfStr(value, dataType):
+    " convert a Python value to a conf file representation "
+    if dataType == "list":
+        return str(value)
+    else:
+        return repr(value)
+
+def buildNewConf(confPath, updates):
+    """
+    Rewrite conf file content applying updates (dict of tag -> (value, confStr)).
+    Tags already in the file are updated in place; new tags are appended.
+    Returns the new content as a string.
+    """
+    outLines = []
+    handled = set()
+    removeTriplets = False
+
+    for line in open(confPath):
+        if removeTriplets:
+            if '"""' in line:
+                removeTriplets = False
+            continue
+        parts = line.strip().split("=", 1)
+        confTag = parts[0].strip()
+        if confTag in updates:
+            value, confStr = updates[confTag]
+            outLines.append(confTag + "=" + confStr + "\n")
+            handled.add(confTag)
+            if len(parts) > 1 and '"""' in parts[1]:
+                removeTriplets = True
+        else:
+            outLines.append(line if line.endswith('\n') else line + '\n')
+
+    # append tags not already present in the conf
+    for tag, (value, confStr) in updates.items():
+        if tag not in handled:
+            outLines.append(tag + "=" + confStr + "\n")
+
+    return "".join(outLines)
+
+def processDataset(dname, updates, confPath, jsonPath, updateJson):
+    """
+    Apply updates to confPath and (if updateJson) jsonPath using atomic temp-file
+    replacement so both files are always consistent.
+
+    updates: dict of tagName -> (python_value, conf_str)
+    """
+    if not updates:
+        return
+
+    newConfContent = buildNewConf(confPath, updates)
+
+    newJsonContent = None
+    if updateJson:
+        if exists(jsonPath):
+            with open(jsonPath) as f:
+                jsonData = json.load(f)
+            for tag, (value, _) in updates.items():
+                jsonData[tag] = value
+            newJsonContent = json.dumps(jsonData, indent=2)
+        else:
+            print("  warning: %s not found, skipping JSON update" % jsonPath)
+
+    # write both temp files before replacing either (minimises drift window)
+    confTmp = confPath + ".tmp"
+    jsonTmp = jsonPath + ".tmp" if newJsonContent is not None else None
+    try:
+        with open(confTmp, 'w') as f:
+            f.write(newConfContent)
+        if jsonTmp:
+            with open(jsonTmp, 'w') as f:
+                f.write(newJsonContent)
+    except Exception as e:
+        for tmp in [confTmp, jsonTmp]:
+            if tmp and exists(tmp):
+                os.unlink(tmp)
+        raise
+
+    os.replace(confTmp, confPath)
+    if jsonTmp:
+        os.replace(jsonTmp, jsonPath)
+
+# ---- argument parsing ----
+
 parser = argparse.ArgumentParser(
     formatter_class=argparse.RawDescriptionHelpFormatter,
-    description="Add/update tag values for a list of datasets. Requires a directory and tab-sep file with one column per new or updated tag. The tab-sep file must have a header line, the field names are the names of the tags. Tags are assumed to be lists, unless the tag name contains a pipe symbol followed by the data type. Valid data types are list, float, int and str.")
-parser.add_argument('datasetFile', type=str, help='file containing list of datasets in first column \
-and any tags to add/update in subsequent columns. Header should contain tag names that should match \
-those in the example cellbrowser.conf, e.g. body_parts.')
-#parser.add_argument("-u","--update", action='store_true',
-#help='if a tag already exists in the cellbrowser.conf, update it with value from datasetsFile')
-parser.add_argument("-i","--inDir", action='store', default="/hive/data/inside/cells/datasets",
-    help='directory where datasets are searched, default is /hive/data/inside/cells/datasets')
-parser.add_argument('-d', '--descConf', action='store_true', help='search for tag in desc.conf instead of cellbrowser.conf')
+    description="""\
+Add/update tag values for a list of datasets.
+
+Requires a tab-separated file with a header line; the first column is the
+dataset name, subsequent columns are tag names to add or update. Tag names
+may include a type suffix after a pipe character (e.g. 'unit|str'); valid
+types are list (default), str, int, float.
+
+By default the script also updates the corresponding built JSON file
+(dataset.json or desc.json) so changes take effect immediately without
+re-running cbBuild. Both the conf file and the JSON file are written via
+temp files to avoid drift if the script is interrupted.
+""")
+parser.add_argument('datasetFile',
+    help='TSV file with dataset names in column 1 and tag values in subsequent columns')
+parser.add_argument("-i", "--inDir", default="/hive/data/inside/cells/datasets",
+    help='directory containing dataset source files (default: /hive/data/inside/cells/datasets)')
+parser.add_argument("-o", "--outDir", default="/usr/local/apache/htdocs-cells",
+    help='directory containing built dataset JSON files (default: /usr/local/apache/htdocs-cells)')
+parser.add_argument('-d', '--descConf', action='store_true',
+    help='edit desc.conf / desc.json instead of cellbrowser.conf / dataset.json')
+parser.add_argument('--no-json', action='store_true', dest='noJson',
+    help='update conf files only; do not touch JSON files')
+parser.add_argument('--rebuild-search', action='store_true', dest='rebuildSearch',
+    help='rebuild search.json in --outDir after all updates are applied')
 
 args = parser.parse_args()
 
-# From https://stackoverflow.com/questions/541390/extracting-extension-from-filename-in-python
-dFtype = Path(args.datasetFile).suffix
-inDir = args.inDir
+if Path(args.datasetFile).suffix == ".csv":
+    print("datasetFile must be TSV, not CSV")
+    sys.exit(1)
 
-if dFtype == ".csv":
-    print("datasetFile must be tsv")
-    exit(1)
+confFname = "desc.conf" if args.descConf else "cellbrowser.conf"
+jsonFname = "desc.json" if args.descConf else "dataset.json"
+updateJson = not args.noJson
 
 dfh = open(args.datasetFile)
-
-# Peel off header so we can know which tags we're working with
 header = dfh.readline().rstrip().split('\t')
+headerNoType = [x.split("|")[0] for x in header]
 
-fname = "cellbrowser.conf"
-if args.descConf:
-    fname = "desc.conf"
-
-# Now process rest of datasetFile
 for line in dfh:
     splitLine = line.rstrip('\n').split('\t')
     dname = splitLine[0]
-    print("adding tag/values for:",dname)
-    confName = join(inDir,dname,fname)
-    # Turn conf into dict
-    conf = loadConfig(confName)
+    print("processing:", dname)
 
-    # go through each tag in the header
-    headerNoType = [x.split("|")[0] for x in header]
+    confPath = join(args.inDir, dname, confFname)
+    jsonPath = join(args.outDir, dname, jsonFname)
+
+    if not exists(confPath):
+        print("  warning: %s not found, skipping" % confPath)
+        continue
+
+    # build updates dict for this dataset
+    updates = {}
     for tag in header:
-        # Skip first column
+        if tag == "dataset":
+            continue
         dataType = "list"
+        tagName = tag
         if "|" in tag:
-            tag, dataType = tag.split("|")
+            tagName, dataType = tag.split("|")
 
-        if tag != "dataset":
-            # Get index of tag in the header so that we can use position to get values
-            # for the current tag of our current dataset later
-            n = headerNoType.index(tag)
+        n = headerNoType.index(tagName)
+        rawVal = splitLine[n] if n < len(splitLine) else ''
+        if rawVal == '':
+            continue
 
-            # Case where we're dealing with a new tag
-            if tag not in conf.keys():
-                # need to handle case where value is empty for a particular tag
-                # no need to add an empty tag to cellbrowser.conf
-                if splitLine[n] != '':
-                    # Turn vals into a list
-                    newVal = splitLine[n]
-                    if dataType=="list":
-                        #vals = splitLine[n].strip().split(',')
-                        # code adapated from https://stackoverflow.com/questions/4071396/split-by-comma-and-strip-whitespace-in-python
-                        vals = [x.strip() for x in newVal.split(',')]
-                        valStr = str(vals)
-                    elif dataType=="str":
-                        valStr = repr(newVal)
-                    elif dataType=="int":
-                        valStr = repr(int(newVal))
-                    elif dataType=="float":
-                        valStr = repr(float(newVal))
-                    elif dataType=="list":
-                        valStr = repr(list(newVal))
-                    else:
-                        assert(False) # unknown dataType after pipe character
+        value = computeValue(rawVal, dataType)
+        updates[tagName] = (value, valueToConfStr(value, dataType))
 
-                    # Append to file
-                    with open(confName,"a") as f:
-                        f.write(tag + "=" + valStr + "\n")
-            else:
-                # Case where tag already exists in conf file, so we're updating it
-                #if args.update:
-                # empty string to hold outConf if we're dealing with updates to current tags
-                # doing it this way should keep the formatting of the lines we're not changing intact
-                outConf = ""
-                removeTriplets = False
-                # go through line by line
-                for tagLine in open(confName):
-                    # whenever we have found a line with a triplequote, we skip all the lines
-                    # up to the next triple quotes. Terrible hack.
-                    if removeTriplets:
-                        if '"""' in tagLine:
-                            removeTriplets=False
-                        continue
-                    splitTag = tagLine.strip().split("=",1)
-                    confTag = splitTag[0].strip()
-                    # find those tags we've referenced in the header
-                    if confTag == tag:
-                        # take the values from datasetFile and add to output string
-                        # code adapated from https://stackoverflow.com/questions/4071396/split-by-comma-and-strip-whitespace-in-python
-                        oldVal = splitTag[1].strip()
-                        if "[" in oldVal:
-                            vals = [x.strip() for x in splitLine[n].split(',')]
-                            outConf += tag + "=" + str(vals) + "\n"
-                        else:
-                            newVal = splitLine[n]
-                            outConf += tag + "=" + repr(newVal) + "\n"
-                            if '"""' in tagLine:
-                                removeTriplets=True
+    processDataset(dname, updates, confPath, jsonPath, updateJson)
 
-                    # Just add other lines to the output string
-                    else:
-                        outConf += tagLine
-                # Write output string to our conf file
-                with open(confName,"w") as f:
-                    f.write(outConf)
+if updateJson and args.rebuildSearch:
+    from cellbrowser.cellbrowser import buildSearchJson
+    print("\nRebuilding search.json...")
+    buildSearchJson(args.outDir)
+elif updateJson:
+    print("\nNote: search.json not updated. Pass --rebuild-search to refresh search results.")

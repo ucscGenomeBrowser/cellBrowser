@@ -1,0 +1,51 @@
+# Test cases for test_cb_tools.sh
+#
+# Columns (comma-separated):
+#   category       - tool name used for filtering (e.g. ./test_cb_tools.sh cbImportScanpy)
+#   test_name      - human-readable label shown in output
+#   out_subdir     - output directory name, created under the script's directory
+#   env            - conda environment to run the command in
+#   command        - shell command; may reference these variables:
+#                      $OUTDIR       - resolved output directory (set automatically)
+#                      $SCANPY_H5AD  - path to d1d.h5ad
+#                      $SCANPY_EXPR  - path to d1d_exprMatrix.tsv.gz
+#                      $SCANPY_META  - path to d1d_meta.tsv
+#                      $SEURAT_RDS   - path to skeletal-muscle_adult-hindlimb.rds
+#   expected       - space-separated list of files that MUST exist in out_subdir after the run
+#   unexpected     - space-separated list of files that MUST NOT exist in out_subdir (leave blank if none)
+#
+# Lines beginning with # are ignored. Blank lines are ignored.
+# To skip a test temporarily, comment it out with #.
+
+# category,test_name,out_subdir,env,command,expected,unexpected
+
+# ---------------------------------------------------------------------------
+# cbImportScanpy
+# ---------------------------------------------------------------------------
+cbImportScanpy,cbImportScanpy basic,cbImportScanpy_out_basic,scanpyenv,cbImportScanpy -i $SCANPY_H5AD -o $OUTDIR,barcodes.tsv.gz cellbrowser.conf desc.conf features.tsv.gz markers.tsv matrix.mtx.gz meta.tsv quickGenes.tsv tsne_coords.tsv,
+cbImportScanpy,cbImportScanpy --matrixFormat tsv,cbImportScanpy_out_tsv,scanpyenv,cbImportScanpy -i $SCANPY_H5AD -o $OUTDIR --matrixFormat tsv,cellbrowser.conf desc.conf exprMatrix.tsv.gz markers.tsv meta.tsv quickGenes.tsv tsne_coords.tsv,matrix.mtx.gz barcodes.tsv.gz features.tsv.gz
+cbImportScanpy,cbImportScanpy --skipMatrix,cbImportScanpy_out_skip_matrix,scanpyenv,cbImportScanpy -i $SCANPY_H5AD -o $OUTDIR --skipMatrix,cellbrowser.conf desc.conf markers.tsv meta.tsv quickGenes.tsv tsne_coords.tsv,matrix.mtx.gz barcodes.tsv.gz features.tsv.gz exprMatrix.tsv.gz
+cbImportScanpy,cbImportScanpy --skipMarkers,cbImportScanpy_out_skip_markers,scanpyenv,cbImportScanpy -i $SCANPY_H5AD -o $OUTDIR --skipMarkers,barcodes.tsv.gz cellbrowser.conf desc.conf features.tsv.gz matrix.mtx.gz meta.tsv tsne_coords.tsv,markers.tsv quickGenes.tsv
+cbImportScanpy,cbImportScanpy --proc,cbImportScanpy_out_proc,scanpyenv,cbImportScanpy -i $SCANPY_H5AD -o $OUTDIR --proc,barcodes.tsv.gz cellbrowser.conf desc.conf features.tsv.gz markers.tsv matrix.mtx.gz meta.tsv quickGenes.tsv tsne_coords.tsv,
+
+# ---------------------------------------------------------------------------
+# cbScanpy
+# ---------------------------------------------------------------------------
+cbScanpy,cbScanpy basic,cbScanpy_out_basic,scanpyenv,cbScanpy -e $SCANPY_EXPR -m $SCANPY_META -o $OUTDIR -n cbScanpy_basic,anndata.h5ad cbScanpy.log cellbrowser.conf desc.conf exprMatrix.tsv.gz markers.tsv meta.tsv quickGenes.tsv umap_coords.tsv,
+cbScanpy,cbScanpy --matrixFormat mtx,cbScanpy_out_mtx,scanpyenv,cbScanpy -e $SCANPY_EXPR -m $SCANPY_META -o $OUTDIR -n cbScanpy_mtx --matrixFormat mtx,anndata.h5ad cbScanpy.log cellbrowser.conf desc.conf barcodes.tsv.gz features.tsv.gz matrix.mtx.gz markers.tsv meta.tsv quickGenes.tsv umap_coords.tsv exprMatrix.tsv.gz,
+cbScanpy,cbScanpy --skipMatrix,cbScanpy_out_skip_matrix,scanpyenv,cbScanpy -e $SCANPY_EXPR -m $SCANPY_META -o $OUTDIR -n cbScanpy_skip_matrix --skipMatrix,anndata.h5ad cbScanpy.log cellbrowser.conf desc.conf markers.tsv meta.tsv quickGenes.tsv umap_coords.tsv exprMatrix.tsv.gz,matrix.mtx.gz barcodes.tsv.gz
+cbScanpy,cbScanpy --skipMarkers,cbScanpy_out_skip_markers,scanpyenv,cbScanpy -e $SCANPY_EXPR -m $SCANPY_META -o $OUTDIR -n cbScanpy_skip_markers --skipMarkers,anndata.h5ad cbScanpy.log cellbrowser.conf desc.conf exprMatrix.tsv.gz meta.tsv umap_coords.tsv,markers.tsv quickGenes.tsv
+
+# ---------------------------------------------------------------------------
+# cbImportSeurat
+# ---------------------------------------------------------------------------
+cbImportSeurat,cbImportSeurat basic,cbImportSeurat_out_basic,seuratenv,cbImportSeurat -i $SEURAT_RDS -o $OUTDIR,analysisLog.txt cellbrowser.conf counts_exprMatrix.tsv.gz data_exprMatrix.tsv.gz desc.conf markers.tsv meta.tsv quickGenes.tsv runSeurat.R scale_exprMatrix.tsv.gz umap.coords.tsv,
+cbImportSeurat,cbImportSeurat --useMtx,cbImportSeurat_out_use_mtx,seuratenv,cbImportSeurat -i $SEURAT_RDS -o $OUTDIR --useMtx,analysisLog.txt runSeurat.R counts_barcodes.tsv.gz counts_features.tsv.gz counts_matrix.mtx.gz data_barcodes.tsv.gz data_features.tsv.gz data_matrix.mtx.gz,counts_exprMatrix.tsv.gz data_exprMatrix.tsv.gz
+cbImportSeurat,cbImportSeurat --skipMatrix,cbImportSeurat_out_skip_matrix,seuratenv,cbImportSeurat -i $SEURAT_RDS -o $OUTDIR --skipMatrix,analysisLog.txt cellbrowser.conf desc.conf markers.tsv meta.tsv quickGenes.tsv runSeurat.R umap.coords.tsv,counts_exprMatrix.tsv.gz data_exprMatrix.tsv.gz counts_matrix.mtx.gz
+cbImportSeurat,cbImportSeurat --skipMarkers,cbImportSeurat_out_skip_markers,seuratenv,cbImportSeurat -i $SEURAT_RDS -o $OUTDIR --skipMarkers,analysisLog.txt cellbrowser.conf counts_exprMatrix.tsv.gz data_exprMatrix.tsv.gz desc.conf meta.tsv runSeurat.R scale_exprMatrix.tsv.gz umap.coords.tsv,markers.tsv
+cbImportSeurat,cbImportSeurat --matrixSlot data,cbImportSeurat_out_slot_data,seuratenv,cbImportSeurat -i $SEURAT_RDS -o $OUTDIR --matrixSlot data,analysisLog.txt cellbrowser.conf exprMatrix.tsv.gz desc.conf markers.tsv meta.tsv quickGenes.tsv runSeurat.R umap.coords.tsv,counts_exprMatrix.tsv.gz scale_exprMatrix.tsv.gz
+
+# ---------------------------------------------------------------------------
+# cbSeurat
+# ---------------------------------------------------------------------------
+cbSeurat,cbSeurat basic,cbSeurat_out_basic,seuratenv,cbSeurat -e $SCANPY_EXPR -o $OUTDIR -n cbSeurat_basic,cellbrowser.conf desc.conf markers.tsv meta.tsv quickGenes.tsv features.tsv.gz barcodes.tsv.gz matrix.mtx.gz tsne.coords.tsv pca.coords.tsv,
