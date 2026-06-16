@@ -9043,7 +9043,7 @@ var cellbrowser = function() {
         if (getVar("exprGene", null) !== null) {
             geneIds = getVar("exprGene", null).split(" ");
         } else if (db.conf.quickGenes && db.conf.quickGenes.length > 0) {
-            if (db.conf.sampleCount > 500000)
+            if (db.conf.sampleCount > 200000)
                 geneIds = [db.conf.quickGenes[0][0]];
             else
                 geneIds = db.conf.quickGenes.map(function(qg) { return qg[0]; });
