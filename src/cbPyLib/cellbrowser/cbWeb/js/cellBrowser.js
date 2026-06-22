@@ -7857,7 +7857,7 @@ var cellbrowser = function() {
            plotHeatmap(divEl, metaName, exprData);
        }
 
-       loadGroupedExprData(db.heatmap.exprData, geneIds, metaName, onExprDataDoneHeat);
+       loadGroupedExprData(db.heatmap.exprData, geneIds, metaName, null, onExprDataDoneHeat);
     }
 
     function useGeneDropdown() {
