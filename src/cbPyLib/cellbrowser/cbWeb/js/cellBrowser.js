@@ -2220,11 +2220,17 @@ var cellbrowser = function() {
             // it's an enum field
             $('#tpSelectValue_'+rowIdx).hide();
             $('#tpSelectMetaValueEnum_'+rowIdx).empty();
-            for (var i = 0; i < valCounts.length; i++) {
-                //var valName = valCounts[i][0];
-                var valLabel = shortLabels[i];
-                $('#tpSelectMetaValueEnum_'+rowIdx).append("<option value='"+i+"'>"+valLabel+"</option>");
+            
+            // sort values by label, but keep track of original index
+            var sorted = shortLabels.map((label, i) => ({label, idx: i}));
+            sorted.sort((a, b) => a.label.localeCompare(b.label, undefined, {numeric: true}));
+
+            for (var i = 0; i < sorted.length; i++) {
+                var valIndex = sorted[i].idx;
+                var valLabel = sorted[i].label;
+                $('#tpSelectMetaValueEnum_'+rowIdx).append("<option value='"+valIndex+"'>"+valLabel+"</option>");
             }
+
             $('#tpSelectMetaValueEnum_'+rowIdx).show();
         }
     }
