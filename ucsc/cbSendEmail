@@ -50,16 +50,16 @@ Here is an example link: https://cortex-dev.cells.ucsc.edu.
 {UCSC Genome Browser tracks note for ATAC-seq datasets}
 
 For your {DESCRIBE THE DATASET IN 2-5 WORDS} dataset, I suggest the dataset name "$DATASET_NAME".
-The full URL that you can add to your manuscript will then be $DATASET_NAME.cells.ucsc.edu
-once you give us permission for release (usually after review or publication).
+The URL from your manuscript will then be $DATASET_NAME.cells.ucsc.edu
+once you give us permission for release (usually once the paper is accepted).
 
 You can upload your dataset here:
 https://cells-submit.gi.ucsc.edu?ds=$DATASET_NAME.  To hide the dataset
 until publication, select “Private dataset”.
 
-Feel free to email us if you have any questions. Once
-we have the dataset converted, we will send you an email with a testing link and
-you can add the link to your manuscript and let us know when to make it public.
+Feel free to email us if you have any questions. When
+we have the dataset converted, we send you a testing link and wait for your
+feedback.
 
 Best regards,
 Maximilian Haeussler, PhD
@@ -386,7 +386,7 @@ def classify_papers_with_claude(papers, batch_size=20):
 
 For each paper below, determine:
 1. Does it contain NEW single-cell or single-nucleus genomic data (not re-analysis of public data)?
-2. What type(s) of data: scRNA-seq, snRNA-seq, scATAC-seq, snATAC-seq, spatial (Visium/MERFISH/etc), multiome, CITE-seq, or other_sc
+2. What type(s) of data: scRNA-seq, snRNA-seq, scATAC-seq, snATAC-seq, spatial (Visium/MERFISH/etc), multiome, lineage tracing, clone tracking, CITE-seq, or other_sc
 3. A one-line summary of what the dataset is
 
 Papers that are purely computational methods, reviews, re-analyses of existing public data, or not about single-cell genomics should be marked not_relevant.
@@ -395,7 +395,7 @@ Papers that are purely computational methods, reviews, re-analyses of existing p
 
 Respond ONLY with a JSON array. Each element must have these fields:
 - "doi": the paper DOI
-- "data_types": array of strings from [scRNA-seq, snRNA-seq, scATAC-seq, snATAC-seq, spatial, multiome, CITE-seq, other_sc, not_relevant]
+- "data_types": array of strings, a subset of  [scRNA-seq, snRNA-seq, scATAC-seq, snATAC-seq, spatial, multiome, lineage, clone CITE-seq, other_sc, not_relevant]
 - "has_new_data": true if the paper generated new data, false if re-analysis or methods-only
 - "summary": one-line description of the dataset/paper
 
@@ -589,9 +589,89 @@ def parse_authors(authors_str: str) -> list:
     return authors
 
 
+def get_crossref_record(doi: str) -> dict:
+    """
+    Fallback metadata source: resolve the DOI with CSL-JSON content negotiation
+    (served by Crossref). Used when the bioRxiv/medRxiv API has not ingested a
+    preprint yet -- their API lags the website by days for newly posted DOIs,
+    including the new openRxiv "10.64898" prefix.
+
+    Returns a dict in the same shape as get_biorxiv_record().
+    """
+    headers = {"Accept": "application/vnd.citationstyles.csl+json"}
+    url = f"https://doi.org/{quote(doi, safe='/')}"
+    resp = requests.get(url, headers=headers, timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"DOI resolver returned status {resp.status_code}")
+    data = resp.json()
+
+    # Title may be a string or a single-element list
+    title = data.get("title", "")
+    if isinstance(title, list):
+        title = title[0] if title else ""
+
+    # Abstract is JATS/HTML markup (e.g. <jats:p>...); strip tags and the
+    # leading "ABSTRACT" heading.
+    abstract = data.get("abstract", "") or ""
+    abstract = re.sub(r"<[^>]+>", " ", abstract)
+    abstract = re.sub(r"\s+", " ", abstract).strip()
+    abstract = re.sub(r"^abstract[:\s]*", "", abstract, flags=re.IGNORECASE)
+
+    # Build a bioRxiv-style author string: "Family, G. I.; Family2, A. B."
+    csl_authors = data.get("author", [])
+    parts = []
+    for a in csl_authors:
+        family = (a.get("family") or "").strip()
+        given = (a.get("given") or "").strip()
+        if not family:
+            # institutional/consortium author with only a "name" field
+            name = (a.get("name") or "").strip()
+            if name:
+                parts.append(name)
+            continue
+        initials = " ".join(f"{tok[0]}." for tok in re.split(r"[\s.-]+", given) if tok)
+        parts.append(f"{family}, {initials}" if initials else family)
+    authors_str = "; ".join(parts)
+
+    # CSL-JSON does not flag the corresponding author, so fall back to the last
+    # author (typically the PI) -- the same name the bioRxiv API usually reports
+    # and the one used for the email salutation.
+    author_corresponding = ""
+    corr_inst = ""
+    if csl_authors:
+        last = csl_authors[-1]
+        family = (last.get("family") or "").strip()
+        given = (last.get("given") or "").strip()
+        author_corresponding = f"{given} {family}".strip() or (last.get("name") or "").strip()
+        affil = last.get("affiliation") or []
+        if affil:
+            corr_inst = affil[0].get("name", "").strip()
+
+    # Posted date -> zero-padded "YYYY-MM-DD" to match the bioRxiv API
+    date_str = ""
+    posted = data.get("posted") or data.get("published") or {}
+    date_parts = posted.get("date-parts", [[]])
+    if date_parts and date_parts[0]:
+        p = date_parts[0]
+        date_str = "-".join([str(p[0])] + [f"{int(x):02d}" for x in p[1:]])
+
+    return {
+        "title": title,
+        "abstract": abstract,
+        "authors": authors_str,
+        "author_corresponding": author_corresponding,
+        "author_corresponding_institution": corr_inst,
+        "date": date_str,
+        "doi": data.get("DOI", doi),
+        "category": "",  # CSL-JSON has no bioRxiv subject collection
+    }
+
+
 def get_biorxiv_record(doi: str) -> dict:
     """
     Query the bioRxiv/medRxiv API for a single DOI and return the first record.
+    Falls back to Crossref DOI metadata when the API has no record yet (the
+    bioRxiv API can lag the website by several days for new preprints).
     """
     doi_encoded = quote(doi, safe="/")
 
@@ -605,7 +685,10 @@ def get_biorxiv_record(doi: str) -> dict:
             if collection:
                 return collection[0]
 
-    raise RuntimeError(f"No records found for DOI {doi}")
+    # Not in the bioRxiv API yet -- fall back to Crossref so recently posted
+    # preprints (already live on the website) still work.
+    print("  Not in bioRxiv API yet; falling back to Crossref DOI metadata...")
+    return get_crossref_record(doi)
 
 
 def find_emails_with_claude(authors: list, institution: str) -> dict:
@@ -744,6 +827,8 @@ Please rewrite this email to make it specific to this paper. Reference specific 
 {ds_instructions}
 
 If the abstract suggests that the paper contains ATAC-seq or Chip-Seq or "chromatin accessibility" data or other cis-regulatory data, replace the placeholder "UCSC Genome Browser tracks note for ATAC-seq datasets" with a text like the following: "Since your paper seems to include Chip-Seq or ATAC-seq data, note that we have support for this assay: You can send us your bigWig files and we convert them to UCSC Genome Browser Tracks, that can be loaded from the single cell browser or can be loaded via the UCSC Genome Browser public hubs page."
+
+If the abstract suggests that the paper contains lineage tracing or clone tracking data, add a sentence like: "Your paper seems to include lineage tracing data, our website has special support for this, and can import from e.g. Monocle3 or URD."
 
 IMPORTANT: Your response must be in this exact format with no other text:
 DATASET_NAME: <the exact dataset shortname you used to replace $DATASET_NAME>
@@ -1128,6 +1213,8 @@ def main():
         print("Rerun with --name <dataset-name> to set it explicitly.", file=sys.stderr)
         sys.exit(1)
 
+    # Append the bare DOI at the end for our own tracking (so we can match the
+    # paper when replies come in) -- intentionally not a clickable URL.
     personalized["body"] = personalized["body"]+"\n\n\n"+identifier
     # Collect all email addresses
     all_recipients = email_list.copy()
