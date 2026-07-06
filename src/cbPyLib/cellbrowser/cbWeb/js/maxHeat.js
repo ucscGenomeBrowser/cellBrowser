@@ -10,10 +10,10 @@ function MaxHeat(div, args) {
     // TODO: convert to a new-style class?
     var self = this;
  
-    var COL_FONT_SIZE = 10; // minimum font size of column labels at the top
-    var ROW_FONT_SIZE = 10; // minimum font size of row labels at the left
+    var COL_FONT_SIZE = 13; // minimum font size of column labels at the top
+    var ROW_FONT_SIZE = 13; // minimum font size of row labels at the left
 
-    var LABEL_MAX_LEN = 25; // max characters shown for labels
+    var LABEL_MAX_LEN = 40; // max characters shown for labels
     var MIN_EXPR_WIDTH = 3; // minimum width of expression rectangle
     var MIN_ROW_HEIGHT = 4; // minimum height of row
     var META_GAP = 4; // pixel gap between metadata and expression sections
@@ -121,25 +121,27 @@ function MaxHeat(div, args) {
             var flipBtn = document.createElement("button");
             flipBtn.textContent = "Flip";
             flipBtn.title = "Swap rows and columns";
+            flipBtn.style.cssText = "margin-top:6px; margin-left:8px; padding:4px 10px; font-size:13px;";
             flipBtn.addEventListener("click", function() {
                 self.conf.doFlip = !self.conf.doFlip;
                 self.reload();
             });
             toolbar.appendChild(flipBtn);
+            if (conf.onClose) {
+                var closeBtn = document.createElement("button");
+                closeBtn.textContent = "Close";
+                closeBtn.title = "Return to scatter plot";
+                closeBtn.style.cssText = "margin-top:6px; margin-left:8px; padding:4px 10px; font-size:13px;";
+                closeBtn.addEventListener("click", conf.onClose);
+                toolbar.appendChild(closeBtn);
+            }
             div.appendChild(toolbar);
             self.toolbarEl = toolbar;
         }
 
         var canv = document.createElement("canvas");
-        //canv.style.width = width+"px";
-        //canv.style.height = height+"px";
         canv.id = id;
         canv.style.display = "block";
-        canv.style.height = "auto";
-        canv.style.width = "auto";
-        // No scaling = one unit on screen is one pixel. Essential for speed.
-        //canv.width = divRect.width;
-        //canv.height = divRect.height;
 
         // keep these as ints, need them all the time
         //self.width = divRect.width;
@@ -370,13 +372,19 @@ function MaxHeat(div, args) {
         selEl.style.width=colWidth+"px";
         selEl.style.display="block";
         var value = self.exprValues[geneIdx][metaIdx];
-        var rowExtra = self.rowExtraInfo ? self.rowExtraInfo[geneIdx] : null;
+
+        // cell count is per meta group; index differs depending on flip state
+        var cellCount = null;
+        if (self._metaCellCounts) {
+            var metaGroupIdx = self.conf.doFlip ? self.rowOrder[geneIdx] : self.colOrder[metaIdx];
+            cellCount = self._metaCellCounts[metaGroupIdx];
+        }
 
         if (metaName==="")
             metaName = "(empty)";
 
         if (self.onCellHover)
-            self.onCellHover(self.rowOrder[geneIdx], self.colOrder[metaIdx], geneName, metaName, value, rowExtra, ev);
+            self.onCellHover(self.rowOrder[geneIdx], self.colOrder[metaIdx], geneName, metaName, value, cellCount, ev);
     }
 
     this.initDrawing = function (div, opts) {
@@ -402,12 +410,14 @@ function MaxHeat(div, args) {
     this.setSize = function(width, height) {
         /* change size of canvas and div and keep in object */
 
+        var dpr = window.devicePixelRatio || 1;
         self.width = width;
         self.height = height;
-        self.canvas.width = width;
-        self.canvas.height = height;
-        //self.canvas.style.width = width+"px";
-        //self.canvas.style.height = height+"px";
+        self.canvas.width = Math.round(width * dpr);
+        self.canvas.height = Math.round(height * dpr);
+        self.canvas.style.width = width + "px";
+        self.canvas.style.height = height + "px";
+        self.ctx.scale(dpr, dpr);
 
         if (self.rowLabels)
             self.calcRectBoundaries();
@@ -456,6 +466,9 @@ function MaxHeat(div, args) {
         else
             self.conf = {};
 
+        // save cell counts per meta group before flip may null geneExtraInfo
+        self._metaCellCounts = geneExtraInfo || null;
+
         if (self.conf.doFlip) {
             var tmp = self.colLabels;
             self.colLabels = self.rowLabels;
@@ -489,7 +502,7 @@ function MaxHeat(div, args) {
 
         // calc the size of the canvas, can be bigger than screen
         self.colLabelHeight = self.textBoxDim("height", LABEL_MAX_LEN, self.colFontSize, colLabelsForDim, true);
-        self.rowLabelWidth = self.textBoxDim("width", LABEL_MAX_LEN, self.rowFontSize, rowLabelsForDim);
+        self.rowLabelWidth = self.textBoxDim("width", null, self.rowFontSize, rowLabelsForDim) + 8;
 
         // metadata layout dimensions (annotates groups axis)
         self.metaColTotalWidth = 0;
@@ -876,7 +889,7 @@ function MaxHeat(div, args) {
         // determine the max size of the labels
         let maxVal = null;
         for (let label of labels) {
-            const m = ctx.measureText(truncLabel(label, maxLen));
+            const m = ctx.measureText(maxLen == null ? label : truncLabel(label, maxLen));
             if (doHeight) {
                 if (doAngle) {
                     const w = m.width;
@@ -927,24 +940,34 @@ function MaxHeat(div, args) {
         var ctx = self.ctx;
         ctx.save();
 
+        // draw primary field name to the left of the column labels, above meta row labels
+        if (self.conf.primaryFieldName && self.colLabelHeight > 5) {
+            ctx.font = "bold " + self.rowFontSize + "px sans-serif";
+            ctx.fillText(self.conf.primaryFieldName, 4, self.colLabelHeight - 4);
+        }
+
         // draw expression row labels
         if (rowHeight>4) {
             var rowFontSize = self.rowFontSize;
             let rowEndToTextBase = (rowHeight - rowFontSize)/2;
-            ctx.font = rowFontSize+"px sans-serif";
             console.time("rowLabelsDraw");
             var rowLabels = self.rowLabels;
             for (var labelI=0; labelI < rowCount; labelI++) {
                 var realLabelI = rowOrder[labelI];
+                var label = rowLabels[realLabelI];
                 var textY = parseInt(self.exprStartY+(labelI*rowHeight) + rowEndToTextBase + rowFontSize - (0.2*rowHeight));
-                ctx.fillText(rowLabels[realLabelI], 4, textY);
+                if (label === self.highlightedRowLabel)
+                    ctx.font = "bold " + rowFontSize + "px sans-serif";
+                else
+                    ctx.font = rowFontSize + "px sans-serif";
+                ctx.fillText(label, 4, textY);
             }
             console.timeEnd("rowLabelsDraw");
         }
 
         // draw expression column labels
         if (self.colLabelHeight>5) {
-            var colFontSize = self.colLabelFontSize;
+            var colFontSize = self.colFontSize;
             ctx.font = colFontSize+"px sans-serif";
             console.time("colLabelsDraw");
             let colLabels = self.colLabels;
@@ -1059,6 +1082,25 @@ function MaxHeat(div, args) {
 
     this.clear = function() {
         clearCanvas(self.ctx, self.width, self.height);
+    };
+
+    this.highlightRow = function(name) {
+        /* Bold the row with this label and scroll it into view */
+        self.highlightedRowLabel = name;
+        self.draw();
+
+        // scroll the heatmap div so the row is centered vertically
+        var rowLabels = self.rowLabels;
+        var rowOrder = self.rowOrder;
+        for (var labelI = 0; labelI < rowLabels.length; labelI++) {
+            if (rowLabels[rowOrder[labelI]] === name) {
+                var rowY = self.exprStartY + labelI * self.rowHeight;
+                var divHeight = self.div.clientHeight;
+                var targetScroll = rowY - (divHeight / 2) + (self.rowHeight / 2);
+                self.div.scrollTo({ top: Math.max(0, targetScroll), behavior: "smooth" });
+                break;
+            }
+        }
     };
 
     // constructor

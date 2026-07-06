@@ -4320,6 +4320,9 @@ var cellbrowser = function() {
         if (el && el.selectize) {
             el.selectize.addOption({id: name, text: name});
             el.selectize.setValue(name, 1); // 1 = do not fire change
+        } else if ($("#"+elId+"_chosen").length > 0) {
+            // chosen dropdown (used for heatmap gene combos)
+            $("#"+elId).val(name).trigger("chosen:updated");
         } else {
             // select2: change.select2 updates the UI without firing user change handlers
             $("#"+elId).val(name).trigger("change.select2");
@@ -4327,11 +4330,13 @@ var cellbrowser = function() {
     }
 
     function selectizeClear(elId) {
-        /* clear a gene combobox. Works for both selectize and select2. */
+        /* clear a gene combobox. Works for selectize, chosen, and select2. */
         var el = getById(elId);
         if (!el) return;
         if (el.selectize)
             el.selectize.clear();
+        else if ($("#"+elId+"_chosen").length > 0)
+            $("#"+elId).val("").trigger("chosen:updated");
         else
             $("#"+elId).val(null).trigger("change.select2");
     }
@@ -4935,7 +4940,7 @@ var cellbrowser = function() {
        fetch(jsonUrl);
 
        if (db.conf.sampleCount < 50000) {
-           if (db.conf.quickGenes)
+           if (db.conf.quickGenes && db.conf.display !== "heatmap")
                db.preloadGenes(db.conf.quickGenes, function() {
                    updateGeneTableColors(null);
                    if (getVar("heat")==="1")
@@ -5612,7 +5617,10 @@ var cellbrowser = function() {
         var saneId = onlyAlphaNum(locusId)
         $('#tpGeneBarCell_'+saneId).addClass("tpGeneBarCellSelected");
 
-        colorByLocus(locusId, null, locusLabel);
+        if (db.heatmap)
+            db.heatmap.highlightRow(locusLabel);
+        else
+            colorByLocus(locusId, null, locusLabel);
         event.stopPropagation();
     }
 
@@ -5902,7 +5910,10 @@ var cellbrowser = function() {
             if (mouseOver===undefined)
                 mouseOver = internalId;
 
-            htmls.push('<span title="'+mouseOver+'" style="width: fit-content;" data-geneId="'+internalId+'" id="tpGeneBarCell_'+onlyAlphaNum(internalId)+'" class="hasTooltip tpGeneBarCell">'+label+'</span>');
+            var isHeatmap = db.conf.display === "heatmap";
+            var titleAttr = isHeatmap ? "" : 'title="'+mouseOver+'"';
+            var tooltipClass = isHeatmap ? "tpGeneBarCell" : "hasTooltip tpGeneBarCell";
+            htmls.push('<span '+titleAttr+' style="width: fit-content;" data-geneId="'+internalId+'" id="tpGeneBarCell_'+onlyAlphaNum(internalId)+'" class="'+tooltipClass+'">'+label+'</span>');
             i++;
         }
         htmls.push("</div>"); // divId
@@ -6935,10 +6946,11 @@ var cellbrowser = function() {
         if (db.conf.atacSearch) {
             updatePeakListWithGene(geneId);
         } else {
-            // in the normal, gene-matrix mode.
-            var locusStr = null;
             var geneInfo = db.getGeneInfo(geneId);
-            colorByLocus(geneInfo.id);
+            if (db.heatmap)
+                db.heatmap.highlightRow(geneInfo.sym || geneInfo.id);
+            else
+                colorByLocus(geneInfo.id);
         }
     }
 
@@ -7153,6 +7165,7 @@ var cellbrowser = function() {
 
     function buildLayoutCombo(coordLabel, htmls, files, id, left, top) {
         /* files is a list of elements with a shortLabel attribute. Build combobox for them. */
+        if (!files || files.length === 0) return;
         if (!coordLabel)
             coordLabel = "Embedding";
 
@@ -7265,8 +7278,9 @@ var cellbrowser = function() {
 
     function buildGeneCombo(htmls, id, left, width) {
         /* Combobox that allows searching for genes */
+        var isHeatmap = db.conf.display === "heatmap";
         htmls.push('<div class="tpLeftSideItem" style="padding-left: 3px">');
-        var title = "Color by "+getGeneLabel();
+        var title = isHeatmap ? "Search "+getGeneLabel() : "Color by "+getGeneLabel();
         if (db.conf.atacSearch)
             title = "Find "+gFeatDesc+" at or close to:"
         htmls.push('<label style="display:block; margin-bottom:8px; padding-top: 8px;" for="'+id+'">'+title+'</label>');
@@ -7277,9 +7291,11 @@ var cellbrowser = function() {
         htmls.push('<select style="width:'+width+'px" id="'+id+'" placeholder="'+boxLabel+'" class="tpCombo">');
         htmls.push('</select>');
 
-        htmls.push('<div><button style="margin-top:4px" id="tpSplitOnGene">'+splitButtonLabel(true)+'</button>');
-        htmls.push('<button style="margin-left: 4px" id="tpMultiGene">Multi Gene</button></div>');
-        htmls.push('<div><button style="margin-top:4px" id="tpResetColors">Reset to default coloring</button></div>');
+        if (!isHeatmap) {
+            htmls.push('<div><button style="margin-top:4px" id="tpSplitOnGene">'+splitButtonLabel(true)+'</button>');
+            htmls.push('<button style="margin-left: 4px" id="tpMultiGene">Multi Gene</button></div>');
+            htmls.push('<div><button style="margin-top:4px" id="tpResetColors">Reset to default coloring</button></div>');
+        }
         htmls.push('</div>');
     }
 
@@ -7849,7 +7865,12 @@ var cellbrowser = function() {
 
        let metaName = getActiveColorField();
 
-       var heatmap = new MaxHeat(divEl, {mainRenderer:renderer});
+       var heatArgs = {mainRenderer: renderer};
+       var isDisplayHeatmap = db.conf.display === "heatmap";
+       var hasCoords = db.conf.coords && db.conf.coords.length > 0;
+       if (!isDisplayHeatmap || hasCoords)
+           heatArgs.onClose = removeHeatmap;
+       var heatmap = new MaxHeat(divEl, heatArgs);
        db.heatmap = heatmap;
        db.heatmap.exprData = null;
 
@@ -7888,8 +7909,7 @@ var cellbrowser = function() {
                 opts.push(db.getGeneInfo(geneIds[i]));
             opts.sort(function(a, b) { return a.sym.localeCompare(b.sym); });
             var placeholder = selectEl.getAttribute("placeholder") || "";
-            // select2 needs an empty <option> first to show the placeholder
-            var html = ['<option></option>'];
+            var html = ['<option value=""></option>'];
             for (var j=0; j<opts.length; j++) {
                 var text = opts[j].sym;
                 if (opts[j].sym !== opts[j].id)
@@ -7897,12 +7917,22 @@ var cellbrowser = function() {
                 html.push('<option value="'+opts[j].id+'">'+text+'</option>');
             }
             selectEl.innerHTML = html.join("");
-            var widthPx = selectEl.style.width || 'resolve';
-            $("#"+id).select2({
-                placeholder: placeholder,
-                allowClear: true,
-                width: widthPx
-            }).on("change", onGeneComboChange);
+            var widthStr = selectEl.style.width || "240px";
+            if (db.conf.display === "heatmap") {
+                // Use chosen for heatmap datasets so the dropdown matches the Annotation tab styling
+                $("#"+id).chosen({
+                    inherit_select_classes: true,
+                    disable_search_threshold: 0,
+                    width: widthStr,
+                    placeholder_text_single: placeholder
+                }).on("change", onGeneComboChange);
+            } else {
+                $("#"+id).select2({
+                    placeholder: placeholder,
+                    allowClear: true,
+                    width: widthStr
+                }).on("change", onGeneComboChange);
+            }
             return;
         }
 
@@ -9458,7 +9488,8 @@ var cellbrowser = function() {
         htmls.push("<ul>");
         htmls.push("<li><a href='#tpAnnotTab'>Annotation</a></li>");
         htmls.push("<li><a href='#tpGeneTab'>"+getGeneLabel()+"</a></li>");
-        htmls.push("<li><a href='#tpLayoutTab'>"+(db.conf.coordLabel || "Layout")+"</a></li>");
+        if (db.conf.coords && db.conf.coords.length > 0)
+            htmls.push("<li><a href='#tpLayoutTab'>"+(db.conf.coordLabel || "Layout")+"</a></li>");
         htmls.push("<li><a href='#tpToolsTab'>Tools</a></li>");
         htmls.push("</ul>");
 
@@ -9485,7 +9516,7 @@ var cellbrowser = function() {
 
         buildGeneCombo(htmls, "tpGeneCombo", 0, metaBarWidth-10);
 
-        htmls.push('<div id="splitJoinDiv"><input class="form-check-input" type="checkbox" id="splitJoinBox" name="splitJoin" value="splitJoin" /> <label for="splitJoinBox">Show on both sides</label></div>');
+        htmls.push('<div id="splitJoinDiv" style="display:none"><input class="form-check-input" type="checkbox" id="splitJoinBox" name="splitJoin" value="splitJoin" /> <label for="splitJoinBox">Show on both sides</label></div>');
 
         if (db.conf.atacSearch)
             buildPeakList(htmls);
@@ -9984,6 +10015,7 @@ var cellbrowser = function() {
         Mousetrap.bind('g', function() {
             var el = getById("tpGeneCombo");
             if (el && el.selectize) el.selectize.focus();
+            else if ($("#tpGeneCombo_chosen").length > 0) $("#tpGeneCombo").trigger("chosen:open");
             else $("#tpGeneCombo").select2('open');
             return false;
         });
@@ -11436,9 +11468,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     function onHeatCellClick(geneName, clusterName) {
         /* color by gene and select all cells in cluster */
-        colorByLocus(geneName);
-        // clusterName?
-        //selectByColor
+        if (db.heatmap)
+            db.heatmap.highlightRow(geneName);
+        else
+            colorByLocus(geneName);
     }
 
     function onHeatCellHover(rowIdx, colIdx, rowName, colName, value, cellCount, ev, metaHover) {
@@ -11453,12 +11486,17 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 htmls.push(rowName);
             if (colName)
                 htmls.push(colName)
-            if (value!==null)
-                htmls.push("<br><b>Average</b>:"+parseFloat(value).toPrecision(3)+"<br>");
+            if (value!==null) {
+                var valLabel = (cellCount === 1) ? "Value" : "Average";
+                htmls.push("<br><b>" + valLabel + "</b>: " + parseFloat(value).toPrecision(3));
+            }
             if (cellCount!==null && cellCount!==undefined)
-                htmls.push(" <b>Cell Count</b>:"+cellCount+"<br>");
+                htmls.push("<br><b>" + capitalize(gSampleDesc) + "s</b>: " + cellCount);
         }
-        showTooltip(ev.clientX+15, ev.clientY, htmls.join(" "));
+        if (htmls.length === 0)
+            hideTooltip();
+        else
+            showTooltip(ev.clientX+15, ev.clientY, htmls.join(" "));
     }
 
     function plotHeatmap(divEl, metaName, exprData) {
@@ -11466,7 +11504,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         */
         let heatmap = db.heatmap;
 
-        var colors = makeColorPalette("blueWhiteRed", db.exprBinCount);
+        var colors = makeColorPalette("blueWhiteRed", exprBinCount);
 
         let syms = exprData.syms;
         let metaLabels = exprData.metaLabels;
@@ -11477,7 +11515,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         let geneVals = convExprDataForHeatmap(exprData,  binCount);
 
-        let conf = { nullColor: cNullColor, doFlip: true };
+        let conf = { nullColor: cNullColor, doFlip: true, primaryFieldName: metaName };
         heatmap.loadData(metaLabels, syms, colors, geneVals.rowBins, geneVals.rowAvgs, cellCounts, conf, exprData.metaMatrix, exprData.geneAnnotMatrix);
         heatmap.draw();
         heatmap.onCellHover = onHeatCellHover;
@@ -11514,7 +11552,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 let colData = row[colI];
                 let avgExpr = colData[1];
                 // at the edge, floating point problems can make it sometimes 21, so use Math.min
-                let colBin = Math.min(binCount, Math.round((avgExpr-avgMin) / binSize)); 
+                let colBin = Math.min(binCount-1, Math.round((avgExpr-avgMin) / binSize));
                 binRow.push(colBin);
                 avgRow.push(avgExpr);
             }
