@@ -112,6 +112,14 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         margin-bottom: 0;
 }
 
+.tpExprHeaderRow { display: flex; align-items: center; gap: 8px; flex-basis: 100%; }
+.tpExprFilterWrap { position: relative; display: inline-block; }
+.tpExprFilterBtn { height: 25px; font-size: 13px; border: 1px solid #ccc; background: white; cursor: pointer; padding: 0 8px; border-radius: 3px; }
+.tpExprFilterPanel { position: absolute; top: 27px; left: 0; background: white; border: 1px solid #ccc; border-radius: 3px; z-index: 10001; padding: 4px 8px; max-height: 220px; overflow-y: auto; min-width: 150px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); }
+.tpExprFilterItem label { display: block; padding: 1px 0; cursor: pointer; white-space: nowrap; font-size: 13px; }
+.tpExprFilterAll { border-bottom: 1px solid #eee; margin-bottom: 4px; padding-bottom: 3px; font-size: 13px; }
+#tpGeneExprSubsplitLabel { margin-left: 6px; margin-right: 6px; margin-bottom: 0; }
+
 #tpExprViewPlot {
         display:flex;
         flex-direction: row;
@@ -512,7 +520,7 @@ input[type=checkbox], input[type=radio] {
 
 .tpMetaBox { font-size: 13px; cursor:default; overflow:hidden }
 .tpConstantFields { font-size: 10px; color: #888; padding: 3px 2px 5px 2px; border-bottom: 1px solid #ddd; margin-bottom: 4px; line-height: 1.4em; word-break: break-word; }
-#tpCellCount { position: fixed; bottom: 6px; left: 50%; transform: translateX(-50%); font-size: 11px; color: #555; background: rgba(255,255,255,0.75); padding: 2px 7px; border-radius: 3px; pointer-events: none; z-index: 10; }
+#tpCellCount { position: fixed; bottom: 6px; left: 50%; transform: translateX(-50%); font-size: 11px; color: #555; background: rgba(255,255,255,0.75); padding: 2px 7px; border-radius: 3px; pointer-events: none; z-index: 100; }
 .tpMetaHover { 
         color: white; 
         background-color: #333 !important;
