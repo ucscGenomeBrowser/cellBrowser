@@ -24,6 +24,11 @@ var cellbrowser = function() {
     var gVersion = "$VERSION$"; // cellbrowser.py:copyStatic will replace this with the pip version or git release
     var gCurrentCoordName = null; // currently shown coordinates
 
+    // Login state for the cbAnnotServer account system (see src/cbAnnotServer/).
+    // null = not yet checked, false = checked and logged out,
+    // {loggedIn:true, email, display_name} = logged in.
+    var gCbUser = null;
+
     // object with all information needed to map to the legend colors:
     // all info about the current legend. gLegend.rows is an object with keys:
     // color, defColor, label, count, intKey, strKey
@@ -2928,12 +2933,37 @@ var cellbrowser = function() {
         return "custom_" + i;
     }
 
-    function saveCustomFieldsToStorage() {
+    function getCustomFieldsObj() {
+        /* the custom fields as a {name: metaInfo} object — the same shape used
+         * for localStorage and for the annotation server's "data" blob */
         var fields = getCustomFields();
-        if (fields.length === 0) { localStorage.removeItem(db.name + "|customFields"); return; }
         var obj = {};
         for (var i = 0; i < fields.length; i++) obj[fields[i].name] = fields[i];
-        localStorage.setItem(db.name + "|customFields", LZString.compress(JSON.stringify(obj)));
+        return obj;
+    }
+
+    function applyCustomFieldsObj(obj) {
+        /* replace the current custom fields with the ones in obj. Existing custom
+         * fields are dropped first, so this is safe to call repeatedly. */
+        db.conf.metaFields = db.getMetaFields().filter(function(f) { return !f.isCustom; });
+        var names = Object.keys(obj).reverse();
+        for (var i = 0; i < names.length; i++)
+            db.conf.metaFields.unshift(obj[names[i]]);
+    }
+
+    function cbDatasetPath(name) {
+        /* encode a (possibly hierarchical) dataset name for an API path, keeping
+         * the slashes that separate collection levels */
+        return name.split("/").map(encodeURIComponent).join("/");
+    }
+
+    function saveCustomFieldsToStorage() {
+        var fields = getCustomFields();
+        if (fields.length === 0)
+            localStorage.removeItem(db.name + "|customFields");
+        else
+            localStorage.setItem(db.name + "|customFields", LZString.compress(JSON.stringify(getCustomFieldsObj())));
+        pushCustomFieldsToServer();  // no-op unless logged in
     }
 
     function loadCustomFieldsFromStorage() {
@@ -2952,6 +2982,67 @@ var cellbrowser = function() {
             saveCustomFieldsToStorage();
             localStorage.removeItem(db.name + "|custom");
         }
+    }
+
+    // ---- annotation sync with the account system (cbAnnotServer) ----
+
+    function saveAnnotationsToServer(onOk, onErr) {
+        /* upsert the current custom annotations to the logged-in user's account */
+        cbApiPost("/api/annotations/" + cbDatasetPath(db.name),
+            { data: getCustomFieldsObj() }, onOk, onErr);
+    }
+
+    function pushCustomFieldsToServer() {
+        /* mirror annotations to the user's account on every local save. Sends an
+         * empty object to clear when there are none. Fire-and-forget. */
+        if (!isLoggedIn() || !db || !db.name) return;
+        saveAnnotationsToServer(
+            function() { /* saved */ },
+            function(msg) { if (window.console) console.log("cbAnnot: could not save annotations to server: " + msg); });
+    }
+
+    function syncCustomFieldsFromServer() {
+        /* on dataset load, if logged in, pull the server copy (which wins over the
+         * local copy). If the server has nothing yet but local fields exist, push
+         * those up so the account picks up annotations made before signing in. */
+        if (!db || !db.name) return;
+        checkLoginState(function(user) {
+            if (!user || !user.loggedIn) return;
+            $.ajax({
+                url: cbApiUrl("/api/annotations/" + cbDatasetPath(db.name)),
+                dataType: "json",
+                xhrFields: { withCredentials: true }
+            }).done(function(resp) {
+                if (resp && resp.data) {
+                    applyCustomFieldsObj(resp.data);
+                    localStorage.setItem(db.name + "|customFields", LZString.compress(JSON.stringify(resp.data)));
+                    if ($("#tpMetaPanel").length) rebuildMetaPanel();
+                } else if (getCustomFields().length > 0) {
+                    pushCustomFieldsToServer();
+                }
+            });
+        });
+    }
+
+    function loadSharedAnnotations(token, onDone) {
+        /* load a shared annotation set by token (no login required) and apply it.
+         * Caches to localStorage but does NOT push to the server — the set belongs
+         * to whoever created the link, not the current viewer. */
+        $.ajax({
+            url: cbApiUrl("/api/annotations/shared/" + encodeURIComponent(token)),
+            dataType: "json",
+            xhrFields: { withCredentials: true }
+        }).done(function(resp) {
+            if (resp && resp.ok && resp.data && Object.keys(resp.data).length > 0) {
+                applyCustomFieldsObj(resp.data);
+                localStorage.setItem(db.name + "|customFields", LZString.compress(JSON.stringify(resp.data)));
+                if ($("#tpMetaPanel").length) rebuildMetaPanel();
+                if (onDone) onDone(null, resp);
+            } else if (onDone)
+                onDone("This shared link has no annotations.", null);
+        }).fail(function() {
+            if (onDone) onDone("Could not load shared annotations (invalid or expired link).", null);
+        });
     }
 
     function removeOneCustomAnnotation(fieldName) {
@@ -3142,6 +3233,18 @@ var cellbrowser = function() {
         htmls.push('<input type="file" id="tpAnnotImportFile" style="display:none" accept=".tsv,.txt,.csv">');
         htmls.push(' &nbsp;<button id="tpAnnotExportBtn">Export to file</button>');
         htmls.push('</div>');
+
+        // sharing via the account system
+        htmls.push('<div style="margin-bottom:6px">');
+        htmls.push('<button id="tpAnnotShareBtn">Share these annotations</button>');
+        htmls.push('<span id="tpAnnotShareHint" style="color:#888;margin-left:8px"></span>');
+        htmls.push('</div>');
+        htmls.push('<div id="tpAnnotShareResult" style="margin-bottom:12px"></div>');
+        htmls.push('<div style="margin-bottom:12px">');
+        htmls.push('<input type="text" id="tpAnnotLoadToken" placeholder="Paste a share link or token" style="width:55%">');
+        htmls.push(' <button id="tpAnnotLoadBtn">Load shared</button>');
+        htmls.push('</div>');
+
         htmls.push('<div id="tpAnnotMgrTable"></div>');
 
         var buttons = [
@@ -3155,6 +3258,30 @@ var cellbrowser = function() {
         ];
         showDialogBox(htmls, "Custom Annotations", {height: 420, width: 560, buttons: buttons});
         buildAnnotMgrTable();
+
+        // share button is only meaningful when signed in
+        if (isLoggedIn()) {
+            $('#tpAnnotShareBtn').click(onShareAnnotationsClick);
+        } else {
+            $('#tpAnnotShareBtn').prop('disabled', true);
+            $('#tpAnnotShareHint').text("Sign in to create a shareable link.");
+        }
+        $('#tpAnnotLoadBtn').click(function() {
+            var raw = $('#tpAnnotLoadToken').val().trim();
+            if (!raw) return;
+            // accept a full share URL, a .../shared/<token> path, or a bare token
+            var token = raw;
+            var m = raw.match(/[?&]annotShare=([^&\s]+)/);
+            if (m) token = decodeURIComponent(m[1]);
+            else if (raw.indexOf("/") !== -1) { var parts = raw.split("/"); token = parts[parts.length - 1]; }
+            loadSharedAnnotations(token, function(err) {
+                if (err) { alert(err); return; }
+                buildAnnotMgrTable();
+                var first = getCustomFields()[0];
+                if (first) colorByMetaField(first.name);
+                alert("Loaded shared annotations.");
+            });
+        });
 
         $('#tpAnnotExportBtn').click(onExportAnnotationsClick);
         $('#tpAnnotImportBtn').click(function() { $('#tpAnnotImportFile').click(); });
@@ -3170,6 +3297,264 @@ var cellbrowser = function() {
                 },
                 error: function(err) { alert("Could not parse file: " + err.message); }
             });
+        });
+    }
+
+    function onShareAnnotationsClick() {
+        /* save the current annotations to the server, then create a share link */
+        if (getCustomFields().length === 0) {
+            alert("No custom annotations to share yet. Create some with Edit > Name selection.");
+            return;
+        }
+        var btn = $('#tpAnnotShareBtn');
+        btn.prop('disabled', true);
+        // save first so the share endpoint has an annotation row to point at
+        saveAnnotationsToServer(function() {
+            cbApiPost("/api/annotations/" + cbDatasetPath(db.name) + "/share", {},
+                function(resp) {
+                    btn.prop('disabled', false);
+                    var url = new URL(window.location.href);
+                    url.searchParams.set("annotShare", resp.token);
+                    var shareUrl = url.toString();
+                    $('#tpAnnotShareResult').html(
+                        '<div style="margin-bottom:4px">Shareable link (anyone with it can view these annotations):</div>');
+                    var inp = $('<input type="text" readonly style="width:100%">').val(shareUrl);
+                    $('#tpAnnotShareResult').append(inp);
+                    inp.select();
+                },
+                function(msg) { btn.prop('disabled', false); alert("Could not create share link: " + msg); });
+        }, function(msg) {
+            btn.prop('disabled', false);
+            alert("Could not save annotations before sharing: " + msg);
+        });
+    }
+
+    // ----------------------------------------------------------------------
+    // Account system (cbAnnotServer). Sign in / sign up / password reset UI and
+    // the helpers the rest of the frontend uses to talk to the auth API. The
+    // backend lives in src/cbAnnotServer/ and is served under /api on the same
+    // host in production; for local dev set window.cbAnnotApiBase to e.g.
+    // "http://localhost:5000" to point at a Flask dev server on another port.
+    // ----------------------------------------------------------------------
+
+    function cbApiUrl(path) {
+        /* build a full URL to an auth/annotation API endpoint */
+        var base = (window.cbAnnotApiBase || "");
+        return base.replace(/\/+$/, "") + path;
+    }
+
+    function cbApiPost(path, data, onOk, onErr) {
+        /* POST JSON to the API. onOk(resp) on success, onErr(msg, status) on failure. */
+        $.ajax({
+            url: cbApiUrl(path),
+            method: "POST",
+            contentType: "application/json",
+            dataType: "json",
+            data: JSON.stringify(data || {}),
+            xhrFields: { withCredentials: true }  // send/receive the session cookie cross-origin in dev
+        }).done(function(resp) {
+            onOk(resp);
+        }).fail(function(xhr) {
+            var msg = "Something went wrong. Please try again.";
+            try {
+                var j = JSON.parse(xhr.responseText);
+                if (j && j.error) msg = j.error;
+            } catch (e) { /* leave default message */ }
+            if (onErr) onErr(msg, xhr.status);
+        });
+    }
+
+    function isLoggedIn() {
+        return !!(gCbUser && gCbUser.loggedIn);
+    }
+
+    function checkLoginState(onDone) {
+        /* ask the server who we are (once), then update the account menu */
+        if (gCbUser !== null) { if (onDone) onDone(gCbUser); return; }
+        $.ajax({
+            url: cbApiUrl("/api/auth/me"),
+            dataType: "json",
+            xhrFields: { withCredentials: true }
+        }).done(function(data) {
+            gCbUser = (data && data.loggedIn) ? data : false;
+            refreshAuthUi();
+            if (onDone) onDone(gCbUser);
+        }).fail(function() {
+            // No auth backend reachable (e.g. static-only deployment) — treat as logged out.
+            gCbUser = false;
+            refreshAuthUi();
+            if (onDone) onDone(false);
+        });
+    }
+
+    function refreshAuthUi() {
+        /* set the account menu label + dropdown to match gCbUser */
+        var label = $("#tpAccountLabel");
+        var menu = $("#tpAccountDropdown");
+        if (label.length === 0 || menu.length === 0)
+            return;  // menu bar not built yet
+
+        if (isLoggedIn()) {
+            var who = gCbUser.display_name || gCbUser.email;
+            label.text(who);
+            var items = [];
+            items.push('<li class="dropdown-header" style="padding:3px 20px">Signed in as<br><span id="tpAccountEmail"></span></li>');
+            items.push('<li role="separator" class="divider"></li>');
+            items.push('<li><a href="#" id="tpSignOutLink">Sign out</a></li>');
+            menu.html(items.join(""));
+            // set via .text() rather than HTML — email is user-controlled and the
+            // server's validation allows characters like < and >
+            $("#tpAccountEmail").text(gCbUser.email);
+        } else {
+            label.text("Sign in");
+            menu.html('<li><a href="#" id="tpSignInLink">Sign in / Create account&hellip;</a></li>');
+        }
+    }
+
+    function cbSignOut() {
+        cbApiPost("/api/auth/logout", {}, function() {
+            gCbUser = false;
+            refreshAuthUi();
+        }, function() {
+            // even if the call failed, drop local state so the UI reflects logged-out
+            gCbUser = false;
+            refreshAuthUi();
+        });
+    }
+
+    function authShowTab(pane) {
+        /* switch the visible pane in the login dialog */
+        $(".tpAuthPane").hide();
+        $("#tpAuthPane_" + pane).show();
+        $(".tpAuthTab").removeClass("tpAuthTabActive");
+        $(".tpAuthTab[data-pane='" + pane + "']").addClass("tpAuthTabActive");
+        $("#tpAuthMsg").removeClass("tpAuthMsgOk").text("");
+    }
+
+    function authMsg(text, isOk) {
+        var el = $("#tpAuthMsg");
+        el.text(text || "");
+        if (isOk) el.addClass("tpAuthMsgOk"); else el.removeClass("tpAuthMsgOk");
+    }
+
+    function showLoginDialog(initialTab) {
+        /* modal with three tabs: Sign In, Create Account, Forgot Password */
+        var htmls = [];
+
+        htmls.push("<style>"
+            + "#tpAuthTabBar button.tpAuthTab{margin-right:4px;padding:4px 10px;border:1px solid #ccc;background:#f5f5f5;border-radius:3px;cursor:pointer}"
+            + "#tpAuthTabBar button.tpAuthTabActive{background:#fff;border-bottom-color:#fff;font-weight:bold}"
+            + ".tpAuthPane label{display:block;margin-top:8px;font-weight:normal}"
+            + ".tpAuthPane input{width:100%;box-sizing:border-box}"
+            + ".tpAuthPane button.tpAuthSubmit{margin-top:14px}"
+            + "#tpAuthMsg{color:#b00;min-height:1.1em;margin:10px 0}"
+            + "#tpAuthMsg.tpAuthMsgOk{color:#080}"
+            + "</style>");
+
+        htmls.push("<div id='tpAuthTabBar' style='margin-bottom:12px'>");
+        htmls.push("<button type='button' class='tpAuthTab' data-pane='signin'>Sign In</button>");
+        htmls.push("<button type='button' class='tpAuthTab' data-pane='signup'>Create Account</button>");
+        htmls.push("<button type='button' class='tpAuthTab' data-pane='reset'>Forgot Password</button>");
+        htmls.push("</div>");
+
+        htmls.push("<div id='tpAuthMsg'></div>");
+
+        // sign in
+        htmls.push("<div class='tpAuthPane' id='tpAuthPane_signin' style='display:none'>");
+        htmls.push("<label>Email<input type='email' id='tpSignInEmail' class='form-control'></label>");
+        htmls.push("<label>Password<input type='password' id='tpSignInPwd' class='form-control'></label>");
+        htmls.push("<label style='font-weight:normal;margin-top:8px'><input type='checkbox' id='tpSignInRemember' style='width:auto'> Keep me signed in</label>");
+        htmls.push("<button type='button' class='tpAuthSubmit ui-button ui-widget ui-corner-all' id='tpSignInBtn'>Sign In</button>");
+        htmls.push("</div>");
+
+        // sign up
+        htmls.push("<div class='tpAuthPane' id='tpAuthPane_signup' style='display:none'>");
+        htmls.push("<label>Name (optional)<input type='text' id='tpSignUpName' class='form-control'></label>");
+        htmls.push("<label>Email<input type='email' id='tpSignUpEmail' class='form-control'></label>");
+        htmls.push("<label>Password (at least 8 characters)<input type='password' id='tpSignUpPwd' class='form-control'></label>");
+        htmls.push("<button type='button' class='tpAuthSubmit ui-button ui-widget ui-corner-all' id='tpSignUpBtn'>Create Account</button>");
+        htmls.push("</div>");
+
+        // reset
+        htmls.push("<div class='tpAuthPane' id='tpAuthPane_reset' style='display:none'>");
+        htmls.push("<p style='margin-top:4px'>Enter your email and we'll send a link to reset your password.</p>");
+        htmls.push("<label>Email<input type='email' id='tpResetEmail' class='form-control'></label>");
+        htmls.push("<button type='button' class='tpAuthSubmit ui-button ui-widget ui-corner-all' id='tpResetBtn'>Send reset link</button>");
+        htmls.push("</div>");
+
+        var buttons = [{ text: "Close", click: function() { $(this).dialog("close"); } }];
+        showDialogBox(htmls, "Cell Browser Account", { width: 420, buttons: buttons });
+
+        $(".tpAuthTab").click(function() { authShowTab($(this).data("pane")); });
+
+        $("#tpSignInBtn").click(onSignInSubmit);
+        $("#tpSignUpBtn").click(onSignUpSubmit);
+        $("#tpResetBtn").click(onResetSubmit);
+
+        // submit on Enter within any pane input
+        $(".tpAuthPane input").keydown(function(e) {
+            if (e.which === 13) {
+                e.preventDefault();
+                $(this).closest(".tpAuthPane").find(".tpAuthSubmit").click();
+            }
+        });
+
+        authShowTab(initialTab || "signin");
+    }
+
+    function onSignInSubmit() {
+        var email = $("#tpSignInEmail").val().trim();
+        var pwd = $("#tpSignInPwd").val();
+        if (!email || !pwd) { authMsg("Please enter your email and password."); return; }
+
+        cbApiPost("/api/auth/login",
+            { email: email, password: pwd, remember: $("#tpSignInRemember").is(":checked") },
+            function(resp) {
+                gCbUser = { loggedIn: true, email: resp.email, display_name: resp.display_name };
+                refreshAuthUi();
+                $("#tpDialog").dialog("close");
+            },
+            function(msg, status) {
+                if (status === 403) {
+                    // email not verified — offer to resend
+                    authMsg(msg);
+                    $("#tpAuthMsg").append(" <a href='#' id='tpResendVerify'>Resend verification email</a>");
+                    $("#tpResendVerify").click(function(ev) {
+                        ev.preventDefault();
+                        cbApiPost("/api/auth/resend-verification", { email: email }, function() {
+                            authMsg("Verification email sent. Please check your inbox.", true);
+                        });
+                    });
+                } else {
+                    authMsg(msg);
+                }
+            }
+        );
+    }
+
+    function onSignUpSubmit() {
+        var email = $("#tpSignUpEmail").val().trim();
+        var pwd = $("#tpSignUpPwd").val();
+        var name = $("#tpSignUpName").val().trim();
+        if (!email) { authMsg("Please enter your email."); return; }
+        if (pwd.length < 8) { authMsg("Password must be at least 8 characters."); return; }
+
+        cbApiPost("/api/auth/signup",
+            { email: email, password: pwd, display_name: name },
+            function() {
+                authMsg("Account created. Check your email for a verification link before signing in.", true);
+                $(".tpAuthPane").hide();
+            },
+            function(msg) { authMsg(msg); }
+        );
+    }
+
+    function onResetSubmit() {
+        var email = $("#tpResetEmail").val().trim();
+        if (!email) { authMsg("Please enter your email."); return; }
+        cbApiPost("/api/auth/reset-request", { email: email }, function() {
+            // server always returns ok to avoid leaking which emails are registered
+            authMsg("If an account exists for that email, a reset link is on its way.", true);
         });
     }
 
@@ -3590,6 +3975,17 @@ var cellbrowser = function() {
 
        htmls.push('</ul>'); // navbar-nav
 
+       // account menu, right-aligned. Contents are filled in by refreshAuthUi()
+       // once the login state is known; default shows "Sign in".
+       htmls.push('<ul class="nav navbar-nav navbar-right">');
+       htmls.push('<li id="tpAccountMenu" class="dropdown">');
+       htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false"><span id="tpAccountLabel">Sign in</span></a>');
+       htmls.push('<ul class="dropdown-menu" id="tpAccountDropdown">');
+       htmls.push('<li><a href="#" id="tpSignInLink">Sign in / Create account&hellip;</a></li>');
+       htmls.push('</ul>'); // account dropdown-menu
+       htmls.push('</li>'); // account dropdown container
+       htmls.push('</ul>'); // navbar-right
+
        htmls.push('</div>'); // container
        htmls.push('</nav>'); // navbar
        htmls.push('</div>'); // tpMenuBar
@@ -3624,6 +4020,12 @@ var cellbrowser = function() {
        $('#tpSelectName').click( onSelectNameClick );
        $('#tpSelectComplex').click( onFindCellsClick );
 
+
+       // account menu. The dropdown items are rebuilt by refreshAuthUi(), so
+       // these are delegated handlers rather than direct binds.
+       $('#tpAccountMenu').on('click', '#tpSignInLink', function(ev) { ev.preventDefault(); showLoginDialog("signin"); });
+       $('#tpAccountMenu').on('click', '#tpSignOutLink', function(ev) { ev.preventDefault(); cbSignOut(); });
+       refreshAuthUi();  // reflect whatever we already know; checkLoginState() refines it
 
        $('#tpRenameClusters').click( onRenameClustersClick );
        $('#tpCustomAnnotsMgr').click( onCustomAnnotationsManagerClick );
@@ -7078,6 +7480,13 @@ var cellbrowser = function() {
         renderer.setPos(null, metaBarWidth+metaBarMargin);
 
         loadCustomFieldsFromStorage();
+
+        // annotation sync: a share link wins; otherwise pull the user's own copy
+        var annotShareToken = getVar("annotShare");
+        if (annotShareToken)
+            loadSharedAnnotations(annotShareToken, function(err) { if (err) alert(err); });
+        else
+            syncCustomFieldsFromServer();
 
         cartLoad(db);
         if (getVar("exprGene")) {
@@ -12264,6 +12673,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         changeUrl({"nc":null});
         setupKeyboard();
         buildMenuBar();
+        checkLoginState();  // updates the account menu once /api/auth/me responds
 
         var datasetName = getDatasetNameFromUrl()
         // pre-load dataset.json here?

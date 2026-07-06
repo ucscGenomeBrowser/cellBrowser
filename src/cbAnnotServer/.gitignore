@@ -1,0 +1,8 @@
+# Local dev virtualenv and caches — not part of the source
+venv/
+__pycache__/
+*.pyc
+
+# Local SQLite databases (dev). Production DB lives outside the tree.
+*.db
+instance/
