@@ -1517,9 +1517,9 @@ var cellbrowser = function() {
                 return false;
             html.push("<div style='min-width:0'>");
             html.push("<div style='margin-bottom:2px; font-size:12px; color:#555'>"+filterLabel+"</div>");
-            let selPar = getVarSafe(urlVar);
+            let selPar = getVar(urlVar);
             if (selPar && selPar!=="")
-                filtList = selPar.split("|");
+                filtList = selPar.split(" ");
             buildComboBox(html, comboId, filterVals, filtList, comboLabel, 200, {multi:true});
             html.push("</div>");
             return true;
@@ -1582,7 +1582,7 @@ var cellbrowser = function() {
                 param = "stage";
 
             // change the URL
-            var filtArg = filtNames.join("~");
+            var filtArg = filtNames.join(" "); // space encodes as + in URL
             var urlArgs = {}
             urlArgs[param] = filtArg;
             changeUrl(urlArgs);
@@ -1768,7 +1768,7 @@ var cellbrowser = function() {
                     "<span class='tpFilterArrow' style='display:inline-block; margin-right:5px; font-size:10px'>&#9654;</span>Filters</summary>" +
                     "<div style='display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding-top:8px'>");
 
-                buildFilter(noteLines, bodyParts, "Organ", "body", "tpBodyCombo", "select organs...");
+                buildFilter(noteLines, bodyParts, "Organ", "bp", "tpBodyCombo", "select organs...");
                 buildFilter(noteLines, diseases, "Disease", "dis", "tpDisCombo", "select diseases...");
                 buildFilter(noteLines, organisms, "Species", "org", "tpOrgCombo", "select species...");
                 buildFilter(noteLines, projects, "Project", "proj", "tpProjCombo", "select project...");
