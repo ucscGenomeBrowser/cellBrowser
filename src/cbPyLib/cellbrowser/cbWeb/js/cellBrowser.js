@@ -1522,9 +1522,9 @@ var cellbrowser = function() {
                 return false;
             html.push("<div style='min-width:0'>");
             html.push("<div style='margin-bottom:2px; font-size:12px; color:#555'>"+filterLabel+"</div>");
-            let selPar = getVarSafe(urlVar);
+            let selPar = getVar(urlVar);
             if (selPar && selPar!=="")
-                filtList = selPar.split("|");
+                filtList = selPar.split(" ");
             buildComboBox(html, comboId, filterVals, filtList, comboLabel, 200, {multi:true});
             html.push("</div>");
             return true;
@@ -1587,7 +1587,7 @@ var cellbrowser = function() {
                 param = "stage";
 
             // change the URL
-            var filtArg = filtNames.join("~");
+            var filtArg = filtNames.join(" "); // space encodes as + in URL
             var urlArgs = {}
             urlArgs[param] = filtArg;
             changeUrl(urlArgs);
@@ -1773,7 +1773,7 @@ var cellbrowser = function() {
                     "<span class='tpFilterArrow' style='display:inline-block; margin-right:5px; font-size:10px'>&#9654;</span>Filters</summary>" +
                     "<div style='display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding-top:8px'>");
 
-                buildFilter(noteLines, bodyParts, "Organ", "body", "tpBodyCombo", "select organs...");
+                buildFilter(noteLines, bodyParts, "Organ", "bp", "tpBodyCombo", "select organs...");
                 buildFilter(noteLines, diseases, "Disease", "dis", "tpDisCombo", "select diseases...");
                 buildFilter(noteLines, organisms, "Species", "org", "tpOrgCombo", "select species...");
                 buildFilter(noteLines, projects, "Project", "proj", "tpProjCombo", "select project...");
@@ -4722,6 +4722,9 @@ var cellbrowser = function() {
         if (el && el.selectize) {
             el.selectize.addOption({id: name, text: name});
             el.selectize.setValue(name, 1); // 1 = do not fire change
+        } else if ($("#"+elId+"_chosen").length > 0) {
+            // chosen dropdown (used for heatmap gene combos)
+            $("#"+elId).val(name).trigger("chosen:updated");
         } else {
             // select2: change.select2 updates the UI without firing user change handlers
             $("#"+elId).val(name).trigger("change.select2");
@@ -4729,11 +4732,13 @@ var cellbrowser = function() {
     }
 
     function selectizeClear(elId) {
-        /* clear a gene combobox. Works for both selectize and select2. */
+        /* clear a gene combobox. Works for selectize, chosen, and select2. */
         var el = getById(elId);
         if (!el) return;
         if (el.selectize)
             el.selectize.clear();
+        else if ($("#"+elId+"_chosen").length > 0)
+            $("#"+elId).val("").trigger("chosen:updated");
         else
             $("#"+elId).val(null).trigger("change.select2");
     }
@@ -5337,7 +5342,7 @@ var cellbrowser = function() {
        fetch(jsonUrl);
 
        if (db.conf.sampleCount < 50000) {
-           if (db.conf.quickGenes)
+           if (db.conf.quickGenes && db.conf.display !== "heatmap")
                db.preloadGenes(db.conf.quickGenes, function() {
                    updateGeneTableColors(null);
                    if (getVar("heat")==="1")
@@ -6014,7 +6019,10 @@ var cellbrowser = function() {
         var saneId = onlyAlphaNum(locusId)
         $('#tpGeneBarCell_'+saneId).addClass("tpGeneBarCellSelected");
 
-        colorByLocus(locusId, null, locusLabel);
+        if (db.heatmap)
+            db.heatmap.highlightRow(locusLabel);
+        else
+            colorByLocus(locusId, null, locusLabel);
         event.stopPropagation();
     }
 
@@ -6304,7 +6312,10 @@ var cellbrowser = function() {
             if (mouseOver===undefined)
                 mouseOver = internalId;
 
-            htmls.push('<span title="'+mouseOver+'" style="width: fit-content;" data-geneId="'+internalId+'" id="tpGeneBarCell_'+onlyAlphaNum(internalId)+'" class="hasTooltip tpGeneBarCell">'+label+'</span>');
+            var isHeatmap = db.conf.display === "heatmap";
+            var titleAttr = isHeatmap ? "" : 'title="'+mouseOver+'"';
+            var tooltipClass = isHeatmap ? "tpGeneBarCell" : "hasTooltip tpGeneBarCell";
+            htmls.push('<span '+titleAttr+' style="width: fit-content;" data-geneId="'+internalId+'" id="tpGeneBarCell_'+onlyAlphaNum(internalId)+'" class="'+tooltipClass+'">'+label+'</span>');
             i++;
         }
         htmls.push("</div>"); // divId
@@ -7337,10 +7348,11 @@ var cellbrowser = function() {
         if (db.conf.atacSearch) {
             updatePeakListWithGene(geneId);
         } else {
-            // in the normal, gene-matrix mode.
-            var locusStr = null;
             var geneInfo = db.getGeneInfo(geneId);
-            colorByLocus(geneInfo.id);
+            if (db.heatmap)
+                db.heatmap.highlightRow(geneInfo.sym || geneInfo.id);
+            else
+                colorByLocus(geneInfo.id);
         }
     }
 
@@ -7562,6 +7574,7 @@ var cellbrowser = function() {
 
     function buildLayoutCombo(coordLabel, htmls, files, id, left, top) {
         /* files is a list of elements with a shortLabel attribute. Build combobox for them. */
+        if (!files || files.length === 0) return;
         if (!coordLabel)
             coordLabel = "Embedding";
 
@@ -7674,8 +7687,9 @@ var cellbrowser = function() {
 
     function buildGeneCombo(htmls, id, left, width) {
         /* Combobox that allows searching for genes */
+        var isHeatmap = db.conf.display === "heatmap";
         htmls.push('<div class="tpLeftSideItem" style="padding-left: 3px">');
-        var title = "Color by "+getGeneLabel();
+        var title = isHeatmap ? "Search "+getGeneLabel() : "Color by "+getGeneLabel();
         if (db.conf.atacSearch)
             title = "Find "+gFeatDesc+" at or close to:"
         htmls.push('<label style="display:block; margin-bottom:8px; padding-top: 8px;" for="'+id+'">'+title+'</label>');
@@ -7686,9 +7700,11 @@ var cellbrowser = function() {
         htmls.push('<select style="width:'+width+'px" id="'+id+'" placeholder="'+boxLabel+'" class="tpCombo">');
         htmls.push('</select>');
 
-        htmls.push('<div><button style="margin-top:4px" id="tpSplitOnGene">'+splitButtonLabel(true)+'</button>');
-        htmls.push('<button style="margin-left: 4px" id="tpMultiGene">Multi Gene</button></div>');
-        htmls.push('<div><button style="margin-top:4px" id="tpResetColors">Reset to default coloring</button></div>');
+        if (!isHeatmap) {
+            htmls.push('<div><button style="margin-top:4px" id="tpSplitOnGene">'+splitButtonLabel(true)+'</button>');
+            htmls.push('<button style="margin-left: 4px" id="tpMultiGene">Multi Gene</button></div>');
+            htmls.push('<div><button style="margin-top:4px" id="tpResetColors">Reset to default coloring</button></div>');
+        }
         htmls.push('</div>');
     }
 
@@ -8258,7 +8274,12 @@ var cellbrowser = function() {
 
        let metaName = getActiveColorField();
 
-       var heatmap = new MaxHeat(divEl, {mainRenderer:renderer});
+       var heatArgs = {mainRenderer: renderer};
+       var isDisplayHeatmap = db.conf.display === "heatmap";
+       var hasCoords = db.conf.coords && db.conf.coords.length > 0;
+       if (!isDisplayHeatmap || hasCoords)
+           heatArgs.onClose = removeHeatmap;
+       var heatmap = new MaxHeat(divEl, heatArgs);
        db.heatmap = heatmap;
        db.heatmap.exprData = null;
 
@@ -8266,7 +8287,7 @@ var cellbrowser = function() {
            plotHeatmap(divEl, metaName, exprData);
        }
 
-       loadGroupedExprData(db.heatmap.exprData, geneIds, metaName, onExprDataDoneHeat);
+       loadGroupedExprData(db.heatmap.exprData, geneIds, metaName, null, onExprDataDoneHeat);
     }
 
     function useGeneDropdown() {
@@ -8297,8 +8318,7 @@ var cellbrowser = function() {
                 opts.push(db.getGeneInfo(geneIds[i]));
             opts.sort(function(a, b) { return a.sym.localeCompare(b.sym); });
             var placeholder = selectEl.getAttribute("placeholder") || "";
-            // select2 needs an empty <option> first to show the placeholder
-            var html = ['<option></option>'];
+            var html = ['<option value=""></option>'];
             for (var j=0; j<opts.length; j++) {
                 var text = opts[j].sym;
                 if (opts[j].sym !== opts[j].id)
@@ -8306,12 +8326,22 @@ var cellbrowser = function() {
                 html.push('<option value="'+opts[j].id+'">'+text+'</option>');
             }
             selectEl.innerHTML = html.join("");
-            var widthPx = selectEl.style.width || 'resolve';
-            $("#"+id).select2({
-                placeholder: placeholder,
-                allowClear: true,
-                width: widthPx
-            }).on("change", onGeneComboChange);
+            var widthStr = selectEl.style.width || "240px";
+            if (db.conf.display === "heatmap") {
+                // Use chosen for heatmap datasets so the dropdown matches the Annotation tab styling
+                $("#"+id).chosen({
+                    inherit_select_classes: true,
+                    disable_search_threshold: 0,
+                    width: widthStr,
+                    placeholder_text_single: placeholder
+                }).on("change", onGeneComboChange);
+            } else {
+                $("#"+id).select2({
+                    placeholder: placeholder,
+                    allowClear: true,
+                    width: widthStr
+                }).on("change", onGeneComboChange);
+            }
             return;
         }
 
@@ -8328,11 +8358,34 @@ var cellbrowser = function() {
         select.on("change", onGeneComboChange);
     }
 
+    function onGeneExprSubsplitComboChange(ev, choice) {
+        /* gene expression viewer: called when user changes the subsplit meta field combo box */
+        var geneIds = db.exprData ? db.exprData.geneIds.slice() : [];
+        db.exprData = null;
+        if (geneIds.length > 0)
+            buildGeneExprPlotsAddGenes(geneIds, null);
+    }
+
+    function syncSubsplitCombo() {
+        /* disable whichever field is selected in the main split combo from appearing in subsplit */
+        var mainVal = $("#tpGeneExprMetaCombo").val();
+        var subsplitSel = $("#tpGeneExprSubsplitCombo");
+        subsplitSel.find("option").prop("disabled", false);
+        if (mainVal) {
+            subsplitSel.find("option[value='" + mainVal + "']").prop("disabled", true);
+            if (subsplitSel.val() === mainVal) {
+                subsplitSel.val("tpMetaVal_none").trigger("chosen:updated");
+            }
+        }
+        subsplitSel.trigger("chosen:updated");
+    }
+
     function onGeneExprMetaComboChange(ev, choice) {
         /* gene expression viewer: called when user changes the meta field combo box */
         var fieldId = parseInt(choice.selected.split("_")[1]);
         var metaName = db.getMetaFields()[fieldId].name;
         debug("changed meta on gene expr view to "+metaName, ev);
+        syncSubsplitCombo();
         buildGeneExprPlotsAddGenes(null, metaName);
     }
 
@@ -9196,8 +9249,9 @@ var cellbrowser = function() {
         return { fieldNames: fieldNames, metaBins: metaBins, metaLabels: metaLabels, palettes: palettes };
     }
 
-    function loadGroupedExprData(exprData, geneIds, metaName, onGenesDone) {
-        /* load geneIds into exprData object, load expr data and summarize (average) by meta field */
+    function loadGroupedExprData(exprData, geneIds, metaName, subsplitName, onGenesDone) {
+        /* load geneIds into exprData object, load expr data and summarize (average) by meta field.
+         * subsplitName: optional second meta field to cross with metaName (null = no subsplit). */
 
         if (exprData===null) {
             exprData = {};
@@ -9211,22 +9265,60 @@ var cellbrowser = function() {
             exprData.allAvgMin = NaN;
         }
 
-        // load grouping field + all other enum fields in parallel
+        // load grouping field + (optional) subsplit field + all other enum fields in parallel
         var allFields = db.getMetaFields();
         var metaPromises = [promiseMeta(metaName, geneExprOnProgress)];
+        if (subsplitName) {
+            metaPromises.push(promiseMeta(subsplitName, geneExprOnProgress));
+        }
         var enumFieldIndices = [];
 
         for (var i = 0; i < allFields.length; i++) {
             var field = allFields[i];
-            if (field.type !== "enum" || field.name === metaName)
+            if (field.type !== "enum" || field.name === metaName || field.name === subsplitName)
                 continue;
             metaPromises.push(promiseMeta(field.name, geneExprOnProgress));
             enumFieldIndices.push(metaPromises.length - 1);
         }
 
         Promise.all(metaPromises).then( function (resArr) {
-            exprData.metaData = resArr[0];
-            exprData.metaLabels = exprData.metaData.ui.shortLabels;
+            var primaryMetaInfo = resArr[0];
+            exprData._primaryLabels = primaryMetaInfo.ui.shortLabels;
+
+            if (subsplitName) {
+                var subsplitMetaInfo = resArr[1];
+                var primaryCount = primaryMetaInfo.valCounts.length;
+                var subsplitCount = subsplitMetaInfo.valCounts.length;
+                var numCells = primaryMetaInfo.arr.length;
+                var combinedArr = new Int32Array(numCells);
+                for (var c = 0; c < numCells; c++) {
+                    combinedArr[c] = primaryMetaInfo.arr[c] * subsplitCount + subsplitMetaInfo.arr[c];
+                }
+                var primaryLabels = primaryMetaInfo.ui.shortLabels;
+                var subsplitLabels = subsplitMetaInfo.ui.shortLabels;
+                var combinedLabels = [];
+                var combinedValCounts = [];
+                for (var pi = 0; pi < primaryCount; pi++) {
+                    for (var si = 0; si < subsplitCount; si++) {
+                        var lbl = primaryLabels[pi] + " :: " + subsplitLabels[si];
+                        combinedLabels.push(lbl);
+                        combinedValCounts.push([lbl, 0]);
+                    }
+                }
+                exprData.metaData = {
+                    arr: combinedArr,
+                    ui: { shortLabels: combinedLabels },
+                    valCounts: combinedValCounts
+                };
+                exprData.metaLabels = combinedLabels;
+                exprData._subsplitCount = subsplitCount;
+                exprData._subsplitLabels = subsplitLabels;
+            } else {
+                exprData.metaData = primaryMetaInfo;
+                exprData.metaLabels = primaryMetaInfo.ui.shortLabels;
+                exprData._subsplitCount = 0;
+                exprData._subsplitLabels = null;
+            }
 
             var otherMetaInfos = [];
             for (var i = 0; i < enumFieldIndices.length; i++)
@@ -9261,6 +9353,14 @@ var cellbrowser = function() {
         if (geneIds.length>0)
             selectizeSetValue("tpGeneExprGeneCombo", geneIds[0].split("|")[0]);
 
+        // read subsplit name (null if "Show all" is selected)
+        var subsplitName = null;
+        var subsplitCombo = document.getElementById("tpGeneExprSubsplitCombo");
+        if (subsplitCombo && subsplitCombo.value && subsplitCombo.value !== "tpMetaVal_none") {
+            var ssIdx = subsplitCombo.value.split("_")[1];
+            subsplitName = db.conf.metaFields[ssIdx].name;
+        }
+
         function buildProgressBar(domId) {
             var progressDiv = $( "#"+domId );
             var progressLabel = progressDiv.children().first();
@@ -9273,16 +9373,37 @@ var cellbrowser = function() {
         }
 
         let exprContent = getById("tpExprViewPlot");
-        exprContent.innerHTML = 
+        exprContent.innerHTML =
             '<div id="progressBarExpr" style="width:500px"><div class="progress-label">Loading expression values...</div></div><br>'+
             '<div id="progressBarMeta" style="width:500px"><div class="progress-label">Loading annotation labels...</div></div>';
 
         buildProgressBar('progressBarExpr');
         buildProgressBar('progressBarMeta');
 
-        function onExprDataDone (exprData) { 
+        function onExprDataDone (exprData) {
             /* done loading expression data, now do the plotting */
-            buildExprDotplot("tpExprViewPlot", exprData); 
+            // populate split filter panel
+            var splitBtn = getById("tpExprSplitFilterBtn");
+            var splitPanel = getById("tpExprSplitFilterPanel");
+            if (splitBtn && splitPanel) {
+                splitPanel.style.display = 'none'; // ensure closed before populating
+                populateExprFilterPanel("tpExprSplitFilterPanel", "tpExprSplitFilterBtn", exprData._primaryLabels || exprData.metaLabels);
+                splitBtn.style.display = '';
+            }
+            // populate subsplit filter panel
+            var ssBtn = getById("tpExprSubsplitFilterBtn");
+            var ssPanel = getById("tpExprSubsplitFilterPanel");
+            if (ssBtn && ssPanel) {
+                if (exprData._subsplitLabels) {
+                    ssPanel.style.display = 'none';
+                    populateExprFilterPanel("tpExprSubsplitFilterPanel", "tpExprSubsplitFilterBtn", exprData._subsplitLabels);
+                    ssBtn.style.display = '';
+                } else {
+                    ssBtn.style.display = 'none';
+                    ssPanel.innerHTML = '';
+                }
+            }
+            buildExprDotplotFiltered("tpExprViewPlot", exprData);
             db.exprData = exprData;
             // save into URL
             let allGeneIdStr = exprData.geneIds.join(" ");
@@ -9290,7 +9411,7 @@ var cellbrowser = function() {
             changeUrl(urlOpts);
         };
 
-        loadGroupedExprData(db.exprData, geneIds, metaName, onExprDataDone);
+        loadGroupedExprData(db.exprData, geneIds, metaName, subsplitName, onExprDataDone);
 
         //Promise.all([promiseGeneSplitByMeta(geneId, geneExprOnProgress), promiseMeta(metaName, geneExprOnProgress)]).then( function(resArr) {
         //    //if(DEBUG) console.log("promises are all loaded", resArr);
@@ -9343,6 +9464,111 @@ var cellbrowser = function() {
         if(e.keyCode == 27) closeExprView(); 
     }
 
+    function buildMetaFieldComboWithNone(htmls, idOuter, id, optStr) {
+        /* like buildMetaFieldCombo but adds a "Show all" (no subsplit) option at top */
+        var metaFieldInfo = db.getMetaFields();
+        htmls.push('<div id="'+idOuter+'" style="padding-left:2px; display:inline">');
+        var entries = [["tpMetaVal_none", "Show all"]];
+        for (var i = 1; i < metaFieldInfo.length; i++) {
+            var field = metaFieldInfo[i];
+            var isNumeric = (field.type==="int" || field.type==="float");
+            if (optStr==="noNums" && isNumeric) continue;
+            entries.push(["tpMetaVal_"+i, field.label]);
+        }
+        buildComboBox(htmls, id, entries, 0, "Show all", 50);
+        htmls.push('</div>');
+    }
+
+    function populateExprFilterPanel(panelId, btnId, labels) {
+        /* fill a filter dropdown panel with checkboxes for each label */
+        var panel = getById(panelId);
+        if (!panel) return;
+        var htmls = [];
+        htmls.push('<div class="tpExprFilterAll"><label><input type="checkbox" id="'+panelId+'SelectAll" checked> Select all</label></div>');
+        for (var i = 0; i < labels.length; i++) {
+            htmls.push('<div class="tpExprFilterItem"><label><input type="checkbox" class="tpExprFilterCheck" data-panel="'+panelId+'" data-idx="'+i+'" checked> '+labels[i]+'</label></div>');
+        }
+        panel.innerHTML = htmls.join("");
+        updateExprFilterBtnText(panelId, btnId, labels.length);
+
+        getById(panelId+'SelectAll').addEventListener('change', function() {
+            var checked = this.checked;
+            var boxes = panel.querySelectorAll('.tpExprFilterCheck');
+            boxes.forEach(function(b) { b.checked = checked; });
+            updateExprFilterBtnText(panelId, btnId, labels.length);
+            onExprFilterChange();
+        });
+        panel.querySelectorAll('.tpExprFilterCheck').forEach(function(box) {
+            box.addEventListener('change', function() {
+                var total = labels.length;
+                var checkedCount = panel.querySelectorAll('.tpExprFilterCheck:checked').length;
+                getById(panelId+'SelectAll').checked = (checkedCount === total);
+                updateExprFilterBtnText(panelId, btnId, total);
+                onExprFilterChange();
+            });
+        });
+    }
+
+    function updateExprFilterBtnText(panelId, btnId, total) {
+        /* update filter button text to show "All ▾" or "N/M ▾" */
+        var btn = getById(btnId);
+        if (!btn) return;
+        var panel = getById(panelId);
+        var checked = panel ? panel.querySelectorAll('.tpExprFilterCheck:checked').length : total;
+        btn.textContent = (checked === total) ? 'All ▾' : checked+'/'+total+' ▾';
+    }
+
+    function getExprFilterIndices(panelId) {
+        /* return array of checked indices, or null if all are checked */
+        var panel = getById(panelId);
+        if (!panel) return null;
+        var all = panel.querySelectorAll('.tpExprFilterCheck');
+        var checked = panel.querySelectorAll('.tpExprFilterCheck:checked');
+        if (all.length === 0 || all.length === checked.length) return null;
+        var indices = [];
+        checked.forEach(function(b) { indices.push(parseInt(b.getAttribute('data-idx'))); });
+        return indices;
+    }
+
+    function onExprFilterChange() {
+        /* called when any filter checkbox changes — re-render with current filters */
+        if (!db.exprData) return;
+        buildExprDotplotFiltered("tpExprViewPlot", db.exprData);
+    }
+
+    function buildExprDotplotFiltered(parentDomId, exprData) {
+        /* render the dot plot applying the current split/subsplit filter selections */
+        var splitFilter = getExprFilterIndices("tpExprSplitFilterPanel");
+        var subsplitFilter = getExprFilterIndices("tpExprSubsplitFilterPanel");
+        if (splitFilter === null && subsplitFilter === null) {
+            buildExprDotplot(parentDomId, exprData);
+            return;
+        }
+        var subsplitCount = exprData._subsplitCount || 0;
+        var filteredData = {};
+        Object.assign(filteredData, exprData);
+        filteredData.metaLabels = [];
+        filteredData.rows = [];
+        filteredData.cellCounts = [];
+        for (var rowIdx = 0; rowIdx < exprData.metaLabels.length; rowIdx++) {
+            var include = true;
+            if (subsplitCount > 0) {
+                var primaryIdx = Math.floor(rowIdx / subsplitCount);
+                var ssIdx = rowIdx % subsplitCount;
+                if (splitFilter !== null && splitFilter.indexOf(primaryIdx) === -1) include = false;
+                if (subsplitFilter !== null && subsplitFilter.indexOf(ssIdx) === -1) include = false;
+            } else {
+                if (splitFilter !== null && splitFilter.indexOf(rowIdx) === -1) include = false;
+            }
+            if (include) {
+                filteredData.metaLabels.push(exprData.metaLabels[rowIdx]);
+                filteredData.rows.push(exprData.rows[rowIdx]);
+                filteredData.cellCounts.push(exprData.cellCounts[rowIdx]);
+            }
+        }
+        buildExprDotplot(parentDomId, filteredData);
+    }
+
     function buildExprViewWindow() {
         /* build the expression viewer dialog box */
         if (db.conf.atacSearch) {
@@ -9369,14 +9595,16 @@ var cellbrowser = function() {
         htmls.push('<div class="link" style="padding-bottom: 6px; padding-left: 6px" id="tpBackToCb">&#8592; Back to Cell Browser</div>');
 
         htmls.push("<div id='tpExprViewHeader'>");
+
+        // Row 1: gene combo + add multiple genes
+        htmls.push("<div class='tpExprHeaderRow'>");
         htmls.push('<label id="tpGeneExprLabel" for="tpGeneExprGeneCombo">Show expression of </label>');
         htmls.push('<select style="width:250px" id="tpGeneExprGeneCombo" placeholder="Gene" class="tpCombo"></select>');
-
-        htmls.push('<label id="tpGeneExprMetaLabel" for="'+"tpGeneExprMetaCombo"+'">Split by cell annotation</label>');
+        htmls.push('<button id="tpGeneExprAddMulti" style="padding-left: 15px; padding-right: 15px; padding-bottom: 5px; padding-top: 5px; margin-left: 6px">Add multiple genes</button>');
+        htmls.push("</div>"); // tpExprHeaderRow row1
 
         // try to use the current color field, but you cannot split on a number, so fall back to the default color field
         let metaName = getActiveColorField();
-        //let metaName = getActiveColorField();;
         metaName = getVar("exprMeta", metaName);
 
         var fieldInfo = db.findMetaInfo(metaName);
@@ -9389,11 +9617,26 @@ var cellbrowser = function() {
             }
         }
 
+        // Row 2: split by + filter
+        htmls.push("<div class='tpExprHeaderRow'>");
+        htmls.push('<label id="tpGeneExprMetaLabel" for="tpGeneExprMetaCombo">Split by cell annotation</label>');
         buildMetaFieldCombo(htmls, "tpGeneExprMetaComboBox", "tpGeneExprMetaCombo", 0, metaName, "noNums");
         htmlAddInfoIcon(htmls, "Expression data can only be split by categorical fields. Numerical fields are not shown here.");
+        htmls.push("<div class='tpExprFilterWrap'>");
+        htmls.push("<button class='tpExprFilterBtn' id='tpExprSplitFilterBtn' style='display:none'>All &#9662;</button>");
+        htmls.push("<div class='tpExprFilterPanel' id='tpExprSplitFilterPanel' style='display:none'></div>");
+        htmls.push("</div>"); // tpExprFilterWrap
+        htmls.push("</div>"); // tpExprHeaderRow row2
 
-
-        htmls.push('<button id="tpGeneExprAddMulti" style="padding-left: 15px; padding-right: 15px; padding-bottom: 5px; padding-top: 5px; margin-left: 15px">Add multiple genes</button>');
+        // Row 3: subsplit by + filter
+        htmls.push("<div class='tpExprHeaderRow'>");
+        htmls.push('<label id="tpGeneExprSubsplitLabel">Subsplit by</label>');
+        buildMetaFieldComboWithNone(htmls, "tpGeneExprSubsplitComboBox", "tpGeneExprSubsplitCombo", "noNums");
+        htmls.push("<div class='tpExprFilterWrap'>");
+        htmls.push("<button class='tpExprFilterBtn' id='tpExprSubsplitFilterBtn' style='display:none'>All &#9662;</button>");
+        htmls.push("<div class='tpExprFilterPanel' id='tpExprSubsplitFilterPanel' style='display:none'></div>");
+        htmls.push("</div>"); // tpExprFilterWrap
+        htmls.push("</div>"); // tpExprHeaderRow row3
 
         htmls.push("</div>"); //tpExprViewHeader
 
@@ -9409,12 +9652,28 @@ var cellbrowser = function() {
         activateGeneCombo("tpGeneExprGeneCombo", onGeneExprGeneComboChange);
 
         activateCombobox("tpGeneExprMetaCombo", 250);
+        activateCombobox("tpGeneExprSubsplitCombo", 220);
+        syncSubsplitCombo();
 
         $("#tpGeneExprMetaCombo").change( onGeneExprMetaComboChange );
+        $("#tpGeneExprSubsplitCombo").change( onGeneExprSubsplitComboChange );
 
         $("#tpBackToCb").click( closeExprView );
         $('#tpCloseButton').click( closeExprView );
         $('#tpGeneExprAddMulti').click( onGeneExprAddGenesClick  );
+
+        // toggle filter panels on button click; close on outside click
+        $(document.body).on('click', '.tpExprFilterBtn', function(ev) {
+            ev.stopPropagation();
+            var wrap = $(this).parent();
+            var panel = wrap.find('.tpExprFilterPanel');
+            panel.toggle();
+        });
+        $(document).on('click', function(ev) {
+            if (!$(ev.target).closest('.tpExprFilterWrap').length) {
+                $('.tpExprFilterPanel').hide();
+            }
+        });
 
 
         /*
@@ -9867,7 +10126,8 @@ var cellbrowser = function() {
         htmls.push("<ul>");
         htmls.push("<li><a href='#tpAnnotTab'>Annotation</a></li>");
         htmls.push("<li><a href='#tpGeneTab'>"+getGeneLabel()+"</a></li>");
-        htmls.push("<li><a href='#tpLayoutTab'>"+(db.conf.coordLabel || "Layout")+"</a></li>");
+        if (db.conf.coords && db.conf.coords.length > 0)
+            htmls.push("<li><a href='#tpLayoutTab'>"+(db.conf.coordLabel || "Layout")+"</a></li>");
         htmls.push("<li><a href='#tpToolsTab'>Tools</a></li>");
         htmls.push("</ul>");
 
@@ -9894,7 +10154,7 @@ var cellbrowser = function() {
 
         buildGeneCombo(htmls, "tpGeneCombo", 0, metaBarWidth-10);
 
-        htmls.push('<div id="splitJoinDiv"><input class="form-check-input" type="checkbox" id="splitJoinBox" name="splitJoin" value="splitJoin" /> <label for="splitJoinBox">Show on both sides</label></div>');
+        htmls.push('<div id="splitJoinDiv" style="display:none"><input class="form-check-input" type="checkbox" id="splitJoinBox" name="splitJoin" value="splitJoin" /> <label for="splitJoinBox">Show on both sides</label></div>');
 
         if (db.conf.atacSearch)
             buildPeakList(htmls);
@@ -10393,6 +10653,7 @@ var cellbrowser = function() {
         Mousetrap.bind('g', function() {
             var el = getById("tpGeneCombo");
             if (el && el.selectize) el.selectize.focus();
+            else if ($("#tpGeneCombo_chosen").length > 0) $("#tpGeneCombo").trigger("chosen:open");
             else $("#tpGeneCombo").select2('open');
             return false;
         });
@@ -11845,9 +12106,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     function onHeatCellClick(geneName, clusterName) {
         /* color by gene and select all cells in cluster */
-        colorByLocus(geneName);
-        // clusterName?
-        //selectByColor
+        if (db.heatmap)
+            db.heatmap.highlightRow(geneName);
+        else
+            colorByLocus(geneName);
     }
 
     function onHeatCellHover(rowIdx, colIdx, rowName, colName, value, cellCount, ev, metaHover) {
@@ -11862,12 +12124,17 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 htmls.push(rowName);
             if (colName)
                 htmls.push(colName)
-            if (value!==null)
-                htmls.push("<br><b>Average</b>:"+parseFloat(value).toPrecision(3)+"<br>");
+            if (value!==null) {
+                var valLabel = (cellCount === 1) ? "Value" : "Average";
+                htmls.push("<br><b>" + valLabel + "</b>: " + parseFloat(value).toPrecision(3));
+            }
             if (cellCount!==null && cellCount!==undefined)
-                htmls.push(" <b>Cell Count</b>:"+cellCount+"<br>");
+                htmls.push("<br><b>" + capitalize(gSampleDesc) + "s</b>: " + cellCount);
         }
-        showTooltip(ev.clientX+15, ev.clientY, htmls.join(" "));
+        if (htmls.length === 0)
+            hideTooltip();
+        else
+            showTooltip(ev.clientX+15, ev.clientY, htmls.join(" "));
     }
 
     function plotHeatmap(divEl, metaName, exprData) {
@@ -11875,7 +12142,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         */
         let heatmap = db.heatmap;
 
-        var colors = makeColorPalette("blueWhiteRed", db.exprBinCount);
+        var colors = makeColorPalette("blueWhiteRed", exprBinCount);
 
         let syms = exprData.syms;
         let metaLabels = exprData.metaLabels;
@@ -11886,7 +12153,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         let geneVals = convExprDataForHeatmap(exprData,  binCount);
 
-        let conf = { nullColor: cNullColor, doFlip: true };
+        let conf = { nullColor: cNullColor, doFlip: true, primaryFieldName: metaName };
         heatmap.loadData(metaLabels, syms, colors, geneVals.rowBins, geneVals.rowAvgs, cellCounts, conf, exprData.metaMatrix, exprData.geneAnnotMatrix);
         heatmap.draw();
         heatmap.onCellHover = onHeatCellHover;
@@ -11923,7 +12190,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 let colData = row[colI];
                 let avgExpr = colData[1];
                 // at the edge, floating point problems can make it sometimes 21, so use Math.min
-                let colBin = Math.min(binCount, Math.round((avgExpr-avgMin) / binSize)); 
+                let colBin = Math.min(binCount-1, Math.round((avgExpr-avgMin) / binSize));
                 binRow.push(colBin);
                 avgRow.push(avgExpr);
             }
