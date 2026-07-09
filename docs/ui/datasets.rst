@@ -1,8 +1,9 @@
 Browsing and Selecting Datasets
 ===============================
 
-.. image:: /images/cellbrowser-DatasetOverview.converted.jpg
+.. image:: /images/datasets_overview.png
    :alt: Dataset selection screen
+   :width: 1000
 
 The dataset selection screen is the first thing you see when visiting
 cells.ucsc.edu.

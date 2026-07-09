@@ -1,3 +1,5 @@
+:orphan:
+
 .. role:: small
 
 .. role:: smaller

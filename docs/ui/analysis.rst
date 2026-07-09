@@ -4,9 +4,15 @@ Cell Selection, Comparison, and Heatmaps
 Selecting Cells
 ---------------
 
-Switch to the **select cursor mode** (dashed rectangle icon in the
-lower-left of the plot) and click-and-drag to draw a selection box
-around a group of cells.
+.. image:: /images/cell_selection.png
+   :alt: A group of selected cells with a violin plot comparing them to the rest
+   :width: 1000
+
+Switch to the **select cursor mode** (dashed rectangle icon at the top
+of the cursor toolbar) and click-and-drag to draw a selection box
+around a group of cells. Once you have a selection, the count is shown
+in the status bar at the bottom, and **Hide selected** / **Only show
+selected** buttons appear in the top toolbar.
 
 Once cells are selected:
 
@@ -15,7 +21,9 @@ Once cells are selected:
 - If a gene is currently coloring the plot, a **violin plot** shows
   gene expression in the selected cells versus all other cells.
 
-You can also select cells by metadata criteria using **Edit > Find Cells**.
+You can also select cells by metadata criteria or gene expression using
+**Edit > Find Cells**, or by the checkboxes and buttons in the legend
+(**All**, **None**, **Invert**, **> 0**).
 
 Exporting Selected Cells
 -------------------------
@@ -37,8 +45,19 @@ cells* in the dataset. You can define a custom comparison group:
 To clear the custom background, go to **Tools > Reset background cells**
 (or press ``b`` then ``r``).
 
+.. tip::
+
+   To compare a gene's expression across many groups at once — rather than
+   one selection at a time — use the **Gene Expression Plots** window, which
+   draws dot plots and violins split by any metadata field. See
+   :ref:`Gene Expression Plots <gene-expression-plots>`.
+
 Split-Screen Comparison
 -----------------------
+
+.. image:: /images/split_screen.png
+   :alt: Split screen showing gene expression on the left and clusters on the right
+   :width: 1000
 
 The Cell Browser can split the main view into two side-by-side panes,
 allowing you to compare two different colorings simultaneously.
@@ -64,11 +83,18 @@ reflected in the legend. To change a pane's coloring:
 Expression Heatmap
 ------------------
 
-If a dataset includes curated "dataset genes," you can display an
-expression heatmap below the scatter plot:
+.. image:: /images/heatmap.png
+   :alt: Expression heatmap of dataset genes across clusters
+   :width: 1000
 
-- Go to **View > Heatmap** to toggle it on.
-- The heatmap shows the expression of the dataset genes across the
-  cluster labels visible in the scatter plot.
-- Click and drag the divider bar between the scatter plot and heatmap
-  to resize.
+If a dataset includes curated "dataset genes," you can display an
+expression heatmap:
+
+- Go to **View > Heatmap**, press ``h``, or click the **Heatmap** button
+  in the toolbar to switch the main plot to heatmap mode.
+- The heatmap shows the expression of the dataset genes (one per row)
+  across the clusters (one per column). Colored metadata bars along the
+  top align each cluster with its annotation values.
+- The **Flip** button swaps the gene and cluster axes.
+- Toggle **View > Heatmap** again (or press ``h``) to return to the
+  scatter plot.

@@ -1,3 +1,5 @@
+.. _annotate genes:
+
 Annotate Genes
 --------------
 

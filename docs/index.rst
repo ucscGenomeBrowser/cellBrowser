@@ -44,9 +44,16 @@ and use features like split-screen comparison and heatmaps.
    ui/datasets
    ui/visualization
    ui/analysis
+   ui/accounts
+   ui/faq
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Downloading and Loading Data
+
    ui/downloading
    load
-   ui/faq
+   bulk
 
 .. toctree::
    :maxdepth: 1
@@ -54,33 +61,8 @@ and use features like split-screen comparison and heatmaps.
 
    submission
 
-Building Your Own Cell Browser
-------------------------------
-
-Want to create a Cell Browser for your own single-cell dataset and
-host it on your own web server? Follow the guides below.
-
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
    :caption: Building a Cell Browser
 
-   installation
-   quick_start
-   basic_usage
-   internet
-   tabsep
-   seurat
-   scanpy
-   cellranger
-   howto
-   advanced
-   genes
-   cbtool
-   dataDesc
-   collections
-   cellbrowser_conf
-
-.. toctree::
-   :hidden:
-
-   interface
+   building

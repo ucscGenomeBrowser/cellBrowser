@@ -22,9 +22,11 @@ With the Cell Browser web interface you can:
 - Color cells by metadata annotations (cell type, age, condition, etc.)
 - Search for any gene and color cells by expression level
 - Select groups of cells and view violin plots of gene expression
+- Compare expression across groups with dot plots (Gene Expression Plots)
 - Compare annotations or genes side-by-side with split-screen mode
 - View expression heatmaps across clusters
 - Explore spatial transcriptomics data (Visium, MERFISH)
+- Create, save, and share your own cell annotations (with an account)
 - Download expression matrices and metadata for further analysis
 
 Try It Now

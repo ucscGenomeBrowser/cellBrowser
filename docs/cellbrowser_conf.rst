@@ -223,11 +223,19 @@ Gene and Expression Settings
 
    - ``sortColumn``: column index (as a number) to sort by, instead of the first column
    - ``sortOrder``: ``"asc"`` (default) or ``"desc"``
+   - ``columnOrder``: a list of column header names controlling the left-to-right
+     order of the columns in the marker pop-up. The gene/ID column is always shown
+     first; any columns you list follow in that order, and any remaining columns are
+     appended after them.
+   - ``columnLabels``: a dictionary mapping original column header names to the
+     labels to display instead, e.g. to give a terse column a friendlier heading.
 
    ::
 
       markers = [
-          {"file": "markers.tsv", "shortLabel": "Cluster-specific markers"}
+          {"file": "markers.tsv", "shortLabel": "Cluster-specific markers",
+           "columnOrder": ["symbol", "avg_diff", "p_val"],
+           "columnLabels": {"avg_diff": "avg diff", "p_val": "P-value"}}
       ]
 
 ``unit``
@@ -307,6 +315,17 @@ Metadata Display Settings
    ::
 
       metaOpt = {"Cluster_field": {"fontSize": "10px"}}
+
+``skipFields``
+   A list of metadata field names to drop when building the dataset. Listed fields
+   are removed from the cell metadata and will not appear in the **Annotation** tab
+   or the coloring options. Use this to exclude columns from your input metadata that
+   are not useful for browsing (e.g. internal IDs or intermediate QC columns) without
+   having to edit the input file.
+
+   ::
+
+      skipFields = ["orig.ident", "internal_qc_flag"]
 
 ``defColorField``
    The metadata field to use for coloring when the cell browser first opens. If set to

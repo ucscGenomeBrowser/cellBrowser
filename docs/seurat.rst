@@ -9,8 +9,8 @@ There are a number of ways to create a cell browser using Seurat:
 
 Each of these methods are described in more detail below.
 
-Convert a Seurat ``rds`` or ``.rdata` file
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Convert a Seurat ``rds`` or ``.rdata`` file
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 First, create an .rds file in R as described in the Seurat tutorial::
 
@@ -111,7 +111,7 @@ browser. After the ``cbSeurat`` script completes, you can build your cell browse
     cbBuild -o ~/public_html/cells
 
 Changing the defaults using ``seurat.conf``
-""""""""
+"""""""""""""""""""""""""""""""""""""""""""
 
 This set of steps will run a basic Seurat pipeline with the default settings. You can
 modify the settings for Seurat by creating a ``seurat.conf`` file::

@@ -70,7 +70,7 @@ master_doc = 'index'
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -99,7 +99,14 @@ html_context = dict(
 # further.  For a list of options available for each theme, see the
 # documentation.
 #
-# html_theme_options = {}
+html_theme_options = {
+    # Collapse sub-navigation by default. The "Building a Cell Browser" section
+    # is nested under a single landing page (building.rst) so its long list of
+    # guides stays collapsed until the reader opens it, keeping the sidebar
+    # focused on the "Using the Cell Browser" portal docs most visitors want.
+    'collapse_navigation': True,
+    'navigation_depth': 2,
+}
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
