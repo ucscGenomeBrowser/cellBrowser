@@ -41,6 +41,7 @@ and use features like split-screen comparison and heatmaps.
    :caption: Using the Cell Browser
 
    ui/getting_started
+   ui/examples
    ui/datasets
    ui/visualization
    ui/analysis
