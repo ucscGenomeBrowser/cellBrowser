@@ -1061,7 +1061,7 @@ function MaxPlot(div, top, left, width, height, args) {
         zoomButton.addEventListener ('click', function() { self.activateMode("zoom")}, false);
 
         var lassoButton = createButton(bSize, bSize, "mpIconModeLasso",
-            "Lasso select mode: draw a freehand shape to select cells",
+            "Lasso select mode: draw a freehand shape to select cells. Shift+draw to add regions to selection.",
             null, "img/lasso.png", 0, 4, true);
         lassoButton.addEventListener('click', function() { self.activateMode("lasso"); }, false);
 
@@ -4027,7 +4027,8 @@ function MaxPlot(div, top, left, width, height, args) {
 
        // lasso select: close polygon and select enclosed cells
        if (self.dragMode === "lasso" && self.lassoPath.length > 2) {
-           self.selectClear(true);
+           if (!ev.shiftKey)
+               self.selectClear(true);
            self.selectInLasso(self.lassoPath);
            self.lassoPath = [];
            self.lassoCtx.clearRect(0, 0, self.lassoCanvas.width, self.lassoCanvas.height);
