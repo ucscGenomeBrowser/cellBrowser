@@ -10282,6 +10282,15 @@ var cellbrowser = function() {
         intro.setOption("doneLabel", "Close this window");
         intro.setOption("skipLabel", "Stop the tutorial");
 
+        // A step can carry a "tab" property (meta/gene/layout). Before each step
+        // is shown, open that tab in the left sidebar, so the element the step
+        // points at is actually visible, e.g. the Gene tab during "color by gene".
+        intro.onbeforechange(function() {
+            var step = this._introItems[this._currentStep];
+            if (step && step.tab)
+                activateTab(step.tab);
+        });
+
         if (addFirst) {
             intro.setOption("skipLabel", "I know. Close this window.");
             intro.addStep({
@@ -10293,39 +10302,72 @@ var cellbrowser = function() {
         intro.addSteps(
             [
               {
-                intro: "In the center of the window, highlighted here, each circle represents a "+gSampleDesc+". Try to move the mouse over a cell type label of this dataset, it will highlight the cells of this type. You can click the cell type label to show the marker gene lists of the cluster.",
+                intro: "In the center of the window, each circle represents a "+gSampleDesc+". Move the mouse over a "+gSampleDesc+" and its annotations and gene expression values appear in the panel on the left.",
                 element: document.querySelector('#mpCanvas'),
                 position: 'auto'
               },
               {
-                element: document.querySelector('#tpLeftSidebar'),
-                intro: "To color the cells by an annotation that is not a cell type, select an annotation field from the 'Color by annotation' dropdown or simply click it. You cannot color by fields with hundreds of values, as there are not enough distinct colors.",
+                intro: "The text on the plot shows the cluster names. Move the mouse over a label and all "+gSampleDesc+"s in that cluster grow larger and are highlighted. Click a label to open the list of marker genes for the cluster.",
+                element: document.querySelector('#mpCanvas'),
                 position: 'auto'
+              },
+              {
+                element: document.querySelector('#tpButtonInfo'),
+                intro: "Click 'Info &amp; Download' to read this dataset's abstract and methods, find out how to cite it, and download the underlying expression matrix, metadata and other files.",
+                position: 'bottom'
+              },
+              {
+                element: document.querySelector('#tpAnnotTab'),
+                intro: "Color the "+gSampleDesc+"s by an annotation such as cluster, sample or donor: pick a field from the 'Color by Annotation' dropdown or simply click it. Fields with hundreds of values cannot be used, as there are not enough distinct colors.",
+                position: 'auto',
+                tab: 'meta'
+              },
+              {
+                element: document.querySelector('#tpLayoutTab'),
+                intro: "Most datasets have more than one layout, e.g. UMAP and t-SNE. Switch between the available layouts here.",
+                position: 'auto',
+                tab: 'layout'
               },
               {
                 element: document.querySelector('#tpGeneTab'),
-                intro: "Color by gene: Click a gene from the list of pre-selected dataset genes or search for a gene in the dropdown to color by it.<br>",
-                position: 'auto'
+                intro: "Color by gene expression: search for a gene in the box, or click one of the dataset genes listed below it. The "+gSampleDesc+"s are then colored by that gene's expression level.",
+                position: 'auto',
+                tab: 'gene'
               },
               {
                 element: document.querySelector('#tpOpenExprButton'),
-                intro: "Click 'Gene Expression Plots' to make Dotplots.",
+                intro: "Click 'Gene Expression Plots' to compare the expression of genes across clusters as a dot plot or heatmap. Inside that window, 'Multi Gene' mode lets you enter a whole list of genes at once.",
                 position: 'auto'
               },
-              //{
-                //element: document.querySelector('#tpGeneBar'),
-                //intro: "Expression data: when you move the mouse, expression values will be shown here.<br>Click on a gene to color the circles by gene expression level (log'ed).",
-                //position: 'top'
-              //},
+              {
+                element: document.querySelector('#mpIconModeSelect'),
+                intro: "These tools change what the mouse does: move the view, select "+gSampleDesc+"s with a rectangle or a freehand lasso, click to select a whole cluster, or zoom to a rectangle. You can also select using the checkboxes in the legend, or with Edit > Find Cells.",
+                position: 'auto'
+              },
+              {
+                element: document.querySelector('#tpMenuBar'),
+                intro: "Use View > Split screen (or press 't') to show two plots side by side, handy for comparing two genes or two layouts of the same "+gSampleDesc+"s.",
+                position: 'bottom'
+              },
               {
                 element: document.querySelector('#tpLegendBar'),
-                intro: "Click into the legend to select "+gSampleDesc+"s.<br>Click a color to change it or select a palette from the 'Colors' menu.<br>If you need a dataset, send us a link to it. If you have a new dataset in your lab, send it to cells@ucsc.edu so we can add it (hidden until publication).<br>To setup your own cell browser on your own webserver, see 'Help - Setup your own'.",
+                intro: "The legend shows the current colors. Click an entry to select those "+gSampleDesc+"s, click a color swatch to change it, or choose a palette from the 'Colors' menu. When "+gSampleDesc+"s are selected and you color by a gene, a violin plot appears at the bottom right.",
                 position: 'left'
               },
               {
+                element: document.querySelector('#tpOpenDatasetButton'),
+                intro: "Click 'Open...' to browse all the other datasets on this server and load a different one. You can narrow the list by organism, tissue, disease and other categories.",
+                position: 'bottom'
+              },
+              {
+                element: document.querySelector('#tpMenuBar'),
+                intro: "Use File > Download image to save the current plot as a PNG or SVG for a figure or slide. The web address in your browser always reflects the current view, so you can copy it from the address bar to show a colleague exactly what you see.",
+                position: 'bottom'
+              },
+              {
                 element: document.querySelector('#tpLegendBar'),
-                intro: "Select cells with the checkboxes, with the 'select' tool in the toolbar or via Edit > Find Cells. Once cells are selected and you are coloring by a gene, a violin plot is shown in the bottom right.",
-                position: 'auto'
+                intro: "That's it! If you need a dataset that is not here yet, send us a link. If you have your own data, email it to cells@ucsc.edu and we can add it, hidden until publication. To run your own cell browser on your own webserver, see 'Help > Setup your own'.",
+                position: 'left'
               },
             ]);
         intro.start();
