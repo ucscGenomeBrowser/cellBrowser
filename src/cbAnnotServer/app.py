@@ -6,7 +6,8 @@ Run for local development:
     source venv/bin/activate
     FLASK_APP=app.py flask run
 
-Production: see cbAnnotServer.wsgi for mod_wsgi entry point.
+Production: Apache proxies /api to a gunicorn process that serves this app via
+wsgi.py. See deploy/README.md.
 """
 from flask import Flask, jsonify
 

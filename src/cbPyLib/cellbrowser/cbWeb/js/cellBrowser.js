@@ -29,6 +29,10 @@ var cellbrowser = function() {
     // {loggedIn:true, email, display_name} = logged in.
     var gCbUser = null;
 
+    // Site config from the web root "cb.conf" file (see loadClientConf).
+    // null = not yet loaded, otherwise an object of key -> value.
+    var gClientConf = null;
+
     // object with all information needed to map to the legend colors:
     // all info about the current legend. gLegend.rows is an object with keys:
     // color, defColor, label, count, intKey, strKey
@@ -3336,6 +3340,47 @@ var cellbrowser = function() {
     // host in production; for local dev set window.cbAnnotApiBase to e.g.
     // "http://localhost:5000" to point at a Flask dev server on another port.
     // ----------------------------------------------------------------------
+
+    function parseClientConf(text) {
+        /* parse a simple key=value config file. Lines starting with # and blank
+         * lines are ignored. Returns an object of key -> value (both trimmed). */
+        var conf = {};
+        var lines = text.split("\n");
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (line === "" || line.charAt(0) === "#")
+                continue;
+            var eq = line.indexOf("=");
+            if (eq === -1)
+                continue;
+            conf[line.substring(0, eq).trim()] = line.substring(eq + 1).trim();
+        }
+        return conf;
+    }
+
+    function loadClientConf(onDone) {
+        /* Load the site config file "cb.conf" from the web root, if present, and
+         * apply it before the rest of the app starts. This is the Cell Browser's
+         * analog of the Genome Browser's hg.conf, but it is read by the browser.
+         * It is deployed into the web document root (not overwritten by cbUpgrade),
+         * so a mirror or sandbox can, for example, point the login feature at
+         * another server without a code release. A missing file is normal (most
+         * installs run with the built-in defaults), so a 404 is not an error. */
+        $.ajax({ url: "cb.conf", dataType: "text", cache: false })
+            .done(function(text) {
+                gClientConf = parseClientConf(text);
+                // an explicit annotApiBase in the file wins over any built-in
+                // default (and over a window.cbAnnotApiBase set for local dev)
+                if ("annotApiBase" in gClientConf)
+                    window.cbAnnotApiBase = gClientConf["annotApiBase"];
+            })
+            .fail(function() {
+                gClientConf = {};   // no config file deployed: use built-in defaults
+            })
+            .always(function() {
+                onDone();
+            });
+    }
 
     function cbApiUrl(path) {
         /* build a full URL to an auth/annotation API endpoint */
@@ -12973,6 +13018,13 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     /* ==== MAIN ==== ENTRY FUNCTION */
     function main(rootMd5) {
+        /* Load the site config first (it may set the login API endpoint), then
+         * start the app. loadClientConf always calls back, even if cb.conf is
+         * absent, so startup is never blocked by a missing config file. */
+        loadClientConf(function() { mainInit(rootMd5); });
+    }
+
+    function mainInit(rootMd5) {
         /* start the data loaders, show first dataset. If in  */
         changeUrl({"nc":null});
         if (redirectIfSubdomain()) {

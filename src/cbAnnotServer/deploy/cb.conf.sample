@@ -1,0 +1,19 @@
+# UCSC Cell Browser site configuration
+#
+# This is the Cell Browser's analog of the Genome Browser's hg.conf, but it is
+# read by the web frontend (cellBrowser.js) in the browser, so it must contain
+# NO secrets. Deploy it into the web document root (e.g.
+# /usr/local/apache/htdocs-cells/cb.conf). cbUpgrade does not touch it, so you
+# can change it on a mirror or sandbox without a code release.
+#
+# Format: key=value, one per line. Blank lines and lines starting with # are
+# ignored. A missing cb.conf is fine — the frontend falls back to its built-in
+# defaults (same behavior as an empty file).
+
+# Base URL of the login / annotation API (the cbAnnotServer backend).
+#   empty  = same host as this page. Apache proxies /api to the local gunicorn.
+#            This is the normal production setup on cells.ucsc.edu.
+#   a URL  = use another server's login service, for a mirror or sandbox that
+#            does not run its own backend, e.g.:
+#              annotApiBase=https://cells.ucsc.edu
+annotApiBase=
