@@ -25,11 +25,25 @@ You can also select cells by metadata criteria or gene expression using
 **Edit > Find Cells**, or by the checkboxes and buttons in the legend
 (**All**, **None**, **Invert**, **> 0**).
 
+.. image:: /images/find_cells.gif
+   :alt: Animation: using Edit > Find Cells to select all cells of one cell type
+   :width: 1000
+
+In the animation above, **Edit > Find Cells** is used to select every cell of a
+chosen cell type; the matching cells stay highlighted while the rest dim.
+
 Exporting Selected Cells
 -------------------------
 
 After selecting cells, go to **Edit > Export** to download the cell
 identifiers for use in your own analysis tools (e.g. Seurat or Scanpy).
+
+.. image:: /images/select_export.gif
+   :alt: Animation: drawing a selection box, then Edit > Export to list the cell IDs
+   :width: 1000
+
+Here a selection box is drawn around a group of cells, and **Edit > Export**
+then opens a dialog listing their identifiers, ready to download or copy.
 
 Setting Background Cells
 -------------------------
@@ -41,6 +55,15 @@ cells* in the dataset. You can define a custom comparison group:
 2. Go to **Tools > Set as background cells** (or press ``b`` then ``s``).
 3. Select a new group of cells — the violin plot will now compare against
    your defined background instead of all cells.
+
+.. image:: /images/background_cells.gif
+   :alt: Animation: setting one group as background, then selecting another to compare against it
+   :width: 1000
+
+In the animation above the plot is colored by a gene: one group of cells is
+marked as the background, and when a second group is selected the violin plot
+shows the two groups side by side (**Selected** vs **Background**) rather than
+the selection versus all cells.
 
 To clear the custom background, go to **Tools > Reset background cells**
 (or press ``b`` then ``r``).
@@ -72,6 +95,15 @@ reflected in the legend. To change a pane's coloring:
 
 1. Click the pane you want to modify (it will get the black outline).
 2. Change the annotation field or gene in the left sidebar.
+
+.. image:: /images/split_screen_demo.gif
+   :alt: Animation: splitting the view, then coloring one pane by a second gene
+   :width: 1000
+
+In the animation above, the developing-cortex dataset is first colored by
+*PAX6*, a progenitor marker. Splitting the view copies that coloring to both
+panes; searching for *NEUROD2*, a neuronal marker, then recolors the active
+pane, so the two markers can be compared side by side.
 
 .. tip::
 

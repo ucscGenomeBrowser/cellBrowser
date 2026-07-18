@@ -1,0 +1,35 @@
+/* Click-to-zoom lightbox for screenshots in the docs.
+ * Content images are displayed scaled down (:width:) so their annotation text
+ * can be hard to read; clicking one opens the full-resolution image in an
+ * overlay so the text becomes legible. Paired with zoom.js. */
+
+/* Hint that content images are clickable. Scoped to the article body so the
+ * logo, icons, and admonition images are left alone (zoom.js scopes further). */
+.rst-content img.cb-zoomable {
+    cursor: zoom-in;
+}
+
+#cb-zoom-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.85);
+    cursor: zoom-out;
+    /* center the enlarged image */
+    align-items: center;
+    justify-content: center;
+    padding: 2vh 2vw;
+}
+
+#cb-zoom-overlay.cb-open {
+    display: flex;
+}
+
+#cb-zoom-overlay img {
+    max-width: 100%;
+    max-height: 96vh;
+    /* show the image at its natural pixel size when it fits, so text is crisp */
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+    background: #fff;
+}

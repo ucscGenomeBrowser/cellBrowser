@@ -113,6 +113,12 @@ html_theme_options = {
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
 
+# Click-to-zoom lightbox for screenshots: images are shown scaled to the page
+# width, so clicking one opens it full-size (and its callout text becomes
+# readable). Both files live in _static/.
+html_css_files = ['zoom.css']
+html_js_files = ['zoom.js']
+
 # Custom sidebar templates, must be a dictionary that maps document names
 # to template names.
 #
