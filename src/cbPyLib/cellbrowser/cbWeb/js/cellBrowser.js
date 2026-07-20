@@ -10330,10 +10330,38 @@ var cellbrowser = function() {
         // A step can carry a "tab" property (meta/gene/layout). Before each step
         // is shown, open that tab in the left sidebar, so the element the step
         // points at is actually visible, e.g. the Gene tab during "color by gene".
+        // A step whose element is a top-menu <li class="dropdown"> (e.g. the View
+        // or File menu) gets that menu opened, so the item the text refers to
+        // (Split screen, Download image) is visible instead of just the closed bar.
         intro.onbeforechange(function() {
             var step = this._introItems[this._currentStep];
+            // close any menu a previous step left open, drop any item highlight
+            $('#tpMenuBar li.dropdown.open').removeClass('open');
+            $('#tpMenuBar .introMenuHilite').removeClass('introMenuHilite');
             if (step && step.tab)
                 activateTab(step.tab);
+            // A step can carry an "openMenu" selector for a menu item. Its element
+            // is the whole dropdown menu, so intro.js lights up the entire open menu
+            // and puts the tooltip beside it (not on top of the items). We open the
+            // menu and mark the one item the step is about. Do it twice: once now, so
+            // the menu has a real size when intro measures it for placement, and once
+            // after a timeout, because the click on the "Next" button bubbles to the
+            // document where Bootstrap closes all dropdowns right after this runs. The
+            // deferred call re-opens the menu once that click has settled.
+            if (step && step.openMenu) {
+                var openMenu = function() {
+                    $(step.openMenu).closest('.dropdown').addClass('open');
+                    $(step.openMenu).addClass('introMenuHilite');
+                };
+                openMenu();
+                setTimeout(openMenu, 0);
+            }
+        });
+
+        // no menu left open, no highlight left behind when the tutorial closes
+        intro.onexit(function() {
+            $('#tpMenuBar li.dropdown.open').removeClass('open');
+            $('#tpMenuBar .introMenuHilite').removeClass('introMenuHilite');
         });
 
         if (addFirst) {
@@ -10362,19 +10390,19 @@ var cellbrowser = function() {
                 position: 'bottom'
               },
               {
-                element: document.querySelector('#tpAnnotTab'),
+                element: document.querySelector('#tpLeftSidebar'),
                 intro: "Color the "+gSampleDesc+"s by an annotation such as cluster, sample or donor: pick a field from the 'Color by Annotation' dropdown or simply click it. Fields with hundreds of values cannot be used, as there are not enough distinct colors.",
                 position: 'auto',
                 tab: 'meta'
               },
               {
-                element: document.querySelector('#tpLayoutTab'),
+                element: document.querySelector('#tpLeftSidebar'),
                 intro: "Most datasets have more than one layout, e.g. UMAP and t-SNE. Switch between the available layouts here.",
                 position: 'auto',
                 tab: 'layout'
               },
               {
-                element: document.querySelector('#tpGeneTab'),
+                element: document.querySelector('#tpLeftSidebar'),
                 intro: "Color by gene expression: search for a gene in the box, or click one of the dataset genes listed below it. The "+gSampleDesc+"s are then colored by that gene's expression level.",
                 position: 'auto',
                 tab: 'gene'
@@ -10390,9 +10418,10 @@ var cellbrowser = function() {
                 position: 'auto'
               },
               {
-                element: document.querySelector('#tpMenuBar'),
+                element: document.querySelector('#tpSplitMenu').closest('.dropdown-menu'),
+                openMenu: '#tpSplitMenu',
                 intro: "Use View > Split screen (or press 't') to show two plots side by side, handy for comparing two genes or two layouts of the same "+gSampleDesc+"s.",
-                position: 'bottom'
+                position: 'right'
               },
               {
                 element: document.querySelector('#tpLegendBar'),
@@ -10405,14 +10434,13 @@ var cellbrowser = function() {
                 position: 'bottom'
               },
               {
-                element: document.querySelector('#tpMenuBar'),
+                element: document.querySelector('#tpSaveImage').closest('.dropdown-menu'),
+                openMenu: '#tpSaveImage',
                 intro: "Use File > Download image to save the current plot as a PNG or SVG for a figure or slide. The web address in your browser always reflects the current view, so you can copy it from the address bar to show a colleague exactly what you see.",
-                position: 'bottom'
+                position: 'right'
               },
               {
-                element: document.querySelector('#tpLegendBar'),
-                intro: "That's it! If you need a dataset that is not here yet, send us a link. If you have your own data, email it to cells@ucsc.edu and we can add it, hidden until publication. To run your own cell browser on your own webserver, see 'Help > Setup your own'.",
-                position: 'left'
+                intro: "That's it! If you need a dataset that is not here yet, send us a link. If you have your own data, email it to cells@ucsc.edu and we can add it, hidden until publication. To run your own cell browser on your own webserver, see 'Help > Setup your own'."
               },
             ]);
         intro.start();

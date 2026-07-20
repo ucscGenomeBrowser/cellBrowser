@@ -683,6 +683,10 @@ button { line-height: 12px }
 /* make bootstrap's navbar show menus on mouse hover */
 /* ul.nav li.dropdown:hover > ul.dropdown-menu { display: block; } */
 
+/* highlight for the one menu item the interactive tutorial is describing.
+ * translucent tint + inset border so it reads on both light and dark menus. */
+.introMenuHilite { background-color: rgba(245, 158, 11, 0.18) !important; box-shadow: inset 0 0 0 2px #f59e0b !important; }
+
 /* flying-sheep's suggestions */
 .ui-dialog-titlebar { border: none }
 a.list-group-item { background-color: #EEE }
