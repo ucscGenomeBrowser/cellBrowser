@@ -7470,6 +7470,7 @@ var cellbrowser = function() {
         // from a collection config that lacks a meaningful sampleCount.
         if (renderer === null) {
             var canvLeft = metaBarWidth + metaBarMargin;
+            toolBarHeight = $('#tpToolBar').outerHeight(true) || toolBarHeight;
             var canvTop  = menuBarHeight + toolBarHeight;
             var canvWidth = window.innerWidth - canvLeft - legendBarWidth;
             var canvHeight = window.innerHeight - menuBarHeight - toolBarHeight;
