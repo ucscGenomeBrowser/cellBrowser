@@ -7742,11 +7742,36 @@ var cellbrowser = function() {
 
 
     function activateCombobox(id, widthPx) {
-        $('#'+id).chosen({
-            inherit_select_classes : true,
-            disable_search_threshold: 10,
-            width : widthPx
-        });
+        var opts = {inherit_select_classes: true, disable_search_threshold: 10};
+        if (widthPx != null) opts.width = widthPx;
+        $('#'+id).chosen(opts);
+    }
+
+    function measureLongestOptionPx(id) {
+        /* Measure the pixel width needed to show the longest option text without wrapping. */
+        var sel = document.getElementById(id);
+        if (!sel) return 120;
+        var probe = document.createElement('span');
+        probe.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;font-size:14px;white-space:nowrap;padding:0 32px 0 8px';
+        document.body.appendChild(probe);
+        var maxW = 120;
+        for (var i = 0; i < sel.options.length; i++) {
+            probe.textContent = sel.options[i].text;
+            if (probe.offsetWidth > maxW) maxW = probe.offsetWidth;
+        }
+        document.body.removeChild(probe);
+        return maxW;
+    }
+
+    function activateComboboxFixedWidth(id) {
+        /* Activate chosen and permanently lock container to the longest option width.
+           Uses a !important CSS rule so no subsequent chosen:updated or flex reflow can override it. */
+        var w = measureLongestOptionPx(id);
+        activateCombobox(id, w);
+        var rule = '#' + id + '_chosen { width: ' + w + 'px !important; min-width: ' + w + 'px !important; }';
+        var styleEl = document.createElement('style');
+        styleEl.textContent = rule;
+        document.head.appendChild(styleEl);
     }
 
     function updateCollectionCombo(id, collData) {
