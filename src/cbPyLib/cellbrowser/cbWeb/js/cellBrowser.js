@@ -4314,6 +4314,26 @@ var cellbrowser = function() {
         return [metaValToExprArr, exprMin, exprMax];
     }
 
+    function splitExprByMetaMasked(metaArr, metaCountSize, exprArr, cellMask) {
+        /* like splitExprByMeta but skips cells where cellMask[i] === 0 */
+        var metaValToExprArr = [];
+        for (var i=0; i < metaCountSize; i++) {
+            metaValToExprArr.push([]);
+        }
+        let exprMax = -Infinity;
+        let exprMin = Infinity;
+        for (var i=0; i < exprArr.length; i++) {
+            if (cellMask[i] === 0) continue;
+            var exprVal = exprArr[i];
+            var metaVal = metaArr[i];
+            metaValToExprArr[metaVal].push(exprVal);
+            if (exprVal > exprMax) exprMax = exprVal;
+            if (exprVal < exprMin) exprMin = exprVal;
+        }
+        if (exprMax === -Infinity) { exprMax = 0; exprMin = 0; }
+        return [metaValToExprArr, exprMin, exprMax];
+    }
+
     function splitExprByMetaSelected(exprVec, splitArr, selCells) {
         /* split the expression vector into two vectors. splitArr is an array with 0/1, indicates where values go.
          * if selCells is not null, restrict the splitting to just indices in selCells.
@@ -8409,7 +8429,40 @@ var cellbrowser = function() {
         buildGeneExprPlotsAddGenes([geneId], null);
     }
 
-    function promiseGeneSplitByMeta(locusStr, onProgress, metaArr, metaCount) {
+    function updatePerturbCount(selectedIdx, valCounts, totalCells) {
+        /* Update the cell count label next to the perturbation filter dropdown. */
+        var el = document.getElementById("tpExprPerturbCount");
+        if (!el) return;
+        if (selectedIdx === null || selectedIdx === undefined) {
+            el.textContent = totalCells.toLocaleString() + " cells total";
+        } else {
+            var n = valCounts[selectedIdx][1];
+            var pct = (n / totalCells * 100).toFixed(2);
+            el.textContent = n.toLocaleString() + " / " + totalCells.toLocaleString() + " cells (" + pct + "%)";
+        }
+    }
+
+    function onExprPerturbFilterChange() {
+        /* dot plot viewer: user changed the perturbation filter dropdown */
+        var perturbCombo = document.getElementById("tpExprPerturbCombo");
+        if (perturbCombo && db.conf.perturbationField) {
+            var val = perturbCombo.value;
+            var pfi = db.findMetaInfo(db.conf.perturbationField);
+            var pvc = pfi ? (pfi.valCounts || []) : [];
+            if (!val || val === "tpPerturb_none") {
+                updatePerturbCount(null, pvc, db.conf.sampleCount);
+            } else {
+                var idx = parseInt(val.split("_")[1]);
+                updatePerturbCount(idx, pvc, db.conf.sampleCount);
+            }
+        }
+        var geneIds = db.exprData ? db.exprData.geneIds.slice() : [];
+        db.exprData = null; // force full reload so mask is rebuilt for all genes
+        if (geneIds.length > 0)
+            buildGeneExprPlotsAddGenes(geneIds, null);
+    }
+
+    function promiseGeneSplitByMeta(locusStr, onProgress, metaArr, metaCount, cellMask) {
         /* A promise for loading the gene data and calculation average expression per meta data value.
            Resolves with a geneData object with gene-related attributes, exprMin, exprMax and dotRows.  */
         /* geneData.dotRows is an array of [cellCount, zeroPerc, avg] */
@@ -8418,7 +8471,8 @@ var cellbrowser = function() {
             function gotGeneData(exprArr, decArr, locusStr, geneDesc, binInfo) {
                 /* called when the expression vector has been loaded and binning is done */
                 debug("Promise - Received expression vector, for "+locusStr+", desc: "+geneDesc);
-                let res = splitExprByMeta(metaArr, metaCount, exprArr);
+                let res = cellMask ? splitExprByMetaMasked(metaArr, metaCount, exprArr, cellMask)
+                                   : splitExprByMeta(metaArr, metaCount, exprArr);
 
                 let metaToExpr = res[0];
                 let exprMin = res[1];
@@ -9137,7 +9191,7 @@ var cellbrowser = function() {
         return { fieldNames: fieldNames, annotBins: annotBins, annotLabels: annotLabels, palettes: palettes };
     }
 
-    function exprDataLoadGenes(geneIds, exprData, onDone) {
+    function exprDataLoadGenes(geneIds, exprData, onDone, cellMask) {
         /* add a list of geneIds to the current exprData object and call onDone when done.*/
         let promises = [];
         let metaArr = exprData.metaData.arr;
@@ -9146,7 +9200,7 @@ var cellbrowser = function() {
         for (let geneId of geneIds) {
             geneId = geneId.split("|")[0]; // internal genes sometimes can be in format ENSG-ID|geneSymbol
             if (exprData.geneIds.indexOf(geneId)===-1)
-                promises.push( promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount));
+                promises.push( promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount, cellMask));
             else
                 alert("This gene is already on the plot");
         }
