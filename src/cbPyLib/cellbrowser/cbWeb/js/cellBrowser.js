@@ -2005,8 +2005,10 @@ var cellbrowser = function() {
             parts.push(prettyNumber(visCount) + " of " + prettyNumber(totalCount) + " " + gSampleDesc + "s shown");
         else
             parts.push(prettyNumber(totalCount) + " " + gSampleDesc + "s");
-        if (selCount > 0)
-            parts.push(prettyNumber(selCount) + " selected");
+        if (selCount > 0) {
+            var pct = totalCount > 0 ? Math.round(selCount / totalCount * 100) : 0;
+            parts.push(prettyNumber(selCount) + " selected (" + pct + "%)");
+        }
         el.textContent = parts.join(" | ");
     }
 
@@ -4888,6 +4890,7 @@ var cellbrowser = function() {
     function gotCoords(coords, info, clusterInfo, newRadius, rend) {
         /* called when the coordinates have been loaded */
         rend = rend || renderer;
+        rend._suppressDraw = false;  // allow drawing now that real coords have arrived
         if (coords.length===0)
             alert("cellBrowser.js/gotCoords: coords.bin seems to be empty");
         var opts = {};
@@ -5234,6 +5237,8 @@ var cellbrowser = function() {
                    //buildWatermark();
                    //buildWatermark();
                    activateSplit();
+                   renderer.childPlot._suppressDraw = true; // suppress until UMAP coords arrive
+                   renderer.childPlot.clear();
                    configureRenderer(splitOpts, renderer.childPlot);
                    $("#splitJoinDiv").show();
                    $("#splitJoinBox").prop("checked", true);
@@ -7455,9 +7460,9 @@ var cellbrowser = function() {
             activateTooltip(".mpButton");
             renderer.activateSliders();
 
-            var cellCountDiv = document.createElement('div');
+            var cellCountDiv = document.createElement('span');
             cellCountDiv.id = "tpCellCount";
-            document.body.appendChild(cellCountDiv);
+            renderer.statusLine.appendChild(cellCountDiv);
 
             self.tooltipDiv = makeTooltipCont();
             document.body.appendChild(self.tooltipDiv);
@@ -12029,6 +12034,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         if (mainRenderer)
             mainRenderer.refreshSliderPos(true); // back to single mode: just above grey bar
         mainRenderer = null;
+
+        // restore single-panel count position
+        var mainCount = getById("tpCellCount");
+        if (mainCount) mainCount.classList.remove("split");
+
         $("#tpSplitMenuEntry").text("Split Screen");
         buildWatermark(renderer); // clears the watermark now that isSplit() is false
         renderer.drawDots();
@@ -12040,6 +12050,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         $("#splitJoinDiv").show();
         buildWatermark(renderer, true);
         renderer.onActiveChange = onActRendChange;
+
+        // raise the count above the dataset title in split mode
+        var mainCount = getById("tpCellCount");
+        if (mainCount) mainCount.classList.add("split");
 
         var currCoordIdx = $("#tpLayoutCombo").val();
         renderer.legend = gLegend;

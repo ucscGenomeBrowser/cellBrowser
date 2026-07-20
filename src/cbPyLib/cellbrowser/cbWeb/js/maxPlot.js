@@ -1093,7 +1093,9 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     function setStatus(text) {
+        var extra = self.statusLine.querySelector('#tpCellCount');
         self.statusLine.innerHTML = text;
+        if (extra) self.statusLine.appendChild(extra);
     }
 
     function addStatusLine(top, left, width, height) {
@@ -2959,6 +2961,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.drawDots = function(doSvg) {
         /* draw coordinates to canvas with current colors */
+        if (self._suppressDraw) return;
         if(DEBUG) console.time("draw");
 
         self.clear();
