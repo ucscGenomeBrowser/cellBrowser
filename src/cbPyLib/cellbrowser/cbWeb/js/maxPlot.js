@@ -162,7 +162,11 @@ function MaxPlot(div, top, left, width, height, args) {
         }
 
         if (this.childPlot) {
-            this.activeBorderDiv.style.border = `3px solid ${this.isLight() ? "black" : "white"}`;
+            const _b = `3px solid ${this.isLight() ? "black" : "white"}`;
+            this.activeBorderDiv.style.borderTop    = _b;
+            this.activeBorderDiv.style.borderRight  = _b;
+            this.activeBorderDiv.style.borderBottom = _b;
+            this.activeBorderDiv.style.borderLeft   = _b;
             this.childPlot.setLightMode(mode);
         }
 
@@ -3189,9 +3193,6 @@ function MaxPlot(div, top, left, width, height, args) {
 
             // Set the new bounds
             p.setBounds(glMinX, glMaxX, glMaxY, glMinY);
-            // Spatial datasets: mirror the zoom bounds onto child's independent projection
-            if (self.childPlot && self.childPlot.port.projection !== p)
-                self.childPlot.port.projection.setBounds(p.left, p.right, p.top, p.bottom, false);
 
             // Recalculate radius
             this.calcRadius();
@@ -3283,9 +3284,6 @@ function MaxPlot(div, top, left, width, height, args) {
         // a special case for connected plots that are not sharing our pixel coordinates
         if (self.childPlot && self.coords===self.childPlot.coords) {
             if (self.usesWebGL()) {
-                // Spatial datasets give the child its own projection — mirror the scale op.
-                if (self.childPlot.port.projection !== self.port.projection)
-                    self.childPlot.port.projection.scale(zoomFact, x, y);
                 self.childPlot.calcRadius();
             } else {
                 self.childPlot.zoomBy(zoomFact, xPx, yPx);
@@ -3336,9 +3334,6 @@ function MaxPlot(div, top, left, width, height, args) {
 
             // Translate the projection matrix
             self.port.projection.translate(-x, y);
-            // Spatial datasets: mirror pan onto child's independent projection
-            if (self.childPlot && self.childPlot.port.projection !== self.port.projection)
-                self.childPlot.port.projection.translate(-x, y);
 
             self.drawDots();
         } else {
@@ -3850,7 +3845,11 @@ function MaxPlot(div, top, left, width, height, args) {
             return false;
 
         // only need to do something if we're not already the active plot
-        self.activeBorderDiv.style.border = `3px solid ${this.isLight() ? "black" : "white"}`;
+        const _bs = `3px solid ${this.isLight() ? "black" : "white"}`;
+        self.activeBorderDiv.style.borderTop    = _bs;
+        self.activeBorderDiv.style.borderRight  = _bs;
+        self.activeBorderDiv.style.borderBottom = _bs;
+        self.activeBorderDiv.style.borderLeft   = _bs;
         self.parentPlot.activeBorderDiv.style.border = "none";
 
         // flip the parent/child relationship
@@ -4454,8 +4453,11 @@ function MaxPlot(div, top, left, width, height, args) {
         self.childPlot = plot2;
         plot2.parentPlot = self;
 
-        // add a thick border and hide the menus in the child
-        self.activeBorderDiv.style.border = `3px solid ${this.isLight() ? "black" : "white"}`;
+        const _borderStyle = `3px solid ${this.isLight() ? "black" : "white"}`;
+        self.activeBorderDiv.style.borderTop    = _borderStyle;
+        self.activeBorderDiv.style.borderRight  = _borderStyle;
+        self.activeBorderDiv.style.borderBottom = _borderStyle;
+        self.activeBorderDiv.style.borderLeft   = _borderStyle;
         self.childPlot.zoomDiv.style.display = "none";
         self.childPlot.toolDiv.style.display = "none";
 
