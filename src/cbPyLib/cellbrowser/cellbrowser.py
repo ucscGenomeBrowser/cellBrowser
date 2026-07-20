@@ -4880,7 +4880,7 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         # they are just here for backwards-compatibility and will eventually get removed
         "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays",
         # facets are taking their place now
-        "facets", "multiModal", "showHeatmap",
+        "facets", "multiModal", "showHeatmap", "perturbationField",
         ]:
         copyConf(inConf, outConf, tag)
 

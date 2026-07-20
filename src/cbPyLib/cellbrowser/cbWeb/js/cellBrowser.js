@@ -5317,7 +5317,14 @@ var cellbrowser = function() {
        buildSelectActions();
 
        db.loadCoords(coordIdx, gotFirstCoords, gotSpatial, onProgress);
-       
+
+       // Prefetch split coords in parallel so the child panel appears without lag
+       if (db.conf.split && db.conf.split.coords) {
+           let splitCoordIdx = db.findCoordIdx(db.conf.split.coords);
+           if (splitCoordIdx !== undefined && splitCoordIdx !== coordIdx)
+               db.loadCoords(splitCoordIdx, function(){}, function(){}, null);
+       }
+
        if ("traces" in db.conf.fileVersions)
            db.loadTraces(gotTraces);
 
@@ -9254,9 +9261,10 @@ var cellbrowser = function() {
         return { fieldNames: fieldNames, metaBins: metaBins, metaLabels: metaLabels, palettes: palettes };
     }
 
-    function loadGroupedExprData(exprData, geneIds, metaName, subsplitName, onGenesDone) {
+    function loadGroupedExprData(exprData, geneIds, metaName, subsplitName, onGenesDone, perturbFilter) {
         /* load geneIds into exprData object, load expr data and summarize (average) by meta field.
-         * subsplitName: optional second meta field to cross with metaName (null = no subsplit). */
+         * subsplitName: optional second meta field to cross with metaName (null = no subsplit).
+         * perturbFilter: optional {name, valueIdx} to restrict cells by perturbation value. */
 
         if (exprData===null) {
             exprData = {};
@@ -9277,13 +9285,37 @@ var cellbrowser = function() {
             metaPromises.push(promiseMeta(subsplitName, geneExprOnProgress));
         }
         var enumFieldIndices = [];
+        var perturbPromiseIdx = -1;
 
         for (var i = 0; i < allFields.length; i++) {
             var field = allFields[i];
             if (field.type !== "enum" || field.name === metaName || field.name === subsplitName)
                 continue;
+            var isPerturb = perturbFilter && field.name === perturbFilter.name;
+            if (field.valCounts && field.valCounts.length > 50) {
+                // high-cardinality field: skip for metaMatrix color bars, only load if needed for mask
+                if (isPerturb) {
+                    metaPromises.push(promiseMeta(field.name, geneExprOnProgress));
+                    perturbPromiseIdx = metaPromises.length - 1;
+                }
+                continue;
+            }
             metaPromises.push(promiseMeta(field.name, geneExprOnProgress));
             enumFieldIndices.push(metaPromises.length - 1);
+            if (isPerturb)
+                perturbPromiseIdx = metaPromises.length - 1;
+        }
+
+        // fallback: if perturbFilter field wasn't reached above (same as metaName/subsplitName)
+        if (perturbFilter && perturbPromiseIdx === -1) {
+            if (perturbFilter.name === metaName)
+                perturbPromiseIdx = 0;
+            else if (subsplitName && perturbFilter.name === subsplitName)
+                perturbPromiseIdx = 1;
+            else {
+                metaPromises.push(promiseMeta(perturbFilter.name, geneExprOnProgress));
+                perturbPromiseIdx = metaPromises.length - 1;
+            }
         }
 
         Promise.all(metaPromises).then( function (resArr) {
@@ -9334,7 +9366,19 @@ var cellbrowser = function() {
             else
                 exprData.metaMatrix = null;
 
-            exprDataLoadGenes(geneIds, exprData, onGenesDone);
+            // build cell mask for perturbation filtering
+            var cellMask = null;
+            if (perturbFilter && perturbPromiseIdx >= 0) {
+                var perturbMetaInfo = resArr[perturbPromiseIdx];
+                var perturbArr = perturbMetaInfo.arr;
+                var numCells = perturbArr.length;
+                cellMask = new Uint8Array(numCells);
+                for (var c = 0; c < numCells; c++) {
+                    cellMask[c] = (perturbArr[c] === perturbFilter.valueIdx) ? 1 : 0;
+                }
+            }
+
+            exprDataLoadGenes(geneIds, exprData, onGenesDone, cellMask);
         });
     }
 
@@ -9364,6 +9408,16 @@ var cellbrowser = function() {
         if (subsplitCombo && subsplitCombo.value && subsplitCombo.value !== "tpMetaVal_none") {
             var ssIdx = subsplitCombo.value.split("_")[1];
             subsplitName = db.conf.metaFields[ssIdx].name;
+        }
+
+        // read perturbation filter (null if "All cells" is selected)
+        var perturbFilter = null;
+        if (db.conf.perturbationField) {
+            var perturbCombo = document.getElementById("tpExprPerturbCombo");
+            if (perturbCombo && perturbCombo.value && perturbCombo.value !== "tpPerturb_none") {
+                var perturbValueIdx = parseInt(perturbCombo.value.split("_")[1]);
+                perturbFilter = {name: db.conf.perturbationField, valueIdx: perturbValueIdx};
+            }
         }
 
         function buildProgressBar(domId) {
@@ -9416,7 +9470,7 @@ var cellbrowser = function() {
             changeUrl(urlOpts);
         };
 
-        loadGroupedExprData(db.exprData, geneIds, metaName, subsplitName, onExprDataDone);
+        loadGroupedExprData(db.exprData, geneIds, metaName, subsplitName, onExprDataDone, perturbFilter);
 
         //Promise.all([promiseGeneSplitByMeta(geneId, geneExprOnProgress), promiseMeta(metaName, geneExprOnProgress)]).then( function(resArr) {
         //    //if(DEBUG) console.log("promises are all loaded", resArr);
@@ -9601,6 +9655,15 @@ var cellbrowser = function() {
 
         htmls.push("<div id='tpExprViewHeader'>");
 
+        // Row 0: perturbation filter (only shown for perturbation datasets)
+        if (db.conf.perturbationField) {
+            htmls.push("<div class='tpExprHeaderRow' id='tpExprPerturbRow'>");
+            htmls.push('<label for="tpExprPerturbCombo">Filter by perturbation</label>');
+            htmls.push('<select id="tpExprPerturbCombo" placeholder="All cells"></select>');
+            htmls.push('<span id="tpExprPerturbCount" style="font-size:12px;color:#888;margin-left:6px"></span>');
+            htmls.push("</div>"); // tpExprHeaderRow row0
+        }
+
         // Row 1: gene combo + add multiple genes
         htmls.push("<div class='tpExprHeaderRow'>");
         htmls.push('<label id="tpGeneExprLabel" for="tpGeneExprGeneCombo">Show expression of </label>');
@@ -9656,9 +9719,47 @@ var cellbrowser = function() {
 
         activateGeneCombo("tpGeneExprGeneCombo", onGeneExprGeneComboChange);
 
-        activateCombobox("tpGeneExprMetaCombo", 250);
-        activateCombobox("tpGeneExprSubsplitCombo", 220);
+        activateComboboxFixedWidth("tpGeneExprMetaCombo");
+        activateComboboxFixedWidth("tpGeneExprSubsplitCombo");
         syncSubsplitCombo();
+
+        if (db.conf.perturbationField) {
+            var perturbFieldInfo = db.findMetaInfo(db.conf.perturbationField);
+            var perturbOpts = [{value: "tpPerturb_none", text: "All cells"}];
+            var pvc = perturbFieldInfo.valCounts || [];
+            for (var pi = 0; pi < pvc.length; pi++)
+                perturbOpts.push({value: "tpPerturb_"+pi, text: pvc[pi][0]});
+
+            // measure longest option text before selectize init
+            var perturbProbe = document.createElement('span');
+            perturbProbe.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;font-size:14px;white-space:nowrap;padding:0 32px 0 8px';
+            document.body.appendChild(perturbProbe);
+            var perturbW = 120;
+            for (var pi2 = 0; pi2 < perturbOpts.length; pi2++) {
+                perturbProbe.textContent = perturbOpts[pi2].text;
+                if (perturbProbe.offsetWidth > perturbW) perturbW = perturbProbe.offsetWidth;
+            }
+            document.body.removeChild(perturbProbe);
+
+            $("#tpExprPerturbCombo").selectize({
+                options: perturbOpts,
+                items: ["tpPerturb_none"],
+                valueField: "value",
+                labelField: "text",
+                searchField: "text",
+                maxItems: 1,
+                closeAfterSelect: true,
+                onChange: function(val) { onExprPerturbFilterChange(); }
+            });
+
+            // lock selectize control width with !important so selection changes don't resize it
+            var perturbStyleEl = document.createElement('style');
+            perturbStyleEl.textContent = '#tpExprPerturbCombo + .selectize-control { width: ' + perturbW + 'px !important; }';
+            document.head.appendChild(perturbStyleEl);
+
+            // show total cell count initially ("All cells" selected)
+            updatePerturbCount(null, pvc, db.conf.sampleCount);
+        }
 
         $("#tpGeneExprMetaCombo").change( onGeneExprMetaComboChange );
         $("#tpGeneExprSubsplitCombo").change( onGeneExprSubsplitComboChange );
@@ -9746,7 +9847,7 @@ var cellbrowser = function() {
             htmls.push('<button id="tpOpenImgButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Show supplemental hi-res images submitted with this dataset" data-placement="bottom">Supplemental Images</button>');
 
         //if (!db.conf.atacSearch)
-        htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Violin Plot Viewer" data-placement="bottom">Gene Expression Plots</button>');
+        htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Dot Plot Viewer" data-placement="bottom">Gene Expression Plots</button>');
 
         if (db.conf.markers && db.conf.markers.length > 0) {
             var labelMetaInfo = db.findMetaInfo(db.conf.labelField);
@@ -9790,7 +9891,7 @@ var cellbrowser = function() {
         var grandparentName = null;
         if (nameParts.length > 1) {
             //buildCollectionCombo(htmls, "tpCollectionCombo", 330, nextLeft, 0);
-            buildCollectionCombo(htmls, "tpCollectionCombo", 330, null, 3);
+            buildCollectionCombo(htmls, "tpCollectionCombo", 330, null, 1);
             nameParts.pop();
             parentName = nameParts.join("/");
             if (nameParts.length > 1)
