@@ -98,6 +98,14 @@ The scatter plot will recolor using a gradient from light (low expression)
 to dark (high expression). The legend will show the expression bins and
 their associated colors.
 
+.. image:: /images/gene_search.gif
+   :alt: Animation: clicking genes in the Dataset Genes table recolors the plot instantly
+   :width: 1000
+
+You can also recolor instantly by clicking a gene in the **Dataset Genes**
+table on the **Gene** tab, as shown above — a quick way to page through a
+set of markers without retyping each name.
+
 Multi-gene Coloring
 ~~~~~~~~~~~~~~~~~~~
 

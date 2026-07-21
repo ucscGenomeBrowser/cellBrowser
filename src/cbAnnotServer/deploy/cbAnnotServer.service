@@ -1,0 +1,58 @@
+# systemd unit for the Cell Browser login / annotation API (cbAnnotServer).
+#
+# This is the recommended way to keep the service alive: systemd restarts it on
+# crash and starts it on boot, so a reboot of the cells server brings it back
+# with no manual step. Installing it needs root (the admins), so if that is not
+# available yet, use the cron watchdog in deploy/watchdog.sh instead.
+#
+# Install:
+#   1. Edit the placeholders below (User, WorkingDirectory, the paths in
+#      run-gunicorn.sh's environment, and the secrets).
+#   2. sudo cp cbAnnotServer.service /etc/systemd/system/
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable --now cbAnnotServer
+#   5. systemctl status cbAnnotServer   # verify it is running
+#   6. journalctl -u cbAnnotServer -f   # follow its logs
+#
+# Secrets are set here rather than in the repo. Keep this file mode 0600 once it
+# contains a real CBANNOT_SECRET_KEY. Better still, put the secrets in a separate
+# EnvironmentFile that is not world-readable and reference it with
+# EnvironmentFile=/etc/cbAnnotServer.env.
+
+[Unit]
+Description=UCSC Cell Browser login / annotation API (cbAnnotServer)
+After=network.target
+
+[Service]
+Type=simple
+
+# The account that owns the cells web files. REPLACE with the real deploy user.
+User=REPLACE_DEPLOY_USER
+
+# Absolute path to the cbAnnotServer directory in the deployed source tree.
+# REPLACE with the real path (e.g. /usr/local/apache/cellBrowser/src/cbAnnotServer).
+WorkingDirectory=REPLACE_ABSOLUTE_PATH/src/cbAnnotServer
+
+# --- Runtime configuration (see config.py and gunicorn.conf.py) ---
+# A long random string; keep it stable so existing login sessions survive a
+# restart. Generate once with: python -c 'import secrets; print(secrets.token_hex(32))'
+Environment=CBANNOT_SECRET_KEY=REPLACE_WITH_LONG_RANDOM_STRING
+# SQLite on GPFS (/hive) works; switch to postgresql://... when scale warrants.
+Environment=CBANNOT_DATABASE_URI=sqlite:////hive/data/inside/cells/cbAnnotServer/cbAnnot.db
+# Must match the ProxyPass target in apache-cells-api.conf.
+Environment=CBANNOT_BIND=127.0.0.1:5051
+# Site is HTTPS in production, so keep the login cookie off plain HTTP.
+Environment=CBANNOT_COOKIE_SECURE=true
+# Public site URL used to build links in verification / reset emails.
+Environment=CBANNOT_SITE_BASE_URL=https://cells.ucsc.edu
+# Real email delivery (leave as console to print tokens to the log instead):
+#Environment=CBANNOT_MAIL_BACKEND=smtp
+#Environment=CBANNOT_MAIL_SERVER=localhost
+#Environment=CBANNOT_MAIL_FROM=noreply@cells.ucsc.edu
+
+ExecStart=REPLACE_ABSOLUTE_PATH/src/cbAnnotServer/deploy/run-gunicorn.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

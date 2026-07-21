@@ -39,3 +39,11 @@ class Config:
     # CBANNOT_DEV_CORS_ORIGIN to the frontend origin (e.g. http://localhost:8888)
     # to allow credentialed cross-origin requests. Leave unset in production.
     DEV_CORS_ORIGIN = os.environ.get("CBANNOT_DEV_CORS_ORIGIN")
+
+    # Session cookie. In production the site is HTTPS and the API is same-origin
+    # behind Apache, so set CBANNOT_COOKIE_SECURE=true to keep the login cookie
+    # off plain HTTP. SameSite=Lax is fine for the same-origin setup; the dev
+    # default leaves Secure off so the cookie works over http://localhost.
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = os.environ.get("CBANNOT_COOKIE_SAMESITE", "Lax")
+    SESSION_COOKIE_SECURE = os.environ.get("CBANNOT_COOKIE_SECURE", "false").lower() == "true"

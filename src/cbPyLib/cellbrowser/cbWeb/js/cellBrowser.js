@@ -29,6 +29,10 @@ var cellbrowser = function() {
     // {loggedIn:true, email, display_name} = logged in.
     var gCbUser = null;
 
+    // Site config from the web root "cb.conf" file (see loadClientConf).
+    // null = not yet loaded, otherwise an object of key -> value.
+    var gClientConf = null;
+
     // object with all information needed to map to the legend colors:
     // all info about the current legend. gLegend.rows is an object with keys:
     // color, defColor, label, count, intKey, strKey
@@ -813,7 +817,7 @@ var cellbrowser = function() {
                 htmls.push("This information can also be accessed while viewing a dataset by clicking the 'Info &amp; Downloads' button.</p>");
                 htmls.push("<p><b>To bulk download all datasets in this collection via rsync:</b><br>");
                 htmls.push("<code style='display:inline-block; background:#f4f4f4; border:1px solid #ddd; padding:4px 8px; border-radius:3px; font-size:12px; user-select:all'>");
-                htmls.push("rsync --avzp hgdownload.gi.ucsc.edu::cells/"+datasetInfo.name+"/ ./"+datasetInfo.name+"/");
+                htmls.push("rsync -av hgdownload.gi.ucsc.edu::cells/"+datasetInfo.name+"/ ./"+datasetInfo.name+"/");
                 htmls.push("</code></p>");
                 $( "#pane3" ).html(htmls.join(""));
                 $( "#pane3" ).show();
@@ -870,7 +874,7 @@ var cellbrowser = function() {
 
                 htmls.push("<p><b>Bulk download via rsync:</b><br>");
                 htmls.push("<code style='display:inline-block; background:#f4f4f4; border:1px solid #ddd; padding:4px 8px; border-radius:3px; font-size:12px; user-select:all'>");
-                htmls.push("rsync --avzp hgdownload.gi.ucsc.edu::cells/"+datasetInfo.name+"/ ./"+datasetInfo.name+"/");
+                htmls.push("rsync -avzp hgdownload.gi.ucsc.edu::cells/"+datasetInfo.name+"/ ./"+datasetInfo.name+"/");
                 htmls.push("</code></p>");
 
                 $( "#pane3" ).html(htmls.join(""));
@@ -3338,6 +3342,47 @@ var cellbrowser = function() {
     // host in production; for local dev set window.cbAnnotApiBase to e.g.
     // "http://localhost:5000" to point at a Flask dev server on another port.
     // ----------------------------------------------------------------------
+
+    function parseClientConf(text) {
+        /* parse a simple key=value config file. Lines starting with # and blank
+         * lines are ignored. Returns an object of key -> value (both trimmed). */
+        var conf = {};
+        var lines = text.split("\n");
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (line === "" || line.charAt(0) === "#")
+                continue;
+            var eq = line.indexOf("=");
+            if (eq === -1)
+                continue;
+            conf[line.substring(0, eq).trim()] = line.substring(eq + 1).trim();
+        }
+        return conf;
+    }
+
+    function loadClientConf(onDone) {
+        /* Load the site config file "cb.conf" from the web root, if present, and
+         * apply it before the rest of the app starts. This is the Cell Browser's
+         * analog of the Genome Browser's hg.conf, but it is read by the browser.
+         * It is deployed into the web document root (not overwritten by cbUpgrade),
+         * so a mirror or sandbox can, for example, point the login feature at
+         * another server without a code release. A missing file is normal (most
+         * installs run with the built-in defaults), so a 404 is not an error. */
+        $.ajax({ url: "cb.conf", dataType: "text", cache: false })
+            .done(function(text) {
+                gClientConf = parseClientConf(text);
+                // an explicit annotApiBase in the file wins over any built-in
+                // default (and over a window.cbAnnotApiBase set for local dev)
+                if ("annotApiBase" in gClientConf)
+                    window.cbAnnotApiBase = gClientConf["annotApiBase"];
+            })
+            .fail(function() {
+                gClientConf = {};   // no config file deployed: use built-in defaults
+            })
+            .always(function() {
+                onDone();
+            });
+    }
 
     function cbApiUrl(path) {
         /* build a full URL to an auth/annotation API endpoint */
@@ -10468,6 +10513,43 @@ var cellbrowser = function() {
         intro.setOption("doneLabel", "Close this window");
         intro.setOption("skipLabel", "Stop the tutorial");
 
+        // A step can carry a "tab" property (meta/gene/layout). Before each step
+        // is shown, open that tab in the left sidebar, so the element the step
+        // points at is actually visible, e.g. the Gene tab during "color by gene".
+        // A step whose element is a top-menu <li class="dropdown"> (e.g. the View
+        // or File menu) gets that menu opened, so the item the text refers to
+        // (Split screen, Download image) is visible instead of just the closed bar.
+        intro.onbeforechange(function() {
+            var step = this._introItems[this._currentStep];
+            // close any menu a previous step left open, drop any item highlight
+            $('#tpMenuBar li.dropdown.open').removeClass('open');
+            $('#tpMenuBar .introMenuHilite').removeClass('introMenuHilite');
+            if (step && step.tab)
+                activateTab(step.tab);
+            // A step can carry an "openMenu" selector for a menu item. Its element
+            // is the whole dropdown menu, so intro.js lights up the entire open menu
+            // and puts the tooltip beside it (not on top of the items). We open the
+            // menu and mark the one item the step is about. Do it twice: once now, so
+            // the menu has a real size when intro measures it for placement, and once
+            // after a timeout, because the click on the "Next" button bubbles to the
+            // document where Bootstrap closes all dropdowns right after this runs. The
+            // deferred call re-opens the menu once that click has settled.
+            if (step && step.openMenu) {
+                var openMenu = function() {
+                    $(step.openMenu).closest('.dropdown').addClass('open');
+                    $(step.openMenu).addClass('introMenuHilite');
+                };
+                openMenu();
+                setTimeout(openMenu, 0);
+            }
+        });
+
+        // no menu left open, no highlight left behind when the tutorial closes
+        intro.onexit(function() {
+            $('#tpMenuBar li.dropdown.open').removeClass('open');
+            $('#tpMenuBar .introMenuHilite').removeClass('introMenuHilite');
+        });
+
         if (addFirst) {
             intro.setOption("skipLabel", "I know. Close this window.");
             intro.addStep({
@@ -10479,39 +10561,72 @@ var cellbrowser = function() {
         intro.addSteps(
             [
               {
-                intro: "In the center of the window, highlighted here, each circle represents a "+gSampleDesc+". Try to move the mouse over a cell type label of this dataset, it will highlight the cells of this type. You can click the cell type label to show the marker gene lists of the cluster.",
+                intro: "In the center of the window, each circle represents a "+gSampleDesc+". Move the mouse over a "+gSampleDesc+" and its annotations and gene expression values appear in the panel on the left.",
                 element: document.querySelector('#mpCanvas'),
                 position: 'auto'
               },
               {
-                element: document.querySelector('#tpLeftSidebar'),
-                intro: "To color the cells by an annotation that is not a cell type, select an annotation field from the 'Color by annotation' dropdown or simply click it. You cannot color by fields with hundreds of values, as there are not enough distinct colors.",
+                intro: "The text on the plot shows the cluster names. Move the mouse over a label and all "+gSampleDesc+"s in that cluster grow larger and are highlighted. Click a label to open the list of marker genes for the cluster.",
+                element: document.querySelector('#mpCanvas'),
                 position: 'auto'
               },
               {
-                element: document.querySelector('#tpGeneTab'),
-                intro: "Color by gene: Click a gene from the list of pre-selected dataset genes or search for a gene in the dropdown to color by it.<br>",
-                position: 'auto'
+                element: document.querySelector('#tpButtonInfo'),
+                intro: "Click 'Info &amp; Download' to read this dataset's abstract and methods, find out how to cite it, and download the underlying expression matrix, metadata and other files.",
+                position: 'bottom'
+              },
+              {
+                element: document.querySelector('#tpLeftSidebar'),
+                intro: "Color the "+gSampleDesc+"s by an annotation such as cluster, sample or donor: pick a field from the 'Color by Annotation' dropdown or simply click it. Fields with hundreds of values cannot be used, as there are not enough distinct colors.",
+                position: 'auto',
+                tab: 'meta'
+              },
+              {
+                element: document.querySelector('#tpLeftSidebar'),
+                intro: "Most datasets have more than one layout, e.g. UMAP and t-SNE. Switch between the available layouts here.",
+                position: 'auto',
+                tab: 'layout'
+              },
+              {
+                element: document.querySelector('#tpLeftSidebar'),
+                intro: "Color by gene expression: search for a gene in the box, or click one of the dataset genes listed below it. The "+gSampleDesc+"s are then colored by that gene's expression level.",
+                position: 'auto',
+                tab: 'gene'
               },
               {
                 element: document.querySelector('#tpOpenExprButton'),
-                intro: "Click 'Gene Expression Plots' to make Dotplots.",
+                intro: "Click 'Gene Expression Plots' to compare the expression of genes across clusters as a dot plot or heatmap. Inside that window, 'Multi Gene' mode lets you enter a whole list of genes at once.",
                 position: 'auto'
               },
-              //{
-                //element: document.querySelector('#tpGeneBar'),
-                //intro: "Expression data: when you move the mouse, expression values will be shown here.<br>Click on a gene to color the circles by gene expression level (log'ed).",
-                //position: 'top'
-              //},
+              {
+                element: document.querySelector('#mpIconModeSelect'),
+                intro: "These tools change what the mouse does: move the view, select "+gSampleDesc+"s with a rectangle or a freehand lasso, click to select a whole cluster, or zoom to a rectangle. You can also select using the checkboxes in the legend, or with Edit > Find Cells.",
+                position: 'auto'
+              },
+              {
+                element: document.querySelector('#tpSplitMenu').closest('.dropdown-menu'),
+                openMenu: '#tpSplitMenu',
+                intro: "Use View > Split screen (or press 't') to show two plots side by side, handy for comparing two genes or two layouts of the same "+gSampleDesc+"s.",
+                position: 'right'
+              },
               {
                 element: document.querySelector('#tpLegendBar'),
-                intro: "Click into the legend to select "+gSampleDesc+"s.<br>Click a color to change it or select a palette from the 'Colors' menu.<br>If you need a dataset, send us a link to it. If you have a new dataset in your lab, send it to cells@ucsc.edu so we can add it (hidden until publication).<br>To setup your own cell browser on your own webserver, see 'Help - Setup your own'.",
+                intro: "The legend shows the current colors. Click an entry to select those "+gSampleDesc+"s, click a color swatch to change it, or choose a palette from the 'Colors' menu. When "+gSampleDesc+"s are selected and you color by a gene, a violin plot appears at the bottom right.",
                 position: 'left'
               },
               {
-                element: document.querySelector('#tpLegendBar'),
-                intro: "Select cells with the checkboxes, with the 'select' tool in the toolbar or via Edit > Find Cells. Once cells are selected and you are coloring by a gene, a violin plot is shown in the bottom right.",
-                position: 'auto'
+                element: document.querySelector('#tpOpenDatasetButton'),
+                intro: "Click 'Open...' to browse all the other datasets on this server and load a different one. You can narrow the list by organism, tissue, disease and other categories.",
+                position: 'bottom'
+              },
+              {
+                element: document.querySelector('#tpSaveImage').closest('.dropdown-menu'),
+                openMenu: '#tpSaveImage',
+                intro: "Use File > Download image to save the current plot as a PNG or SVG for a figure or slide. The web address in your browser always reflects the current view, so you can copy it from the address bar to show a colleague exactly what you see.",
+                position: 'right'
+              },
+              {
+                intro: "That's it! If you need a dataset that is not here yet, send us a link. If you have your own data, email it to cells@ucsc.edu and we can add it, hidden until publication. To run your own cell browser on your own webserver, see 'Help > Setup your own'."
               },
             ]);
         intro.start();
@@ -13126,6 +13241,13 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     /* ==== MAIN ==== ENTRY FUNCTION */
     function main(rootMd5) {
+        /* Load the site config first (it may set the login API endpoint), then
+         * start the app. loadClientConf always calls back, even if cb.conf is
+         * absent, so startup is never blocked by a missing config file. */
+        loadClientConf(function() { mainInit(rootMd5); });
+    }
+
+    function mainInit(rootMd5) {
         /* start the data loaders, show first dataset. If in  */
         changeUrl({"nc":null});
         if (redirectIfSubdomain()) {

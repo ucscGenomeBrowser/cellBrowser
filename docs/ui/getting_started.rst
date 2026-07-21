@@ -35,3 +35,6 @@ Try It Now
 Open `cortex-dev.cells.ucsc.edu <https://cortex-dev.cells.ucsc.edu>`_
 to follow along with the examples in this guide. This dataset from
 Nowakowski et al. 2017 demonstrates most Cell Browser features.
+
+For datasets that show off specific features — split screen, spatial data,
+trajectories, and more — see :doc:`examples`.
