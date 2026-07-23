@@ -3240,16 +3240,19 @@ var cellbrowser = function() {
         htmls.push(' &nbsp;<button id="tpAnnotExportBtn">Export to file</button>');
         htmls.push('</div>');
 
-        // sharing via the account system
-        htmls.push('<div style="margin-bottom:6px">');
-        htmls.push('<button id="tpAnnotShareBtn">Share these annotations</button>');
-        htmls.push('<span id="tpAnnotShareHint" style="color:#888;margin-left:8px"></span>');
-        htmls.push('</div>');
-        htmls.push('<div id="tpAnnotShareResult" style="margin-bottom:12px"></div>');
-        htmls.push('<div style="margin-bottom:12px">');
-        htmls.push('<input type="text" id="tpAnnotLoadToken" placeholder="Paste a share link or token" style="width:55%">');
-        htmls.push(' <button id="tpAnnotLoadBtn">Load shared</button>');
-        htmls.push('</div>');
+        // sharing via the account system — only when the login feature is on
+        // (cb.conf showLogin). Otherwise just the file import/export above.
+        if (cbLoginEnabled()) {
+            htmls.push('<div style="margin-bottom:6px">');
+            htmls.push('<button id="tpAnnotShareBtn">Share these annotations</button>');
+            htmls.push('<span id="tpAnnotShareHint" style="color:#888;margin-left:8px"></span>');
+            htmls.push('</div>');
+            htmls.push('<div id="tpAnnotShareResult" style="margin-bottom:12px"></div>');
+            htmls.push('<div style="margin-bottom:12px">');
+            htmls.push('<input type="text" id="tpAnnotLoadToken" placeholder="Paste a share link or token" style="width:55%">');
+            htmls.push(' <button id="tpAnnotLoadBtn">Load shared</button>');
+            htmls.push('</div>');
+        }
 
         htmls.push('<div id="tpAnnotMgrTable"></div>');
 
@@ -3265,29 +3268,33 @@ var cellbrowser = function() {
         showDialogBox(htmls, "Custom Annotations", {height: 420, width: 560, buttons: buttons});
         buildAnnotMgrTable();
 
-        // share button is only meaningful when signed in
-        if (isLoggedIn()) {
-            $('#tpAnnotShareBtn').click(onShareAnnotationsClick);
-        } else {
-            $('#tpAnnotShareBtn').prop('disabled', true);
-            $('#tpAnnotShareHint').text("Sign in to create a shareable link.");
-        }
-        $('#tpAnnotLoadBtn').click(function() {
-            var raw = $('#tpAnnotLoadToken').val().trim();
-            if (!raw) return;
-            // accept a full share URL, a .../shared/<token> path, or a bare token
-            var token = raw;
-            var m = raw.match(/[?&]annotShare=([^&\s]+)/);
-            if (m) token = decodeURIComponent(m[1]);
-            else if (raw.indexOf("/") !== -1) { var parts = raw.split("/"); token = parts[parts.length - 1]; }
-            loadSharedAnnotations(token, function(err) {
-                if (err) { alert(err); return; }
-                buildAnnotMgrTable();
-                var first = getCustomFields()[0];
-                if (first) colorByMetaField(first.name);
-                alert("Loaded shared annotations.");
+        // sharing controls exist only when the login feature is on (see the
+        // matching cbLoginEnabled() guard where they are rendered above).
+        if (cbLoginEnabled()) {
+            // share button is only meaningful when signed in
+            if (isLoggedIn()) {
+                $('#tpAnnotShareBtn').click(onShareAnnotationsClick);
+            } else {
+                $('#tpAnnotShareBtn').prop('disabled', true);
+                $('#tpAnnotShareHint').text("Sign in to create a shareable link.");
+            }
+            $('#tpAnnotLoadBtn').click(function() {
+                var raw = $('#tpAnnotLoadToken').val().trim();
+                if (!raw) return;
+                // accept a full share URL, a .../shared/<token> path, or a bare token
+                var token = raw;
+                var m = raw.match(/[?&]annotShare=([^&\s]+)/);
+                if (m) token = decodeURIComponent(m[1]);
+                else if (raw.indexOf("/") !== -1) { var parts = raw.split("/"); token = parts[parts.length - 1]; }
+                loadSharedAnnotations(token, function(err) {
+                    if (err) { alert(err); return; }
+                    buildAnnotMgrTable();
+                    var first = getCustomFields()[0];
+                    if (first) colorByMetaField(first.name);
+                    alert("Loaded shared annotations.");
+                });
             });
-        });
+        }
 
         $('#tpAnnotExportBtn').click(onExportAnnotationsClick);
         $('#tpAnnotImportBtn').click(function() { $('#tpAnnotImportFile').click(); });
@@ -3384,6 +3391,20 @@ var cellbrowser = function() {
             });
     }
 
+    function cbLoginEnabled() {
+        /* Is the login / account system turned on for this site? It is gated
+         * behind the "showLogin" flag in cb.conf (see loadClientConf), the Cell
+         * Browser analog of the feature flags in the Genome Browser's hg.conf.
+         * The flag defaults to OFF, so the feature stays hidden everywhere
+         * unless a site's cb.conf opts in with e.g. "showLogin=on". This keeps
+         * the still-in-progress login from leaking onto installs (like the main
+         * cells.ucsc.edu site) that have not turned it on. */
+        if (gClientConf === null)
+            return false;   // config not loaded yet: treat as off
+        var v = (gClientConf["showLogin"] || "").trim().toLowerCase();
+        return (v === "on" || v === "true" || v === "1" || v === "yes");
+    }
+
     function cbApiUrl(path) {
         /* build a full URL to an auth/annotation API endpoint */
         var base = (window.cbAnnotApiBase || "");
@@ -3417,6 +3438,7 @@ var cellbrowser = function() {
 
     function checkLoginState(onDone) {
         /* ask the server who we are (once), then update the account menu */
+        if (!cbLoginEnabled()) { gCbUser = false; if (onDone) onDone(false); return; }
         if (gCbUser !== null) { if (onDone) onDone(gCbUser); return; }
         $.ajax({
             url: cbApiUrl("/api/auth/me"),
@@ -4022,16 +4044,20 @@ var cellbrowser = function() {
 
        htmls.push('</ul>'); // navbar-nav
 
-       // account menu, right-aligned. Contents are filled in by refreshAuthUi()
-       // once the login state is known; default shows "Sign in".
-       htmls.push('<ul class="nav navbar-nav navbar-right">');
-       htmls.push('<li id="tpAccountMenu" class="dropdown">');
-       htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false"><span id="tpAccountLabel">Sign in</span></a>');
-       htmls.push('<ul class="dropdown-menu" id="tpAccountDropdown">');
-       htmls.push('<li><a href="#" id="tpSignInLink">Sign in / Create account&hellip;</a></li>');
-       htmls.push('</ul>'); // account dropdown-menu
-       htmls.push('</li>'); // account dropdown container
-       htmls.push('</ul>'); // navbar-right
+       // account menu, right-aligned. Only shown when the login feature is
+       // enabled in cb.conf (showLogin); otherwise the account system is hidden
+       // entirely. Contents are filled in by refreshAuthUi() once the login
+       // state is known; default shows "Sign in".
+       if (cbLoginEnabled()) {
+           htmls.push('<ul class="nav navbar-nav navbar-right">');
+           htmls.push('<li id="tpAccountMenu" class="dropdown">');
+           htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false"><span id="tpAccountLabel">Sign in</span></a>');
+           htmls.push('<ul class="dropdown-menu" id="tpAccountDropdown">');
+           htmls.push('<li><a href="#" id="tpSignInLink">Sign in / Create account&hellip;</a></li>');
+           htmls.push('</ul>'); // account dropdown-menu
+           htmls.push('</li>'); // account dropdown container
+           htmls.push('</ul>'); // navbar-right
+       }
 
        htmls.push('</div>'); // container
        htmls.push('</nav>'); // navbar
@@ -4069,10 +4095,13 @@ var cellbrowser = function() {
 
 
        // account menu. The dropdown items are rebuilt by refreshAuthUi(), so
-       // these are delegated handlers rather than direct binds.
-       $('#tpAccountMenu').on('click', '#tpSignInLink', function(ev) { ev.preventDefault(); showLoginDialog("signin"); });
-       $('#tpAccountMenu').on('click', '#tpSignOutLink', function(ev) { ev.preventDefault(); cbSignOut(); });
-       refreshAuthUi();  // reflect whatever we already know; checkLoginState() refines it
+       // these are delegated handlers rather than direct binds. Only wired up
+       // when the login feature is enabled (the menu is not in the DOM otherwise).
+       if (cbLoginEnabled()) {
+           $('#tpAccountMenu').on('click', '#tpSignInLink', function(ev) { ev.preventDefault(); showLoginDialog("signin"); });
+           $('#tpAccountMenu').on('click', '#tpSignOutLink', function(ev) { ev.preventDefault(); cbSignOut(); });
+           refreshAuthUi();  // reflect whatever we already know; checkLoginState() refines it
+       }
 
        $('#tpRenameClusters').click( onRenameClustersClick );
        $('#tpCustomAnnotsMgr').click( onCustomAnnotationsManagerClick );
@@ -7571,12 +7600,16 @@ var cellbrowser = function() {
 
         loadCustomFieldsFromStorage();
 
-        // annotation sync: a share link wins; otherwise pull the user's own copy
-        var annotShareToken = getVar("annotShare");
-        if (annotShareToken)
-            loadSharedAnnotations(annotShareToken, function(err) { if (err) alert(err); });
-        else
-            syncCustomFieldsFromServer();
+        // annotation sync (account system) — only when login is enabled in
+        // cb.conf. A share link in the URL wins; otherwise pull the user's own
+        // copy. syncCustomFieldsFromServer() is itself a no-op when logged out.
+        if (cbLoginEnabled()) {
+            var annotShareToken = getVar("annotShare");
+            if (annotShareToken)
+                loadSharedAnnotations(annotShareToken, function(err) { if (err) alert(err); });
+            else
+                syncCustomFieldsFromServer();
+        }
 
         cartLoad(db);
         if (getVar("exprGene")) {

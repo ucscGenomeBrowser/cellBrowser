@@ -17,3 +17,12 @@
 #            does not run its own backend, e.g.:
 #              annotApiBase=https://cells.ucsc.edu
 annotApiBase=
+
+# Show the login / account system in the web frontend (the sign-in menu, plus
+# saving and sharing custom annotations). This feature is still being finished,
+# so it is gated here like a Genome Browser hg.conf feature flag and defaults to
+# OFF. Turn it on only on sites where it is ready to be seen; leave it off (or
+# absent) everywhere else so the unfinished login does not appear.
+#   on / true / 1 / yes       = show the login UI
+#   off / anything / absent   = hide it
+showLogin=off
