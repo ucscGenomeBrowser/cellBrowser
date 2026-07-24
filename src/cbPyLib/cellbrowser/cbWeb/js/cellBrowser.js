@@ -10418,7 +10418,7 @@ var cellbrowser = function() {
 
         buildGeneCombo(htmls, "tpGeneCombo", 0, metaBarWidth-10);
 
-        htmls.push('<div id="splitJoinDiv" style="display:none"><input class="form-check-input" type="checkbox" id="splitJoinBox" name="splitJoin" value="splitJoin" /> <label for="splitJoinBox">Show on both sides</label></div>');
+        htmls.push('<div id="splitJoinDiv" style="display:none;padding-left:8px"><input class="form-check-input" type="checkbox" id="splitJoinBox" name="splitJoin" value="splitJoin" /> <label for="splitJoinBox">Show on both sides</label></div>');
 
         if (db.conf.atacSearch)
             buildPeakList(htmls);
