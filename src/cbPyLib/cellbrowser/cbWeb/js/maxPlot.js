@@ -2528,9 +2528,27 @@ function MaxPlot(div, top, left, width, height, args) {
         // canvas sizes no longer compounds the extension.
         let arZr = Object.assign({}, self.port.zoomRange);
         self.scaleBackground(self.background, self.port.initZoom, arZr);
-        // Pass keepAspectRatio only when there is no background image — scaleBackground already
-        // handles the aspect-ratio correction for datasets that have one.
+        // For keepAspectRatio datasets without a background image, extend the
+        // underutilized canvas dimension to show more data rather than leaving white
+        // margins — mirrors what scaleBackground does for image-backed datasets.
         const keepAR = self.coords.keepAspectRatio && !self.background;
+        if (keepAR) {
+            const viewW = arZr.maxX - arZr.minX;
+            const viewH = arZr.maxY - arZr.minY;
+            if (viewW / w > viewH / h) {
+                // X is limiting (landscape data in portrait canvas): expand Y view
+                const newViewH = viewW * h / w;
+                const midY = (arZr.minY + arZr.maxY) / 2;
+                arZr.minY = midY - newViewH / 2;
+                arZr.maxY = midY + newViewH / 2;
+            } else {
+                // Y is limiting: expand X view
+                const newViewW = viewH * w / h;
+                const midX = (arZr.minX + arZr.maxX) / 2;
+                arZr.minX = midX - newViewW / 2;
+                arZr.maxX = midX + newViewW / 2;
+            }
+        }
         self.coords.px = scaleCoords(self.coords.orig, borderMargin, arZr, w, h, self.coords.aspectRatio, keepAR);
         if (self.coords.lines)
             self.coords.pxLines = scaleLines(self.coords.lines, arZr, self.canvas.width, self.canvas.height);
