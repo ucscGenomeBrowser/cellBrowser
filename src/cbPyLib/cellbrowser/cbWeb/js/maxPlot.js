@@ -3158,7 +3158,9 @@ function MaxPlot(div, top, left, width, height, args) {
                 self.childPlot.calcRadius();
             } else {
                 // Canvas-2D: reset child zoomRange and recompute its background/coord scaling.
-                copyObj(self.port.initZoom, self.childPlot.port.zoomRange);
+                // Use the child's own initZoom, not the parent's — in split-screen datasets
+                // the two panels can have different coordinate systems (e.g. UMAP vs Spatial).
+                copyObj(self.childPlot.port.initZoom, self.childPlot.port.zoomRange);
                 self.childPlot.scaleData();
             }
         }
