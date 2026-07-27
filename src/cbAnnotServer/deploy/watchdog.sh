@@ -4,16 +4,22 @@
 #
 # It checks the gunicorn health endpoint and (re)starts the service if it is
 # not answering. Run it once a minute from the deploy user's crontab, and once
-# at boot so a reboot brings the service back:
+# at boot so a reboot brings the service back. Pass the runtime environment
+# (secret key, DB URI, cookie flags, log/pid paths) via CBANNOT_ENV_FILE, which
+# this script sources on startup; keep that file non-world-readable:
 #
-#   * * * * *   /ABSOLUTE/PATH/src/cbAnnotServer/deploy/watchdog.sh >> /var/log/cbAnnotServer/watchdog.log 2>&1
-#   @reboot     /ABSOLUTE/PATH/src/cbAnnotServer/deploy/watchdog.sh >> /var/log/cbAnnotServer/watchdog.log 2>&1
-#
-# Set the same runtime environment here that the systemd unit would set
-# (CBANNOT_SECRET_KEY, CBANNOT_DATABASE_URI, CBANNOT_COOKIE_SECURE, ...), e.g. by
-# sourcing an env file that is not world-readable:
-#   set -a; . /etc/cbAnnotServer.env; set +a
+#   * * * * *  CBANNOT_ENV_FILE=/path/cbAnnot.env /ABSOLUTE/PATH/deploy/watchdog.sh >> /path/logs/watchdog.log 2>&1
+#   @reboot    CBANNOT_ENV_FILE=/path/cbAnnot.env /ABSOLUTE/PATH/deploy/watchdog.sh >> /path/logs/watchdog.log 2>&1
 set -uo pipefail
+
+# Optionally source a runtime env file (secrets, DB URI, cookie flags, log/pid
+# paths). Point CBANNOT_ENV_FILE at a non-world-readable file; missing is fine.
+if [ -n "${CBANNOT_ENV_FILE:-}" ] && [ -f "${CBANNOT_ENV_FILE}" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "${CBANNOT_ENV_FILE}"
+    set +a
+fi
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
