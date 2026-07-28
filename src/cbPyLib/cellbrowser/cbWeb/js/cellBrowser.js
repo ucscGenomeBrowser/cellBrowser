@@ -695,6 +695,7 @@ var cellbrowser = function() {
         "hca_dcp" : "Human Cell Atlas Data Portal",
         "cirm_dataset" : "California Institute of Regenerative Medicine Dataset",
         "zenodo" : "Zenodo",
+        "psypheno" : "SSPsyGene",
     };
 
     let descUrls = {
@@ -714,6 +715,7 @@ var cellbrowser = function() {
         "arrayexpress" : "https://www.ebi.ac.uk/arrayexpress/experiments/",
         "hca_dcp" : "https://data.humancellatlas.org/explore/projects/",
         "zenodo" : "https://doi.org/",
+        "psypheno" : "https://psypheno.gi.ucsc.edu/full-datasets?select=",
     }
 
     function htmlAddLink(htmls, desc, key, linkLabel) {
@@ -1092,6 +1094,7 @@ var cellbrowser = function() {
         htmlAddLink(htmls, desc, "ena_project");
         htmlAddLink(htmls, desc, "hca_dcp");
         htmlAddLink(htmls, desc, "zenodo");
+        htmlAddLink(htmls, desc, "psypheno");
 
         if (desc.urls) {
             for (let key in desc.urls)
@@ -1320,15 +1323,16 @@ var cellbrowser = function() {
                          'diseases', 'lab', 'submitter', 'authors', 'institution',
                          'geo_series', 'arrayexpress', 'sra_study', 'bioproject',
                          'ega_study', 'ega_dataset', 'hca_dcp', 'zenodo', 'dbgap',
-                         'pmid', 'pmcid', 'doi', 'tags'],
+                         'pmid', 'pmcid', 'doi', 'psypheno', 'tags'],
                 storeFields: ['name', 'shortLabel', 'md5', 'parent', 'title', 'authors', 'institution', 'lab', 'submitter', 'paper',
                              'geo_series', 'pmid', 'pmcid', 'doi',
                              'arrayexpress', 'sra_study', 'bioproject', 'ega_study', 'ega_dataset', 'hca_dcp', 'zenodo', 'dbgap',
-                             'snippet'],
+                             'psypheno', 'snippet'],
                 searchOptions: {
                     boost: { title: 3, shortLabel: 3,
                              geo_series: 2, arrayexpress: 2, sra_study: 2, bioproject: 2,
                              ega_study: 2, ega_dataset: 2, hca_dcp: 2, zenodo: 2, dbgap: 2,
+                             psypheno: 2,
                              pmid: 2, pmcid: 2, doi: 2 },
                     fuzzy:  0.2,
                     prefix: true,
@@ -1405,6 +1409,7 @@ var cellbrowser = function() {
             ['hca_dcp',      'HCA'],
             ['zenodo',       'Zenodo'],
             ['dbgap',        'dbGaP'],
+            ['psypheno',     'SSPsyGene'],
         ];
         for (var i = 0; i < accessions.length; i++) {
             var field = accessions[i][0], label = accessions[i][1];

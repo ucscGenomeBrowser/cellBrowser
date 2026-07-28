@@ -5966,6 +5966,7 @@ def _collectSearchDocs(conf, outDir, docs):
             "hca_dcp":      _descFieldAsStr(desc.get("hca_dcp")),
             "zenodo":       _descFieldAsStr(desc.get("zenodo")),
             "dbgap":        _descFieldAsStr(desc.get("dbgap")),
+            "psypheno":     _descFieldAsStr(desc.get("psypheno")),
             "authors":      authors,
             "institution":  institution,
             "lab":          _descFieldAsStr(desc.get("lab")) or dsConf.get("lab", ""),
