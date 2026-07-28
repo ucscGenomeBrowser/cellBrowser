@@ -1999,6 +1999,7 @@ var cellbrowser = function() {
         renderer.unhideAll();
         renderer.drawDots();
         $("#tpShowAll").hide();
+        if (!renderer.hasSelected()) $("#tpSelBar").hide();
         updateCellCount();
     }
 
@@ -2034,24 +2035,34 @@ var cellbrowser = function() {
 
         if (renderer.hasSelected()) {
             $(".tpSelectButton").show();
+            $("#tpSelBar").show();
         } else {
             $(".tpSelectButton").hide();
+            if (hiddenCount === 0) $("#tpSelBar").hide();
         }
         updateCellCount();
     }
 
     function buildSelectActions() {
-        /* add buttons for hide selected / unselected to ribbon bar */
+        /* add floating selection-action bar above canvas with hide/show buttons */
         if (getById("tpHideSel")!==null)
             return;
 
-        let htmls = [];
-        htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Hide selected cells" id="tpHideSel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Hide selected</button>');
-        htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Hide all unselected cells" id="tpOnlySel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Only show selected</button>');
-        htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Show all cells that were hidden before" id="tpShowAll" type="button" class="gradientBackground ui-button ui-widget ui-corner-all" data-placement="bottom">Show all</button>');
-        htmls.push('<span id="tpSelSpacer" style="display:none; margin-right:6px"></span>');
-        //htmls.push('');
-        getById('tpToolBar').insertAdjacentHTML('afterbegin', htmls.join(""));
+        const bar = document.createElement('div');
+        bar.id = 'tpSelBar';
+        bar.style.display = 'none';
+        bar.innerHTML =
+            '<button title="Hide selected cells" id="tpHideSel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Hide selected</button>' +
+            '<button title="Hide all unselected cells" id="tpOnlySel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Only show selected</button>' +
+            '<button title="Show all cells that were hidden before" id="tpShowAll" type="button" class="gradientBackground ui-button ui-widget ui-corner-all" data-placement="bottom">Show all</button>';
+        document.body.appendChild(bar);
+        // Position bar centered over the canvas, just below the toolbar
+        const toolBarRect = getById('tpToolBar').getBoundingClientRect();
+        const canvLeft = metaBarWidth + metaBarMargin;
+        const canvRight = window.innerWidth - legendBarWidth;
+        bar.style.top = (toolBarRect.bottom + 6) + 'px';
+        bar.style.left = Math.round((canvLeft + canvRight) / 2) + 'px';
+        bar.style.transform = 'translateX(-50%)';
         getById('tpHideSel').addEventListener('click', onHideSelClick);
         getById('tpOnlySel').addEventListener('click', onOnlySelClick);
         getById('tpShowAll').addEventListener('click', onShowAllClick);
