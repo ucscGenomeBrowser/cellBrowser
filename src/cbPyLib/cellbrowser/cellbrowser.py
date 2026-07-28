@@ -4075,6 +4075,10 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
             coordInfo["annots"] = inCoordInfo["annots"]
         if "colorOnMeta" in inCoordInfo:
             coordInfo["colorOnMeta"] = inCoordInfo["colorOnMeta"]
+        if "keepAspectRatio" in inCoordInfo:
+            coordInfo["keepAspectRatio"] = inCoordInfo["keepAspectRatio"]
+        elif "spatial" in basename(coordFname).lower() or "spatial" in coordLabel.lower():
+            coordInfo["keepAspectRatio"] = True
 
         copyBackgroundImages(inDir, inCoordInfo, coordInfo, outDir)
 
@@ -4876,7 +4880,7 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         # they are just here for backwards-compatibility and will eventually get removed
         "body_parts", "organisms", "diseases", "projects", "life_stages", "domains", "sources", "assays",
         # facets are taking their place now
-        "facets", "multiModal", "showHeatmap",
+        "facets", "multiModal", "showHeatmap", "perturbationField",
         ]:
         copyConf(inConf, outConf, tag)
 
@@ -5962,6 +5966,7 @@ def _collectSearchDocs(conf, outDir, docs):
             "hca_dcp":      _descFieldAsStr(desc.get("hca_dcp")),
             "zenodo":       _descFieldAsStr(desc.get("zenodo")),
             "dbgap":        _descFieldAsStr(desc.get("dbgap")),
+            "psypheno":     _descFieldAsStr(desc.get("psypheno")),
             "authors":      authors,
             "institution":  institution,
             "lab":          _descFieldAsStr(desc.get("lab")) or dsConf.get("lab", ""),

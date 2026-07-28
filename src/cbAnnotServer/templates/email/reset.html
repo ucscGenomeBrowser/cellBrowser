@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <h2>Reset your Cell Browser password</h2>
+  <p>Hi{% if user.display_name %} {{ user.display_name }}{% endif %},</p>
+  <p>A password reset was requested for your Cell Browser account.
+     Click the link below to set a new password. The link expires in 1 hour.</p>
+  <p><a href="{{ reset_url }}">{{ reset_url }}</a></p>
+  <p style="color: #666; font-size: 12px;">If you did not request this, you can ignore this email.</p>
+</body>
+</html>

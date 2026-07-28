@@ -15,7 +15,7 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 
 #tpExprView {
         position: absolute;
-        z-index: 100;
+        z-index: 600;
         display: block;
         background-color: white;
         top: 1%;
@@ -60,6 +60,19 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 }
 
 /* Equalize font size — Selectize defaults to 14px, Chosen to 13px */
+#tpExprViewHeader .chosen-container {
+        min-width: 120px;
+}
+
+/* Open dropdown: don't wrap option text; let the drop expand to content width */
+#tpExprViewHeader .chosen-results li {
+        white-space: nowrap;
+}
+#tpExprViewHeader .chosen-drop {
+        width: max-content;
+        min-width: 100%;
+}
+
 #tpExprViewHeader .chosen-single {
         font-size: 14px;
 }
@@ -88,29 +101,20 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         border-color: #888 transparent transparent transparent;
 }
 
-/* Replace Chosen sprite arrow globally with matching CSS triangle */
-.chosen-container-single .chosen-single div b {
-        background: none !important;
-        position: relative;
-}
-.chosen-container-single .chosen-single div b::after {
-        content: '';
-        position: absolute;
-        top: 50%;
-        right: 6px;
-        width: 0;
-        height: 0;
-        margin-top: -2.5px;
-        border-style: solid;
-        border-width: 5px 4px 0 4px;
-        border-color: #888 transparent transparent transparent;
-}
 
 #tpGeneExprMetaLabel {
         margin-left: 6px;
         margin-right: 6px;
         margin-bottom: 0;
 }
+
+.tpExprHeaderRow { display: flex; align-items: center; gap: 8px; flex-basis: 100%; }
+.tpExprFilterWrap { position: relative; display: inline-block; }
+.tpExprFilterBtn { height: 25px; font-size: 13px; border: 1px solid #ccc; background: white; cursor: pointer; padding: 0 8px; border-radius: 3px; }
+.tpExprFilterPanel { position: absolute; top: 27px; left: 0; background: white; border: 1px solid #ccc; border-radius: 3px; z-index: 10001; padding: 4px 8px; max-height: 220px; overflow-y: auto; min-width: 150px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); }
+.tpExprFilterItem label { display: block; padding: 1px 0; cursor: pointer; white-space: nowrap; font-size: 13px; }
+.tpExprFilterAll { border-bottom: 1px solid #eee; margin-bottom: 4px; padding-bottom: 3px; font-size: 13px; }
+#tpGeneExprSubsplitLabel { margin-left: 6px; margin-right: 6px; margin-bottom: 0; }
 
 #tpExprViewPlot {
         display:flex;
@@ -250,6 +254,9 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 #tpButtonInfo { height: 24px; border-radius: 4px; padding-top: 3px }
 .tpDialogInput { margin-left: 12px; margin-top: 5px; margin-bottom: 12px; }
 #tpDialog { z-index: 1001; }
+/* Ensure jQuery UI dialogs always appear above the toolbar (z-index 500) and canvas */
+.ui-dialog { z-index: 1010 !important; }
+.ui-widget-overlay { z-index: 1005 !important; }
 
 .tpIconButton { 
         padding: 1px 2px 1px 2px; 
@@ -512,7 +519,7 @@ input[type=checkbox], input[type=radio] {
 
 .tpMetaBox { font-size: 13px; cursor:default; overflow:hidden }
 .tpConstantFields { font-size: 10px; color: #888; padding: 3px 2px 5px 2px; border-bottom: 1px solid #ddd; margin-bottom: 4px; line-height: 1.4em; word-break: break-word; }
-#tpCellCount { position: fixed; bottom: 6px; left: 50%; transform: translateX(-50%); font-size: 11px; color: #555; background: rgba(255,255,255,0.75); padding: 2px 7px; border-radius: 3px; pointer-events: none; z-index: 10; }
+#tpCellCount { float: right; font-size: 12px; color: inherit; pointer-events: none; margin-right: 6px; line-height: 13px; }
 .tpMetaHover { 
         color: white; 
         background-color: #333 !important;
@@ -582,6 +589,9 @@ button { line-height: 12px }
 .sp-preview { height: 17px; width: 18px; border: none }
 .sp-dd { line-height: 11px; display:none }
 
+/* add breathing room above the menu bar */
+#tpMenuBar { padding-top: 4px; }
+
 /* make bootstrap's navbar smaller */
 .navbar-xs { min-height:28px; height: 28px; }
 .navbar-xs .navbar-brand{ padding: 0px 12px;font-size: 16px;line-height: 28px; }
@@ -599,8 +609,9 @@ button { line-height: 12px }
     margin-bottom: 0;
 }
 
-#tpToolBar { margin-left: 5px; margin-top: 1px; display: flex; align-items: center; }
+#tpToolBar { margin-left: 5px; margin-top: 1px; display: flex; align-items: center; z-index: 500; overflow: visible; }
 #tpToolBar button, #tpToolBar a.ui-button { margin-right: 0; vertical-align: middle; }
+#tpSelBar { position: fixed; display: flex; gap: 6px; padding: 5px 8px; background: rgba(255,255,255,0.92); border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); z-index: 600; }
 #tpClusterMarkersBtn { padding-left: 8px; padding-right: 22px; position: relative; }
 #tpClusterMarkersBtn::after { content: "\25BE"; position: absolute; right: 7px; top: 50%; transform: translateY(-50%); line-height: 1; }
 
@@ -638,10 +649,20 @@ button { line-height: 12px }
 
 
 /* same for select2 */
-.select2-container .select2-selection--single { 
+.select2-container .select2-selection--single {
         border-radius: 0;
-        background: linear-gradient(#fff 20%,#f6f6f6 50%,#eee 52%,#f4f4f4 100%);
-        padding: 2px
+        background: none;
+        background-color: #f6f6f6;
+        box-shadow: none;
+        height: 25px;
+        padding: 0;
+}
+.select2-container--default .select2-selection--single .select2-selection__rendered {
+        line-height: 23px;
+        padding-left: 6px;
+}
+.select2-container--default .select2-selection--single .select2-selection__arrow {
+        height: 23px;
 }
 /* and selectize */
 .selectize-input {
@@ -675,6 +696,10 @@ button { line-height: 12px }
 /* make bootstrap's navbar show menus on mouse hover */
 /* ul.nav li.dropdown:hover > ul.dropdown-menu { display: block; } */
 
+/* highlight for the one menu item the interactive tutorial is describing.
+ * translucent tint + inset border so it reads on both light and dark menus. */
+.introMenuHilite { background-color: rgba(245, 158, 11, 0.18) !important; box-shadow: inset 0 0 0 2px #f59e0b !important; }
+
 /* flying-sheep's suggestions */
 .ui-dialog-titlebar { border: none }
 a.list-group-item { background-color: #EEE }
@@ -695,6 +720,24 @@ a.list-group-item { background-color: #EEE }
 */
 
 .chosen-container-single .chosen-single { box-shadow: none; background: none; background-color: #f6f6f6 }
+
+/* Replace Chosen's sprite arrow globally with a CSS triangle */
+.chosen-container-single .chosen-single div b {
+        background: none !important;
+        position: relative;
+}
+.chosen-container-single .chosen-single div b::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        right: 6px;
+        width: 0;
+        height: 0;
+        margin-top: -2.5px;
+        border-style: solid;
+        border-width: 5px 4px 0 4px;
+        border-color: #888 transparent transparent transparent;
+}
 
 /* ----- FOR SORTTABLE.JS ------- */
 th[role=columnheader]:not(.no-sort) {

@@ -6,9 +6,9 @@ or comma-separated (csv) format text files. The steps on this page assume that y
 have already gone through the process of clustering your cells.
 
 The files you will need
-^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
 
-You will need the first three files described below in tsv or csv format, the fourth is optional::
+You will need the first three files described below in tsv or csv format, the fourth is optional:
 
 1. **Expression matrix**: one row per gene and one column per cell, ideally gzipped. The first column
    must be the gene identifier or gene symbol, or ideally
@@ -61,7 +61,7 @@ endings if necessary with mac2unix or dos2unix::
     file *.txt *.csv *.tsv *.tab
 
 Setting up your ``cellbrowser.conf``
-^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 After you have all of these files in place, go to the directory go to the
 directory containing all of these files and run the following command to

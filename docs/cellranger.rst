@@ -1,5 +1,5 @@
 With Cell Ranger
-===============
+================
 
 Find the ``cellranger`` **OUT** directory, it should contain an ``analysis`` directory and
 a subdirectory ``filtered_gene_bc_matrices``. The **OUT**

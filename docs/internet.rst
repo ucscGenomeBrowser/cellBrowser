@@ -2,7 +2,7 @@ Putting it onto the internet
 ----------------------------
 
 Basics
-^^^^
+^^^^^^
 
 Deploying your cell browser on the web is as simple as copying the output of ``cbBuild``,
 including all files and directories, into to an empty directory on a web 
@@ -19,7 +19,7 @@ Unfortunately, online backup solutions such as Dropbox, Box.com, iCloud, OneDriv
 Drive will not work; they are intentionally designed to not be usable as web servers.
 
 Adding multiple datasets to your cell browser
-^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To add more datasets to the same cell browser, navigate to the other data directories and run cbBuild
 there with the same output directory. cbBuild will then modify the index.html
@@ -29,7 +29,7 @@ data for each individual dataset will be copied into subdirectories under this
 html directory, one directory per dataset.
 
 Specifying a default output directory for ``cbBuild``
-^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The output directory for ``cbBuild`` can be controlled using environment or .conf variables. 
 This allows you to run ``cbBuild`` in a directory without needing to specify an output
@@ -51,7 +51,7 @@ and assign a value to htmlDir::
 Again, replace ``/var/www`` with your own dorectory. 
 
 Notes on setting up a permanent cell browser on a local machine
-^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The port option, e.g. ``-p 8888``, is optional. When this option is specified,
 it will start up its own web server. If you are running this on your local machine,

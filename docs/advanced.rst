@@ -2,7 +2,7 @@ Advanced Topics
 ---------------
 
 Cell browser updates and web server configuration
-^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 New features and bug fixes are being added to the UCSC Cell Browser software all the time. You can update the javascript files and re-create the index.html using the command line tool ``cbUpgrade``. You need to use the ``--code`` option and the ``-o`` to specify the output directory, e.g. 
 ``cbUpgrade --code -o /var/www/cellbrowser/``.
@@ -14,7 +14,7 @@ For Apache, byte-range requests are enabled by default but may need to be
 activated in some installations of nginx.
 
 Default output directory for building cell browsers
-^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The html directory can be defined in all tools with the option ``-o``. If that
 becomes cumbersome, you can also permanently set it through the environment
@@ -23,7 +23,7 @@ variable CBOUT (e.g. in your ``~/.bashrc``) or by adding a line like this to ``~
     htmlDir = "/data/www/cb/"
 
 Google Analytics
-^^^^
+^^^^^^^^^^^^^^^^
 
 To add Google Analytics tracking to your cell browser, create a file ``.cellbrowser`` in your home directory
 and add a line like this::
@@ -34,7 +34,7 @@ Then run ``cbBuild`` or ``cbUpgrade`` to rebuild your index.html, after which it
 should contain your Google Analytics tracking code.
 
 Various ``cellbrowser.conf`` statements
-^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 For a reference of all possible ``cellbrowser.conf`` statements, see the `example conf  <https://github.com/maximilianh/cellBrowser/blob/master/src/cbPyLib/cellbrowser/sampleConfig/cellbrowser.conf>`_
 

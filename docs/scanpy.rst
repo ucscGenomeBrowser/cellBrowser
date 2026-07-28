@@ -42,7 +42,7 @@ cell browser from the output::
     cbBuild -o ~/public_html/cb -p 8888
 
 Changing the defaults using ``scanpy.conf``
-"""""
+"""""""""""""""""""""""""""""""""""""""""""
 
 This set of steps will run a basic Scanpy pipeline with the default settings. You can modify the settings
 for Scanpy by creating a ``scanpy.conf``::
@@ -53,7 +53,7 @@ You can edit the settings in ``scanpy.conf`` and re-run the ``cbScanpy`` command
 Scanpy output using these new settings.
 
 Convert a Scanpy ``h5ad``
-^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If you have run Scanpy and have an output ``h5ad`` file, you can import it 
 into a cell browser using the command ``cbImportScanpy``. 

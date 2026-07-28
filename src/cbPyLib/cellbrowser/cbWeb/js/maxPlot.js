@@ -162,7 +162,11 @@ function MaxPlot(div, top, left, width, height, args) {
         }
 
         if (this.childPlot) {
-            this.activeBorderDiv.style.border = `3px solid ${this.isLight() ? "black" : "white"}`;
+            const _b = `3px solid ${this.isLight() ? "black" : "white"}`;
+            this.activeBorderDiv.style.borderTop    = _b;
+            this.activeBorderDiv.style.borderRight  = _b;
+            this.activeBorderDiv.style.borderBottom = _b;
+            this.activeBorderDiv.style.borderLeft   = _b;
             this.childPlot.setLightMode(mode);
         }
 
@@ -1061,7 +1065,7 @@ function MaxPlot(div, top, left, width, height, args) {
         zoomButton.addEventListener ('click', function() { self.activateMode("zoom")}, false);
 
         var lassoButton = createButton(bSize, bSize, "mpIconModeLasso",
-            "Lasso select mode: draw a freehand shape to select cells",
+            "Lasso select mode: draw a freehand shape to select cells. Shift+draw to add regions to selection.",
             null, "img/lasso.png", 0, 4, true);
         lassoButton.addEventListener('click', function() { self.activateMode("lasso"); }, false);
 
@@ -1093,7 +1097,9 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     function setStatus(text) {
+        var extra = self.statusLine.querySelector('#tpCellCount');
         self.statusLine.innerHTML = text;
+        if (extra) self.statusLine.appendChild(extra);
     }
 
     function addStatusLine(top, left, width, height) {
@@ -1306,13 +1312,12 @@ function MaxPlot(div, top, left, width, height, args) {
      * @param {*} aspectRatio 
      * @returns 
      */
-    function scaleCoords(coords, borderSize, zoomRange, winWidth, winHeight, annots, aspectRatio) {
-    /* scale list of [x (float),y (float)] to integer pixels on screen and
-     * annots is an array with on-screen annotations in the format (x, y,
-     * otherInfo) that is also scaled.  return [array of (x (int), y (int)),
-     * scaled annots array]. Take into account the current zoom range.      *
+    function scaleCoords(coords, borderSize, zoomRange, winWidth, winHeight, annots, keepAspectRatio) {
+    /* scale list of [x (float),y (float)] to integer pixels on screen.
      * Canvas origin is top-left, but usually plotting origin is bottom-left,
-     * so also flip the Y axis. sets invisible coords to HIDCOORD
+     * so also flip the Y axis. sets invisible coords to HIDCOORD.
+     * When keepAspectRatio is true, uses equal pixels-per-data-unit on both
+     * axes (centering the data) so tissue shapes are not distorted.
      * */
         if (coords===null)
             return;
@@ -1325,18 +1330,20 @@ function MaxPlot(div, top, left, width, height, args) {
         var spanX = maxX - minX;
         var spanY = maxY - minY;
 
-        //if (aspectRatio) {
-            //xMult = Math.min(xMult, yMult);
-            //yMult = Math.min(xMult, yMult);
-            //let ratio = spanX / spanY;
-            //spanY = spanY*0.5;
-        //}
-
         winWidth = winWidth-(2*borderSize);
         winHeight = winHeight-(2*borderSize);
 
-        var xMult = winWidth / spanX;
-        var yMult = winHeight / spanY;
+        var xMult, yMult, xOffset = 0, yOffset = 0;
+        if (keepAspectRatio) {
+            const mult = Math.min(winWidth / spanX, winHeight / spanY);
+            xMult = mult;
+            yMult = mult;
+            xOffset = Math.round((winWidth  - spanX * mult) / 2);
+            yOffset = Math.round((winHeight - spanY * mult) / 2);
+        } else {
+            xMult = winWidth / spanX;
+            yMult = winHeight / spanY;
+        }
 
         // transform from data floats to screen pixel coordinates
         var pixelCoords = new Uint16Array(coords.length);
@@ -1349,10 +1356,10 @@ function MaxPlot(div, top, left, width, height, args) {
                 pixelCoords[2*i+1] = HIDCOORD;
             }
             else {
-                var xPx = Math.round((x-minX)*xMult)+borderSize;
+                var xPx = Math.round((x-minX)*xMult) + borderSize + xOffset;
                 // our y-axis is flipped compared to matplotlib/R, so we do winHeight - pixel value
                 // to make sure that our plot looks like the figures in the papers
-                var yPx = winHeight - Math.round((y-minY)*yMult)+borderSize;
+                var yPx = winHeight - yOffset - Math.round((y-minY)*yMult) + borderSize;
                 pixelCoords[2*i] = xPx;
                 pixelCoords[2*i+1] = yPx;
             }
@@ -1401,18 +1408,28 @@ function MaxPlot(div, top, left, width, height, args) {
         const spanX = maxX - minX;
         const spanY = maxY - minY;
 
-        // Scale coordiantes to fit [-1, 1] (accounting for the radius)
+        // Scale coordinates to fit [-1, 1] (accounting for the radius)
         const margin = self.port.radius;
         const canvas = self.canvas;
-        const trueHalfSpanX = 1 - ((2 * margin) / canvas.width);
-        const trueHalfSpanY = 1 - ((2 * margin) / canvas.height);
         let scaledCoords = new Float32Array(coords.length);
-        for(let i = 0; i < coords.length / 2; i++) {
-            const x = coords[i*2];
-            const y = coords[i*2 + 1];
-
-            scaledCoords[2*i] = ((x - minX) / (spanX / 2) - 1) * trueHalfSpanX;
-            scaledCoords[2*i+1] = ((y - minY) / (spanY / 2) - 1) * trueHalfSpanY;
+        if (self.coords && self.coords.keepAspectRatio) {
+            // Use equal pixels-per-data-unit on both axes so shapes aren't distorted
+            const ppu = Math.min((canvas.width - 2*margin) / spanX, (canvas.height - 2*margin) / spanY);
+            const centerX = (minX + maxX) / 2;
+            const centerY = (minY + maxY) / 2;
+            for(let i = 0; i < coords.length / 2; i++) {
+                scaledCoords[2*i]   = (coords[i*2]   - centerX) * ppu / (canvas.width  / 2);
+                scaledCoords[2*i+1] = (coords[i*2+1] - centerY) * ppu / (canvas.height / 2);
+            }
+        } else {
+            const trueHalfSpanX = 1 - ((2 * margin) / canvas.width);
+            const trueHalfSpanY = 1 - ((2 * margin) / canvas.height);
+            for(let i = 0; i < coords.length / 2; i++) {
+                const x = coords[i*2];
+                const y = coords[i*2 + 1];
+                scaledCoords[2*i]   = ((x - minX) / (spanX / 2) - 1) * trueHalfSpanX;
+                scaledCoords[2*i+1] = ((y - minY) / (spanY / 2) - 1) * trueHalfSpanY;
+            }
         }
 
         if(DEBUG) console.timeEnd("scale");
@@ -2511,7 +2528,28 @@ function MaxPlot(div, top, left, width, height, args) {
         // canvas sizes no longer compounds the extension.
         let arZr = Object.assign({}, self.port.zoomRange);
         self.scaleBackground(self.background, self.port.initZoom, arZr);
-        self.coords.px = scaleCoords(self.coords.orig, borderMargin, arZr, w, h, self.coords.aspectRatio);
+        // For keepAspectRatio datasets without a background image, extend the
+        // underutilized canvas dimension to show more data rather than leaving white
+        // margins — mirrors what scaleBackground does for image-backed datasets.
+        const keepAR = self.coords.keepAspectRatio && !self.background;
+        if (keepAR) {
+            const viewW = arZr.maxX - arZr.minX;
+            const viewH = arZr.maxY - arZr.minY;
+            if (viewW / w > viewH / h) {
+                // X is limiting (landscape data in portrait canvas): expand Y view
+                const newViewH = viewW * h / w;
+                const midY = (arZr.minY + arZr.maxY) / 2;
+                arZr.minY = midY - newViewH / 2;
+                arZr.maxY = midY + newViewH / 2;
+            } else {
+                // Y is limiting: expand X view
+                const newViewW = viewH * w / h;
+                const midX = (arZr.minX + arZr.maxX) / 2;
+                arZr.minX = midX - newViewW / 2;
+                arZr.maxX = midX + newViewW / 2;
+            }
+        }
+        self.coords.px = scaleCoords(self.coords.orig, borderMargin, arZr, w, h, self.coords.aspectRatio, keepAR);
         if (self.coords.lines)
             self.coords.pxLines = scaleLines(self.coords.lines, arZr, self.canvas.width, self.canvas.height);
         self.scalingDone = true;
@@ -2672,6 +2710,9 @@ function MaxPlot(div, top, left, width, height, args) {
         if(self.usesWebGL()) {
             // If we're drawing using WebGL, we have to reset the viewport
             this.ctx.viewport(0, 0, this.canvas.width, this.canvas.height);
+            // keepAspectRatio coords bake canvas dimensions, so recompute after resize
+            if (self.coords && self.coords.keepAspectRatio && self.coords.orig)
+                self.setCoordsWebGL();
         }else {
             // If we're drawing using CanvasRenderingContext2D, coordinate pixels must be recalculated
             if (self.coords) self.scaleData();
@@ -2736,6 +2777,8 @@ function MaxPlot(div, top, left, width, height, args) {
        self.plotLabels = clusterLabels;
        if (coordInfo.aspectRatio)
            self.coords.aspectRatio = coordInfo.aspectRatio;
+       if (coordInfo.keepAspectRatio)
+           self.coords.keepAspectRatio = coordInfo.keepAspectRatio;
 
        var count = 0;
 
@@ -2940,6 +2983,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.drawDots = function(doSvg) {
         /* draw coordinates to canvas with current colors */
+        if (self._suppressDraw) return;
         if(DEBUG) console.time("draw");
 
         self.clear();
@@ -3132,7 +3176,9 @@ function MaxPlot(div, top, left, width, height, args) {
                 self.childPlot.calcRadius();
             } else {
                 // Canvas-2D: reset child zoomRange and recompute its background/coord scaling.
-                copyObj(self.port.initZoom, self.childPlot.port.zoomRange);
+                // Use the child's own initZoom, not the parent's — in split-screen datasets
+                // the two panels can have different coordinate systems (e.g. UMAP vs Spatial).
+                copyObj(self.childPlot.port.initZoom, self.childPlot.port.zoomRange);
                 self.childPlot.scaleData();
             }
         }
@@ -3167,9 +3213,6 @@ function MaxPlot(div, top, left, width, height, args) {
 
             // Set the new bounds
             p.setBounds(glMinX, glMaxX, glMaxY, glMinY);
-            // Spatial datasets: mirror the zoom bounds onto child's independent projection
-            if (self.childPlot && self.childPlot.port.projection !== p)
-                self.childPlot.port.projection.setBounds(p.left, p.right, p.top, p.bottom, false);
 
             // Recalculate radius
             this.calcRadius();
@@ -3261,9 +3304,6 @@ function MaxPlot(div, top, left, width, height, args) {
         // a special case for connected plots that are not sharing our pixel coordinates
         if (self.childPlot && self.coords===self.childPlot.coords) {
             if (self.usesWebGL()) {
-                // Spatial datasets give the child its own projection — mirror the scale op.
-                if (self.childPlot.port.projection !== self.port.projection)
-                    self.childPlot.port.projection.scale(zoomFact, x, y);
                 self.childPlot.calcRadius();
             } else {
                 self.childPlot.zoomBy(zoomFact, xPx, yPx);
@@ -3314,9 +3354,6 @@ function MaxPlot(div, top, left, width, height, args) {
 
             // Translate the projection matrix
             self.port.projection.translate(-x, y);
-            // Spatial datasets: mirror pan onto child's independent projection
-            if (self.childPlot && self.childPlot.port.projection !== self.port.projection)
-                self.childPlot.port.projection.translate(-x, y);
 
             self.drawDots();
         } else {
@@ -3828,7 +3865,11 @@ function MaxPlot(div, top, left, width, height, args) {
             return false;
 
         // only need to do something if we're not already the active plot
-        self.activeBorderDiv.style.border = `3px solid ${this.isLight() ? "black" : "white"}`;
+        const _bs = `3px solid ${this.isLight() ? "black" : "white"}`;
+        self.activeBorderDiv.style.borderTop    = _bs;
+        self.activeBorderDiv.style.borderRight  = _bs;
+        self.activeBorderDiv.style.borderBottom = _bs;
+        self.activeBorderDiv.style.borderLeft   = _bs;
         self.parentPlot.activeBorderDiv.style.border = "none";
 
         // flip the parent/child relationship
@@ -4027,7 +4068,8 @@ function MaxPlot(div, top, left, width, height, args) {
 
        // lasso select: close polygon and select enclosed cells
        if (self.dragMode === "lasso" && self.lassoPath.length > 2) {
-           self.selectClear(true);
+           if (!ev.shiftKey)
+               self.selectClear(true);
            self.selectInLasso(self.lassoPath);
            self.lassoPath = [];
            self.lassoCtx.clearRect(0, 0, self.lassoCanvas.width, self.lassoCanvas.height);
@@ -4432,8 +4474,11 @@ function MaxPlot(div, top, left, width, height, args) {
         self.childPlot = plot2;
         plot2.parentPlot = self;
 
-        // add a thick border and hide the menus in the child
-        self.activeBorderDiv.style.border = `3px solid ${this.isLight() ? "black" : "white"}`;
+        const _borderStyle = `3px solid ${this.isLight() ? "black" : "white"}`;
+        self.activeBorderDiv.style.borderTop    = _borderStyle;
+        self.activeBorderDiv.style.borderRight  = _borderStyle;
+        self.activeBorderDiv.style.borderBottom = _borderStyle;
+        self.activeBorderDiv.style.borderLeft   = _borderStyle;
         self.childPlot.zoomDiv.style.display = "none";
         self.childPlot.toolDiv.style.display = "none";
 

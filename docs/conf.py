@@ -70,7 +70,7 @@ master_doc = 'index'
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -99,12 +99,25 @@ html_context = dict(
 # further.  For a list of options available for each theme, see the
 # documentation.
 #
-# html_theme_options = {}
+html_theme_options = {
+    # Collapse sub-navigation by default. The "Building a Cell Browser" section
+    # is nested under a single landing page (building.rst) so its long list of
+    # guides stays collapsed until the reader opens it, keeping the sidebar
+    # focused on the "Using the Cell Browser" portal docs most visitors want.
+    'collapse_navigation': True,
+    'navigation_depth': 2,
+}
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
+
+# Click-to-zoom lightbox for screenshots: images are shown scaled to the page
+# width, so clicking one opens it full-size (and its callout text becomes
+# readable). Both files live in _static/.
+html_css_files = ['zoom.css']
+html_js_files = ['zoom.js']
 
 # Custom sidebar templates, must be a dictionary that maps document names
 # to template names.

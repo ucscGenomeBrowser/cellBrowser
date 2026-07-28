@@ -1,5 +1,5 @@
 Submitting data to the UCSC Cell Browser
-----
+----------------------------------------
 
 At this time, we are happy to host pretty much any single-cell dataset,
 regardless of the library preparation (10x, Smart-seq2, etc), organism
@@ -15,7 +15,7 @@ A cell browser requires at minimum three things:
 Go to our `submission website <https://cells-submit.gi.ucsc.edu>`_ to begin.
 
 Step 1: Describe and configure your dataset
-^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The first step is
 `describing your dataset <https://cells-submit.gi.ucsc.edu/cb-submission.py>`_,
@@ -34,13 +34,13 @@ dashes, it's short at only two words long, and informs you that the dataset is f
 cortex development. It fulfills all four points above. 
 
 Dataset collections
-""""
+"""""""""""""""""""
 If you have multiple datasets to submit, you can group them as a collection. Check
 the box "Submitting multiple datasets as a collection" to indicate this, and you will
 be prompted for the details for each dataset in that collection.
 
 "Quick Genes"
-""""
+"""""""""""""
 The final step in the dataset description form allows you to upload (in csv or tsv format)
 or paste in a list of "quick genes", a set of genes that you believe represent important
 variables in your dataset(s). In addition to the list of gene symbols, you can include
@@ -49,7 +49,7 @@ For collections, you can have one set of genes for every dataset in the
 collection, or a different set for each.
 
 Step 2: Preparing and sharing your files
-^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Before we can make a cell browser for you, you have to share the data
 with us. We accept the following file types:
@@ -63,7 +63,7 @@ After you have your data in one of the formats above,
 to our servers.
 
 Step 3: Associate files with datasets
-^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Once you've filled out the dataset description form and uploaded your files,
 you will need to `associate <https://cells-submit.gi.ucsc.edu/associate.py>`_
@@ -71,7 +71,7 @@ those files using the dataset shortname that you selected in step 1.
 
 
 Getting your URL
-^^^^
+^^^^^^^^^^^^^^^^
 
 After submitting your dataset to us, we will import the data and make a preliminary
 version available on our development server. We will work with you to iterate and
@@ -86,7 +86,7 @@ FAQs
 ^^^^
 
 Can I share the output of cbBuild with you?
-""""
+"""""""""""""""""""""""""""""""""""""""""""
 
 We prefer you share the original h5ad, RDS, or tsv files. This way we can offer them
 as downloads alongside your data visualization. The output of
@@ -95,7 +95,7 @@ not impossible to make changes to the cell browser at a later date (e.g.
 correcting spelling mistakes).
 
 Can I keep my dataset private until a later date, but still accessible to reviewers?
-""""
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 Yes, we offer limited methods for keeping datasets private. We can hide datasets from
 being listed alongside the others we host. This means that someone would need to know
 the URL or dataset name to be able to access your dataset. For example, this means

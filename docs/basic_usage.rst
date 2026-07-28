@@ -20,7 +20,7 @@ There is also a collection of small tools (``cbTool``) to combine cell annotatio
 from different pipelines or convert expression matrices.
 
 Using cbBuild to set up a Cell Browser
-^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The main utility for building your own cell browser is ``cbBuild``. It takes in a gene expression
 matrix and a set related files and converts them JSON and binary files outputting them to directory which
@@ -35,7 +35,7 @@ the usage message::
 
 
 On your local computer
-====
+======================
 
 If you are running the cell browser on your local computer, you will likely need to have cbBuild start up a webserver for you. 
 You can use the ``-p PORT`` option to specify on which port the webserver will run::
@@ -49,7 +49,7 @@ Restarting the web server will not re-export the entire expression matrix again 
 ``~/public_html/cells/my-dataset``. 
 
 On a webserver
-====
+==============
 
 If you are on a webserver, you likely only only want to build the cell browser html files into a web-accessible directory::
 
@@ -59,7 +59,7 @@ Specifying the port is optional is you are running this on a server that is alre
 navigate to the address for your webserver. 
 
 Customizing your cell browser
-^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The example `cellbrowser.conf <https://github.com/maximilianh/cellBrowser/blob/master/src/cbPyLib/cellbrowser/sampleConfig/cellbrowser.conf>`_
 explains all the various settings that are available in this config file. Things 

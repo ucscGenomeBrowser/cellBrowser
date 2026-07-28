@@ -24,6 +24,15 @@ var cellbrowser = function() {
     var gVersion = "$VERSION$"; // cellbrowser.py:copyStatic will replace this with the pip version or git release
     var gCurrentCoordName = null; // currently shown coordinates
 
+    // Login state for the cbAnnotServer account system (see src/cbAnnotServer/).
+    // null = not yet checked, false = checked and logged out,
+    // {loggedIn:true, email, display_name} = logged in.
+    var gCbUser = null;
+
+    // Site config from the web root "cb.conf" file (see loadClientConf).
+    // null = not yet loaded, otherwise an object of key -> value.
+    var gClientConf = null;
+
     // object with all information needed to map to the legend colors:
     // all info about the current legend. gLegend.rows is an object with keys:
     // color, defColor, label, count, intKey, strKey
@@ -686,6 +695,7 @@ var cellbrowser = function() {
         "hca_dcp" : "Human Cell Atlas Data Portal",
         "cirm_dataset" : "California Institute of Regenerative Medicine Dataset",
         "zenodo" : "Zenodo",
+        "psypheno" : "SSPsyGene",
     };
 
     let descUrls = {
@@ -705,6 +715,7 @@ var cellbrowser = function() {
         "arrayexpress" : "https://www.ebi.ac.uk/arrayexpress/experiments/",
         "hca_dcp" : "https://data.humancellatlas.org/explore/projects/",
         "zenodo" : "https://doi.org/",
+        "psypheno" : "https://psypheno.gi.ucsc.edu/full-datasets?select=",
     }
 
     function htmlAddLink(htmls, desc, key, linkLabel) {
@@ -808,7 +819,7 @@ var cellbrowser = function() {
                 htmls.push("This information can also be accessed while viewing a dataset by clicking the 'Info &amp; Downloads' button.</p>");
                 htmls.push("<p><b>To bulk download all datasets in this collection via rsync:</b><br>");
                 htmls.push("<code style='display:inline-block; background:#f4f4f4; border:1px solid #ddd; padding:4px 8px; border-radius:3px; font-size:12px; user-select:all'>");
-                htmls.push("rsync --avzp hgdownload.gi.ucsc.edu::cells/"+datasetInfo.name+"/ ./"+datasetInfo.name+"/");
+                htmls.push("rsync -av hgdownload.gi.ucsc.edu::cells/"+datasetInfo.name+"/ ./"+datasetInfo.name+"/");
                 htmls.push("</code></p>");
                 $( "#pane3" ).html(htmls.join(""));
                 $( "#pane3" ).show();
@@ -865,7 +876,7 @@ var cellbrowser = function() {
 
                 htmls.push("<p><b>Bulk download via rsync:</b><br>");
                 htmls.push("<code style='display:inline-block; background:#f4f4f4; border:1px solid #ddd; padding:4px 8px; border-radius:3px; font-size:12px; user-select:all'>");
-                htmls.push("rsync --avzp hgdownload.gi.ucsc.edu::cells/"+datasetInfo.name+"/ ./"+datasetInfo.name+"/");
+                htmls.push("rsync -avzp hgdownload.gi.ucsc.edu::cells/"+datasetInfo.name+"/ ./"+datasetInfo.name+"/");
                 htmls.push("</code></p>");
 
                 $( "#pane3" ).html(htmls.join(""));
@@ -1083,6 +1094,7 @@ var cellbrowser = function() {
         htmlAddLink(htmls, desc, "ena_project");
         htmlAddLink(htmls, desc, "hca_dcp");
         htmlAddLink(htmls, desc, "zenodo");
+        htmlAddLink(htmls, desc, "psypheno");
 
         if (desc.urls) {
             for (let key in desc.urls)
@@ -1311,15 +1323,16 @@ var cellbrowser = function() {
                          'diseases', 'lab', 'submitter', 'authors', 'institution',
                          'geo_series', 'arrayexpress', 'sra_study', 'bioproject',
                          'ega_study', 'ega_dataset', 'hca_dcp', 'zenodo', 'dbgap',
-                         'pmid', 'pmcid', 'doi', 'tags'],
+                         'pmid', 'pmcid', 'doi', 'psypheno', 'tags'],
                 storeFields: ['name', 'shortLabel', 'md5', 'parent', 'title', 'authors', 'institution', 'lab', 'submitter', 'paper',
                              'geo_series', 'pmid', 'pmcid', 'doi',
                              'arrayexpress', 'sra_study', 'bioproject', 'ega_study', 'ega_dataset', 'hca_dcp', 'zenodo', 'dbgap',
-                             'snippet'],
+                             'psypheno', 'snippet'],
                 searchOptions: {
                     boost: { title: 3, shortLabel: 3,
                              geo_series: 2, arrayexpress: 2, sra_study: 2, bioproject: 2,
                              ega_study: 2, ega_dataset: 2, hca_dcp: 2, zenodo: 2, dbgap: 2,
+                             psypheno: 2,
                              pmid: 2, pmcid: 2, doi: 2 },
                     fuzzy:  0.2,
                     prefix: true,
@@ -1396,6 +1409,7 @@ var cellbrowser = function() {
             ['hca_dcp',      'HCA'],
             ['zenodo',       'Zenodo'],
             ['dbgap',        'dbGaP'],
+            ['psypheno',     'SSPsyGene'],
         ];
         for (var i = 0; i < accessions.length; i++) {
             var field = accessions[i][0], label = accessions[i][1];
@@ -1517,9 +1531,9 @@ var cellbrowser = function() {
                 return false;
             html.push("<div style='min-width:0'>");
             html.push("<div style='margin-bottom:2px; font-size:12px; color:#555'>"+filterLabel+"</div>");
-            let selPar = getVarSafe(urlVar);
+            let selPar = getVar(urlVar);
             if (selPar && selPar!=="")
-                filtList = selPar.split("|");
+                filtList = selPar.split(" ");
             buildComboBox(html, comboId, filterVals, filtList, comboLabel, 200, {multi:true});
             html.push("</div>");
             return true;
@@ -1582,7 +1596,7 @@ var cellbrowser = function() {
                 param = "stage";
 
             // change the URL
-            var filtArg = filtNames.join("~");
+            var filtArg = filtNames.join(" "); // space encodes as + in URL
             var urlArgs = {}
             urlArgs[param] = filtArg;
             changeUrl(urlArgs);
@@ -1768,7 +1782,7 @@ var cellbrowser = function() {
                     "<span class='tpFilterArrow' style='display:inline-block; margin-right:5px; font-size:10px'>&#9654;</span>Filters</summary>" +
                     "<div style='display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding-top:8px'>");
 
-                buildFilter(noteLines, bodyParts, "Organ", "body", "tpBodyCombo", "select organs...");
+                buildFilter(noteLines, bodyParts, "Organ", "bp", "tpBodyCombo", "select organs...");
                 buildFilter(noteLines, diseases, "Disease", "dis", "tpDisCombo", "select diseases...");
                 buildFilter(noteLines, organisms, "Species", "org", "tpOrgCombo", "select species...");
                 buildFilter(noteLines, projects, "Project", "proj", "tpProjCombo", "select project...");
@@ -1985,6 +1999,7 @@ var cellbrowser = function() {
         renderer.unhideAll();
         renderer.drawDots();
         $("#tpShowAll").hide();
+        if (!renderer.hasSelected()) $("#tpSelBar").hide();
         updateCellCount();
     }
 
@@ -2000,8 +2015,10 @@ var cellbrowser = function() {
             parts.push(prettyNumber(visCount) + " of " + prettyNumber(totalCount) + " " + gSampleDesc + "s shown");
         else
             parts.push(prettyNumber(totalCount) + " " + gSampleDesc + "s");
-        if (selCount > 0)
-            parts.push(prettyNumber(selCount) + " selected");
+        if (selCount > 0) {
+            var pct = totalCount > 0 ? Math.round(selCount / totalCount * 100) : 0;
+            parts.push(prettyNumber(selCount) + " selected (" + pct + "%)");
+        }
         el.textContent = parts.join(" | ");
     }
 
@@ -2018,24 +2035,34 @@ var cellbrowser = function() {
 
         if (renderer.hasSelected()) {
             $(".tpSelectButton").show();
+            $("#tpSelBar").show();
         } else {
             $(".tpSelectButton").hide();
+            if (hiddenCount === 0) $("#tpSelBar").hide();
         }
         updateCellCount();
     }
 
     function buildSelectActions() {
-        /* add buttons for hide selected / unselected to ribbon bar */
+        /* add floating selection-action bar above canvas with hide/show buttons */
         if (getById("tpHideSel")!==null)
             return;
 
-        let htmls = [];
-        htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Hide selected cells" id="tpHideSel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Hide selected</button>');
-        htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Hide all unselected cells" id="tpOnlySel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Only show selected</button>');
-        htmls.push('<button style="display:none; margin-top:3px; margin-left:3px; height:24px; border-radius:3px; padding-top:3px" title="Show all cells that were hidden before" id="tpShowAll" type="button" class="gradientBackground ui-button ui-widget ui-corner-all" data-placement="bottom">Show all</button>');
-        htmls.push('<span id="tpSelSpacer" style="display:none; margin-right:6px"></span>');
-        //htmls.push('');
-        getById('tpToolBar').insertAdjacentHTML('afterbegin', htmls.join(""));
+        const bar = document.createElement('div');
+        bar.id = 'tpSelBar';
+        bar.style.display = 'none';
+        bar.innerHTML =
+            '<button title="Hide selected cells" id="tpHideSel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Hide selected</button>' +
+            '<button title="Hide all unselected cells" id="tpOnlySel" type="button" class="gradientBackground ui-button ui-widget ui-corner-all tpSelectButton" data-placement="bottom">Only show selected</button>' +
+            '<button title="Show all cells that were hidden before" id="tpShowAll" type="button" class="gradientBackground ui-button ui-widget ui-corner-all" data-placement="bottom">Show all</button>';
+        document.body.appendChild(bar);
+        // Position bar centered over the canvas, just below the toolbar
+        const toolBarRect = getById('tpToolBar').getBoundingClientRect();
+        const canvLeft = metaBarWidth + metaBarMargin;
+        const canvRight = window.innerWidth - legendBarWidth;
+        bar.style.top = (toolBarRect.bottom + 6) + 'px';
+        bar.style.left = Math.round((canvLeft + canvRight) / 2) + 'px';
+        bar.style.transform = 'translateX(-50%)';
         getById('tpHideSel').addEventListener('click', onHideSelClick);
         getById('tpOnlySel').addEventListener('click', onOnlySelClick);
         getById('tpShowAll').addEventListener('click', onShowAllClick);
@@ -2928,12 +2955,37 @@ var cellbrowser = function() {
         return "custom_" + i;
     }
 
-    function saveCustomFieldsToStorage() {
+    function getCustomFieldsObj() {
+        /* the custom fields as a {name: metaInfo} object — the same shape used
+         * for localStorage and for the annotation server's "data" blob */
         var fields = getCustomFields();
-        if (fields.length === 0) { localStorage.removeItem(db.name + "|customFields"); return; }
         var obj = {};
         for (var i = 0; i < fields.length; i++) obj[fields[i].name] = fields[i];
-        localStorage.setItem(db.name + "|customFields", LZString.compress(JSON.stringify(obj)));
+        return obj;
+    }
+
+    function applyCustomFieldsObj(obj) {
+        /* replace the current custom fields with the ones in obj. Existing custom
+         * fields are dropped first, so this is safe to call repeatedly. */
+        db.conf.metaFields = db.getMetaFields().filter(function(f) { return !f.isCustom; });
+        var names = Object.keys(obj).reverse();
+        for (var i = 0; i < names.length; i++)
+            db.conf.metaFields.unshift(obj[names[i]]);
+    }
+
+    function cbDatasetPath(name) {
+        /* encode a (possibly hierarchical) dataset name for an API path, keeping
+         * the slashes that separate collection levels */
+        return name.split("/").map(encodeURIComponent).join("/");
+    }
+
+    function saveCustomFieldsToStorage() {
+        var fields = getCustomFields();
+        if (fields.length === 0)
+            localStorage.removeItem(db.name + "|customFields");
+        else
+            localStorage.setItem(db.name + "|customFields", LZString.compress(JSON.stringify(getCustomFieldsObj())));
+        pushCustomFieldsToServer();  // no-op unless logged in
     }
 
     function loadCustomFieldsFromStorage() {
@@ -2952,6 +3004,67 @@ var cellbrowser = function() {
             saveCustomFieldsToStorage();
             localStorage.removeItem(db.name + "|custom");
         }
+    }
+
+    // ---- annotation sync with the account system (cbAnnotServer) ----
+
+    function saveAnnotationsToServer(onOk, onErr) {
+        /* upsert the current custom annotations to the logged-in user's account */
+        cbApiPost("/api/annotations/" + cbDatasetPath(db.name),
+            { data: getCustomFieldsObj() }, onOk, onErr);
+    }
+
+    function pushCustomFieldsToServer() {
+        /* mirror annotations to the user's account on every local save. Sends an
+         * empty object to clear when there are none. Fire-and-forget. */
+        if (!isLoggedIn() || !db || !db.name) return;
+        saveAnnotationsToServer(
+            function() { /* saved */ },
+            function(msg) { if (window.console) console.log("cbAnnot: could not save annotations to server: " + msg); });
+    }
+
+    function syncCustomFieldsFromServer() {
+        /* on dataset load, if logged in, pull the server copy (which wins over the
+         * local copy). If the server has nothing yet but local fields exist, push
+         * those up so the account picks up annotations made before signing in. */
+        if (!db || !db.name) return;
+        checkLoginState(function(user) {
+            if (!user || !user.loggedIn) return;
+            $.ajax({
+                url: cbApiUrl("/api/annotations/" + cbDatasetPath(db.name)),
+                dataType: "json",
+                xhrFields: { withCredentials: true }
+            }).done(function(resp) {
+                if (resp && resp.data) {
+                    applyCustomFieldsObj(resp.data);
+                    localStorage.setItem(db.name + "|customFields", LZString.compress(JSON.stringify(resp.data)));
+                    if ($("#tpMetaPanel").length) rebuildMetaPanel();
+                } else if (getCustomFields().length > 0) {
+                    pushCustomFieldsToServer();
+                }
+            });
+        });
+    }
+
+    function loadSharedAnnotations(token, onDone) {
+        /* load a shared annotation set by token (no login required) and apply it.
+         * Caches to localStorage but does NOT push to the server — the set belongs
+         * to whoever created the link, not the current viewer. */
+        $.ajax({
+            url: cbApiUrl("/api/annotations/shared/" + encodeURIComponent(token)),
+            dataType: "json",
+            xhrFields: { withCredentials: true }
+        }).done(function(resp) {
+            if (resp && resp.ok && resp.data && Object.keys(resp.data).length > 0) {
+                applyCustomFieldsObj(resp.data);
+                localStorage.setItem(db.name + "|customFields", LZString.compress(JSON.stringify(resp.data)));
+                if ($("#tpMetaPanel").length) rebuildMetaPanel();
+                if (onDone) onDone(null, resp);
+            } else if (onDone)
+                onDone("This shared link has no annotations.", null);
+        }).fail(function() {
+            if (onDone) onDone("Could not load shared annotations (invalid or expired link).", null);
+        });
     }
 
     function removeOneCustomAnnotation(fieldName) {
@@ -3142,6 +3255,21 @@ var cellbrowser = function() {
         htmls.push('<input type="file" id="tpAnnotImportFile" style="display:none" accept=".tsv,.txt,.csv">');
         htmls.push(' &nbsp;<button id="tpAnnotExportBtn">Export to file</button>');
         htmls.push('</div>');
+
+        // sharing via the account system — only when the login feature is on
+        // (cb.conf showLogin). Otherwise just the file import/export above.
+        if (cbLoginEnabled()) {
+            htmls.push('<div style="margin-bottom:6px">');
+            htmls.push('<button id="tpAnnotShareBtn">Share these annotations</button>');
+            htmls.push('<span id="tpAnnotShareHint" style="color:#888;margin-left:8px"></span>');
+            htmls.push('</div>');
+            htmls.push('<div id="tpAnnotShareResult" style="margin-bottom:12px"></div>');
+            htmls.push('<div style="margin-bottom:12px">');
+            htmls.push('<input type="text" id="tpAnnotLoadToken" placeholder="Paste a share link or token" style="width:55%">');
+            htmls.push(' <button id="tpAnnotLoadBtn">Load shared</button>');
+            htmls.push('</div>');
+        }
+
         htmls.push('<div id="tpAnnotMgrTable"></div>');
 
         var buttons = [
@@ -3155,6 +3283,34 @@ var cellbrowser = function() {
         ];
         showDialogBox(htmls, "Custom Annotations", {height: 420, width: 560, buttons: buttons});
         buildAnnotMgrTable();
+
+        // sharing controls exist only when the login feature is on (see the
+        // matching cbLoginEnabled() guard where they are rendered above).
+        if (cbLoginEnabled()) {
+            // share button is only meaningful when signed in
+            if (isLoggedIn()) {
+                $('#tpAnnotShareBtn').click(onShareAnnotationsClick);
+            } else {
+                $('#tpAnnotShareBtn').prop('disabled', true);
+                $('#tpAnnotShareHint').text("Sign in to create a shareable link.");
+            }
+            $('#tpAnnotLoadBtn').click(function() {
+                var raw = $('#tpAnnotLoadToken').val().trim();
+                if (!raw) return;
+                // accept a full share URL, a .../shared/<token> path, or a bare token
+                var token = raw;
+                var m = raw.match(/[?&]annotShare=([^&\s]+)/);
+                if (m) token = decodeURIComponent(m[1]);
+                else if (raw.indexOf("/") !== -1) { var parts = raw.split("/"); token = parts[parts.length - 1]; }
+                loadSharedAnnotations(token, function(err) {
+                    if (err) { alert(err); return; }
+                    buildAnnotMgrTable();
+                    var first = getCustomFields()[0];
+                    if (first) colorByMetaField(first.name);
+                    alert("Loaded shared annotations.");
+                });
+            });
+        }
 
         $('#tpAnnotExportBtn').click(onExportAnnotationsClick);
         $('#tpAnnotImportBtn').click(function() { $('#tpAnnotImportFile').click(); });
@@ -3170,6 +3326,320 @@ var cellbrowser = function() {
                 },
                 error: function(err) { alert("Could not parse file: " + err.message); }
             });
+        });
+    }
+
+    function onShareAnnotationsClick() {
+        /* save the current annotations to the server, then create a share link */
+        if (getCustomFields().length === 0) {
+            alert("No custom annotations to share yet. Create some with Edit > Name selection.");
+            return;
+        }
+        var btn = $('#tpAnnotShareBtn');
+        btn.prop('disabled', true);
+        // save first so the share endpoint has an annotation row to point at
+        saveAnnotationsToServer(function() {
+            cbApiPost("/api/annotations/" + cbDatasetPath(db.name) + "/share", {},
+                function(resp) {
+                    btn.prop('disabled', false);
+                    var url = new URL(window.location.href);
+                    url.searchParams.set("annotShare", resp.token);
+                    var shareUrl = url.toString();
+                    $('#tpAnnotShareResult').html(
+                        '<div style="margin-bottom:4px">Shareable link (anyone with it can view these annotations):</div>');
+                    var inp = $('<input type="text" readonly style="width:100%">').val(shareUrl);
+                    $('#tpAnnotShareResult').append(inp);
+                    inp.select();
+                },
+                function(msg) { btn.prop('disabled', false); alert("Could not create share link: " + msg); });
+        }, function(msg) {
+            btn.prop('disabled', false);
+            alert("Could not save annotations before sharing: " + msg);
+        });
+    }
+
+    // ----------------------------------------------------------------------
+    // Account system (cbAnnotServer). Sign in / sign up / password reset UI and
+    // the helpers the rest of the frontend uses to talk to the auth API. The
+    // backend lives in src/cbAnnotServer/ and is served under /api on the same
+    // host in production; for local dev set window.cbAnnotApiBase to e.g.
+    // "http://localhost:5000" to point at a Flask dev server on another port.
+    // ----------------------------------------------------------------------
+
+    function parseClientConf(text) {
+        /* parse a simple key=value config file. Lines starting with # and blank
+         * lines are ignored. Returns an object of key -> value (both trimmed). */
+        var conf = {};
+        var lines = text.split("\n");
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (line === "" || line.charAt(0) === "#")
+                continue;
+            var eq = line.indexOf("=");
+            if (eq === -1)
+                continue;
+            conf[line.substring(0, eq).trim()] = line.substring(eq + 1).trim();
+        }
+        return conf;
+    }
+
+    function loadClientConf(onDone) {
+        /* Load the site config file "cb.conf" from the web root, if present, and
+         * apply it before the rest of the app starts. This is the Cell Browser's
+         * analog of the Genome Browser's hg.conf, but it is read by the browser.
+         * It is deployed into the web document root (not overwritten by cbUpgrade),
+         * so a mirror or sandbox can, for example, point the login feature at
+         * another server without a code release. A missing file is normal (most
+         * installs run with the built-in defaults), so a 404 is not an error. */
+        $.ajax({ url: "cb.conf", dataType: "text", cache: false })
+            .done(function(text) {
+                gClientConf = parseClientConf(text);
+                // an explicit annotApiBase in the file wins over any built-in
+                // default (and over a window.cbAnnotApiBase set for local dev)
+                if ("annotApiBase" in gClientConf)
+                    window.cbAnnotApiBase = gClientConf["annotApiBase"];
+            })
+            .fail(function() {
+                gClientConf = {};   // no config file deployed: use built-in defaults
+            })
+            .always(function() {
+                onDone();
+            });
+    }
+
+    function cbLoginEnabled() {
+        /* Is the login / account system turned on for this site? It is gated
+         * behind the "showLogin" flag in cb.conf (see loadClientConf), the Cell
+         * Browser analog of the feature flags in the Genome Browser's hg.conf.
+         * The flag defaults to OFF, so the feature stays hidden everywhere
+         * unless a site's cb.conf opts in with e.g. "showLogin=on". This keeps
+         * the still-in-progress login from leaking onto installs (like the main
+         * cells.ucsc.edu site) that have not turned it on. */
+        if (gClientConf === null)
+            return false;   // config not loaded yet: treat as off
+        var v = (gClientConf["showLogin"] || "").trim().toLowerCase();
+        return (v === "on" || v === "true" || v === "1" || v === "yes");
+    }
+
+    function cbApiUrl(path) {
+        /* build a full URL to an auth/annotation API endpoint */
+        var base = (window.cbAnnotApiBase || "");
+        return base.replace(/\/+$/, "") + path;
+    }
+
+    function cbApiPost(path, data, onOk, onErr) {
+        /* POST JSON to the API. onOk(resp) on success, onErr(msg, status) on failure. */
+        $.ajax({
+            url: cbApiUrl(path),
+            method: "POST",
+            contentType: "application/json",
+            dataType: "json",
+            data: JSON.stringify(data || {}),
+            xhrFields: { withCredentials: true }  // send/receive the session cookie cross-origin in dev
+        }).done(function(resp) {
+            onOk(resp);
+        }).fail(function(xhr) {
+            var msg = "Something went wrong. Please try again.";
+            try {
+                var j = JSON.parse(xhr.responseText);
+                if (j && j.error) msg = j.error;
+            } catch (e) { /* leave default message */ }
+            if (onErr) onErr(msg, xhr.status);
+        });
+    }
+
+    function isLoggedIn() {
+        return !!(gCbUser && gCbUser.loggedIn);
+    }
+
+    function checkLoginState(onDone) {
+        /* ask the server who we are (once), then update the account menu */
+        if (!cbLoginEnabled()) { gCbUser = false; if (onDone) onDone(false); return; }
+        if (gCbUser !== null) { if (onDone) onDone(gCbUser); return; }
+        $.ajax({
+            url: cbApiUrl("/api/auth/me"),
+            dataType: "json",
+            xhrFields: { withCredentials: true }
+        }).done(function(data) {
+            gCbUser = (data && data.loggedIn) ? data : false;
+            refreshAuthUi();
+            if (onDone) onDone(gCbUser);
+        }).fail(function() {
+            // No auth backend reachable (e.g. static-only deployment) — treat as logged out.
+            gCbUser = false;
+            refreshAuthUi();
+            if (onDone) onDone(false);
+        });
+    }
+
+    function refreshAuthUi() {
+        /* set the account menu label + dropdown to match gCbUser */
+        var label = $("#tpAccountLabel");
+        var menu = $("#tpAccountDropdown");
+        if (label.length === 0 || menu.length === 0)
+            return;  // menu bar not built yet
+
+        if (isLoggedIn()) {
+            var who = gCbUser.display_name || gCbUser.email;
+            label.text(who);
+            var items = [];
+            items.push('<li class="dropdown-header" style="padding:3px 20px">Signed in as<br><span id="tpAccountEmail"></span></li>');
+            items.push('<li role="separator" class="divider"></li>');
+            items.push('<li><a href="#" id="tpSignOutLink">Sign out</a></li>');
+            menu.html(items.join(""));
+            // set via .text() rather than HTML — email is user-controlled and the
+            // server's validation allows characters like < and >
+            $("#tpAccountEmail").text(gCbUser.email);
+        } else {
+            label.text("Sign in");
+            menu.html('<li><a href="#" id="tpSignInLink">Sign in / Create account&hellip;</a></li>');
+        }
+    }
+
+    function cbSignOut() {
+        cbApiPost("/api/auth/logout", {}, function() {
+            gCbUser = false;
+            refreshAuthUi();
+        }, function() {
+            // even if the call failed, drop local state so the UI reflects logged-out
+            gCbUser = false;
+            refreshAuthUi();
+        });
+    }
+
+    function authShowTab(pane) {
+        /* switch the visible pane in the login dialog */
+        $(".tpAuthPane").hide();
+        $("#tpAuthPane_" + pane).show();
+        $(".tpAuthTab").removeClass("tpAuthTabActive");
+        $(".tpAuthTab[data-pane='" + pane + "']").addClass("tpAuthTabActive");
+        $("#tpAuthMsg").removeClass("tpAuthMsgOk").text("");
+    }
+
+    function authMsg(text, isOk) {
+        var el = $("#tpAuthMsg");
+        el.text(text || "");
+        if (isOk) el.addClass("tpAuthMsgOk"); else el.removeClass("tpAuthMsgOk");
+    }
+
+    function showLoginDialog(initialTab) {
+        /* modal with three tabs: Sign In, Create Account, Forgot Password */
+        var htmls = [];
+
+        htmls.push("<style>"
+            + "#tpAuthTabBar button.tpAuthTab{margin-right:4px;padding:4px 10px;border:1px solid #ccc;background:#f5f5f5;border-radius:3px;cursor:pointer}"
+            + "#tpAuthTabBar button.tpAuthTabActive{background:#fff;border-bottom-color:#fff;font-weight:bold}"
+            + ".tpAuthPane label{display:block;margin-top:8px;font-weight:normal}"
+            + ".tpAuthPane input{width:100%;box-sizing:border-box}"
+            + ".tpAuthPane button.tpAuthSubmit{margin-top:14px}"
+            + "#tpAuthMsg{color:#b00;min-height:1.1em;margin:10px 0}"
+            + "#tpAuthMsg.tpAuthMsgOk{color:#080}"
+            + "</style>");
+
+        htmls.push("<div id='tpAuthTabBar' style='margin-bottom:12px'>");
+        htmls.push("<button type='button' class='tpAuthTab' data-pane='signin'>Sign In</button>");
+        htmls.push("<button type='button' class='tpAuthTab' data-pane='signup'>Create Account</button>");
+        htmls.push("<button type='button' class='tpAuthTab' data-pane='reset'>Forgot Password</button>");
+        htmls.push("</div>");
+
+        htmls.push("<div id='tpAuthMsg'></div>");
+
+        // sign in
+        htmls.push("<div class='tpAuthPane' id='tpAuthPane_signin' style='display:none'>");
+        htmls.push("<label>Email<input type='email' id='tpSignInEmail' class='form-control'></label>");
+        htmls.push("<label>Password<input type='password' id='tpSignInPwd' class='form-control'></label>");
+        htmls.push("<label style='font-weight:normal;margin-top:8px'><input type='checkbox' id='tpSignInRemember' style='width:auto'> Keep me signed in</label>");
+        htmls.push("<button type='button' class='tpAuthSubmit ui-button ui-widget ui-corner-all' id='tpSignInBtn'>Sign In</button>");
+        htmls.push("</div>");
+
+        // sign up
+        htmls.push("<div class='tpAuthPane' id='tpAuthPane_signup' style='display:none'>");
+        htmls.push("<label>Name (optional)<input type='text' id='tpSignUpName' class='form-control'></label>");
+        htmls.push("<label>Email<input type='email' id='tpSignUpEmail' class='form-control'></label>");
+        htmls.push("<label>Password (at least 8 characters)<input type='password' id='tpSignUpPwd' class='form-control'></label>");
+        htmls.push("<button type='button' class='tpAuthSubmit ui-button ui-widget ui-corner-all' id='tpSignUpBtn'>Create Account</button>");
+        htmls.push("</div>");
+
+        // reset
+        htmls.push("<div class='tpAuthPane' id='tpAuthPane_reset' style='display:none'>");
+        htmls.push("<p style='margin-top:4px'>Enter your email and we'll send a link to reset your password.</p>");
+        htmls.push("<label>Email<input type='email' id='tpResetEmail' class='form-control'></label>");
+        htmls.push("<button type='button' class='tpAuthSubmit ui-button ui-widget ui-corner-all' id='tpResetBtn'>Send reset link</button>");
+        htmls.push("</div>");
+
+        var buttons = [{ text: "Close", click: function() { $(this).dialog("close"); } }];
+        showDialogBox(htmls, "Cell Browser Account", { width: 420, buttons: buttons });
+
+        $(".tpAuthTab").click(function() { authShowTab($(this).data("pane")); });
+
+        $("#tpSignInBtn").click(onSignInSubmit);
+        $("#tpSignUpBtn").click(onSignUpSubmit);
+        $("#tpResetBtn").click(onResetSubmit);
+
+        // submit on Enter within any pane input
+        $(".tpAuthPane input").keydown(function(e) {
+            if (e.which === 13) {
+                e.preventDefault();
+                $(this).closest(".tpAuthPane").find(".tpAuthSubmit").click();
+            }
+        });
+
+        authShowTab(initialTab || "signin");
+    }
+
+    function onSignInSubmit() {
+        var email = $("#tpSignInEmail").val().trim();
+        var pwd = $("#tpSignInPwd").val();
+        if (!email || !pwd) { authMsg("Please enter your email and password."); return; }
+
+        cbApiPost("/api/auth/login",
+            { email: email, password: pwd, remember: $("#tpSignInRemember").is(":checked") },
+            function(resp) {
+                gCbUser = { loggedIn: true, email: resp.email, display_name: resp.display_name };
+                refreshAuthUi();
+                $("#tpDialog").dialog("close");
+            },
+            function(msg, status) {
+                if (status === 403) {
+                    // email not verified — offer to resend
+                    authMsg(msg);
+                    $("#tpAuthMsg").append(" <a href='#' id='tpResendVerify'>Resend verification email</a>");
+                    $("#tpResendVerify").click(function(ev) {
+                        ev.preventDefault();
+                        cbApiPost("/api/auth/resend-verification", { email: email }, function() {
+                            authMsg("Verification email sent. Please check your inbox.", true);
+                        });
+                    });
+                } else {
+                    authMsg(msg);
+                }
+            }
+        );
+    }
+
+    function onSignUpSubmit() {
+        var email = $("#tpSignUpEmail").val().trim();
+        var pwd = $("#tpSignUpPwd").val();
+        var name = $("#tpSignUpName").val().trim();
+        if (!email) { authMsg("Please enter your email."); return; }
+        if (pwd.length < 8) { authMsg("Password must be at least 8 characters."); return; }
+
+        cbApiPost("/api/auth/signup",
+            { email: email, password: pwd, display_name: name },
+            function() {
+                authMsg("Account created. Check your email for a verification link before signing in.", true);
+                $(".tpAuthPane").hide();
+            },
+            function(msg) { authMsg(msg); }
+        );
+    }
+
+    function onResetSubmit() {
+        var email = $("#tpResetEmail").val().trim();
+        if (!email) { authMsg("Please enter your email."); return; }
+        cbApiPost("/api/auth/reset-request", { email: email }, function() {
+            // server always returns ok to avoid leaking which emails are registered
+            authMsg("If an account exists for that email, a reset link is on its way.", true);
         });
     }
 
@@ -3590,6 +4060,21 @@ var cellbrowser = function() {
 
        htmls.push('</ul>'); // navbar-nav
 
+       // account menu, right-aligned. Only shown when the login feature is
+       // enabled in cb.conf (showLogin); otherwise the account system is hidden
+       // entirely. Contents are filled in by refreshAuthUi() once the login
+       // state is known; default shows "Sign in".
+       if (cbLoginEnabled()) {
+           htmls.push('<ul class="nav navbar-nav navbar-right">');
+           htmls.push('<li id="tpAccountMenu" class="dropdown">');
+           htmls.push('<a href="#" class="dropdown-toggle" data-toggle="dropdown" data-submenu role="button" aria-haspopup="true" aria-expanded="false"><span id="tpAccountLabel">Sign in</span></a>');
+           htmls.push('<ul class="dropdown-menu" id="tpAccountDropdown">');
+           htmls.push('<li><a href="#" id="tpSignInLink">Sign in / Create account&hellip;</a></li>');
+           htmls.push('</ul>'); // account dropdown-menu
+           htmls.push('</li>'); // account dropdown container
+           htmls.push('</ul>'); // navbar-right
+       }
+
        htmls.push('</div>'); // container
        htmls.push('</nav>'); // navbar
        htmls.push('</div>'); // tpMenuBar
@@ -3624,6 +4109,15 @@ var cellbrowser = function() {
        $('#tpSelectName').click( onSelectNameClick );
        $('#tpSelectComplex').click( onFindCellsClick );
 
+
+       // account menu. The dropdown items are rebuilt by refreshAuthUi(), so
+       // these are delegated handlers rather than direct binds. Only wired up
+       // when the login feature is enabled (the menu is not in the DOM otherwise).
+       if (cbLoginEnabled()) {
+           $('#tpAccountMenu').on('click', '#tpSignInLink', function(ev) { ev.preventDefault(); showLoginDialog("signin"); });
+           $('#tpAccountMenu').on('click', '#tpSignOutLink', function(ev) { ev.preventDefault(); cbSignOut(); });
+           refreshAuthUi();  // reflect whatever we already know; checkLoginState() refines it
+       }
 
        $('#tpRenameClusters').click( onRenameClustersClick );
        $('#tpCustomAnnotsMgr').click( onCustomAnnotationsManagerClick );
@@ -3907,6 +4401,26 @@ var cellbrowser = function() {
             exprMin = Math.min(exprMin, exprVal);
 
         }
+        return [metaValToExprArr, exprMin, exprMax];
+    }
+
+    function splitExprByMetaMasked(metaArr, metaCountSize, exprArr, cellMask) {
+        /* like splitExprByMeta but skips cells where cellMask[i] === 0 */
+        var metaValToExprArr = [];
+        for (var i=0; i < metaCountSize; i++) {
+            metaValToExprArr.push([]);
+        }
+        let exprMax = -Infinity;
+        let exprMin = Infinity;
+        for (var i=0; i < exprArr.length; i++) {
+            if (cellMask[i] === 0) continue;
+            var exprVal = exprArr[i];
+            var metaVal = metaArr[i];
+            metaValToExprArr[metaVal].push(exprVal);
+            if (exprVal > exprMax) exprMax = exprVal;
+            if (exprVal < exprMin) exprMin = exprVal;
+        }
+        if (exprMax === -Infinity) { exprMax = 0; exprMin = 0; }
         return [metaValToExprArr, exprMin, exprMax];
     }
 
@@ -4320,6 +4834,9 @@ var cellbrowser = function() {
         if (el && el.selectize) {
             el.selectize.addOption({id: name, text: name});
             el.selectize.setValue(name, 1); // 1 = do not fire change
+        } else if ($("#"+elId+"_chosen").length > 0) {
+            // chosen dropdown (used for heatmap gene combos)
+            $("#"+elId).val(name).trigger("chosen:updated");
         } else {
             // select2: change.select2 updates the UI without firing user change handlers
             $("#"+elId).val(name).trigger("change.select2");
@@ -4327,11 +4844,13 @@ var cellbrowser = function() {
     }
 
     function selectizeClear(elId) {
-        /* clear a gene combobox. Works for both selectize and select2. */
+        /* clear a gene combobox. Works for selectize, chosen, and select2. */
         var el = getById(elId);
         if (!el) return;
         if (el.selectize)
             el.selectize.clear();
+        else if ($("#"+elId+"_chosen").length > 0)
+            $("#"+elId).val("").trigger("chosen:updated");
         else
             $("#"+elId).val(null).trigger("change.select2");
     }
@@ -4481,6 +5000,7 @@ var cellbrowser = function() {
     function gotCoords(coords, info, clusterInfo, newRadius, rend) {
         /* called when the coordinates have been loaded */
         rend = rend || renderer;
+        rend._suppressDraw = false;  // allow drawing now that real coords have arrived
         if (coords.length===0)
             alert("cellBrowser.js/gotCoords: coords.bin seems to be empty");
         var opts = {};
@@ -4827,6 +5347,8 @@ var cellbrowser = function() {
                    //buildWatermark();
                    //buildWatermark();
                    activateSplit();
+                   renderer.childPlot._suppressDraw = true; // suppress until UMAP coords arrive
+                   renderer.childPlot.clear();
                    configureRenderer(splitOpts, renderer.childPlot);
                    $("#splitJoinDiv").show();
                    $("#splitJoinBox").prop("checked", true);
@@ -4905,7 +5427,14 @@ var cellbrowser = function() {
        buildSelectActions();
 
        db.loadCoords(coordIdx, gotFirstCoords, gotSpatial, onProgress);
-       
+
+       // Prefetch split coords in parallel so the child panel appears without lag
+       if (db.conf.split && db.conf.split.coords) {
+           let splitCoordIdx = db.findCoordIdx(db.conf.split.coords);
+           if (splitCoordIdx !== undefined && splitCoordIdx !== coordIdx)
+               db.loadCoords(splitCoordIdx, function(){}, function(){}, null);
+       }
+
        if ("traces" in db.conf.fileVersions)
            db.loadTraces(gotTraces);
 
@@ -4935,7 +5464,7 @@ var cellbrowser = function() {
        fetch(jsonUrl);
 
        if (db.conf.sampleCount < 50000) {
-           if (db.conf.quickGenes)
+           if (db.conf.quickGenes && db.conf.display !== "heatmap")
                db.preloadGenes(db.conf.quickGenes, function() {
                    updateGeneTableColors(null);
                    if (getVar("heat")==="1")
@@ -5612,7 +6141,10 @@ var cellbrowser = function() {
         var saneId = onlyAlphaNum(locusId)
         $('#tpGeneBarCell_'+saneId).addClass("tpGeneBarCellSelected");
 
-        colorByLocus(locusId, null, locusLabel);
+        if (db.heatmap)
+            db.heatmap.highlightRow(locusLabel);
+        else
+            colorByLocus(locusId, null, locusLabel);
         event.stopPropagation();
     }
 
@@ -5902,7 +6434,10 @@ var cellbrowser = function() {
             if (mouseOver===undefined)
                 mouseOver = internalId;
 
-            htmls.push('<span title="'+mouseOver+'" style="width: fit-content;" data-geneId="'+internalId+'" id="tpGeneBarCell_'+onlyAlphaNum(internalId)+'" class="hasTooltip tpGeneBarCell">'+label+'</span>');
+            var isHeatmap = db.conf.display === "heatmap";
+            var titleAttr = isHeatmap ? "" : 'title="'+mouseOver+'"';
+            var tooltipClass = isHeatmap ? "tpGeneBarCell" : "hasTooltip tpGeneBarCell";
+            htmls.push('<span '+titleAttr+' style="width: fit-content;" data-geneId="'+internalId+'" id="tpGeneBarCell_'+onlyAlphaNum(internalId)+'" class="'+tooltipClass+'">'+label+'</span>');
             i++;
         }
         htmls.push("</div>"); // divId
@@ -6935,10 +7470,11 @@ var cellbrowser = function() {
         if (db.conf.atacSearch) {
             updatePeakListWithGene(geneId);
         } else {
-            // in the normal, gene-matrix mode.
-            var locusStr = null;
             var geneInfo = db.getGeneInfo(geneId);
-            colorByLocus(geneInfo.id);
+            if (db.heatmap)
+                db.heatmap.highlightRow(geneInfo.sym || geneInfo.id);
+            else
+                colorByLocus(geneInfo.id);
         }
     }
 
@@ -7024,6 +7560,7 @@ var cellbrowser = function() {
         // from a collection config that lacks a meaningful sampleCount.
         if (renderer === null) {
             var canvLeft = metaBarWidth + metaBarMargin;
+            toolBarHeight = $('#tpToolBar').outerHeight(true) || toolBarHeight;
             var canvTop  = menuBarHeight + toolBarHeight;
             var canvWidth = window.innerWidth - canvLeft - legendBarWidth;
             var canvHeight = window.innerHeight - menuBarHeight - toolBarHeight;
@@ -7041,9 +7578,9 @@ var cellbrowser = function() {
             activateTooltip(".mpButton");
             renderer.activateSliders();
 
-            var cellCountDiv = document.createElement('div');
+            var cellCountDiv = document.createElement('span');
             cellCountDiv.id = "tpCellCount";
-            document.body.appendChild(cellCountDiv);
+            renderer.statusLine.appendChild(cellCountDiv);
 
             self.tooltipDiv = makeTooltipCont();
             document.body.appendChild(self.tooltipDiv);
@@ -7078,6 +7615,17 @@ var cellbrowser = function() {
         renderer.setPos(null, metaBarWidth+metaBarMargin);
 
         loadCustomFieldsFromStorage();
+
+        // annotation sync (account system) — only when login is enabled in
+        // cb.conf. A share link in the URL wins; otherwise pull the user's own
+        // copy. syncCustomFieldsFromServer() is itself a no-op when logged out.
+        if (cbLoginEnabled()) {
+            var annotShareToken = getVar("annotShare");
+            if (annotShareToken)
+                loadSharedAnnotations(annotShareToken, function(err) { if (err) alert(err); });
+            else
+                syncCustomFieldsFromServer();
+        }
 
         cartLoad(db);
         if (getVar("exprGene")) {
@@ -7153,6 +7701,7 @@ var cellbrowser = function() {
 
     function buildLayoutCombo(coordLabel, htmls, files, id, left, top) {
         /* files is a list of elements with a shortLabel attribute. Build combobox for them. */
+        if (!files || files.length === 0) return;
         if (!coordLabel)
             coordLabel = "Embedding";
 
@@ -7265,8 +7814,9 @@ var cellbrowser = function() {
 
     function buildGeneCombo(htmls, id, left, width) {
         /* Combobox that allows searching for genes */
+        var isHeatmap = db.conf.display === "heatmap";
         htmls.push('<div class="tpLeftSideItem" style="padding-left: 3px">');
-        var title = "Color by "+getGeneLabel();
+        var title = isHeatmap ? "Search "+getGeneLabel() : "Color by "+getGeneLabel();
         if (db.conf.atacSearch)
             title = "Find "+gFeatDesc+" at or close to:"
         htmls.push('<label style="display:block; margin-bottom:8px; padding-top: 8px;" for="'+id+'">'+title+'</label>');
@@ -7277,19 +7827,46 @@ var cellbrowser = function() {
         htmls.push('<select style="width:'+width+'px" id="'+id+'" placeholder="'+boxLabel+'" class="tpCombo">');
         htmls.push('</select>');
 
-        htmls.push('<div><button style="margin-top:4px" id="tpSplitOnGene">'+splitButtonLabel(true)+'</button>');
-        htmls.push('<button style="margin-left: 4px" id="tpMultiGene">Multi Gene</button></div>');
-        htmls.push('<div><button style="margin-top:4px" id="tpResetColors">Reset to default coloring</button></div>');
+        if (!isHeatmap) {
+            htmls.push('<div><button style="margin-top:4px" id="tpSplitOnGene">'+splitButtonLabel(true)+'</button>');
+            htmls.push('<button style="margin-left: 4px" id="tpMultiGene">Multi Gene</button></div>');
+            htmls.push('<div><button style="margin-top:4px" id="tpResetColors">Reset to default coloring</button></div>');
+        }
         htmls.push('</div>');
     }
 
 
     function activateCombobox(id, widthPx) {
-        $('#'+id).chosen({
-            inherit_select_classes : true,
-            disable_search_threshold: 10,
-            width : widthPx
-        });
+        var opts = {inherit_select_classes: true, disable_search_threshold: 10};
+        if (widthPx != null) opts.width = widthPx;
+        $('#'+id).chosen(opts);
+    }
+
+    function measureLongestOptionPx(id) {
+        /* Measure the pixel width needed to show the longest option text without wrapping. */
+        var sel = document.getElementById(id);
+        if (!sel) return 120;
+        var probe = document.createElement('span');
+        probe.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;font-size:14px;white-space:nowrap;padding:0 32px 0 8px';
+        document.body.appendChild(probe);
+        var maxW = 120;
+        for (var i = 0; i < sel.options.length; i++) {
+            probe.textContent = sel.options[i].text;
+            if (probe.offsetWidth > maxW) maxW = probe.offsetWidth;
+        }
+        document.body.removeChild(probe);
+        return maxW;
+    }
+
+    function activateComboboxFixedWidth(id) {
+        /* Activate chosen and permanently lock container to the longest option width.
+           Uses a !important CSS rule so no subsequent chosen:updated or flex reflow can override it. */
+        var w = measureLongestOptionPx(id);
+        activateCombobox(id, w);
+        var rule = '#' + id + '_chosen { width: ' + w + 'px !important; min-width: ' + w + 'px !important; }';
+        var styleEl = document.createElement('style');
+        styleEl.textContent = rule;
+        document.head.appendChild(styleEl);
     }
 
     function updateCollectionCombo(id, collData) {
@@ -7849,7 +8426,12 @@ var cellbrowser = function() {
 
        let metaName = getActiveColorField();
 
-       var heatmap = new MaxHeat(divEl, {mainRenderer:renderer});
+       var heatArgs = {mainRenderer: renderer};
+       var isDisplayHeatmap = db.conf.display === "heatmap";
+       var hasCoords = db.conf.coords && db.conf.coords.length > 0;
+       if (!isDisplayHeatmap || hasCoords)
+           heatArgs.onClose = removeHeatmap;
+       var heatmap = new MaxHeat(divEl, heatArgs);
        db.heatmap = heatmap;
        db.heatmap.exprData = null;
 
@@ -7857,7 +8439,7 @@ var cellbrowser = function() {
            plotHeatmap(divEl, metaName, exprData);
        }
 
-       loadGroupedExprData(db.heatmap.exprData, geneIds, metaName, onExprDataDoneHeat);
+       loadGroupedExprData(db.heatmap.exprData, geneIds, metaName, null, onExprDataDoneHeat);
     }
 
     function useGeneDropdown() {
@@ -7888,8 +8470,7 @@ var cellbrowser = function() {
                 opts.push(db.getGeneInfo(geneIds[i]));
             opts.sort(function(a, b) { return a.sym.localeCompare(b.sym); });
             var placeholder = selectEl.getAttribute("placeholder") || "";
-            // select2 needs an empty <option> first to show the placeholder
-            var html = ['<option></option>'];
+            var html = ['<option value=""></option>'];
             for (var j=0; j<opts.length; j++) {
                 var text = opts[j].sym;
                 if (opts[j].sym !== opts[j].id)
@@ -7897,12 +8478,22 @@ var cellbrowser = function() {
                 html.push('<option value="'+opts[j].id+'">'+text+'</option>');
             }
             selectEl.innerHTML = html.join("");
-            var widthPx = selectEl.style.width || 'resolve';
-            $("#"+id).select2({
-                placeholder: placeholder,
-                allowClear: true,
-                width: widthPx
-            }).on("change", onGeneComboChange);
+            var widthStr = selectEl.style.width || "240px";
+            if (db.conf.display === "heatmap") {
+                // Use chosen for heatmap datasets so the dropdown matches the Annotation tab styling
+                $("#"+id).chosen({
+                    inherit_select_classes: true,
+                    disable_search_threshold: 0,
+                    width: widthStr,
+                    placeholder_text_single: placeholder
+                }).on("change", onGeneComboChange);
+            } else {
+                $("#"+id).select2({
+                    placeholder: placeholder,
+                    allowClear: true,
+                    width: widthStr
+                }).on("change", onGeneComboChange);
+            }
             return;
         }
 
@@ -7919,11 +8510,34 @@ var cellbrowser = function() {
         select.on("change", onGeneComboChange);
     }
 
+    function onGeneExprSubsplitComboChange(ev, choice) {
+        /* gene expression viewer: called when user changes the subsplit meta field combo box */
+        var geneIds = db.exprData ? db.exprData.geneIds.slice() : [];
+        db.exprData = null;
+        if (geneIds.length > 0)
+            buildGeneExprPlotsAddGenes(geneIds, null);
+    }
+
+    function syncSubsplitCombo() {
+        /* disable whichever field is selected in the main split combo from appearing in subsplit */
+        var mainVal = $("#tpGeneExprMetaCombo").val();
+        var subsplitSel = $("#tpGeneExprSubsplitCombo");
+        subsplitSel.find("option").prop("disabled", false);
+        if (mainVal) {
+            subsplitSel.find("option[value='" + mainVal + "']").prop("disabled", true);
+            if (subsplitSel.val() === mainVal) {
+                subsplitSel.val("tpMetaVal_none").trigger("chosen:updated");
+            }
+        }
+        subsplitSel.trigger("chosen:updated");
+    }
+
     function onGeneExprMetaComboChange(ev, choice) {
         /* gene expression viewer: called when user changes the meta field combo box */
         var fieldId = parseInt(choice.selected.split("_")[1]);
         var metaName = db.getMetaFields()[fieldId].name;
         debug("changed meta on gene expr view to "+metaName, ev);
+        syncSubsplitCombo();
         buildGeneExprPlotsAddGenes(null, metaName);
     }
 
@@ -7935,7 +8549,40 @@ var cellbrowser = function() {
         buildGeneExprPlotsAddGenes([geneId], null);
     }
 
-    function promiseGeneSplitByMeta(locusStr, onProgress, metaArr, metaCount) {
+    function updatePerturbCount(selectedIdx, valCounts, totalCells) {
+        /* Update the cell count label next to the perturbation filter dropdown. */
+        var el = document.getElementById("tpExprPerturbCount");
+        if (!el) return;
+        if (selectedIdx === null || selectedIdx === undefined) {
+            el.textContent = totalCells.toLocaleString() + " cells total";
+        } else {
+            var n = valCounts[selectedIdx][1];
+            var pct = (n / totalCells * 100).toFixed(2);
+            el.textContent = n.toLocaleString() + " / " + totalCells.toLocaleString() + " cells (" + pct + "%)";
+        }
+    }
+
+    function onExprPerturbFilterChange() {
+        /* dot plot viewer: user changed the perturbation filter dropdown */
+        var perturbCombo = document.getElementById("tpExprPerturbCombo");
+        if (perturbCombo && db.conf.perturbationField) {
+            var val = perturbCombo.value;
+            var pfi = db.findMetaInfo(db.conf.perturbationField);
+            var pvc = pfi ? (pfi.valCounts || []) : [];
+            if (!val || val === "tpPerturb_none") {
+                updatePerturbCount(null, pvc, db.conf.sampleCount);
+            } else {
+                var idx = parseInt(val.split("_")[1]);
+                updatePerturbCount(idx, pvc, db.conf.sampleCount);
+            }
+        }
+        var geneIds = db.exprData ? db.exprData.geneIds.slice() : [];
+        db.exprData = null; // force full reload so mask is rebuilt for all genes
+        if (geneIds.length > 0)
+            buildGeneExprPlotsAddGenes(geneIds, null);
+    }
+
+    function promiseGeneSplitByMeta(locusStr, onProgress, metaArr, metaCount, cellMask) {
         /* A promise for loading the gene data and calculation average expression per meta data value.
            Resolves with a geneData object with gene-related attributes, exprMin, exprMax and dotRows.  */
         /* geneData.dotRows is an array of [cellCount, zeroPerc, avg] */
@@ -7944,7 +8591,8 @@ var cellbrowser = function() {
             function gotGeneData(exprArr, decArr, locusStr, geneDesc, binInfo) {
                 /* called when the expression vector has been loaded and binning is done */
                 debug("Promise - Received expression vector, for "+locusStr+", desc: "+geneDesc);
-                let res = splitExprByMeta(metaArr, metaCount, exprArr);
+                let res = cellMask ? splitExprByMetaMasked(metaArr, metaCount, exprArr, cellMask)
+                                   : splitExprByMeta(metaArr, metaCount, exprArr);
 
                 let metaToExpr = res[0];
                 let exprMin = res[1];
@@ -8663,7 +9311,7 @@ var cellbrowser = function() {
         return { fieldNames: fieldNames, annotBins: annotBins, annotLabels: annotLabels, palettes: palettes };
     }
 
-    function exprDataLoadGenes(geneIds, exprData, onDone) {
+    function exprDataLoadGenes(geneIds, exprData, onDone, cellMask) {
         /* add a list of geneIds to the current exprData object and call onDone when done.*/
         let promises = [];
         let metaArr = exprData.metaData.arr;
@@ -8672,7 +9320,7 @@ var cellbrowser = function() {
         for (let geneId of geneIds) {
             geneId = geneId.split("|")[0]; // internal genes sometimes can be in format ENSG-ID|geneSymbol
             if (exprData.geneIds.indexOf(geneId)===-1)
-                promises.push( promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount));
+                promises.push( promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount, cellMask));
             else
                 alert("This gene is already on the plot");
         }
@@ -8787,8 +9435,10 @@ var cellbrowser = function() {
         return { fieldNames: fieldNames, metaBins: metaBins, metaLabels: metaLabels, palettes: palettes };
     }
 
-    function loadGroupedExprData(exprData, geneIds, metaName, onGenesDone) {
-        /* load geneIds into exprData object, load expr data and summarize (average) by meta field */
+    function loadGroupedExprData(exprData, geneIds, metaName, subsplitName, onGenesDone, perturbFilter) {
+        /* load geneIds into exprData object, load expr data and summarize (average) by meta field.
+         * subsplitName: optional second meta field to cross with metaName (null = no subsplit).
+         * perturbFilter: optional {name, valueIdx} to restrict cells by perturbation value. */
 
         if (exprData===null) {
             exprData = {};
@@ -8802,22 +9452,84 @@ var cellbrowser = function() {
             exprData.allAvgMin = NaN;
         }
 
-        // load grouping field + all other enum fields in parallel
+        // load grouping field + (optional) subsplit field + all other enum fields in parallel
         var allFields = db.getMetaFields();
         var metaPromises = [promiseMeta(metaName, geneExprOnProgress)];
+        if (subsplitName) {
+            metaPromises.push(promiseMeta(subsplitName, geneExprOnProgress));
+        }
         var enumFieldIndices = [];
+        var perturbPromiseIdx = -1;
 
         for (var i = 0; i < allFields.length; i++) {
             var field = allFields[i];
-            if (field.type !== "enum" || field.name === metaName)
+            if (field.type !== "enum" || field.name === metaName || field.name === subsplitName)
                 continue;
+            var isPerturb = perturbFilter && field.name === perturbFilter.name;
+            if (field.valCounts && field.valCounts.length > 50) {
+                // high-cardinality field: skip for metaMatrix color bars, only load if needed for mask
+                if (isPerturb) {
+                    metaPromises.push(promiseMeta(field.name, geneExprOnProgress));
+                    perturbPromiseIdx = metaPromises.length - 1;
+                }
+                continue;
+            }
             metaPromises.push(promiseMeta(field.name, geneExprOnProgress));
             enumFieldIndices.push(metaPromises.length - 1);
+            if (isPerturb)
+                perturbPromiseIdx = metaPromises.length - 1;
+        }
+
+        // fallback: if perturbFilter field wasn't reached above (same as metaName/subsplitName)
+        if (perturbFilter && perturbPromiseIdx === -1) {
+            if (perturbFilter.name === metaName)
+                perturbPromiseIdx = 0;
+            else if (subsplitName && perturbFilter.name === subsplitName)
+                perturbPromiseIdx = 1;
+            else {
+                metaPromises.push(promiseMeta(perturbFilter.name, geneExprOnProgress));
+                perturbPromiseIdx = metaPromises.length - 1;
+            }
         }
 
         Promise.all(metaPromises).then( function (resArr) {
-            exprData.metaData = resArr[0];
-            exprData.metaLabels = exprData.metaData.ui.shortLabels;
+            var primaryMetaInfo = resArr[0];
+            exprData._primaryLabels = primaryMetaInfo.ui.shortLabels;
+
+            if (subsplitName) {
+                var subsplitMetaInfo = resArr[1];
+                var primaryCount = primaryMetaInfo.valCounts.length;
+                var subsplitCount = subsplitMetaInfo.valCounts.length;
+                var numCells = primaryMetaInfo.arr.length;
+                var combinedArr = new Int32Array(numCells);
+                for (var c = 0; c < numCells; c++) {
+                    combinedArr[c] = primaryMetaInfo.arr[c] * subsplitCount + subsplitMetaInfo.arr[c];
+                }
+                var primaryLabels = primaryMetaInfo.ui.shortLabels;
+                var subsplitLabels = subsplitMetaInfo.ui.shortLabels;
+                var combinedLabels = [];
+                var combinedValCounts = [];
+                for (var pi = 0; pi < primaryCount; pi++) {
+                    for (var si = 0; si < subsplitCount; si++) {
+                        var lbl = primaryLabels[pi] + " :: " + subsplitLabels[si];
+                        combinedLabels.push(lbl);
+                        combinedValCounts.push([lbl, 0]);
+                    }
+                }
+                exprData.metaData = {
+                    arr: combinedArr,
+                    ui: { shortLabels: combinedLabels },
+                    valCounts: combinedValCounts
+                };
+                exprData.metaLabels = combinedLabels;
+                exprData._subsplitCount = subsplitCount;
+                exprData._subsplitLabels = subsplitLabels;
+            } else {
+                exprData.metaData = primaryMetaInfo;
+                exprData.metaLabels = primaryMetaInfo.ui.shortLabels;
+                exprData._subsplitCount = 0;
+                exprData._subsplitLabels = null;
+            }
 
             var otherMetaInfos = [];
             for (var i = 0; i < enumFieldIndices.length; i++)
@@ -8828,7 +9540,19 @@ var cellbrowser = function() {
             else
                 exprData.metaMatrix = null;
 
-            exprDataLoadGenes(geneIds, exprData, onGenesDone);
+            // build cell mask for perturbation filtering
+            var cellMask = null;
+            if (perturbFilter && perturbPromiseIdx >= 0) {
+                var perturbMetaInfo = resArr[perturbPromiseIdx];
+                var perturbArr = perturbMetaInfo.arr;
+                var numCells = perturbArr.length;
+                cellMask = new Uint8Array(numCells);
+                for (var c = 0; c < numCells; c++) {
+                    cellMask[c] = (perturbArr[c] === perturbFilter.valueIdx) ? 1 : 0;
+                }
+            }
+
+            exprDataLoadGenes(geneIds, exprData, onGenesDone, cellMask);
         });
     }
 
@@ -8852,6 +9576,24 @@ var cellbrowser = function() {
         if (geneIds.length>0)
             selectizeSetValue("tpGeneExprGeneCombo", geneIds[0].split("|")[0]);
 
+        // read subsplit name (null if "Show all" is selected)
+        var subsplitName = null;
+        var subsplitCombo = document.getElementById("tpGeneExprSubsplitCombo");
+        if (subsplitCombo && subsplitCombo.value && subsplitCombo.value !== "tpMetaVal_none") {
+            var ssIdx = subsplitCombo.value.split("_")[1];
+            subsplitName = db.conf.metaFields[ssIdx].name;
+        }
+
+        // read perturbation filter (null if "All cells" is selected)
+        var perturbFilter = null;
+        if (db.conf.perturbationField) {
+            var perturbCombo = document.getElementById("tpExprPerturbCombo");
+            if (perturbCombo && perturbCombo.value && perturbCombo.value !== "tpPerturb_none") {
+                var perturbValueIdx = parseInt(perturbCombo.value.split("_")[1]);
+                perturbFilter = {name: db.conf.perturbationField, valueIdx: perturbValueIdx};
+            }
+        }
+
         function buildProgressBar(domId) {
             var progressDiv = $( "#"+domId );
             var progressLabel = progressDiv.children().first();
@@ -8864,16 +9606,37 @@ var cellbrowser = function() {
         }
 
         let exprContent = getById("tpExprViewPlot");
-        exprContent.innerHTML = 
+        exprContent.innerHTML =
             '<div id="progressBarExpr" style="width:500px"><div class="progress-label">Loading expression values...</div></div><br>'+
             '<div id="progressBarMeta" style="width:500px"><div class="progress-label">Loading annotation labels...</div></div>';
 
         buildProgressBar('progressBarExpr');
         buildProgressBar('progressBarMeta');
 
-        function onExprDataDone (exprData) { 
+        function onExprDataDone (exprData) {
             /* done loading expression data, now do the plotting */
-            buildExprDotplot("tpExprViewPlot", exprData); 
+            // populate split filter panel
+            var splitBtn = getById("tpExprSplitFilterBtn");
+            var splitPanel = getById("tpExprSplitFilterPanel");
+            if (splitBtn && splitPanel) {
+                splitPanel.style.display = 'none'; // ensure closed before populating
+                populateExprFilterPanel("tpExprSplitFilterPanel", "tpExprSplitFilterBtn", exprData._primaryLabels || exprData.metaLabels);
+                splitBtn.style.display = '';
+            }
+            // populate subsplit filter panel
+            var ssBtn = getById("tpExprSubsplitFilterBtn");
+            var ssPanel = getById("tpExprSubsplitFilterPanel");
+            if (ssBtn && ssPanel) {
+                if (exprData._subsplitLabels) {
+                    ssPanel.style.display = 'none';
+                    populateExprFilterPanel("tpExprSubsplitFilterPanel", "tpExprSubsplitFilterBtn", exprData._subsplitLabels);
+                    ssBtn.style.display = '';
+                } else {
+                    ssBtn.style.display = 'none';
+                    ssPanel.innerHTML = '';
+                }
+            }
+            buildExprDotplotFiltered("tpExprViewPlot", exprData);
             db.exprData = exprData;
             // save into URL
             let allGeneIdStr = exprData.geneIds.join(" ");
@@ -8881,7 +9644,7 @@ var cellbrowser = function() {
             changeUrl(urlOpts);
         };
 
-        loadGroupedExprData(db.exprData, geneIds, metaName, onExprDataDone);
+        loadGroupedExprData(db.exprData, geneIds, metaName, subsplitName, onExprDataDone, perturbFilter);
 
         //Promise.all([promiseGeneSplitByMeta(geneId, geneExprOnProgress), promiseMeta(metaName, geneExprOnProgress)]).then( function(resArr) {
         //    //if(DEBUG) console.log("promises are all loaded", resArr);
@@ -8934,6 +9697,111 @@ var cellbrowser = function() {
         if(e.keyCode == 27) closeExprView(); 
     }
 
+    function buildMetaFieldComboWithNone(htmls, idOuter, id, optStr) {
+        /* like buildMetaFieldCombo but adds a "Show all" (no subsplit) option at top */
+        var metaFieldInfo = db.getMetaFields();
+        htmls.push('<div id="'+idOuter+'" style="padding-left:2px; display:inline">');
+        var entries = [["tpMetaVal_none", "Show all"]];
+        for (var i = 1; i < metaFieldInfo.length; i++) {
+            var field = metaFieldInfo[i];
+            var isNumeric = (field.type==="int" || field.type==="float");
+            if (optStr==="noNums" && isNumeric) continue;
+            entries.push(["tpMetaVal_"+i, field.label]);
+        }
+        buildComboBox(htmls, id, entries, 0, "Show all", 50);
+        htmls.push('</div>');
+    }
+
+    function populateExprFilterPanel(panelId, btnId, labels) {
+        /* fill a filter dropdown panel with checkboxes for each label */
+        var panel = getById(panelId);
+        if (!panel) return;
+        var htmls = [];
+        htmls.push('<div class="tpExprFilterAll"><label><input type="checkbox" id="'+panelId+'SelectAll" checked> Select all</label></div>');
+        for (var i = 0; i < labels.length; i++) {
+            htmls.push('<div class="tpExprFilterItem"><label><input type="checkbox" class="tpExprFilterCheck" data-panel="'+panelId+'" data-idx="'+i+'" checked> '+labels[i]+'</label></div>');
+        }
+        panel.innerHTML = htmls.join("");
+        updateExprFilterBtnText(panelId, btnId, labels.length);
+
+        getById(panelId+'SelectAll').addEventListener('change', function() {
+            var checked = this.checked;
+            var boxes = panel.querySelectorAll('.tpExprFilterCheck');
+            boxes.forEach(function(b) { b.checked = checked; });
+            updateExprFilterBtnText(panelId, btnId, labels.length);
+            onExprFilterChange();
+        });
+        panel.querySelectorAll('.tpExprFilterCheck').forEach(function(box) {
+            box.addEventListener('change', function() {
+                var total = labels.length;
+                var checkedCount = panel.querySelectorAll('.tpExprFilterCheck:checked').length;
+                getById(panelId+'SelectAll').checked = (checkedCount === total);
+                updateExprFilterBtnText(panelId, btnId, total);
+                onExprFilterChange();
+            });
+        });
+    }
+
+    function updateExprFilterBtnText(panelId, btnId, total) {
+        /* update filter button text to show "All ▾" or "N/M ▾" */
+        var btn = getById(btnId);
+        if (!btn) return;
+        var panel = getById(panelId);
+        var checked = panel ? panel.querySelectorAll('.tpExprFilterCheck:checked').length : total;
+        btn.textContent = (checked === total) ? 'All ▾' : checked+'/'+total+' ▾';
+    }
+
+    function getExprFilterIndices(panelId) {
+        /* return array of checked indices, or null if all are checked */
+        var panel = getById(panelId);
+        if (!panel) return null;
+        var all = panel.querySelectorAll('.tpExprFilterCheck');
+        var checked = panel.querySelectorAll('.tpExprFilterCheck:checked');
+        if (all.length === 0 || all.length === checked.length) return null;
+        var indices = [];
+        checked.forEach(function(b) { indices.push(parseInt(b.getAttribute('data-idx'))); });
+        return indices;
+    }
+
+    function onExprFilterChange() {
+        /* called when any filter checkbox changes — re-render with current filters */
+        if (!db.exprData) return;
+        buildExprDotplotFiltered("tpExprViewPlot", db.exprData);
+    }
+
+    function buildExprDotplotFiltered(parentDomId, exprData) {
+        /* render the dot plot applying the current split/subsplit filter selections */
+        var splitFilter = getExprFilterIndices("tpExprSplitFilterPanel");
+        var subsplitFilter = getExprFilterIndices("tpExprSubsplitFilterPanel");
+        if (splitFilter === null && subsplitFilter === null) {
+            buildExprDotplot(parentDomId, exprData);
+            return;
+        }
+        var subsplitCount = exprData._subsplitCount || 0;
+        var filteredData = {};
+        Object.assign(filteredData, exprData);
+        filteredData.metaLabels = [];
+        filteredData.rows = [];
+        filteredData.cellCounts = [];
+        for (var rowIdx = 0; rowIdx < exprData.metaLabels.length; rowIdx++) {
+            var include = true;
+            if (subsplitCount > 0) {
+                var primaryIdx = Math.floor(rowIdx / subsplitCount);
+                var ssIdx = rowIdx % subsplitCount;
+                if (splitFilter !== null && splitFilter.indexOf(primaryIdx) === -1) include = false;
+                if (subsplitFilter !== null && subsplitFilter.indexOf(ssIdx) === -1) include = false;
+            } else {
+                if (splitFilter !== null && splitFilter.indexOf(rowIdx) === -1) include = false;
+            }
+            if (include) {
+                filteredData.metaLabels.push(exprData.metaLabels[rowIdx]);
+                filteredData.rows.push(exprData.rows[rowIdx]);
+                filteredData.cellCounts.push(exprData.cellCounts[rowIdx]);
+            }
+        }
+        buildExprDotplot(parentDomId, filteredData);
+    }
+
     function buildExprViewWindow() {
         /* build the expression viewer dialog box */
         if (db.conf.atacSearch) {
@@ -8960,14 +9828,25 @@ var cellbrowser = function() {
         htmls.push('<div class="link" style="padding-bottom: 6px; padding-left: 6px" id="tpBackToCb">&#8592; Back to Cell Browser</div>');
 
         htmls.push("<div id='tpExprViewHeader'>");
+
+        // Row 0: perturbation filter (only shown for perturbation datasets)
+        if (db.conf.perturbationField) {
+            htmls.push("<div class='tpExprHeaderRow' id='tpExprPerturbRow'>");
+            htmls.push('<label for="tpExprPerturbCombo">Filter by perturbation</label>');
+            htmls.push('<select id="tpExprPerturbCombo" placeholder="All cells"></select>');
+            htmls.push('<span id="tpExprPerturbCount" style="font-size:12px;color:#888;margin-left:6px"></span>');
+            htmls.push("</div>"); // tpExprHeaderRow row0
+        }
+
+        // Row 1: gene combo + add multiple genes
+        htmls.push("<div class='tpExprHeaderRow'>");
         htmls.push('<label id="tpGeneExprLabel" for="tpGeneExprGeneCombo">Show expression of </label>');
         htmls.push('<select style="width:250px" id="tpGeneExprGeneCombo" placeholder="Gene" class="tpCombo"></select>');
-
-        htmls.push('<label id="tpGeneExprMetaLabel" for="'+"tpGeneExprMetaCombo"+'">Split by cell annotation</label>');
+        htmls.push('<button id="tpGeneExprAddMulti" style="padding-left: 15px; padding-right: 15px; padding-bottom: 5px; padding-top: 5px; margin-left: 6px">Add multiple genes</button>');
+        htmls.push("</div>"); // tpExprHeaderRow row1
 
         // try to use the current color field, but you cannot split on a number, so fall back to the default color field
         let metaName = getActiveColorField();
-        //let metaName = getActiveColorField();;
         metaName = getVar("exprMeta", metaName);
 
         var fieldInfo = db.findMetaInfo(metaName);
@@ -8980,11 +9859,26 @@ var cellbrowser = function() {
             }
         }
 
+        // Row 2: split by + filter
+        htmls.push("<div class='tpExprHeaderRow'>");
+        htmls.push('<label id="tpGeneExprMetaLabel" for="tpGeneExprMetaCombo">Split by cell annotation</label>');
         buildMetaFieldCombo(htmls, "tpGeneExprMetaComboBox", "tpGeneExprMetaCombo", 0, metaName, "noNums");
         htmlAddInfoIcon(htmls, "Expression data can only be split by categorical fields. Numerical fields are not shown here.");
+        htmls.push("<div class='tpExprFilterWrap'>");
+        htmls.push("<button class='tpExprFilterBtn' id='tpExprSplitFilterBtn' style='display:none'>All &#9662;</button>");
+        htmls.push("<div class='tpExprFilterPanel' id='tpExprSplitFilterPanel' style='display:none'></div>");
+        htmls.push("</div>"); // tpExprFilterWrap
+        htmls.push("</div>"); // tpExprHeaderRow row2
 
-
-        htmls.push('<button id="tpGeneExprAddMulti" style="padding-left: 15px; padding-right: 15px; padding-bottom: 5px; padding-top: 5px; margin-left: 15px">Add multiple genes</button>');
+        // Row 3: subsplit by + filter
+        htmls.push("<div class='tpExprHeaderRow'>");
+        htmls.push('<label id="tpGeneExprSubsplitLabel">Subsplit by</label>');
+        buildMetaFieldComboWithNone(htmls, "tpGeneExprSubsplitComboBox", "tpGeneExprSubsplitCombo", "noNums");
+        htmls.push("<div class='tpExprFilterWrap'>");
+        htmls.push("<button class='tpExprFilterBtn' id='tpExprSubsplitFilterBtn' style='display:none'>All &#9662;</button>");
+        htmls.push("<div class='tpExprFilterPanel' id='tpExprSubsplitFilterPanel' style='display:none'></div>");
+        htmls.push("</div>"); // tpExprFilterWrap
+        htmls.push("</div>"); // tpExprHeaderRow row3
 
         htmls.push("</div>"); //tpExprViewHeader
 
@@ -8999,13 +9893,67 @@ var cellbrowser = function() {
 
         activateGeneCombo("tpGeneExprGeneCombo", onGeneExprGeneComboChange);
 
-        activateCombobox("tpGeneExprMetaCombo", 250);
+        activateComboboxFixedWidth("tpGeneExprMetaCombo");
+        activateComboboxFixedWidth("tpGeneExprSubsplitCombo");
+        syncSubsplitCombo();
+
+        if (db.conf.perturbationField) {
+            var perturbFieldInfo = db.findMetaInfo(db.conf.perturbationField);
+            var perturbOpts = [{value: "tpPerturb_none", text: "All cells"}];
+            var pvc = perturbFieldInfo.valCounts || [];
+            for (var pi = 0; pi < pvc.length; pi++)
+                perturbOpts.push({value: "tpPerturb_"+pi, text: pvc[pi][0]});
+
+            // measure longest option text before selectize init
+            var perturbProbe = document.createElement('span');
+            perturbProbe.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;font-size:14px;white-space:nowrap;padding:0 32px 0 8px';
+            document.body.appendChild(perturbProbe);
+            var perturbW = 120;
+            for (var pi2 = 0; pi2 < perturbOpts.length; pi2++) {
+                perturbProbe.textContent = perturbOpts[pi2].text;
+                if (perturbProbe.offsetWidth > perturbW) perturbW = perturbProbe.offsetWidth;
+            }
+            document.body.removeChild(perturbProbe);
+
+            $("#tpExprPerturbCombo").selectize({
+                options: perturbOpts,
+                items: ["tpPerturb_none"],
+                valueField: "value",
+                labelField: "text",
+                searchField: "text",
+                maxItems: 1,
+                closeAfterSelect: true,
+                onChange: function(val) { onExprPerturbFilterChange(); }
+            });
+
+            // lock selectize control width with !important so selection changes don't resize it
+            var perturbStyleEl = document.createElement('style');
+            perturbStyleEl.textContent = '#tpExprPerturbCombo + .selectize-control { width: ' + perturbW + 'px !important; }';
+            document.head.appendChild(perturbStyleEl);
+
+            // show total cell count initially ("All cells" selected)
+            updatePerturbCount(null, pvc, db.conf.sampleCount);
+        }
 
         $("#tpGeneExprMetaCombo").change( onGeneExprMetaComboChange );
+        $("#tpGeneExprSubsplitCombo").change( onGeneExprSubsplitComboChange );
 
         $("#tpBackToCb").click( closeExprView );
         $('#tpCloseButton').click( closeExprView );
         $('#tpGeneExprAddMulti').click( onGeneExprAddGenesClick  );
+
+        // toggle filter panels on button click; close on outside click
+        $(document.body).on('click', '.tpExprFilterBtn', function(ev) {
+            ev.stopPropagation();
+            var wrap = $(this).parent();
+            var panel = wrap.find('.tpExprFilterPanel');
+            panel.toggle();
+        });
+        $(document).on('click', function(ev) {
+            if (!$(ev.target).closest('.tpExprFilterWrap').length) {
+                $('.tpExprFilterPanel').hide();
+            }
+        });
 
 
         /*
@@ -9073,7 +10021,7 @@ var cellbrowser = function() {
             htmls.push('<button id="tpOpenImgButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Show supplemental hi-res images submitted with this dataset" data-placement="bottom">Supplemental Images</button>');
 
         //if (!db.conf.atacSearch)
-        htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Violin Plot Viewer" data-placement="bottom">Gene Expression Plots</button>');
+        htmls.push('<button id="tpOpenExprButton" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Gene Expression Dot Plot Viewer" data-placement="bottom">Gene Expression Plots</button>');
 
         if (db.conf.markers && db.conf.markers.length > 0) {
             var labelMetaInfo = db.findMetaInfo(db.conf.labelField);
@@ -9117,7 +10065,7 @@ var cellbrowser = function() {
         var grandparentName = null;
         if (nameParts.length > 1) {
             //buildCollectionCombo(htmls, "tpCollectionCombo", 330, nextLeft, 0);
-            buildCollectionCombo(htmls, "tpCollectionCombo", 330, null, 3);
+            buildCollectionCombo(htmls, "tpCollectionCombo", 330, null, 1);
             nameParts.pop();
             parentName = nameParts.join("/");
             if (nameParts.length > 1)
@@ -9458,7 +10406,8 @@ var cellbrowser = function() {
         htmls.push("<ul>");
         htmls.push("<li><a href='#tpAnnotTab'>Annotation</a></li>");
         htmls.push("<li><a href='#tpGeneTab'>"+getGeneLabel()+"</a></li>");
-        htmls.push("<li><a href='#tpLayoutTab'>"+(db.conf.coordLabel || "Layout")+"</a></li>");
+        if (db.conf.coords && db.conf.coords.length > 0)
+            htmls.push("<li><a href='#tpLayoutTab'>"+(db.conf.coordLabel || "Layout")+"</a></li>");
         htmls.push("<li><a href='#tpToolsTab'>Tools</a></li>");
         htmls.push("</ul>");
 
@@ -9485,7 +10434,7 @@ var cellbrowser = function() {
 
         buildGeneCombo(htmls, "tpGeneCombo", 0, metaBarWidth-10);
 
-        htmls.push('<div id="splitJoinDiv"><input class="form-check-input" type="checkbox" id="splitJoinBox" name="splitJoin" value="splitJoin" /> <label for="splitJoinBox">Show on both sides</label></div>');
+        htmls.push('<div id="splitJoinDiv" style="display:none;padding-left:8px"><input class="form-check-input" type="checkbox" id="splitJoinBox" name="splitJoin" value="splitJoin" /> <label for="splitJoinBox">Show on both sides</label></div>');
 
         if (db.conf.atacSearch)
             buildPeakList(htmls);
@@ -9613,6 +10562,43 @@ var cellbrowser = function() {
         intro.setOption("doneLabel", "Close this window");
         intro.setOption("skipLabel", "Stop the tutorial");
 
+        // A step can carry a "tab" property (meta/gene/layout). Before each step
+        // is shown, open that tab in the left sidebar, so the element the step
+        // points at is actually visible, e.g. the Gene tab during "color by gene".
+        // A step whose element is a top-menu <li class="dropdown"> (e.g. the View
+        // or File menu) gets that menu opened, so the item the text refers to
+        // (Split screen, Download image) is visible instead of just the closed bar.
+        intro.onbeforechange(function() {
+            var step = this._introItems[this._currentStep];
+            // close any menu a previous step left open, drop any item highlight
+            $('#tpMenuBar li.dropdown.open').removeClass('open');
+            $('#tpMenuBar .introMenuHilite').removeClass('introMenuHilite');
+            if (step && step.tab)
+                activateTab(step.tab);
+            // A step can carry an "openMenu" selector for a menu item. Its element
+            // is the whole dropdown menu, so intro.js lights up the entire open menu
+            // and puts the tooltip beside it (not on top of the items). We open the
+            // menu and mark the one item the step is about. Do it twice: once now, so
+            // the menu has a real size when intro measures it for placement, and once
+            // after a timeout, because the click on the "Next" button bubbles to the
+            // document where Bootstrap closes all dropdowns right after this runs. The
+            // deferred call re-opens the menu once that click has settled.
+            if (step && step.openMenu) {
+                var openMenu = function() {
+                    $(step.openMenu).closest('.dropdown').addClass('open');
+                    $(step.openMenu).addClass('introMenuHilite');
+                };
+                openMenu();
+                setTimeout(openMenu, 0);
+            }
+        });
+
+        // no menu left open, no highlight left behind when the tutorial closes
+        intro.onexit(function() {
+            $('#tpMenuBar li.dropdown.open').removeClass('open');
+            $('#tpMenuBar .introMenuHilite').removeClass('introMenuHilite');
+        });
+
         if (addFirst) {
             intro.setOption("skipLabel", "I know. Close this window.");
             intro.addStep({
@@ -9624,39 +10610,72 @@ var cellbrowser = function() {
         intro.addSteps(
             [
               {
-                intro: "In the center of the window, highlighted here, each circle represents a "+gSampleDesc+". Try to move the mouse over a cell type label of this dataset, it will highlight the cells of this type. You can click the cell type label to show the marker gene lists of the cluster.",
+                intro: "In the center of the window, each circle represents a "+gSampleDesc+". Move the mouse over a "+gSampleDesc+" and its annotations and gene expression values appear in the panel on the left.",
                 element: document.querySelector('#mpCanvas'),
                 position: 'auto'
               },
               {
-                element: document.querySelector('#tpLeftSidebar'),
-                intro: "To color the cells by an annotation that is not a cell type, select an annotation field from the 'Color by annotation' dropdown or simply click it. You cannot color by fields with hundreds of values, as there are not enough distinct colors.",
+                intro: "The text on the plot shows the cluster names. Move the mouse over a label and all "+gSampleDesc+"s in that cluster grow larger and are highlighted. Click a label to open the list of marker genes for the cluster.",
+                element: document.querySelector('#mpCanvas'),
                 position: 'auto'
               },
               {
-                element: document.querySelector('#tpGeneTab'),
-                intro: "Color by gene: Click a gene from the list of pre-selected dataset genes or search for a gene in the dropdown to color by it.<br>",
-                position: 'auto'
+                element: document.querySelector('#tpButtonInfo'),
+                intro: "Click 'Info &amp; Download' to read this dataset's abstract and methods, find out how to cite it, and download the underlying expression matrix, metadata and other files.",
+                position: 'bottom'
+              },
+              {
+                element: document.querySelector('#tpLeftSidebar'),
+                intro: "Color the "+gSampleDesc+"s by an annotation such as cluster, sample or donor: pick a field from the 'Color by Annotation' dropdown or simply click it. Fields with hundreds of values cannot be used, as there are not enough distinct colors.",
+                position: 'auto',
+                tab: 'meta'
+              },
+              {
+                element: document.querySelector('#tpLeftSidebar'),
+                intro: "Most datasets have more than one layout, e.g. UMAP and t-SNE. Switch between the available layouts here.",
+                position: 'auto',
+                tab: 'layout'
+              },
+              {
+                element: document.querySelector('#tpLeftSidebar'),
+                intro: "Color by gene expression: search for a gene in the box, or click one of the dataset genes listed below it. The "+gSampleDesc+"s are then colored by that gene's expression level.",
+                position: 'auto',
+                tab: 'gene'
               },
               {
                 element: document.querySelector('#tpOpenExprButton'),
-                intro: "Click 'Gene Expression Plots' to make Dotplots.",
+                intro: "Click 'Gene Expression Plots' to compare the expression of genes across clusters as a dot plot or heatmap. Inside that window, 'Multi Gene' mode lets you enter a whole list of genes at once.",
                 position: 'auto'
               },
-              //{
-                //element: document.querySelector('#tpGeneBar'),
-                //intro: "Expression data: when you move the mouse, expression values will be shown here.<br>Click on a gene to color the circles by gene expression level (log'ed).",
-                //position: 'top'
-              //},
+              {
+                element: document.querySelector('#mpIconModeSelect'),
+                intro: "These tools change what the mouse does: move the view, select "+gSampleDesc+"s with a rectangle or a freehand lasso, click to select a whole cluster, or zoom to a rectangle. You can also select using the checkboxes in the legend, or with Edit > Find Cells.",
+                position: 'auto'
+              },
+              {
+                element: document.querySelector('#tpSplitMenu').closest('.dropdown-menu'),
+                openMenu: '#tpSplitMenu',
+                intro: "Use View > Split screen (or press 't') to show two plots side by side, handy for comparing two genes or two layouts of the same "+gSampleDesc+"s.",
+                position: 'right'
+              },
               {
                 element: document.querySelector('#tpLegendBar'),
-                intro: "Click into the legend to select "+gSampleDesc+"s.<br>Click a color to change it or select a palette from the 'Colors' menu.<br>If you need a dataset, send us a link to it. If you have a new dataset in your lab, send it to cells@ucsc.edu so we can add it (hidden until publication).<br>To setup your own cell browser on your own webserver, see 'Help - Setup your own'.",
+                intro: "The legend shows the current colors. Click an entry to select those "+gSampleDesc+"s, click a color swatch to change it, or choose a palette from the 'Colors' menu. When "+gSampleDesc+"s are selected and you color by a gene, a violin plot appears at the bottom right.",
                 position: 'left'
               },
               {
-                element: document.querySelector('#tpLegendBar'),
-                intro: "Select cells with the checkboxes, with the 'select' tool in the toolbar or via Edit > Find Cells. Once cells are selected and you are coloring by a gene, a violin plot is shown in the bottom right.",
-                position: 'auto'
+                element: document.querySelector('#tpOpenDatasetButton'),
+                intro: "Click 'Open...' to browse all the other datasets on this server and load a different one. You can narrow the list by organism, tissue, disease and other categories.",
+                position: 'bottom'
+              },
+              {
+                element: document.querySelector('#tpSaveImage').closest('.dropdown-menu'),
+                openMenu: '#tpSaveImage',
+                intro: "Use File > Download image to save the current plot as a PNG or SVG for a figure or slide. The web address in your browser always reflects the current view, so you can copy it from the address bar to show a colleague exactly what you see.",
+                position: 'right'
+              },
+              {
+                intro: "That's it! If you need a dataset that is not here yet, send us a link. If you have your own data, email it to cells@ucsc.edu and we can add it, hidden until publication. To run your own cell browser on your own webserver, see 'Help > Setup your own'."
               },
             ]);
         intro.start();
@@ -9984,6 +11003,7 @@ var cellbrowser = function() {
         Mousetrap.bind('g', function() {
             var el = getById("tpGeneCombo");
             if (el && el.selectize) el.selectize.focus();
+            else if ($("#tpGeneCombo_chosen").length > 0) $("#tpGeneCombo").trigger("chosen:open");
             else $("#tpGeneCombo").select2('open');
             return false;
         });
@@ -11359,6 +12379,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         if (mainRenderer)
             mainRenderer.refreshSliderPos(true); // back to single mode: just above grey bar
         mainRenderer = null;
+
+        // restore single-panel count position
+        var mainCount = getById("tpCellCount");
+        if (mainCount) mainCount.classList.remove("split");
+
         $("#tpSplitMenuEntry").text("Split Screen");
         buildWatermark(renderer); // clears the watermark now that isSplit() is false
         renderer.drawDots();
@@ -11370,6 +12395,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         $("#splitJoinDiv").show();
         buildWatermark(renderer, true);
         renderer.onActiveChange = onActRendChange;
+
+        // raise the count above the dataset title in split mode
+        var mainCount = getById("tpCellCount");
+        if (mainCount) mainCount.classList.add("split");
 
         var currCoordIdx = $("#tpLayoutCombo").val();
         renderer.legend = gLegend;
@@ -11436,9 +12465,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     function onHeatCellClick(geneName, clusterName) {
         /* color by gene and select all cells in cluster */
-        colorByLocus(geneName);
-        // clusterName?
-        //selectByColor
+        if (db.heatmap)
+            db.heatmap.highlightRow(geneName);
+        else
+            colorByLocus(geneName);
     }
 
     function onHeatCellHover(rowIdx, colIdx, rowName, colName, value, cellCount, ev, metaHover) {
@@ -11453,12 +12483,17 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 htmls.push(rowName);
             if (colName)
                 htmls.push(colName)
-            if (value!==null)
-                htmls.push("<br><b>Average</b>:"+parseFloat(value).toPrecision(3)+"<br>");
+            if (value!==null) {
+                var valLabel = (cellCount === 1) ? "Value" : "Average";
+                htmls.push("<br><b>" + valLabel + "</b>: " + parseFloat(value).toPrecision(3));
+            }
             if (cellCount!==null && cellCount!==undefined)
-                htmls.push(" <b>Cell Count</b>:"+cellCount+"<br>");
+                htmls.push("<br><b>" + capitalize(gSampleDesc) + "s</b>: " + cellCount);
         }
-        showTooltip(ev.clientX+15, ev.clientY, htmls.join(" "));
+        if (htmls.length === 0)
+            hideTooltip();
+        else
+            showTooltip(ev.clientX+15, ev.clientY, htmls.join(" "));
     }
 
     function plotHeatmap(divEl, metaName, exprData) {
@@ -11466,7 +12501,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         */
         let heatmap = db.heatmap;
 
-        var colors = makeColorPalette("blueWhiteRed", db.exprBinCount);
+        var colors = makeColorPalette("blueWhiteRed", exprBinCount);
 
         let syms = exprData.syms;
         let metaLabels = exprData.metaLabels;
@@ -11477,7 +12512,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         let geneVals = convExprDataForHeatmap(exprData,  binCount);
 
-        let conf = { nullColor: cNullColor, doFlip: true };
+        let conf = { nullColor: cNullColor, doFlip: true, primaryFieldName: metaName };
         heatmap.loadData(metaLabels, syms, colors, geneVals.rowBins, geneVals.rowAvgs, cellCounts, conf, exprData.metaMatrix, exprData.geneAnnotMatrix);
         heatmap.draw();
         heatmap.onCellHover = onHeatCellHover;
@@ -11514,7 +12549,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 let colData = row[colI];
                 let avgExpr = colData[1];
                 // at the edge, floating point problems can make it sometimes 21, so use Math.min
-                let colBin = Math.min(binCount, Math.round((avgExpr-avgMin) / binSize)); 
+                let colBin = Math.min(binCount-1, Math.round((avgExpr-avgMin) / binSize));
                 binRow.push(colBin);
                 avgRow.push(avgExpr);
             }
@@ -12255,6 +13290,13 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     /* ==== MAIN ==== ENTRY FUNCTION */
     function main(rootMd5) {
+        /* Load the site config first (it may set the login API endpoint), then
+         * start the app. loadClientConf always calls back, even if cb.conf is
+         * absent, so startup is never blocked by a missing config file. */
+        loadClientConf(function() { mainInit(rootMd5); });
+    }
+
+    function mainInit(rootMd5) {
         /* start the data loaders, show first dataset. If in  */
         changeUrl({"nc":null});
         if (redirectIfSubdomain()) {
@@ -12264,6 +13306,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         changeUrl({"nc":null});
         setupKeyboard();
         buildMenuBar();
+        checkLoginState();  // updates the account menu once /api/auth/me responds
 
         var datasetName = getDatasetNameFromUrl()
         // pre-load dataset.json here?

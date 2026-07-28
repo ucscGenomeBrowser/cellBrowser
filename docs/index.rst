@@ -7,7 +7,9 @@ to color cells by both of these attributes. Additional information, such as
 cluster marker genes and selected dataset-relevant genes, can also be displayed.
 
 The main UCSC Cell Browser website runs at http://cells.ucsc.edu, showing more than
-330 datasets, the majority submitted directly to us from labs for publications.
+1,600 datasets covering over 160 million cells, organized into 180 collections
+alongside 132 standalone datasets. The majority are submitted directly to us
+from labs for publications.
 We are happy to host your datasets; to do so
 upload your files via the website https://cells-submit.gi.ucsc.edu.
 To not show data publicly, check the box "private dataset" in the upload interface.
@@ -41,12 +43,20 @@ and use features like split-screen comparison and heatmaps.
    :caption: Using the Cell Browser
 
    ui/getting_started
+   ui/examples
    ui/datasets
    ui/visualization
    ui/analysis
+   ui/accounts
+   ui/faq
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Downloading and Loading Data
+
    ui/downloading
    load
-   ui/faq
+   bulk
 
 .. toctree::
    :maxdepth: 1
@@ -54,33 +64,8 @@ and use features like split-screen comparison and heatmaps.
 
    submission
 
-Building Your Own Cell Browser
-------------------------------
-
-Want to create a Cell Browser for your own single-cell dataset and
-host it on your own web server? Follow the guides below.
-
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
    :caption: Building a Cell Browser
 
-   installation
-   quick_start
-   basic_usage
-   internet
-   tabsep
-   seurat
-   scanpy
-   cellranger
-   howto
-   advanced
-   genes
-   cbtool
-   dataDesc
-   collections
-   cellbrowser_conf
-
-.. toctree::
-   :hidden:
-
-   interface
+   building
