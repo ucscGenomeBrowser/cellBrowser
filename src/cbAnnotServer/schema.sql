@@ -3,20 +3,27 @@
 -- SQLAlchemy can create the tables directly with db.create_all(), so this file is
 -- here for reference and for environments that prefer raw SQL bootstrap.
 
+-- email and password_hash are nullable: an account may instead be identified
+-- by an external OAuth identity (oauth_provider, oauth_sub). An ORCID login in
+-- particular may carry no email, and any OAuth login has no local password.
 CREATE TABLE IF NOT EXISTS users (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    email           TEXT UNIQUE NOT NULL,
-    password_hash   TEXT NOT NULL,
+    email           TEXT UNIQUE,
+    password_hash   TEXT,
     display_name    TEXT,
     email_verified  BOOLEAN NOT NULL DEFAULT 0,
     verify_token    TEXT,
     reset_token     TEXT,
     reset_expires   TIMESTAMP,
+    oauth_provider  TEXT,
+    oauth_sub       TEXT,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_login      TIMESTAMP
+    last_login      TIMESTAMP,
+    UNIQUE (oauth_provider, oauth_sub)
 );
 CREATE INDEX IF NOT EXISTS idx_users_verify_token ON users(verify_token);
 CREATE INDEX IF NOT EXISTS idx_users_reset_token  ON users(reset_token);
+CREATE INDEX IF NOT EXISTS idx_users_oauth        ON users(oauth_provider, oauth_sub);
 
 CREATE TABLE IF NOT EXISTS annotations (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

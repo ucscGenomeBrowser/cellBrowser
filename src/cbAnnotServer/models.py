@@ -13,15 +13,28 @@ from extensions import db
 
 class User(UserMixin, db.Model):
     __tablename__ = "users"
+    # An account is identified either by email+password or by an external OAuth
+    # identity (Google / ORCID). Hence email and password_hash are both
+    # nullable: an ORCID login may carry no email at all, and any OAuth login
+    # has no local password. (oauth_provider, oauth_sub) uniquely names the
+    # external identity when present.
+    __table_args__ = (
+        db.UniqueConstraint("oauth_provider", "oauth_sub", name="uq_user_oauth"),
+    )
 
     id              = db.Column(db.Integer, primary_key=True)
-    email           = db.Column(db.String(255), unique=True, nullable=False)
-    password_hash   = db.Column(db.String(255), nullable=False)
+    email           = db.Column(db.String(255), unique=True)          # nullable: ORCID may not share one
+    password_hash   = db.Column(db.String(255))                       # nullable: OAuth users have none
     display_name    = db.Column(db.String(255))
     email_verified  = db.Column(db.Boolean, nullable=False, default=False)
     verify_token    = db.Column(db.String(64), index=True)
     reset_token     = db.Column(db.String(64), index=True)
     reset_expires   = db.Column(db.DateTime)
+    # External identity provider, when the account was created via OAuth.
+    # oauth_provider is a short slug ("google" / "orcid"); oauth_sub is the
+    # provider's stable subject id (Google "sub" claim / the ORCID iD).
+    oauth_provider  = db.Column(db.String(32), index=True)
+    oauth_sub       = db.Column(db.String(255))
     created_at      = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     last_login      = db.Column(db.DateTime)
 

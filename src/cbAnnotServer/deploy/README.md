@@ -57,7 +57,55 @@ cron watchdog sources). See `config.py` for the full list.
 | `CBANNOT_BIND` | `127.0.0.1:5051` (must match the ProxyPass target) |
 | `CBANNOT_COOKIE_SECURE` | `true` (site is HTTPS) |
 | `CBANNOT_SITE_BASE_URL` | `https://cells.ucsc.edu` (used in email links) |
-| `CBANNOT_MAIL_BACKEND` | `smtp` once real email is wired; default `console` prints tokens to the log |
+| `CBANNOT_MAIL_BACKEND` | `smtp` to actually send email; default `console` only prints tokens to the log (this is why verification emails don't arrive until it's flipped) |
+| `CBANNOT_MAIL_SERVER` | SMTP host, e.g. `localhost` (hgwdev/cells run a local Sendmail on port 25) |
+| `CBANNOT_MAIL_PORT` | `25` for the local MTA |
+| `CBANNOT_MAIL_FROM` | envelope/from address, e.g. `noreply@cells.ucsc.edu` |
+| `CBANNOT_GOOGLE_CLIENT_ID` / `CBANNOT_GOOGLE_CLIENT_SECRET` | Google OAuth client (blank = Google button hidden) |
+| `CBANNOT_ORCID_CLIENT_ID` / `CBANNOT_ORCID_CLIENT_SECRET` | ORCID OAuth client (blank = ORCID button hidden) |
+| `CBANNOT_ORCID_ENV` | `production` (orcid.org) or `sandbox` (sandbox.orcid.org) |
+
+## Email (verification / password reset)
+
+The service ships with `CBANNOT_MAIL_BACKEND=console`, which **prints** the
+verification link to the log and sends nothing — handy in dev, but it means real
+signups never receive an email. To actually send, set on the running service:
+```
+CBANNOT_MAIL_BACKEND=smtp
+CBANNOT_MAIL_SERVER=localhost      # local Sendmail listens on :25
+CBANNOT_MAIL_PORT=25
+CBANNOT_MAIL_FROM=noreply@cells.ucsc.edu
+```
+then restart gunicorn (on cells the otto watchdog re-launches it and re-sources
+the env file). Signup no longer 500s if the MTA hiccups — the account is still
+created and the user can use "resend verification".
+
+## OAuth sign-in (Google / ORCID)
+
+Google and ORCID are OpenID Connect providers wired up in `oauth.py`. Each stays
+**dormant until both its client id and secret are set**, so this ships safely
+before the apps are registered — no button appears and the `/api/auth/oauth/...`
+routes 404. The PI registers the client apps (ticket #37492) and drops the
+credentials into the env file; no code change or release is needed to turn them on.
+
+Registered **redirect URIs** must match exactly:
+```
+https://cells-test.gi.ucsc.edu/api/auth/oauth/google/callback
+https://cells-test.gi.ucsc.edu/api/auth/oauth/orcid/callback
+https://cells.ucsc.edu/api/auth/oauth/google/callback     # prod, later
+https://cells.ucsc.edu/api/auth/oauth/orcid/callback       # prod, later
+```
+
+Because OAuth users have no local password (and ORCID may not share an email),
+`users.email` and `users.password_hash` became nullable and two columns were
+added. **Existing databases must be migrated once** (create_all won't alter an
+existing table). With the service stopped:
+```
+CBANNOT_DATABASE_URI=sqlite:////hive/data/inside/cells/cbAnnotServer/cbAnnot.db \
+    ./venv/bin/python3 deploy/migrate_oauth.py     # backs up the DB, then rebuilds `users`
+```
+It's idempotent and preserves all rows. A fresh install (`db.create_all()` /
+`schema.sql`) already has the new shape and needs no migration.
 
 ## Keeping it running
 

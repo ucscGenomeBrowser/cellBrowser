@@ -30,8 +30,25 @@ class Config:
     MAIL_USE_TLS = os.environ.get("CBANNOT_MAIL_USE_TLS", "false").lower() == "true"
     MAIL_DEFAULT_SENDER = os.environ.get("CBANNOT_MAIL_FROM", "noreply@cells.ucsc.edu")
 
-    # Base URL used to construct links in verification / reset emails
+    # Base URL used to construct links in verification / reset emails, and the
+    # base for OAuth redirect (callback) URLs.
     SITE_BASE_URL = os.environ.get("CBANNOT_SITE_BASE_URL", "http://localhost:5000")
+
+    # ---- OAuth sign-in (Google, ORCID) ----------------------------------
+    # Each provider is DORMANT until its client id AND secret are both set —
+    # exactly like the frontend's showLogin flag. With the defaults below
+    # (empty strings) no OAuth buttons appear and the /oauth routes 404, so it
+    # is safe to ship this code before the apps are registered. The PI creates
+    # the client credentials (see ticket #37492) and drops them into cbAnnot.env.
+    GOOGLE_CLIENT_ID     = os.environ.get("CBANNOT_GOOGLE_CLIENT_ID", "")
+    GOOGLE_CLIENT_SECRET = os.environ.get("CBANNOT_GOOGLE_CLIENT_SECRET", "")
+
+    ORCID_CLIENT_ID      = os.environ.get("CBANNOT_ORCID_CLIENT_ID", "")
+    ORCID_CLIENT_SECRET  = os.environ.get("CBANNOT_ORCID_CLIENT_SECRET", "")
+    # "production" (orcid.org) or "sandbox" (sandbox.orcid.org). The sandbox is
+    # a separate registration with separate credentials — use it to test the
+    # flow without touching real ORCID accounts.
+    ORCID_ENV            = os.environ.get("CBANNOT_ORCID_ENV", "production").lower()
 
     # Dev-only CORS. Production serves the frontend and this API from the same
     # Apache host (same origin), so no CORS is needed. For local dev, where the

@@ -42,6 +42,16 @@ def create_app(config_class=Config):
     # from de import de_bp
     # app.register_blueprint(de_bp, url_prefix="/api/de")
 
+    # OAuth (Google / ORCID) is optional. Import inside try/except so the
+    # service still boots on a host where Authlib isn't installed yet — OAuth
+    # just stays off. Each provider is further gated on having credentials
+    # configured (see oauth.py / config.py).
+    try:
+        from oauth import init_oauth
+        init_oauth(app)
+    except ImportError as e:
+        app.logger.warning("OAuth disabled (Authlib not available): %s", e)
+
     # Dev-only CORS: allow a single configured frontend origin to make
     # credentialed requests. No-op when DEV_CORS_ORIGIN is unset (production).
     cors_origin = app.config.get("DEV_CORS_ORIGIN")

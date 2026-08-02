@@ -61,8 +61,15 @@ def signup():
     db.session.add(user)
     db.session.commit()
 
-    send_verification_email(user, user.verify_token)
-    return _ok(requiresVerification=True)
+    # The account already exists at this point, so a mail failure must not turn
+    # into a 500 that hides that. Log it and let the user recover via
+    # "resend verification" rather than losing the signup.
+    try:
+        send_verification_email(user, user.verify_token)
+    except Exception:
+        current_app.logger.exception("failed to send verification email to %s", email)
+        return _ok(requiresVerification=True, emailSent=False)
+    return _ok(requiresVerification=True, emailSent=True)
 
 
 # ---------- verify ----------
@@ -130,6 +137,21 @@ def login():
 def logout():
     logout_user()
     return _ok()
+
+
+@auth_bp.get("/providers")
+def providers():
+    """Which sign-in providers the frontend should offer. "password" is always
+    on; the OAuth flags reflect whether Google / ORCID credentials are
+    configured (see oauth.py). Defaults to OAuth-off if Authlib isn't installed
+    or OAuth failed to initialise, so the frontend degrades to password-only."""
+    status = {"password": True, "google": False, "orcid": False}
+    try:
+        from oauth import provider_status
+        status.update(provider_status())
+    except Exception:
+        pass
+    return jsonify(status)
 
 
 @auth_bp.get("/me")

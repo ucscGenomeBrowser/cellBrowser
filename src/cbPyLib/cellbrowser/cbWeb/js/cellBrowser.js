@@ -29,6 +29,11 @@ var cellbrowser = function() {
     // {loggedIn:true, email, display_name} = logged in.
     var gCbUser = null;
 
+    // Which sign-in providers the backend offers, from GET /api/auth/providers:
+    // {password:true, google:bool, orcid:bool}. null = not yet fetched. Used to
+    // decide which OAuth buttons to show in the login dialog.
+    var gAuthProviders = null;
+
     // Site config from the web root "cb.conf" file (see loadClientConf).
     // null = not yet loaded, otherwise an object of key -> value.
     var gClientConf = null;
@@ -3472,6 +3477,52 @@ var cellbrowser = function() {
         });
     }
 
+    function fetchAuthProviders(onDone) {
+        /* Ask the backend which sign-in providers are live (password + which
+         * OAuth providers are configured). Cached after the first call. Falls
+         * back to password-only if the endpoint is missing (older backend). */
+        if (gAuthProviders !== null) { if (onDone) onDone(gAuthProviders); return; }
+        $.ajax({
+            url: cbApiUrl("/api/auth/providers"),
+            dataType: "json",
+            xhrFields: { withCredentials: true }
+        }).done(function(data) {
+            gAuthProviders = data || { password: true };
+            if (onDone) onDone(gAuthProviders);
+        }).fail(function() {
+            gAuthProviders = { password: true, google: false, orcid: false };
+            if (onDone) onDone(gAuthProviders);
+        });
+    }
+
+    function oauthSignIn(provider) {
+        /* Start the OAuth flow. This must be a top-level navigation (not an
+         * AJAX call): the provider shows its own consent page and then redirects
+         * back to our callback, which drops the user back into the app already
+         * signed in. */
+        window.location.href = cbApiUrl("/api/auth/oauth/" + provider + "/login");
+    }
+
+    function renderOAuthButtons() {
+        /* Fill #tpOAuthRow with a button per live OAuth provider. Hidden
+         * entirely when no OAuth provider is configured, so a password-only
+         * backend shows the plain email/password dialog with nothing extra. */
+        var row = $("#tpOAuthRow");
+        if (row.length === 0)
+            return;
+        fetchAuthProviders(function(p) {
+            var btns = [];
+            if (p.google)
+                btns.push("<button type='button' class='tpOAuthBtn ui-button ui-widget ui-corner-all' data-provider='google'>Sign in with Google</button>");
+            if (p.orcid)
+                btns.push("<button type='button' class='tpOAuthBtn ui-button ui-widget ui-corner-all' data-provider='orcid'>Sign in with ORCID</button>");
+            if (btns.length === 0) { row.hide(); return; }
+            row.html(btns.join("")
+                + "<div class='tpOAuthOr'><span>or use an email and password</span></div>").show();
+            row.find(".tpOAuthBtn").click(function() { oauthSignIn($(this).data("provider")); });
+        });
+    }
+
     function refreshAuthUi() {
         /* set the account menu label + dropdown to match gCbUser */
         var label = $("#tpAccountLabel");
@@ -3534,7 +3585,16 @@ var cellbrowser = function() {
             + ".tpAuthPane button.tpAuthSubmit{margin-top:14px}"
             + "#tpAuthMsg{color:#b00;min-height:1.1em;margin:10px 0}"
             + "#tpAuthMsg.tpAuthMsgOk{color:#080}"
+            + "#tpOAuthRow{margin-bottom:12px}"
+            + "#tpOAuthRow button.tpOAuthBtn{display:block;width:100%;margin-bottom:8px;padding:8px}"
+            + "#tpOAuthRow .tpOAuthOr{text-align:center;border-bottom:1px solid #ddd;line-height:0.1em;margin:14px 0 4px}"
+            + "#tpOAuthRow .tpOAuthOr span{background:#fff;padding:0 10px;color:#888;font-size:90%}"
             + "</style>");
+
+        // OAuth sign-in buttons (Google / ORCID), filled in asynchronously by
+        // renderOAuthButtons() from GET /api/auth/providers. Stays hidden if no
+        // OAuth provider is configured on the backend.
+        htmls.push("<div id='tpOAuthRow' style='display:none'></div>");
 
         htmls.push("<div id='tpAuthTabBar' style='margin-bottom:12px'>");
         htmls.push("<button type='button' class='tpAuthTab' data-pane='signin'>Sign In</button>");
@@ -3585,6 +3645,7 @@ var cellbrowser = function() {
         });
 
         authShowTab(initialTab || "signin");
+        renderOAuthButtons();
     }
 
     function onSignInSubmit() {
