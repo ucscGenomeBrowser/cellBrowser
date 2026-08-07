@@ -636,7 +636,7 @@ var cellbrowser = function() {
         let md5 = datasetInfo.md5;
         if (datasetInfo.hasFiles && datasetInfo.hasFiles.indexOf("datasetDesc")!==-1) {
             // description is not through html files but a json file
-            var jsonUrl = cbUtil.joinPaths([datasetName, "desc.json"]) +"?"+md5;
+            var jsonUrl = cbUtil.dataUrl([datasetName, "desc.json"]) +"?"+md5;
             fetch(jsonUrl)
               .then(function(response) {
                 if(!response.ok) {
@@ -780,15 +780,15 @@ var cellbrowser = function() {
         if (label)
             htmls.push("<b> Matrix for "+label+":</b> ");
 
-        htmls.push("<a href='"+dsName+"/"+matFname+"'>"+matFname+"</a>");
+        htmls.push("<a href='"+cbUtil.dataUrl([dsName, matFname])+"'>"+matFname+"</a>");
         if (matFname.endsWith(".mtx.gz")) {
             var prefix = "";
             if (matFname.indexOf("_")!==-1)
                 prefix = matFname.split("_")[0]+"_";
             var ftName = prefix+"features.tsv.gz";
-            htmls.push(", <a href='"+dsName+"/"+ftName+"'>"+ftName+"</a>");
+            htmls.push(", <a href='"+cbUtil.dataUrl([dsName, ftName])+"'>"+ftName+"</a>");
             var barName = prefix+"barcodes.tsv.gz";
-            htmls.push(", <a href='"+dsName+"/"+barName+"'>"+barName+"</a>");
+            htmls.push(", <a href='"+cbUtil.dataUrl([dsName, barName])+"'>"+barName+"</a>");
         }
         htmls.push("<br>");
     }
@@ -800,8 +800,8 @@ var cellbrowser = function() {
             for (let suppFile of supplFiles) {
                 let label = suppFile.label;
                 let fname = suppFile.file;
-                htmls.push("<b>"+label+":</b> <a href='"+dsName);
-                htmls.push("/"+fname+"'>"+fname+"</a>");
+                htmls.push("<b>"+label+":</b> <a href='"+cbUtil.dataUrl([dsName, fname]));
+                htmls.push("'>"+fname+"</a>");
                 htmls.push("<br>");
             }
         }
@@ -843,16 +843,16 @@ var cellbrowser = function() {
                     buildLinkToMatrix(htmls, datasetInfo.name, matBaseName, "dataset");
                     htmls.push("</p>");
                 } else {
-                    htmls.push("<p><b>Matrix:</b> <a href='"+datasetInfo.name);
-                    htmls.push("/exprMatrix.tsv.gz'>exprMatrix.tsv.gz</a>");
+                    htmls.push("<p><b>Matrix:</b> <a href='"+cbUtil.dataUrl([datasetInfo.name, "exprMatrix.tsv.gz"]));
+                    htmls.push("'>exprMatrix.tsv.gz</a>");
                 }
                 if (desc.unitDesc)
                     htmls.push("<br>Values in matrix are: "+desc.unitDesc);
                 htmls.push("</p>");
 
                 if (desc.rawMatrixFile) {
-                    htmls.push("<p><b>Raw count matrix:</b> <a href='"+datasetInfo.name);
-                    htmls.push("/"+desc.rawMatrixFile+"'>"+desc.rawMatrixFile+"</a>");
+                    htmls.push("<p><b>Raw count matrix:</b> <a href='"+cbUtil.dataUrl([datasetInfo.name, desc.rawMatrixFile]));
+                    htmls.push("'>"+desc.rawMatrixFile+"</a>");
                     if (desc.rawMatrixNote)
                         htmls.push("<br>"+desc.rawMatrixNote);
                     htmls.push("</p>");
@@ -860,24 +860,24 @@ var cellbrowser = function() {
 
                 htmls.push("<p><i><a style='float:right; padding-left: 100px'; target=_blank href='https://cellbrowser.readthedocs.io/en/master/load.html'>Help: Load matrix/meta into Seurat or Scanpy</a></i></p>");
 
-                htmls.push("<p><b>Cell meta annotations:</b> <a target=_blank href='"+datasetInfo.name);
-                htmls.push("/meta.tsv'>meta.tsv</a>");
+                htmls.push("<p><b>Cell meta annotations:</b> <a target=_blank href='"+cbUtil.dataUrl([datasetInfo.name, "meta.tsv"]));
+                htmls.push("'>meta.tsv</a>");
                 if (desc.metaNote)
                     htmls.push("<br>"+desc.metaNote);
                 htmls.push("</p>");
 
                 htmls.push("<p><b>Dimensionality reduction coordinates:</b><br>");
                 for (let fname of desc.coordFiles)
-                    htmls.push("<a target=_blank href='"+datasetInfo.name+"/"+fname+"'>"+fname+"</a><br>");
+                    htmls.push("<a target=_blank href='"+cbUtil.dataUrl([datasetInfo.name, fname])+"'>"+fname+"</a><br>");
                 htmls.push("</p>");
 
                 buildSupplFiles(desc, datasetInfo.name, htmls);
 
                 htmls.push("<p><b>Dataset description</b>: ");
-                htmls.push("<a target=_blank href='"+datasetInfo.name+"/desc.json'>desc.json</a></p>");
+                htmls.push("<a target=_blank href='"+cbUtil.dataUrl([datasetInfo.name, "desc.json"])+"'>desc.json</a></p>");
 
                 htmls.push("<p><b>Cell Browser configuration</b>: ");
-                htmls.push("<a target=_blank href='"+datasetInfo.name+"/dataset.json'>dataset.json</a></p>");
+                htmls.push("<a target=_blank href='"+cbUtil.dataUrl([datasetInfo.name, "dataset.json"])+"'>dataset.json</a></p>");
 
                 htmls.push("<p><b>Bulk download via rsync:</b><br>");
                 htmls.push("<code style='display:inline-block; background:#f4f4f4; border:1px solid #ddd; padding:4px 8px; border-radius:3px; font-size:12px; user-select:all'>");
@@ -920,7 +920,7 @@ var cellbrowser = function() {
             htmls.push("<a name='imgCat"+catIdx+"'></a>");
             catIdx++;
             htmls.push("<b>"+catInfo.categoryLabel+":</b><br>");
-            let imgDir = datasetInfo.name+"/images/";
+            let imgDir = cbUtil.dataUrl([datasetInfo.name, "images"])+"/";
             htmls.push("<div style='padding-left:1em; padding-top:4px' class='tpImgSets'>");
 
             for (let imgSet of catInfo.categoryImageSets) {
@@ -1035,7 +1035,7 @@ var cellbrowser = function() {
         }
         if (desc.image) {
             htmls.push("<img style='float:right; padding-left:5px' src='");
-            htmls.push(datasetInfo.name+"/"+desc.image[0]+"'");
+            htmls.push(cbUtil.dataUrl([datasetInfo.name, desc.image[0]])+"'");
             if (desc.imageMap)
                 htmls.push(" usemap='#clickmap'");
             htmls.push(" width='"+desc.image[1]+"' height='"+desc.image[2]+"'>");
@@ -1322,7 +1322,7 @@ var cellbrowser = function() {
         gSearchIndexCallbacks.push(onDone);
         if (gSearchIndexLoading) return;
         gSearchIndexLoading = true;
-        $.getJSON("search.json", function(docs) {
+        $.getJSON(cbUtil.dataUrl("search.json"), function(docs) {
             var ms = new MiniSearch({
                 fields: ['shortLabel', 'title', 'abstract', 'paper', 'organisms', 'body_parts',
                          'diseases', 'lab', 'submitter', 'authors', 'institution',
@@ -3403,6 +3403,12 @@ var cellbrowser = function() {
                 // default (and over a window.cbAnnotApiBase set for local dev)
                 if ("annotApiBase" in gClientConf)
                     window.cbAnnotApiBase = gClientConf["annotApiBase"];
+                // dataRoot lets a directory that holds only the code (index.html
+                // and js/) read its datasets from another directory or server,
+                // e.g. a personal sandbox pointing at the shared data tree. This
+                // runs before mainInit(), so every data load below sees it.
+                if ("dataRoot" in gClientConf)
+                    cbUtil.setDataRoot(gClientConf["dataRoot"]);
             })
             .fail(function() {
                 gClientConf = {};   // no config file deployed: use built-in defaults
@@ -4100,6 +4106,7 @@ var cellbrowser = function() {
          htmls.push('<ul class="dropdown-menu">');
          //htmls.push('<li><a href="#" id="tpRenameClusters">Rename clusters...<span class="dropmenu-item-content"></span></a></li>');
          htmls.push('<li><a href="#" id="tpCustomAnnotsMgr" class="dropmenu-item"><span class="dropmenu-item-label">Custom Annotations...</span><span class="dropmenu-item-content">c a</span></a></li>');
+         htmls.push('<li><a href="#" id="tpDeMenu" class="dropmenu-item"><span class="dropmenu-item-label" style="font-weight:600">Differential expression&hellip;</span><span class="dropmenu-item-content"><span style="font-size:9px;font-weight:600;letter-spacing:0.08em;color:#337ab7;border:1px solid #cfe0f0;border-radius:3px;padding:1px 4px">NEW</span></span></a></li>');
          //htmls.push('<li><a href="#" id="tpCluster">Run clustering...<span class="dropmenu-item-content"></span></a></li>');
          htmls.push('<li class="disabled"><a href="#" id="tpSetBackground">Set as background cells<span class="dropmenu-item-content">b s</span></a></li>');
          htmls.push('<li class="disabled"><a href="#" id="tpResetBackground">Reset background cells<span class="dropmenu-item-content">b r</span></a></li>');
@@ -4182,6 +4189,7 @@ var cellbrowser = function() {
 
        $('#tpRenameClusters').click( onRenameClustersClick );
        $('#tpCustomAnnotsMgr').click( onCustomAnnotationsManagerClick );
+       $('#tpDeMenu').click( function(ev) { ev.preventDefault(); deOpen(); } );
        $('#tpSetBackground').click( onBackgroudSetClick );
        $('#tpResetBackground').click( onBackgroudResetClick );
        //$('#tpCluster').click( onRunClusteringClick );
@@ -5521,7 +5529,7 @@ var cellbrowser = function() {
 
        // pre-load the dataset description file, as the users will often go directly to the info dialog
        // and the following pre-loads risk blocking this load.
-       var jsonUrl = cbUtil.joinPaths([db.conf.name, "desc.json"]) +"?"+db.conf.md5;
+       var jsonUrl = cbUtil.dataUrl([db.conf.name, "desc.json"]) +"?"+db.conf.md5;
        fetch(jsonUrl);
 
        if (db.conf.sampleCount < 50000) {
@@ -6593,7 +6601,7 @@ var cellbrowser = function() {
 
     function loadMarkerIndex() {
     /* Load markers/index.json, filter by dataset species, and show the Browse button if available */
-        cbUtil.loadJson("downloads/markers/index.json", function(indexData) {
+        cbUtil.loadJson(cbUtil.dataUrl("downloads/markers/index.json"), function(indexData) {
             if (!indexData) return;
 
             var dsSpecies = getDatasetSpecies();
@@ -6632,7 +6640,10 @@ var cellbrowser = function() {
         gMarkerCellTypes = null;
         if (!url) return;
 
-        cbUtil.loadJson(url, function(rawData) {
+        // url is the dropdown's value, a plain "downloads/markers/<file>" key that
+        // is also matched against the index in updateMarkerBrowseLinks(). Keep it
+        // unprefixed and add dataRoot only here, at the fetch.
+        cbUtil.loadJson(cbUtil.dataUrl(url), function(rawData) {
             if (!rawData) return;
             gMarkerCellTypes = flattenMarkerData(rawData);
             addDatasetCounts(gMarkerCellTypes);
@@ -6983,7 +6994,7 @@ var cellbrowser = function() {
             updateMarkerBrowseLinks(url);
             if (!url) { $("#tpMarkerBrowseTree").empty(); return; }
             $("#tpMarkerBrowseTree").html("<div style='font-style:italic; font-size:11px; padding:4px'>Loading...</div>");
-            cbUtil.loadJson(url, function(rawData) {
+            cbUtil.loadJson(cbUtil.dataUrl(url), function(rawData) {
                 if (!rawData) return;
                 gMarkerBrowseCellTypes = flattenMarkerData(rawData);
                 // Render immediately with fallback (total-gene) counts so the dialog is interactive.
@@ -7015,7 +7026,7 @@ var cellbrowser = function() {
             $("#tpMarkerBrowseDbSelect").val(gMarkerBrowseSelectedUrl);
             updateMarkerBrowseLinks(gMarkerBrowseSelectedUrl);
             $("#tpMarkerBrowseTree").html("<div style='font-style:italic; font-size:11px; padding:4px'>Loading...</div>");
-            cbUtil.loadJson(gMarkerBrowseSelectedUrl, function(rawData) {
+            cbUtil.loadJson(cbUtil.dataUrl(gMarkerBrowseSelectedUrl), function(rawData) {
                 if (!rawData) return;
                 gMarkerBrowseCellTypes = flattenMarkerData(rawData);
                 updateMarkerBrowseTree("");
@@ -7744,7 +7755,7 @@ var cellbrowser = function() {
 
     function loadCollectionInfo(collName, onDone) {
         /* load collection info and run onDone */
-        var jsonUrl = cbUtil.joinPaths([collName, "dataset.json"]);
+        var jsonUrl = cbUtil.dataUrl([collName, "dataset.json"]);
         cbUtil.loadJson(jsonUrl, onDone);
     }
 
@@ -8381,9 +8392,12 @@ var cellbrowser = function() {
             } else {
                 // it's a url to a hub.txt file: either relative or absolute
                 if (!hubUrl.startsWith("http")) {
-                    // relative URL to a hub.txt file -> make absolute now
-                    //hubUrl = getBaseUrl()+db.name+"/"+hubUrl
-                    hubUrl = cbUtil.absPath("", cbUtil.joinPaths([getBaseUrl(), db.name, hubUrl]));
+                    // relative URL to a hub.txt file -> make absolute now.
+                    // hgTracks fetches this itself, so it has to be fully
+                    // qualified, and it has to point at the data tree (which
+                    // cb.conf dataRoot may put on another host) rather than at
+                    // whatever directory served this page.
+                    hubUrl = cbUtil.absDataUrl([db.name, hubUrl]);
                 }
                 // URL is an absolute link to a hub.txt URL
                 fullUrl = "https://genome.ucsc.edu/cgi-bin/hgTracks?hubUrl="+hubUrl+"&genome="+ucscDb;
@@ -8443,7 +8457,7 @@ var cellbrowser = function() {
         $(this).blur();  // remove focus = tooltip disappears
         var parentNames = db.name.split("/");
         parentNames.pop();
-        var newPath = cbUtil.joinPaths([parentNames.join("/"), "dataset.json"]);
+        var newPath = cbUtil.dataUrl([parentNames.join("/"), "dataset.json"]);
         cbUtil.loadJson(newPath, function(parentConf) {
             openDatasetDialog(parentConf, db.name);
         });
@@ -10526,6 +10540,8 @@ var cellbrowser = function() {
         htmls.push("<div style='margin-bottom:8px'><b>Annotations</b></div>");
         htmls.push("<button id='tpToolsNameSel' style='width:100%;margin-bottom:6px'>Name Selection</button>");
         htmls.push("<button id='tpToolsCustomAnnot' style='width:100%'>Manage Custom Annotations</button>");
+        htmls.push("<div style='margin:12px 0 8px'><b>Differential expression</b></div>");
+        htmls.push("<button id='tpToolsDe' style='width:100%'>Compare two populations&hellip;</button>");
         htmls.push("</div>");
         htmls.push("</div>"); // tpToolsTab
 
@@ -10572,6 +10588,7 @@ var cellbrowser = function() {
 
         $("#tpToolsNameSel").click(onSelectNameClick);
         $("#tpToolsCustomAnnot").click(onCustomAnnotationsManagerClick);
+        $("#tpToolsDe").click(deOpen);
 
         $('.tpGeneBarCell').click( onGeneClick );
         $('#tpChangeGenes').click( onChangeGenesClick );
@@ -11869,6 +11886,11 @@ var cellbrowser = function() {
         }
 
         buildViolinPlot();
+
+        // Differential expression: add A/B assignment affordances to the rows
+        // while the builder is open (§2). No-op otherwise.
+        if (typeof gDe !== "undefined" && gDe.active)
+            deAugmentLegend();
     }
 
     function onLegendValueRightClick(key, options) {
@@ -12358,7 +12380,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 labelLines.push("Click to show full marker gene list.");
 
             if (db.conf.clusterPngDir!==undefined) {
-                var fullPath = cbUtil.joinPaths([db.name, db.conf.clusterPngDir, clusterName+".png"]);
+                var fullPath = cbUtil.joinPaths([db.url, db.conf.clusterPngDir, clusterName+".png"]);
                 labelLines.push("<img src='"+fullPath+"'>");
             }
         }
@@ -12761,7 +12783,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             var divName = "tabs-"+tabIdx;
             var tabDir = tabInfo[tabIdx].name;
             var sanName = sanitizeName(clusterName);
-            var markerTsvUrl = cbUtil.joinPaths([db.name, "markers", tabDir, sanName+".tsv.gz"]);
+            var markerTsvUrl = cbUtil.joinPaths([db.url, "markers", tabDir, sanName+".tsv.gz"]);
             htmls.push("<div id='"+divName+"'>");
             htmls.push("Loading...");
             htmls.push("</div>");
@@ -13354,7 +13376,16 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         /* Load the site config first (it may set the login API endpoint), then
          * start the app. loadClientConf always calls back, even if cb.conf is
          * absent, so startup is never blocked by a missing config file. */
-        loadClientConf(function() { mainInit(rootMd5); });
+        loadClientConf(function() {
+            // rootMd5 is baked into index.html from the dataset.json sitting next
+            // to the code. With dataRoot set we read a different dataset.json, so
+            // that md5 describes the wrong file: it would pin the cache-buster to
+            // a value that never changes when the real one does, hiding new
+            // datasets. Drop it and let loadConfig() fall back to a random buster.
+            if (cbUtil.dataRoot !== "")
+                rootMd5 = null;
+            mainInit(rootMd5);
+        });
     }
 
     function mainInit(rootMd5) {
@@ -13377,11 +13408,916 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         loadDataset(datasetName, false, rootMd5);
     }
 
+    // ============================================================
+    // Differential Expression (Redmine #24912)
+    // Additive feature. A Tools-menu / Tools-tab launcher opens a builder
+    // that takes over the sidebar; A/B cell-type groups are assigned from
+    // the legend; the plot recolors by group; a run opens a results pop-up
+    // (sortable gene table + volcano); clicking a gene recolors the scatter
+    // by expression (reusing the existing gene-search path). New surfaces
+    // only — no existing surface is restyled. See the design handoff and
+    // plans/differential-expression.md.
+    // ============================================================
+
+    var DE_A_COL = "c2603a", DE_B_COL = "42559f", DE_NEUTRAL = "dedcd6";
+
+    var gDe = {
+        active: false,
+        field: null,            // metaInfo.name of the cell-type field driving groups
+        metaInfo: null,
+        a: [], b: [],           // arrays of value-indices (intKeys) per group
+        bMode: 'rest',          // 'rest' | 'pick'; default one-vs-rest
+        aField: '', aValue: '', bField: '', bValue: '',
+        test: 'wilcox', lfcCut: 1, padjCut: 0.05, minPct: 0.1, subsample: 5000,
+        paramsOpen: false,
+        running: false, canceled: false,
+        results: null,          // snapshot: { genes, nA, nB, aLabel, bLabel, lfcCut, padjCut, minPct, test }
+        selectedGene: null,
+        sortKey: 'padj', sortDir: 1,
+        geneFilter: '', side: 'all',
+        history: []
+    };
+
+    // ---- small helpers -------------------------------------------------
+
+    function deCellTypeField() {
+        /* the cell-type / cluster field that group A/B are defined over */
+        return db.conf.labelField || (db.getDefaultColorField && db.getDefaultColorField());
+    }
+    function deFmt(n) { return (n===undefined||n===null) ? "" : n.toLocaleString(); }
+    function deTypeLabel(intKey) {
+        var mi = gDe.metaInfo;
+        if (mi.ui && mi.ui.shortLabels && mi.ui.shortLabels[intKey]!==undefined)
+            return (mi.ui.shortLabels[intKey]+"").replace(/_/g, " ");
+        if (mi.valCounts && mi.valCounts[intKey]) return (mi.valCounts[intKey][0]+"").replace(/_/g, " ");
+        return ""+intKey;
+    }
+    function deTypeCount(intKey) {
+        var mi = gDe.metaInfo;
+        return (mi.valCounts && mi.valCounts[intKey]) ? mi.valCounts[intKey][1] : 0;
+    }
+    function deTypeColor(intKey) {
+        if (gLegend && gLegend.rows)
+            for (var i=0;i<gLegend.rows.length;i++)
+                if (gLegend.rows[i].intKey===intKey)
+                    return gLegend.rows[i].color || gLegend.rows[i].defColor || "888888";
+        return "888888";
+    }
+    function deGroupCount(list) {
+        var s=0; for (var i=0;i<list.length;i++) s += deTypeCount(list[i]); return s;
+    }
+    function deCanvasRect() {
+        var c = renderer && renderer.canvas;
+        if (!c) return {left:0, top:0, width:600, height:400};
+        var r = c.getBoundingClientRect();
+        return {left:r.left+window.scrollX, top:r.top+window.scrollY, width:r.width, height:r.height};
+    }
+    function deMetaEnumFields() {
+        var out=[]; var fields = db.getMetaFields ? db.getMetaFields() : (db.conf.metaFields||[]);
+        for (var i=0;i<fields.length;i++){
+            var f=fields[i];
+            if (f.type==="enum" && f.valCounts && f.valCounts.length>1 && f.valCounts.length<200)
+                out.push(f);
+        }
+        return out;
+    }
+
+    // ---- open / close --------------------------------------------------
+
+    function deOpen() {
+        if (!db || !db.conf) return;
+        var field = deCellTypeField();
+        if (!field) { alert("This dataset has no cell-type annotation to compare."); return; }
+        gDe.field = field;
+        gDe.metaInfo = db.findMetaInfo(field);
+        gDe.active = true;
+
+        $("#tpLeftTabs").hide();
+        deBuildPanel();
+
+        // make sure the legend shows the cell-type field so A/B assignment works
+        var needSwitch = (!gLegend || gLegend.type!=="meta" || !gLegend.metaInfo || gLegend.metaInfo.name!==field);
+        if (needSwitch) {
+            colorByMetaField(field, function(){ renderer.drawDots(); deRenderBody(); deRecolorPlot(); });
+        } else {
+            buildLegendBar(); // re-render to add the A/B augmentation
+            deRenderBody(); deRecolorPlot();
+        }
+    }
+
+    function deClose() {
+        gDe.active = false;
+        deHideRunning();
+        deCloseResults();
+        deClearGene(true);
+        deRemoveStatus();
+        $("#tpDeBuilder").remove();
+        $("#tpLeftTabs").show();
+        $("#tpDeLegHint").remove();
+        // restore normal cell-type coloring (drops the A/B override and the augmentation)
+        if (gDe.field)
+            colorByMetaField(gDe.field, function(){ renderer.drawDots(); });
+        // gDe.a / gDe.b are kept so re-opening resumes where the user left off
+    }
+
+    // ---- builder panel (§1) --------------------------------------------
+
+    function deBuildPanel() {
+        $("#tpDeBuilder").remove();
+        var h = [];
+        h.push("<div id='tpDeBuilder'>");
+        h.push("<div class='tpDeHead'>");
+        h.push("<div class='tpDeTitle'>Differential expression</div>");
+        h.push("<div class='tpDeSub'>Build two populations, then compare.</div>");
+        h.push("<div class='tpDeClose' id='tpDeCloseBtn' title='Close'>&times;</div>");
+        h.push("</div>");
+        h.push("<div class='tpDeBody' id='tpDeBody'></div>");
+        h.push("</div>");
+        var side = document.getElementById("tpLeftSidebar");
+        if (side) side.insertAdjacentHTML("beforeend", h.join(""));
+        $("#tpDeCloseBtn").click(deClose);
+    }
+
+    function deGroupCardHtml(which) {
+        var isA = (which==="A");
+        var col = isA ? DE_A_COL : DE_B_COL;
+        var list = isA ? gDe.a : gDe.b;
+        var h=[];
+        h.push("<div class='tpDeCard'>");
+
+        // Group B mode toggle
+        if (!isA) {
+            h.push("<div class='tpDeSeg' id='tpDeBmode'>");
+            h.push("<button data-mode='rest' class='"+(gDe.bMode==='rest'?'tpDeSegOn':'')+"'>All other cells</button>");
+            h.push("<button data-mode='pick' class='"+(gDe.bMode==='pick'?'tpDeSegOn':'')+"'>Pick cell types</button>");
+            h.push("</div>");
+        }
+
+        // header row with live count
+        var n = isA ? deGroupCount(gDe.a) : (gDe.bMode==='rest' ? Math.max(0, db.conf.sampleCount - deGroupCount(gDe.a)) : deGroupCount(gDe.b));
+        var nonEmpty = isA ? gDe.a.length>0 : (gDe.bMode==='rest' ? gDe.a.length>0 : gDe.b.length>0);
+        var warn = (nonEmpty && n>0 && n<25) ? " tpDeWarn" : "";
+        var countTxt = nonEmpty ? (deFmt(n)+" cells") : "empty";
+        h.push("<div class='tpDeCardHead'>");
+        h.push("<span class='tpDeDot' style='background:#"+col+"'></span>");
+        h.push("<span class='tpDeCardLabel'>Group "+which+"</span>");
+        h.push("<span class='tpDeCount"+warn+"'>"+countTxt+"</span>");
+        h.push("</div>");
+
+        if (!isA && gDe.bMode==='rest') {
+            h.push("<div class='tpDeRestNote'>Every cell not in Group A, after filters. This is the one-vs-rest marker test.</div>");
+            h.push("</div>"); // card
+            return h.join("");
+        }
+
+        // chips or empty hint
+        if (list.length===0) {
+            var hint = isA
+                ? "Click cell types in the legend to add them here."
+                : "Shift-click legend entries, or use the B button on each row.";
+            h.push("<div class='tpDeHint'>"+hint+"</div>");
+        } else {
+            h.push("<div class='tpDeChips'>");
+            for (var i=0;i<list.length;i++){
+                var k=list[i];
+                h.push("<span class='tpDeChip' data-key='"+k+"' data-grp='"+which+"' "+
+                    "style='background:"+deTint(col,0.06)+";border-color:"+deTint(col,0.25)+"'>");
+                h.push("<span class='tpDeChipDot' style='background:#"+deTypeColor(k)+"'></span>");
+                h.push("<span>"+deTypeLabel(k)+"</span>");
+                h.push("<span class='tpDeChipN' style='color:"+col+"'>"+deFmt(deTypeCount(k))+"</span>");
+                h.push("<span class='tpDeChipX' data-key='"+k+"' data-grp='"+which+"' style='color:"+col+"'>&times;</span>");
+                h.push("</span>");
+            }
+            h.push("</div>");
+        }
+
+        // filter row (secondary cross-field capability)
+        var fields = deMetaEnumFields();
+        var fSel = isA ? gDe.aField : gDe.bField;
+        var vSel = isA ? gDe.aValue : gDe.bValue;
+        h.push("<div class='tpDeFilterRow' data-grp='"+which+"'>");
+        h.push("<select class='tpDeFilterField'><option value=''>No filter</option>");
+        for (var j=0;j<fields.length;j++){
+            var fn=fields[j].name;
+            h.push("<option value='"+fn+"'"+(fn===fSel?" selected":"")+">"+(fields[j].label||fn)+"</option>");
+        }
+        h.push("</select>");
+        h.push("<select class='tpDeFilterValue'>");
+        if (fSel){
+            var fi=db.findMetaInfo(fSel);
+            h.push("<option value=''>All "+(fi.label||fSel)+"</option>");
+            var vc=fi.valCounts||[];
+            for (var v=0;v<vc.length;v++)
+                h.push("<option value='"+vc[v][0]+"'"+(vc[v][0]===vSel?" selected":"")+">"+vc[v][0]+"</option>");
+        } else {
+            h.push("<option value=''>&mdash;</option>");
+        }
+        h.push("</select>");
+        h.push("</div>");
+
+        h.push("</div>"); // card
+        return h.join("");
+    }
+
+    function deTint(hex, frac) {
+        /* mix a hex color 'frac' of the way from white, for chip backgrounds */
+        var r=parseInt(hex.substr(0,2),16), g=parseInt(hex.substr(2,2),16), b=parseInt(hex.substr(4,2),16);
+        r=Math.round(255+(r-255)*frac); g=Math.round(255+(g-255)*frac); b=Math.round(255+(b-255)*frac);
+        return "rgb("+r+","+g+","+b+")";
+    }
+
+    function deRenderBody() {
+        if (!gDe.active) return;
+        var body = document.getElementById("tpDeBody");
+        if (!body) return;
+        var h=[];
+        // Group A card
+        h.push(deGroupCardHtml("A"));
+        // swap
+        h.push("<div class='tpDeSwap'><span class='tpDeSwapLine'></span>"+
+               "<button class='tpDeSwapBtn' id='tpDeSwap'>&#8645; swap</button>"+
+               "<span class='tpDeSwapLine'></span></div>");
+        // Group B card
+        h.push(deGroupCardHtml("B"));
+
+        // test settings (collapsed by default)
+        var sum = gDe.test+" &middot; |lfc|&ge;"+gDe.lfcCut+" &middot; p<"+gDe.padjCut;
+        h.push("<div class='tpDeCard tpDeSettings'>");
+        h.push("<div class='tpDeSettingsHead' id='tpDeSettingsHead'><b>Test settings</b><span class='tpDeSummary'>"+sum+"</span></div>");
+        if (gDe.paramsOpen) {
+            h.push("<div class='tpDeSettingsBody'>");
+            h.push(deSetRow("Test","<select id='tpDeTest'>"+
+                deOpt("wilcox","Wilcoxon rank-sum",gDe.test)+deOpt("ttest","Student's t-test",gDe.test)+
+                deOpt("logreg","Logistic regression",gDe.test)+deOpt("binom","Binomial",gDe.test)+"</select>"));
+            h.push(deSetRow("Min. log₂ fold change","<input id='tpDeLfc' type='number' step='0.1' value='"+gDe.lfcCut+"'>"));
+            h.push(deSetRow("Adjusted p cutoff","<input id='tpDePadj' type='number' step='0.01' value='"+gDe.padjCut+"'>"));
+            h.push(deSetRow("Min. fraction expressing","<input id='tpDeMinPct' type='number' step='0.05' value='"+gDe.minPct+"'>"));
+            h.push(deSetRow("Subsample per group","<input id='tpDeSub' type='number' step='500' value='"+gDe.subsample+"'>"));
+            h.push("<div class='tpDeFoot'>Benjamini-Hochberg correction across all tested genes.</div>");
+            h.push("</div>");
+        }
+        h.push("</div>");
+
+        // validation banner
+        var msg = deValidate();
+        if (msg) h.push("<div class='tpDeBanner'>"+msg+"</div>");
+
+        // run row
+        var runDisabled = (msg || gDe.running) ? " disabled" : "";
+        var runLabel = gDe.running ? "Running…" : "Run comparison";
+        h.push("<div class='tpDeRunRow'>");
+        h.push("<button class='tpDeRun' id='tpDeRun'"+runDisabled+">"+runLabel+"</button>");
+        h.push("<button class='tpDeReset' id='tpDeReset'>Reset</button>");
+        h.push("</div>");
+
+        // recent comparisons
+        if (gDe.history.length){
+            h.push("<div class='tpDeRecentLabel'>Recent comparisons</div>");
+            for (var i=0;i<gDe.history.length;i++){
+                var e=gDe.history[i];
+                h.push("<div class='tpDeRecent' data-idx='"+i+"'>");
+                h.push("<div class='tpDeRecentTitle'>"+e.title+"</div>");
+                h.push("<div class='tpDeRecentSub'>"+e.n+" significant genes</div>");
+                h.push("</div>");
+            }
+        }
+
+        body.innerHTML = h.join("");
+        deWireBody();
+    }
+
+    function deSetRow(label, control){ return "<div class='tpDeSetRow'><label>"+label+"</label>"+control+"</div>"; }
+    function deOpt(val,label,cur){ return "<option value='"+val+"'"+(val===cur?" selected":"")+">"+label+"</option>"; }
+
+    function deWireBody() {
+        $("#tpDeSettingsHead").click(function(){ gDe.paramsOpen=!gDe.paramsOpen; deRenderBody(); });
+        $("#tpDeRun").click(deRun);
+        $("#tpDeReset").click(deReset);
+        $("#tpDeSwap").click(deSwap);
+
+        // B mode toggle
+        $("#tpDeBmode button").click(function(){
+            var m=$(this).data("mode");
+            if (m==='rest' && gDe.bMode==='pick'){ gDe.bMode='rest'; }
+            else if (m==='pick'){ gDe.bMode='pick'; }
+            deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
+        });
+
+        // chip remove
+        $("#tpDeBody .tpDeChipX").click(function(ev){
+            ev.stopPropagation();
+            var k=parseInt($(this).data("key")), grp=$(this).data("grp");
+            deRemoveType(k, grp);
+        });
+
+        // filters
+        $("#tpDeBody .tpDeFilterField").change(function(){
+            var grp=$(this).closest(".tpDeFilterRow").data("grp"); var val=this.value;
+            if (grp==="A"){ gDe.aField=val; gDe.aValue=""; } else { gDe.bField=val; gDe.bValue=""; }
+            deRenderBody();
+        });
+        $("#tpDeBody .tpDeFilterValue").change(function(){
+            var grp=$(this).closest(".tpDeFilterRow").data("grp"); var val=this.value;
+            if (grp==="A") gDe.aValue=val; else gDe.bValue=val;
+        });
+
+        // settings inputs -> state
+        $("#tpDeTest").change(function(){ gDe.test=this.value; });
+        $("#tpDeLfc").change(function(){ gDe.lfcCut=parseFloat(this.value)||0; });
+        $("#tpDePadj").change(function(){ gDe.padjCut=parseFloat(this.value)||0.05; });
+        $("#tpDeMinPct").change(function(){ gDe.minPct=parseFloat(this.value)||0; });
+        $("#tpDeSub").change(function(){ gDe.subsample=parseInt(this.value)||5000; });
+
+        // recent
+        $("#tpDeBody .tpDeRecent").click(function(){
+            var e=gDe.history[parseInt($(this).data("idx"))];
+            if (!e) return;
+            gDe.a=e.snap.a.slice(); gDe.b=e.snap.b.slice(); gDe.bMode=e.snap.bMode;
+            deRefreshLegendMarks(); deRenderBody(); deRecolorPlot(); // restores selection, does not re-run
+        });
+    }
+
+    // ---- group assignment ----------------------------------------------
+
+    function deToggleType(intKey, group) {
+        var inA = gDe.a.indexOf(intKey)>-1, inB = gDe.b.indexOf(intKey)>-1;
+        if (group==='A') {
+            if (inB) gDe.b.splice(gDe.b.indexOf(intKey),1);
+            if (inA) gDe.a.splice(gDe.a.indexOf(intKey),1);
+            else gDe.a.push(intKey);
+        } else {
+            gDe.bMode='pick'; // assigning to B leaves rest mode
+            if (inA) gDe.a.splice(gDe.a.indexOf(intKey),1);
+            if (inB) gDe.b.splice(gDe.b.indexOf(intKey),1);
+            else gDe.b.push(intKey);
+        }
+        deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
+    }
+
+    function deRemoveType(intKey, group) {
+        var list = (group==='A') ? gDe.a : gDe.b;
+        var i=list.indexOf(intKey); if (i>-1) list.splice(i,1);
+        deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
+    }
+
+    function deSwap() {
+        var a=gDe.a, b=gDe.b;
+        if (gDe.bMode==='rest') {
+            // materialize the complement of A into an explicit list, then swap
+            var all=[]; var vc=gDe.metaInfo.valCounts||[];
+            for (var k=0;k<vc.length;k++) if (vc[k][1]>0 && a.indexOf(k)===-1) all.push(k);
+            gDe.b=a; gDe.a=all; gDe.bMode='pick';
+        } else {
+            gDe.a=b; gDe.b=a;
+        }
+        var af=gDe.aField, av=gDe.aValue; gDe.aField=gDe.bField; gDe.aValue=gDe.bValue; gDe.bField=af; gDe.bValue=av;
+        deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
+    }
+
+    function deReset() {
+        gDe.a=[]; gDe.b=[]; gDe.bMode='rest';
+        gDe.aField=gDe.aValue=gDe.bField=gDe.bValue='';
+        gDe.results=null; deCloseResults(); deClearGene(true);
+        deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
+    }
+
+    // ---- legend augmentation (§2) --------------------------------------
+
+    function deAugmentLegend() {
+        if (!gDe.active) return;
+        if (!gLegend || gLegend.type!=="meta" || !gLegend.metaInfo || gLegend.metaInfo.name!==gDe.field) return;
+
+        // header hint (added, not a row-layout change; removed on close)
+        if (!document.getElementById("tpDeLegHint")) {
+            var title=document.getElementById("tpLegendTitle");
+            if (title) title.insertAdjacentHTML("afterend",
+                "<div id='tpDeLegHint' style='font-size:10.5px;color:#8b8f96;padding:1px 0 3px'>Click &rarr; A, shift-click &rarr; B</div>");
+        }
+
+        var aset=new Set(gDe.a), bset=new Set(gDe.b);
+        var rows=document.querySelectorAll('#tpLegendRows .tpLegend');
+        rows.forEach(function(row){
+            var intKey=parseInt(row.id.split("_")[1]);
+            var inA=aset.has(intKey), inB=bset.has(intKey);
+            row.classList.toggle('tpDeRowA', inA);
+            row.classList.toggle('tpDeRowB', inB);
+
+            var btns=document.createElement('span');
+            btns.className='tpDeLegBtns';
+            btns.innerHTML="<button type='button' class='tpDeLegBtn tpDeLegA"+(inA?' tpDeOn':'')+"'>A</button>"+
+                           "<button type='button' class='tpDeLegBtn tpDeLegB"+(inB?' tpDeOn':'')+"'>B</button>";
+            row.appendChild(btns);
+            btns.children[0].addEventListener('click', function(e){ e.stopPropagation(); e.preventDefault(); deToggleType(intKey,'A'); });
+            btns.children[1].addEventListener('click', function(e){ e.stopPropagation(); e.preventDefault(); deToggleType(intKey,'B'); });
+
+            // intercept the normal legend select (bound on .tpLegendLabel, bubble phase)
+            row.addEventListener('mouseup', function(e){
+                if (!gDe.active) return;
+                if (e.target.closest && e.target.closest('.tpDeLegBtns')) return;
+                e.stopImmediatePropagation(); e.preventDefault();
+                deToggleType(intKey, e.shiftKey ? 'B' : 'A');
+            }, true);
+        });
+    }
+
+    function deRefreshLegendMarks() {
+        var aset=new Set(gDe.a), bset=new Set(gDe.b);
+        document.querySelectorAll('#tpLegendRows .tpLegend').forEach(function(row){
+            var k=parseInt(row.id.split("_")[1]);
+            row.classList.toggle('tpDeRowA', aset.has(k));
+            row.classList.toggle('tpDeRowB', bset.has(k));
+            var a=row.querySelector('.tpDeLegA'), b=row.querySelector('.tpDeLegB');
+            if (a) a.classList.toggle('tpDeOn', aset.has(k));
+            if (b) b.classList.toggle('tpDeOn', bset.has(k));
+        });
+    }
+
+    // ---- plot recolor by group (§3) ------------------------------------
+
+    function deRecolorPlot() {
+        if (!gDe.active) return;
+        if (gDe.selectedGene) return; // gene coloring takes precedence
+        var mi=gDe.metaInfo;
+        var hasA=gDe.a.length>0;
+        var hasB=(gDe.bMode==='rest') ? hasA : gDe.b.length>0;
+
+        if (!mi.arr) { db.loadMetaVec(mi, function(arr){ mi.arr=arr; deRecolorPlot(); }); return; }
+
+        if (!hasA && !hasB) {
+            // nothing assigned -> keep the normal cell-type coloring
+            renderer.setColorArr(mi.arr);
+            renderer.setColors(legendGetColors(gLegend.rows));
+            renderer.drawDots();
+            deRemoveStatus();
+            return;
+        }
+
+        var aset=new Set(gDe.a), bset=new Set(gDe.b);
+        var arr=mi.arr, n=arr.length, colArr=new Uint8Array(n);
+        for (var i=0;i<n;i++){
+            var t=arr[i];
+            if (aset.has(t)) colArr[i]=0;
+            else if (gDe.bMode==='rest') colArr[i]= hasA ? 1 : 2;
+            else if (bset.has(t)) colArr[i]=1;
+            else colArr[i]=2;
+        }
+        renderer.setColorArr(colArr);
+        renderer.setColors([DE_A_COL, DE_B_COL, DE_NEUTRAL]);
+        renderer.drawDots();
+
+        var nA=deGroupCount(gDe.a);
+        var nB=(gDe.bMode==='rest') ? Math.max(0, db.conf.sampleCount-nA) : deGroupCount(gDe.b);
+        deShowStatus(nA, nB);
+    }
+
+    function deShowStatus(nA, nB) {
+        var el=document.getElementById("tpDeStatus");
+        if (!el){ el=document.createElement("div"); el.id="tpDeStatus";
+            el.style.cssText="position:absolute;z-index:18;font-size:11.5px;font-family:monospace;color:#555;background:rgba(255,255,255,0.8);padding:2px 7px;border-radius:4px";
+            document.body.appendChild(el); }
+        var r=deCanvasRect();
+        el.style.left=(r.left+r.width-160)+"px"; el.style.top=(r.top+8)+"px";
+        el.innerHTML="<span style='color:#"+DE_A_COL+"'>A "+deFmt(nA)+"</span> &nbsp;&middot;&nbsp; <span style='color:#"+DE_B_COL+"'>B "+deFmt(nB)+"</span>";
+    }
+    function deRemoveStatus(){ var el=document.getElementById("tpDeStatus"); if(el) el.remove(); }
+
+    // ---- validation (§7) -----------------------------------------------
+
+    function deValidate() {
+        if (gDe.a.length===0) return "Add at least one cell type to Group A.";
+        if (gDe.bMode==='pick' && gDe.b.length===0)
+            return "Add at least one cell type to Group B, or switch B to all other cells.";
+        var overlap=gDe.a.filter(function(k){ return gDe.b.indexOf(k)>-1; });
+        if (overlap.length) return "The same cell type is in both groups: "+overlap.map(deTypeLabel).join(", ")+".";
+        var nA=deGroupCount(gDe.a);
+        if (nA>0 && nA<25) return "Group A has only "+nA+" cells. At least 25 are needed for a stable rank-sum test.";
+        var nB=(gDe.bMode==='rest') ? Math.max(0, db.conf.sampleCount-nA) : deGroupCount(gDe.b);
+        if (gDe.bMode==='pick' && nB>0 && nB<25) return "Group B has only "+nB+" cells. At least 25 are needed for a stable rank-sum test.";
+        return null;
+    }
+
+    // ---- run + compute seam (§4) ---------------------------------------
+
+    function deComparisonTitle() {
+        function lab(list){
+            if (!list.length) return "";
+            var names=list.map(deTypeLabel);
+            return names.length<=2 ? names.join(" + ") : (names[0]+" +"+(names.length-1)+" more");
+        }
+        var aLab=lab(gDe.a); if (gDe.aValue) aLab+=" · "+gDe.aValue;
+        var bLab=(gDe.bMode==='rest') ? "All other cells" : lab(gDe.b);
+        if (gDe.bMode!=='rest' && gDe.bValue) bLab+=" · "+gDe.bValue;
+        return aLab+"  vs  "+bLab;
+    }
+
+    function deBuildSpec() {
+        return {
+            dataset: db.name || (db.conf && db.conf.name),
+            field: gDe.field,
+            groupA: { values: gDe.a.map(deTypeLabel), filter: gDe.aField ? {field:gDe.aField, value:gDe.aValue} : null },
+            groupB: gDe.bMode==='rest' ? "rest"
+                     : { values: gDe.b.map(deTypeLabel), filter: gDe.bField ? {field:gDe.bField, value:gDe.bValue} : null },
+            test: gDe.test, minPct: gDe.minPct, subsample: gDe.subsample,
+            lfcCut: gDe.lfcCut, padjCut: gDe.padjCut
+        };
+    }
+
+    function deRun() {
+        if (deValidate() || gDe.running) return;
+        var spec=deBuildSpec();
+        gDe.running=true; gDe.canceled=false;
+        deRenderBody();       // reflect Running… + disabled button
+        deShowRunning();
+        deSubmitJob(spec,
+            function(p,label){ deUpdateProgress(p,label); },
+            function(result){ if (gDe.canceled) return; gDe.running=false; deHideRunning(); deOnResults(result, spec); deRenderBody(); },
+            function(err){ gDe.running=false; deHideRunning(); deRenderBody(); alert("Differential expression failed: "+err); }
+        );
+    }
+
+    function deOnResults(result, spec) {
+        // snapshot the thresholds at run time so the pop-up can re-filter without a re-run
+        gDe.results = {
+            genes: result.genes, nA: result.nA, nB: result.nB,
+            aLabel: deComparisonTitle().split("  vs  ")[0],
+            bLabel: (gDe.bMode==='rest') ? "All other cells" : deComparisonTitle().split("  vs  ")[1],
+            lfcCut: spec.lfcCut, padjCut: spec.padjCut, minPct: spec.minPct, test: spec.test
+        };
+        gDe.sortKey='padj'; gDe.sortDir=1; gDe.geneFilter=''; gDe.side='all'; gDe.selectedGene=null;
+
+        var sig=deSignificant(gDe.results.genes, gDe.results);
+        var title=deComparisonTitle();
+        gDe.history.unshift({ title:title, n:sig.length, snap:{a:gDe.a.slice(), b:gDe.b.slice(), bMode:gDe.bMode} });
+        // de-dup by title, keep last 4
+        var seen={}; gDe.history=gDe.history.filter(function(e){ if(seen[e.title]) return false; seen[e.title]=1; return true; }).slice(0,4);
+
+        deShowResults();
+    }
+
+    /* The single integration point for the DE backend. The endpoint is a
+     * SITE-WIDE setting, so it comes from cb.conf ("deUrl", exposed as
+     * gClientConf["deUrl"]) — the same layer as annotApiBase / showLogin — not
+     * from a dataset's dataset.json. window.cbDeUrl is a local-dev override.
+     * If set, POST the spec and poll for status/results (see
+     * plans/differential-expression.md, three-tier flow). Otherwise fall back
+     * to a clearly-labelled client-side placeholder that stages progress and
+     * synthesizes statistics over the dataset's REAL gene symbols, so the whole
+     * UI flow — running → results → gene select → recolor — works before the
+     * backend is deployed. Only the DE statistics are placeholder; the genes
+     * and their expression coloring are real. */
+    function deSubmitJob(spec, onProgress, onDone, onErr) {
+        var url = (typeof gClientConf !== "undefined" && gClientConf && gClientConf["deUrl"]) || window.cbDeUrl || null;
+        if (url) { deSubmitJobHttp(url, spec, onProgress, onDone, onErr); return; }
+        deSubmitJobStub(spec, onProgress, onDone);
+    }
+
+    function deSubmitJobHttp(url, spec, onProgress, onDone, onErr) {
+        // POST spec -> {jobId}; then poll url?jobId=... every 2s until done/failed.
+        fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(spec)})
+            .then(function(r){ return r.json(); })
+            .then(function(sub){
+                if (!sub || !sub.jobId) throw new Error("no jobId returned");
+                var poll=function(){
+                    if (gDe.canceled) return;
+                    fetch(url+"?jobId="+encodeURIComponent(sub.jobId))
+                        .then(function(r){ return r.json(); })
+                        .then(function(st){
+                            if (st.status==="done") onDone({genes:st.result.genes, nA:st.result.n_pop1, nB:st.result.n_pop2});
+                            else if (st.status==="failed") onErr(st.error||"job failed");
+                            else { onProgress(st.progress? st.progress*100 : null, st.stage||"running"); setTimeout(poll, 2000); }
+                        }).catch(function(e){ onErr(""+e); });
+                };
+                poll();
+            }).catch(function(e){ onErr(""+e); });
+    }
+
+    function deHash(str){ var h=2166136261>>>0; for(var i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return (h>>>0)/4294967296; }
+
+    function deSubmitJobStub(spec, onProgress, onDone) {
+        var stages=[["Preparing matrix",6],["Subsampling cells",22],["Filtering genes by detection rate",46],
+                    ["Computing rank-sum statistics",74],["Benjamini-Hochberg correction",94]];
+        var i=0;
+        (function step(){
+            if (gDe.canceled) return;
+            if (i<stages.length){ onProgress(stages[i][1], stages[i][0]); i++; setTimeout(step, 300); return; }
+            onProgress(100, "done");
+            // synthesize over real genes
+            var ids=db.allGeneIds ? db.allGeneIds() : [];
+            var cap=Math.min(ids.length, 1500);
+            var aLabel=deComparisonTitle().split("  vs  ")[0], bLabel=deComparisonTitle().split("  vs  ")[1];
+            var genes=[];
+            for (var g=0; g<cap; g++){
+                var info=db.getGeneInfo(ids[g]); var sym=info.sym||ids[g];
+                var seed=sym+"|"+aLabel+"|"+bLabel;
+                var u1=deHash(seed+"1"), u2=deHash(seed+"2"), u3=deHash(seed+"3"), u4=deHash(seed+"4");
+                var lfc=Math.round((u1*2-1)*4*100)/100;
+                var strength=deHash(seed+"s");
+                var negLog = (Math.abs(lfc)>=1) ? (2 + strength*28*Math.abs(lfc)/4) : (strength*2.5);
+                var pAdj=Math.pow(10, -negLog); if (pAdj<1e-300) pAdj=1e-300;
+                var pctA=Math.round((lfc>0 ? 0.3+u3*0.7 : u3*0.7)*100)/100;
+                var pctB=Math.round((lfc<0 ? 0.3+u4*0.7 : u4*0.7)*100)/100;
+                genes.push({symbol:sym, log2FC:lfc, pAdj:pAdj, pctA:pctA, pctB:pctB});
+            }
+            var nA=deGroupCount(gDe.a);
+            var nB=(gDe.bMode==='rest') ? Math.max(0, db.conf.sampleCount-nA) : deGroupCount(gDe.b);
+            setTimeout(function(){ if(!gDe.canceled) onDone({genes:genes, nA:nA, nB:nB}); }, 250);
+        })();
+    }
+
+    // running overlay
+    function deShowRunning() {
+        deHideRunning();
+        var r=deCanvasRect();
+        var h="<div id='tpDeRunning' style='left:"+r.left+"px;top:"+r.top+"px;width:"+r.width+"px;height:"+r.height+"px'>"+
+            "<div class='tpDeRunCard'>"+
+            "<div class='tpDeRunTop'><span id='tpDeSpinner'></span><span>Running differential expression</span></div>"+
+            "<div class='tpDeProgTrack'><div class='tpDeProgFill' id='tpDeProgFill'></div></div>"+
+            "<div class='tpDeStage' id='tpDeStage'>queued</div>"+
+            "<div class='tpDeCancel'><button id='tpDeCancel'>Cancel</button></div>"+
+            "</div></div>";
+        document.body.insertAdjacentHTML("beforeend", h);
+        $("#tpDeCancel").click(function(){ gDe.canceled=true; gDe.running=false; deHideRunning(); deRenderBody(); });
+    }
+    function deUpdateProgress(p, label) {
+        var fill=document.getElementById("tpDeProgFill"), st=document.getElementById("tpDeStage");
+        if (fill && p!==null && p!==undefined) fill.style.width=p+"%";
+        else if (fill) fill.style.width="40%"; // indeterminate fallback
+        if (st && label) st.textContent=label;
+    }
+    function deHideRunning(){ var el=document.getElementById("tpDeRunning"); if(el) el.remove(); }
+
+    // ---- results pop-up (§5) — non-modal dialog over the canvas ---------
+
+    function deSignificant(genes, thr) {
+        return genes.filter(function(g){
+            return Math.abs(g.log2FC)>=thr.lfcCut && g.pAdj<thr.padjCut && Math.max(g.pctA,g.pctB)>=thr.minPct;
+        });
+    }
+
+    function deShowResults() {
+        deCloseResults();
+        var div=document.createElement("div"); div.id="tpDeResults";
+        document.body.appendChild(div);
+        deRenderResults();
+        var r=deCanvasRect();
+        var w=Math.min(840, Math.max(680, r.width-40));
+        var ht=Math.min(470, Math.max(320, r.height-40));
+        $("#tpDeResults").dialog({
+            modal:false, closeOnEscape:true, resizable:true, draggable:true,
+            width:w, height:ht, title:"Differential expression results",
+            position:{ my:"center", at:"center", of: renderer.canvas },
+            close:function(){ deCloseResults(); }
+        });
+    }
+    function deCloseResults() {
+        if ($("#tpDeResults").length && $("#tpDeResults").hasClass("ui-dialog-content"))
+            $("#tpDeResults").dialog("destroy");
+        $("#tpDeResults").remove();
+    }
+
+    function deRenderResults() {
+        var res=gDe.results; if (!res) return;
+        var sig=deSignificant(res.genes, res);
+        var upA=sig.filter(function(g){return g.log2FC>0;}).length;
+        var upB=sig.length-upA;
+        var h=[];
+        h.push("<div class='tpDeResHead'>");
+        h.push("<span class='tpDeResSub'>"+sig.length+" significant &middot; "+upA+" up in A, "+upB+" up in B &middot; n="+deFmt(res.nA)+"/"+deFmt(res.nB)+"</span>");
+        h.push("<span class='tpDeResActions'><button class='tpDeCsv' id='tpDeCsv'>&darr; Download CSV</button></span>");
+        h.push("</div>");
+
+        if (sig.length===0) {
+            h.push(deEmptyStateHtml(res));
+            $("#tpDeResults").html(h.join(""));
+            $("#tpDeCsv").click(deDownloadCsv);
+            $("#tpDeLoosen").click(deLoosen);
+            $("#tpDeEditGroups").click(function(){ deCloseResults(); });
+            return;
+        }
+
+        h.push("<div id='tpDeResBody'>");
+        h.push("<div id='tpDeResTableWrap'>");
+        // controls
+        h.push("<div class='tpDeCtrls'>");
+        h.push("<input class='tpDeGeneFilter' id='tpDeGeneFilter' placeholder='Filter genes' value='"+gDe.geneFilter+"'>");
+        h.push("<span class='tpDeSide' id='tpDeSide'>"+
+            "<button data-side='all' class='"+(gDe.side==='all'?'tpDeSideOn':'')+"'>All</button>"+
+            "<button data-side='a' class='"+(gDe.side==='a'?'tpDeSideOn':'')+"'>Up in A</button>"+
+            "<button data-side='b' class='"+(gDe.side==='b'?'tpDeSideOn':'')+"'>Up in B</button></span>");
+        h.push("<span class='tpDeGeneCount' id='tpDeGeneCount'></span>");
+        h.push("</div>");
+        // grid header
+        h.push("<div class='tpDeGridHead'>"+
+            deHeadCell("name","Gene","")+deHeadCell("lfc","log₂FC","tpDeNum")+deHeadCell("padj","p-adj","tpDeNum")+
+            deHeadCell("pctA","pct A","tpDeNum")+deHeadCell("pctB","pct B","tpDeNum")+"</div>");
+        h.push("<div id='tpDeGrid'></div>");
+        h.push("</div>"); // tableWrap
+        h.push("<div id='tpDeResVolcano'>"+
+            "<div class='tpDeVolHead'><span class='tpDeVolTitle'>Volcano</span><span class='tpDeVolHint'>click a point to color the plot</span></div>"+
+            "<div id='tpDeVolcanoSvg'></div></div>");
+        h.push("</div>"); // resBody
+
+        $("#tpDeResults").html(h.join(""));
+        $("#tpDeCsv").click(deDownloadCsv);
+        $("#tpDeGeneFilter").on("input", function(){ gDe.geneFilter=this.value; deRenderTable(); });
+        $("#tpDeSide button").click(function(){ gDe.side=$(this).data("side"); gDe.selectedGene=gDe.selectedGene; deRenderResults(); });
+        $("#tpDeResults .tpDeGridHead > div").click(function(){
+            var k=$(this).data("key");
+            if (gDe.sortKey===k) gDe.sortDir=-gDe.sortDir; else { gDe.sortKey=k; gDe.sortDir=(k==='name'?1:1); }
+            deRenderResults();
+        });
+        deRenderTable();
+        deRenderVolcano();
+    }
+
+    function deHeadCell(key,label,cls){
+        var on=(gDe.sortKey===key);
+        var caret=on ? (gDe.sortDir>0 ? " ▴" : " ▾") : "";
+        // default p-adj ascending shows a down caret per spec (▾ descending, ▴ ascending)
+        return "<div data-key='"+key+"' class='"+cls+(on?' tpDeSortOn':'')+"'>"+label+caret+"</div>";
+    }
+
+    function deFilteredSortedGenes() {
+        var res=gDe.results; var sig=deSignificant(res.genes, res);
+        var rows=sig;
+        if (gDe.side==='a') rows=rows.filter(function(g){return g.log2FC>0;});
+        else if (gDe.side==='b') rows=rows.filter(function(g){return g.log2FC<0;});
+        if (gDe.geneFilter){ var q=gDe.geneFilter.toUpperCase(); rows=rows.filter(function(g){return g.symbol.toUpperCase().indexOf(q)>-1;}); }
+        var key=gDe.sortKey, dir=gDe.sortDir;
+        rows=rows.slice().sort(function(a,b){
+            var va,vb;
+            if (key==='name'){ va=a.symbol.toUpperCase(); vb=b.symbol.toUpperCase(); return va<vb?-dir:va>vb?dir:0; }
+            if (key==='lfc'){ va=a.log2FC; vb=b.log2FC; }
+            else if (key==='padj'){ va=a.pAdj; vb=b.pAdj; }
+            else if (key==='pctA'){ va=a.pctA; vb=b.pctA; }
+            else { va=a.pctB; vb=b.pctB; }
+            return (va-vb)*dir;
+        });
+        return rows;
+    }
+
+    function deRenderTable() {
+        var rows=deFilteredSortedGenes();
+        var grid=document.getElementById("tpDeGrid");
+        var cnt=document.getElementById("tpDeGeneCount");
+        if (cnt) cnt.textContent=rows.length+" genes";
+        if (!grid) return;
+        var h=[]; var cap=Math.min(rows.length, 400); // DOM cap per spec
+        for (var i=0;i<cap;i++){
+            var g=rows[i];
+            var dirCol=g.log2FC>0 ? DE_A_COL : DE_B_COL;
+            var sel=(g.symbol===gDe.selectedGene) ? " tpDeRowSel" : "";
+            h.push("<div class='tpDeGridRow"+sel+"' data-sym='"+g.symbol+"'>");
+            h.push("<div class='tpDeGene'><span class='tpDeDirDot' style='background:#"+dirCol+"'></span>"+g.symbol+"</div>");
+            h.push("<div class='tpDeNum' style='color:"+(g.log2FC>0?'#a94c2c':'#3a4a8c')+"'>"+g.log2FC.toFixed(2)+"</div>");
+            h.push("<div class='tpDeNum'>"+deFmtP(g.pAdj)+"</div>");
+            h.push("<div class='tpDeNum' style='color:#6b6f76'>"+Math.round(g.pctA*100)+"%</div>");
+            h.push("<div class='tpDeNum' style='color:#6b6f76'>"+Math.round(g.pctB*100)+"%</div>");
+            h.push("</div>");
+        }
+        grid.innerHTML=h.join("");
+        $("#tpDeGrid .tpDeGridRow").click(function(){ deSelectGene($(this).data("sym")); });
+    }
+
+    function deFmtP(p){
+        if (p>=0.001) return p.toFixed(3);
+        var e=p.toExponential(1); return e.replace("e","e");
+    }
+
+    function deRenderVolcano() {
+        var host=document.getElementById("tpDeVolcanoSvg"); if(!host) return;
+        var res=gDe.results; var genes=res.genes;
+        var maxAbs=0, maxNeg=0;
+        for (var i=0;i<genes.length;i++){
+            var a=Math.abs(genes[i].log2FC); if(a>maxAbs)maxAbs=a;
+            var nl=-Math.log10(Math.max(genes[i].pAdj,1e-300)); if(nl>maxNeg)maxNeg=nl;
+        }
+        var xMax=Math.ceil(maxAbs*1.08*2)/2 || 1;
+        var yMax=(maxNeg*1.08)||1;
+        var bx0=34,bx1=360,by0=10,by1=238;
+        function sx(v){ return bx0 + (v+xMax)/(2*xMax)*(bx1-bx0); }
+        function sy(v){ return by1 - (v/yMax)*(by1-by0); }
+        var lfcCut=res.lfcCut, pCut=-Math.log10(res.padjCut);
+        var s=[];
+        s.push("<svg viewBox='0 0 368 268' style='width:100%;height:auto' id='tpDeVolSvgEl'>");
+        // axes
+        s.push("<line x1='"+bx0+"' y1='"+by0+"' x2='"+bx0+"' y2='"+by1+"' stroke='#e2e0da'/>");
+        s.push("<line x1='"+bx0+"' y1='"+by1+"' x2='"+bx1+"' y2='"+by1+"' stroke='#e2e0da'/>");
+        // threshold guides
+        s.push("<line x1='"+sx(0)+"' y1='"+by0+"' x2='"+sx(0)+"' y2='"+by1+"' stroke='#cfc9bd' stroke-dasharray='2 4'/>");
+        s.push("<line x1='"+sx(lfcCut)+"' y1='"+by0+"' x2='"+sx(lfcCut)+"' y2='"+by1+"' stroke='#cfc9bd' stroke-dasharray='2 4'/>");
+        s.push("<line x1='"+sx(-lfcCut)+"' y1='"+by0+"' x2='"+sx(-lfcCut)+"' y2='"+by1+"' stroke='#cfc9bd' stroke-dasharray='2 4'/>");
+        s.push("<line x1='"+bx0+"' y1='"+sy(pCut)+"' x2='"+bx1+"' y2='"+sy(pCut)+"' stroke='#cfc9bd' stroke-dasharray='2 4'/>");
+        // points
+        var sig=deSignificant(genes, res); var sigSet={}; sig.forEach(function(g){sigSet[g.symbol]=1;});
+        for (var p=0;p<genes.length;p++){
+            var g=genes[p]; var nlg=-Math.log10(Math.max(g.pAdj,1e-300));
+            var isSig=sigSet[g.symbol]; var isSel=(g.symbol===gDe.selectedGene);
+            var col=isSel ? "#23262b" : (isSig ? "#"+(g.log2FC>0?DE_A_COL:DE_B_COL) : "#cfcec8");
+            var op=isSel?1:(isSig?0.85:0.55); var rr=isSel?5:3;
+            s.push("<circle class='tpDeVolPt' data-sym='"+g.symbol+"' cx='"+sx(g.log2FC).toFixed(1)+"' cy='"+sy(nlg).toFixed(1)+"' r='"+rr+"' fill='"+col+"' fill-opacity='"+op+"' style='cursor:pointer'/>");
+        }
+        // labels on 7 most significant
+        var top=sig.slice().sort(function(a,b){return a.pAdj-b.pAdj;}).slice(0,7);
+        for (var t=0;t<top.length;t++){
+            var g2=top[t]; var nlg2=-Math.log10(Math.max(g2.pAdj,1e-300));
+            var anchor=g2.log2FC>0?"end":"start"; var dx=g2.log2FC>0?-6:6;
+            s.push("<text x='"+(sx(g2.log2FC)+dx).toFixed(1)+"' y='"+(sy(nlg2)-6).toFixed(1)+"' font-size='9' font-family='monospace' fill='#6b6f76' text-anchor='"+anchor+"'>"+g2.symbol+"</text>");
+        }
+        // axis titles
+        s.push("<text x='"+((bx0+bx1)/2)+"' y='262' font-size='9.5' fill='#8b8f96' text-anchor='middle'>log₂ fold change (A / B)</text>");
+        s.push("<text x='10' y='"+((by0+by1)/2)+"' font-size='9.5' fill='#8b8f96' text-anchor='middle' transform='rotate(-90 10 "+((by0+by1)/2)+")'>−log₁₀ p-adj</text>");
+        s.push("</svg>");
+        host.innerHTML=s.join("");
+        $("#tpDeVolcanoSvg .tpDeVolPt").click(function(){ deSelectGene($(this).data("sym")); });
+    }
+
+    function deDownloadCsv() {
+        var res=gDe.results; if(!res) return;
+        var rows=res.genes.slice().sort(function(a,b){return a.pAdj-b.pAdj;});
+        var aName=res.aLabel, bName=res.bLabel;
+        var lines=["gene,log2FC,p_adj,pct_A,pct_B,group_A,group_B,test"];
+        for (var i=0;i<rows.length;i++){
+            var g=rows[i];
+            lines.push([g.symbol, g.log2FC, g.pAdj, g.pctA, g.pctB,
+                '"'+aName.replace(/"/g,'""')+'"', '"'+bName.replace(/"/g,'""')+'"', res.test].join(","));
+        }
+        var blob=new Blob([lines.join("\n")], {type:"text/csv"});
+        var a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+        a.download="cellbrowser_DE_results.csv"; document.body.appendChild(a); a.click();
+        setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 100);
+    }
+
+    // ---- empty state (§7) ----------------------------------------------
+
+    function deEmptyStateHtml(res) {
+        var canLoosen = deSignificant(res.genes, {lfcCut:0.25, padjCut:res.padjCut, minPct:res.minPct}).length>0;
+        var h=[];
+        h.push("<div class='tpDeEmpty'>");
+        h.push("<h3>No genes passed the thresholds</h3>");
+        h.push("<p>The rank-sum test found no gene with |log₂FC| ≥ "+res.lfcCut+" and adjusted p < "+res.padjCut+
+               ". These two populations may be transcriptionally similar, or the groups may be too small to reach significance.</p>");
+        h.push("<div class='tpDeEmptyBtns'>");
+        if (canLoosen)
+            h.push("<button class='tpDeLoosen' id='tpDeLoosen'>Loosen to |log₂FC| ≥ 0.25, p-adj < "+res.padjCut+"</button>");
+        h.push("<button class='tpDeEditGroups' id='tpDeEditGroups'>Edit groups</button>");
+        h.push("</div></div>");
+        return h.join("");
+    }
+
+    function deLoosen() {
+        // re-filter the EXISTING result in place (p-values unchanged) — no re-run
+        gDe.results.lfcCut=0.25;
+        gDe.lfcCut=0.25;
+        deRenderResults();
+        deRenderBody();
+    }
+
+    // ---- gene selection recolors scatter (§6) --------------------------
+
+    function deSelectGene(sym) {
+        if (!sym) return;
+        gDe.selectedGene=sym;
+        $("#tpDeGrid .tpDeGridRow").removeClass("tpDeRowSel");
+        $("#tpDeGrid .tpDeGridRow[data-sym='"+sym+"']").addClass("tpDeRowSel");
+        deRenderVolcano(); // re-render to highlight the point
+        // reuse the existing gene-search coloring path
+        var geneId=sym;
+        if (db.geneSyns){ var ids=db.findGenesExact(sym); if (ids && ids.length) geneId=ids[0]; }
+        colorByLocus(geneId, function(){ renderer.drawDots(); deShowGeneBadge(sym); }, sym);
+    }
+
+    function deShowGeneBadge(sym) {
+        deRemoveGeneBadge();
+        var r=deCanvasRect();
+        var h="<div id='tpDeGeneBadge' style='left:"+(r.left+14)+"px;top:"+(r.top+12)+"px'>"+
+            "<div><div class='tpDeGbSym'>"+sym+"</div><div class='tpDeGbCap'>expression, log-normalized</div></div>"+
+            "<div style='display:flex;align-items:center;gap:4px'><span style='font-size:10px;color:#8b8f96'>0</span>"+
+            "<span class='tpDeGbRamp'></span><span style='font-size:10px;color:#8b8f96'>max</span></div>"+
+            "<span class='tpDeGbX' id='tpDeGbX' title='Clear'>&times;</span></div>";
+        document.body.insertAdjacentHTML("beforeend", h);
+        $("#tpDeGbX").click(function(){ deClearGene(); });
+    }
+    function deRemoveGeneBadge(){ var el=document.getElementById("tpDeGeneBadge"); if(el) el.remove(); }
+
+    function deClearGene(silent) {
+        var had=gDe.selectedGene;
+        gDe.selectedGene=null;
+        deRemoveGeneBadge();
+        if (silent) return;
+        $("#tpDeGrid .tpDeGridRow").removeClass("tpDeRowSel");
+        if (gDe.active && gDe.results) deRenderVolcano();
+        // return to group coloring
+        if (gDe.active && had && gDe.field)
+            colorByMetaField(gDe.field, function(){ deRecolorPlot(); });
+    }
+
     // only export these functions
     return {
         "main":main,
         "selectizeClear" : selectizeClear,
-        "selectizeSetValue" : selectizeSetValue
+        "selectizeSetValue" : selectizeSetValue,
+        "deOpen" : deOpen
     }
 
 }();

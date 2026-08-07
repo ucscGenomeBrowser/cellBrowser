@@ -158,6 +158,34 @@ annotApiBase=https://cells.ucsc.edu
 ```
 `cbUpgrade` never overwrites `cb.conf`, so it survives code deploys.
 
+### Code-only sandboxes (`dataRoot`)
+
+`dataRoot` points the frontend at data served from somewhere other than the
+directory the code was loaded from, so you can run a sandbox that holds only
+`index.html`, `js/`, `css/` and `cb.conf` against the shared dataset tree
+instead of copying hundreds of GB:
+
+```
+# in htdocs-cells-mspeir/cb.conf
+dataRoot=https://cells-test.gi.ucsc.edu
+```
+
+Everything under the data tree moves with it: the dataset directories,
+`search.json`, `genes/` and `downloads/markers/`. The code's own files, and
+`cb.conf` itself, are always read from the directory serving the page.
+
+Set up such a sandbox with:
+```
+cbUpgrade -o /usr/local/apache/htdocs-cells-mspeir --code
+cp cb.conf.sample /usr/local/apache/htdocs-cells-mspeir/cb.conf
+# then edit dataRoot in that file
+```
+
+An absolute URL crosses origins, so the data host must send
+`Access-Control-Allow-Origin` (the `cells*` vhosts on hgwdev already do). To
+stay same-origin, use a server-absolute path instead (`dataRoot=/cells-data`)
+and add an Apache `Alias` for it.
+
 ## Verifying end to end
 
 ```

@@ -37,6 +37,67 @@ var cbUtil = (function () {
       return parts.map(function(part) { return part.trim().replace(/(^[\/]*|[\/]*$)/g, ''); }).join(separator || '/');
     };
 
+    // Web root of the data files, set from the "dataRoot" key in cb.conf (see
+    // loadClientConf in cellBrowser.js). Empty = data sits next to the code,
+    // which is the normal single-directory install.
+    my.dataRoot = "";
+
+    my.setDataRoot = function setDataRoot(root) {
+    /* Serve the data from somewhere other than the directory the code was
+     * loaded from. Accepts an absolute URL ("https://cells.ucsc.edu") for a
+     * code-only sandbox pointing at a shared data host, or a server-absolute
+     * path ("/cells-data") for another directory on the same server. A bare
+     * "/" is treated as unset. */
+        root = (root || "").trim().replace(/\/+$/, "");
+        // A server-absolute path is expanded to a full URL right here, so that
+        // dataRoot is only ever "" or scheme+host+path. Everything downstream
+        // feeds it to joinPaths(), which strips a leading slash and would
+        // silently turn "/cells-data/ds" back into a page-relative path.
+        if (root.charAt(0) === "/" && typeof window !== "undefined")
+            root = window.location.origin + root;
+        my.dataRoot = root;
+    };
+
+    my.dataUrl = function dataUrl(parts) {
+    /* joinPaths(), but rooted at dataRoot. Use this for every file that lives
+     * in the data tree (dataset dirs, search.json, genes/, downloads/) so that
+     * a sandbox with only index.html + js/ can read a shared data directory.
+     * Do NOT use it for the code's own files (js, css, cb.conf itself).
+     * With no dataRoot set this behaves exactly like joinPaths(). */
+        if (typeof parts === "string")
+            parts = [parts];
+        var rel = my.joinPaths(parts);
+        if (my.dataRoot === "")
+            return rel;
+        // not joinPaths() here: it strips the leading slash, which would turn a
+        // server-absolute dataRoot ("/cells-data") into a relative path
+        return (rel === "") ? my.dataRoot+"/" : my.dataRoot+"/"+rel;
+    };
+
+    my.absDataUrl = function absDataUrl(parts) {
+    /* dataUrl(), but always fully qualified with scheme and host. Needed when
+     * the URL is handed to another server to fetch, e.g. a hub.txt passed to
+     * hgTracks, which cannot resolve a path relative to this page. */
+        var url = my.dataUrl(parts);
+        var origin, rel;
+        var m = url.match(/^(https?:\/\/[^\/]+)\/?(.*)$/);
+        if (m) {
+            origin = m[1];
+            rel = m[2];
+        } else if (url.charAt(0) === "/") {
+            origin = window.location.origin;
+            rel = url.substring(1);
+        } else {
+            // relative to the page: pathname only, so a "?" or "#" on the
+            // current URL cannot end up inside the path we hand out
+            return my.absPath(window.location.origin + window.location.pathname, url);
+        }
+        // always finish through absPath: dataset settings such as hubUrl are
+        // written relative to the dataset dir ("../hubs/x/hub.txt"), and the
+        // ".." has to be resolved here rather than shipped to the other server
+        return my.absPath(origin + "/", rel);
+    };
+
     my.dumpObj = function (o) {
     /* for debugging */
         if(DEBUG) console.log(JSON.stringify(o));
@@ -414,8 +475,13 @@ function CbDbFile(url) {
 
     const DEBUG = false;
 
+    // name identifies the dataset (cart keys, URL "ds" argument, API calls) and
+    // is always the plain dataset path. url is where its files are fetched from
+    // and picks up the cb.conf dataRoot prefix, if one is set. Every data file
+    // below is built from self.url, so this is the single place that redirects
+    // per-dataset loads to another server or directory.
     self.name = url;
-    self.url = url;
+    self.url = cbUtil.dataUrl(url);
 
     self.exprBinCount = 10;
 
@@ -1838,7 +1904,7 @@ function CbDbFile(url) {
         var addUrl = "";
         if (fileInfo)
             addUrl = "#"+fileInfo.md5
-        url = "genes/"+dbAndGene+".json"+addUrl;
+        url = cbUtil.dataUrl(["genes", dbAndGene+".json"])+addUrl;
         cbUtil.loadJson(url, genesDone, true);
     }
 

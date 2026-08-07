@@ -10,6 +10,22 @@
 # ignored. A missing cb.conf is fine — the frontend falls back to its built-in
 # defaults (same behavior as an empty file).
 
+# Where the data files live, if not in the directory this page was served from.
+# This lets a docroot hold only the code (index.html, js/, css/, cb.conf) and
+# read its datasets from a shared data directory, instead of duplicating them.
+# It covers everything in the data tree: the dataset directories, search.json,
+# genes/ and downloads/markers/. The code's own files, and this cb.conf, are
+# always read from the directory serving the page.
+#   empty / absent = data sits next to the code (the normal install)
+#   a URL          = another server, e.g. a personal sandbox reading the shared
+#                    tree. Crosses origins, so that server must send
+#                    Access-Control-Allow-Origin:
+#                      dataRoot=https://cells.ucsc.edu
+#   a path         = another directory on this same server, via an Apache Alias.
+#                    Stays same-origin, so no CORS header needed:
+#                      dataRoot=/cells-data
+dataRoot=
+
 # Base URL of the login / annotation API (the cbAnnotServer backend).
 #   empty  = same host as this page. Apache proxies /api to the local gunicorn.
 #            This is the normal production setup on cells.ucsc.edu.
@@ -26,3 +42,14 @@ annotApiBase=
 #   on / true / 1 / yes       = show the login UI
 #   off / anything / absent   = hide it
 showLogin=off
+
+# Endpoint for the on-the-fly differential expression backend (Redmine #24912).
+# The frontend POSTs a DE job spec here and polls the same URL for status and
+# results. This is a site-wide service (one backend per server), so it belongs
+# here and not in any dataset's cellbrowser.conf.
+#   absent / empty = no backend: the "Differential expression" tool still opens
+#                    and builds groups, but a run produces placeholder results
+#                    so the UI can be demoed before the backend is deployed.
+#   a URL          = use this DE service, e.g.:
+#                      deUrl=https://cells.ucsc.edu/cgi-bin/cbDe
+deUrl=
