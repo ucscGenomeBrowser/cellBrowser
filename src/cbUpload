@@ -1,0 +1,422 @@
+#!/usr/bin/env python3
+
+# cbUpload - upload files to the UCSC Cell Browser upload server (a tusd server).
+#
+# This is a stripped-down, dependency-free version of "hubtools up". It implements
+# the tus.io resumable upload protocol (https://tus.io) directly on top of the
+# Python standard library, so it needs neither the 'tuspy'/'tusclient' package nor
+# 'requests'. It is written to run on most older Python 3 versions (no f-strings,
+# no walrus operator, only stdlib modules).
+#
+# Unlike the genome browser uploader, the only two metadata attributes sent for
+# each file are "dataset" and "passcode" - there is no apiKey and nothing about
+# assemblies, file types, parent directories, etc.
+
+import argparse
+import base64
+import json
+import logging
+import os
+import ssl
+import sys
+import http.client
+
+from urllib.parse import urlparse, urljoin, urlencode
+
+# ---- defaults / constants ----
+
+# the tusd server of the cell browser (NOT the genome browser)
+DEFAULT_URL = "https://cells-submit.gi.ucsc.edu/files"
+
+# tus protocol version we speak
+TUS_VERSION = "1.0.0"
+
+# config file, parsed for an optional 'url' override. No apiKey, no upload
+# arguments live here: passcode/dataset/filenames are all command line arguments.
+CONF_FNAME = "~/.cellbrowser"
+
+# local mtime cache, kept in the current directory: files whose mtime is
+# unchanged since the last successful upload are skipped.
+# Keyed as { dataset: { absPath: {mtime, size} } }.
+CACHE_FNAME = ".cbUpload.cache.json"
+
+# how many bytes to send per PATCH request
+CHUNK_SIZE = 64 * 1024 * 1024
+
+# network timeout in seconds
+TIMEOUT = 600
+
+# set by --debug: more logging and re-raise exceptions instead of a clean exit
+debugMode = False
+# set to False by -k/--insecure: skip TLS certificate verification
+verifyCert = True
+
+
+# ==== helpers ====
+
+def errAbort(msg):
+    " print an error and stop "
+    logging.error(msg)
+    if debugMode:
+        raise Exception(msg)
+    sys.exit(1)
+
+
+def parseConf(fname):
+    """ parse a simple key=value config file and return a dict. Lines starting
+    with '#' and lines without '=' are ignored. A single layer of matching
+    surrounding quotes is stripped from values. """
+    conf = {}
+    if not os.path.isfile(fname):
+        logging.debug("No config file %s" % fname)
+        return conf
+    logging.debug("Parsing %s" % fname)
+    fh = open(fname)
+    try:
+        for line in fh:
+            line = line.strip()
+            if line == "" or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            key = key.strip()
+            val = val.strip()
+            if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+                val = val[1:-1]
+            conf[key] = val
+    finally:
+        fh.close()
+    return conf
+
+
+def cacheLoad(fname):
+    " load the mtime cache from a json file, return {} if missing or unreadable "
+    if not os.path.isfile(fname):
+        logging.debug("No upload cache at %s" % fname)
+        return {}
+    logging.debug("Loading upload cache %s" % fname)
+    try:
+        fh = open(fname)
+        try:
+            data = json.load(fh)
+        finally:
+            fh.close()
+    except (ValueError, IOError):
+        logging.warning("Could not read cache %s, ignoring it" % fname)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def cacheWrite(cache, fname):
+    " write the mtime cache back to a json file "
+    logging.debug("Writing upload cache %s" % fname)
+    fh = open(fname, "w")
+    try:
+        json.dump(cache, fh, indent=4, sort_keys=True)
+    finally:
+        fh.close()
+
+
+def expandFiles(paths):
+    """ turn the command line file/dir arguments into a flat list of file paths.
+    Directories are walked recursively; dot-files and dot-directories are skipped
+    while walking, but an explicitly named file is always included. """
+    out = []
+    for p in paths:
+        if os.path.isdir(p):
+            for rootDir, dirs, files in os.walk(p):
+                # do not descend into dot-directories (.git, .cache, ...)
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
+                for fbase in sorted(files):
+                    if fbase.startswith("."):
+                        continue
+                    out.append(os.path.join(rootDir, fbase))
+        elif os.path.isfile(p):
+            out.append(p)
+        else:
+            errAbort("File or directory not found: %s" % p)
+    return out
+
+
+# ==== minimal tus client (stdlib only) ====
+
+def makeConnection(url):
+    " return an http(s) connection for the host in url, honoring verifyCert "
+    parts = urlparse(url)
+    host = parts.hostname
+    port = parts.port  # None -> scheme default port
+    if parts.scheme == "https":
+        if verifyCert:
+            ctx = ssl.create_default_context()
+        else:
+            # do not verify the certificate (use only if the server has a known
+            # certificate/hostname mismatch)
+            ctx = ssl._create_unverified_context()
+        return http.client.HTTPSConnection(host, port, context=ctx, timeout=TIMEOUT)
+    return http.client.HTTPConnection(host, port, timeout=TIMEOUT)
+
+
+def httpDo(url, method, headers, body=None):
+    """ perform a single HTTP request and return (status, headers-dict, body-bytes).
+    The response header keys are lower-cased. Aborts on connection errors. """
+    parts = urlparse(url)
+    path = parts.path or "/"
+    if parts.query:
+        path += "?" + parts.query
+
+    conn = makeConnection(url)
+    try:
+        logging.debug("HTTP %s %s" % (method, url))
+        conn.request(method, path, body=body, headers=headers)
+        resp = conn.getresponse()
+        respBody = resp.read()
+        respHeaders = {}
+        for key, val in resp.getheaders():
+            respHeaders[key.lower()] = val
+        logging.debug("  -> HTTP %d" % resp.status)
+        return resp.status, respHeaders, respBody
+    except (http.client.HTTPException, OSError) as e:
+        errAbort("HTTP %s request to %s failed: %s" % (method, url, e))
+    finally:
+        conn.close()
+
+
+def encodeMetadata(metadata):
+    """ build a tus 'Upload-Metadata' header value from a dict:
+    comma separated 'key <base64-of-value>' pairs. """
+    pairs = []
+    for key in sorted(metadata.keys()):
+        val = metadata[key]
+        encoded = base64.b64encode(val.encode("utf-8")).decode("ascii")
+        pairs.append("%s %s" % (key, encoded))
+    return ",".join(pairs)
+
+
+def tusCreate(baseUrl, size, metadata):
+    " create an upload on the tus server and return the URL of the new resource "
+    headers = {
+        "Tus-Resumable": TUS_VERSION,
+        "Upload-Length": str(size),
+        "Content-Length": "0",
+    }
+    metaHeader = encodeMetadata(metadata)
+    if metaHeader:
+        headers["Upload-Metadata"] = metaHeader
+
+    status, respHeaders, body = httpDo(baseUrl, "POST", headers)
+    if status != 201:
+        errAbort("Server did not accept the upload (HTTP %d) when POSTing to %s.\n"
+                 "Response: %s" % (status, baseUrl, body[:500]))
+
+    location = respHeaders.get("location")
+    if not location:
+        errAbort("Server accepted the upload but returned no Location header")
+    # Location can be absolute or relative to the creation endpoint
+    return urljoin(baseUrl, location)
+
+
+def tusUpload(uploadUrl, localPath, size):
+    " send the file contents to uploadUrl with PATCH requests, chunk by chunk "
+    offset = 0
+    fh = open(localPath, "rb")
+    try:
+        while offset < size:
+            fh.seek(offset)
+            chunk = fh.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            headers = {
+                "Tus-Resumable": TUS_VERSION,
+                "Upload-Offset": str(offset),
+                "Content-Type": "application/offset+octet-stream",
+                "Content-Length": str(len(chunk)),
+            }
+            status, respHeaders, body = httpDo(uploadUrl, "PATCH", headers, body=chunk)
+            if status != 204:
+                errAbort("PATCH at offset %d failed (HTTP %d): %s" %
+                         (offset, status, body[:500]))
+            newOffset = respHeaders.get("upload-offset")
+            if newOffset is None:
+                errAbort("PATCH response had no Upload-Offset header")
+            offset = int(newOffset)
+            if size > 0:
+                logging.info("  %s: %d / %d bytes (%d%%)" %
+                             (os.path.basename(localPath), offset, size,
+                              int(100.0 * offset / size)))
+    finally:
+        fh.close()
+
+    if offset != size:
+        errAbort("Upload of %s finished at offset %d but file size is %d" %
+                 (localPath, offset, size))
+
+
+# ==== main upload driver ====
+
+def uploadFiles(passcode, dataset, filePaths, baseUrl, cacheFname, force):
+    " upload all files to the given dataset, skipping unchanged files "
+    cache = cacheLoad(cacheFname)
+    dsCache = cache.setdefault(dataset, {})
+
+    fileList = expandFiles(filePaths)
+    if len(fileList) == 0:
+        logging.info("No files to upload")
+        return []
+
+    logging.info("Uploading %d file(s) to dataset '%s' at %s" %
+                 (len(fileList), dataset, baseUrl))
+
+    uploaded = []
+    for localPath in fileList:
+        absPath = os.path.abspath(localPath)
+        stat = os.stat(absPath)
+        mtime = stat.st_mtime
+        size = stat.st_size
+
+        # skip files that have not changed since the last successful upload
+        if not force and absPath in dsCache and dsCache[absPath].get("mtime") == mtime:
+            logging.info("%s: unchanged since last upload, skipping" % localPath)
+            continue
+
+        # the only two metadata attributes for the cell browser tusd server
+        metadata = {
+            "dataset": dataset,
+            "passcode": passcode,
+        }
+
+        logging.info("Uploading %s (%d bytes)" % (localPath, size))
+        uploadUrl = tusCreate(baseUrl, size, metadata)
+        logging.debug("Created upload at %s" % uploadUrl)
+        tusUpload(uploadUrl, absPath, size)
+
+        # record success and persist after each file so an interrupted run does
+        # not re-upload files that already completed
+        dsCache[absPath] = {"mtime": mtime, "size": size}
+        cacheWrite(cache, cacheFname)
+        uploaded.append(localPath)
+
+    logging.info("Done.")
+    return uploaded
+
+
+def notifyUpload(baseUrl, passcode, dataset, email, uploadedFiles):
+    """Tell the server that an upload finished, so it can email the Cell Browser
+    team a summary. Best effort: any failure is logged as a warning and ignored,
+    so a notification problem never fails the upload itself. The notification
+    endpoint is upload.py on the same host as the tusd server."""
+    parts = urlparse(baseUrl)
+    notifyUrl = "%s://%s/upload.py" % (parts.scheme, parts.netloc)
+    fields = {
+        "cli": "1",
+        "ds": dataset,
+        "passcode": passcode,
+        "email": email,
+        "uploaded_files": "\n".join(os.path.basename(f) for f in uploadedFiles),
+    }
+    body = urlencode(fields).encode("utf-8")
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": str(len(body)),
+    }
+    try:
+        path = urlparse(notifyUrl).path or "/"
+        conn = makeConnection(notifyUrl)
+        try:
+            conn.request("POST", path, body=body, headers=headers)
+            resp = conn.getresponse()
+            resp.read()
+            if resp.status == 200:
+                logging.info("Notified the Cell Browser team about this upload.")
+            else:
+                logging.warning("Upload notification returned HTTP %d "
+                                "(the upload itself was fine)." % resp.status)
+        finally:
+            conn.close()
+    except Exception as e:
+        logging.warning("Could not send the upload notification (%s). "
+                        "The upload itself was fine." % e)
+
+
+def parseArgs():
+    " parse the command line and return the argparse namespace "
+    epilog = """\
+examples:
+  cbUpload mypass mydataset me@lab.edu exprMatrix.tsv.gz meta.tsv
+  cbUpload mypass mydataset me@lab.edu file1.bw file2.bw
+  cbUpload -k mypass mydataset me@lab.edu myDir/   # upload every file under a directory
+
+The tusd server URL defaults to:
+  %s
+It can be overridden with --url or a line 'tusdUrl=...' in %s.
+
+Only two metadata attributes are sent per file: "dataset" and "passcode".
+Files whose modification time is unchanged since the last successful upload
+are skipped (mtime cache in %s); use -f/--force to re-upload them anyway.
+
+When the upload finishes, a confirmation email listing the uploaded files is
+sent to the UCSC Cell Browser team (cells@ucsc.edu), copied to your email.
+""" % (DEFAULT_URL, CONF_FNAME, CACHE_FNAME)
+
+    parser = argparse.ArgumentParser(
+        prog="cbUpload",
+        description="Upload files to the UCSC Cell Browser upload server (tusd). "
+                    "Pure Python standard library, no external dependencies.",
+        epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+
+    parser.add_argument("passcode", help="the upload passcode for the dataset")
+    parser.add_argument("dataset", help="the dataset identifier to upload into")
+    parser.add_argument("email", help="your submitter email address (the one you "
+                        "registered the dataset with). When the upload finishes, a "
+                        "confirmation is emailed to the Cell Browser team, copied to "
+                        "this address.")
+    parser.add_argument("filenames", nargs="+",
+                        help="one or more files (or directories) to upload")
+
+    parser.add_argument("-u", "--url", dest="url", default=None,
+                        help="tusd server URL. Overrides the 'tusdUrl' setting in the "
+                             "config file. Default: " + DEFAULT_URL)
+    parser.add_argument("-f", "--force", dest="force", action="store_true",
+                        help="ignore the mtime cache and re-upload every file, "
+                             "even if unchanged")
+    parser.add_argument("-k", "--insecure", dest="insecure", action="store_true",
+                        help="do not verify the server's TLS certificate. Use only "
+                             "if the server has a known certificate/hostname mismatch.")
+    parser.add_argument("-d", "--debug", dest="debug", action="store_true",
+                        help="show debug messages and a stack trace on abort")
+
+    return parser.parse_args()
+
+
+def main():
+    args = parseArgs()
+
+    global debugMode, verifyCert
+    debugMode = args.debug
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG, format="%(message)s")
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    if args.insecure:
+        verifyCert = False
+        logging.warning("TLS certificate verification is DISABLED (--insecure)")
+
+    conf = parseConf(os.path.expanduser(CONF_FNAME))
+    baseUrl = args.url or conf.get("tusdUrl") or DEFAULT_URL
+
+    # the mtime cache lives in the current working directory
+    cacheFname = CACHE_FNAME
+
+    uploaded = uploadFiles(args.passcode, args.dataset, args.filenames, baseUrl,
+                           cacheFname, args.force)
+
+    if uploaded:
+        notifyUpload(baseUrl, args.passcode, args.dataset, args.email, uploaded)
+
+
+if __name__ == "__main__":
+    main()
