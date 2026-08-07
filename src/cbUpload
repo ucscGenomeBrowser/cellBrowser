@@ -21,7 +21,7 @@ import ssl
 import sys
 import http.client
 
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, urlencode
 
 # ---- defaults / constants ----
 
@@ -264,11 +264,12 @@ def uploadFiles(passcode, dataset, filePaths, baseUrl, cacheFname, force):
     fileList = expandFiles(filePaths)
     if len(fileList) == 0:
         logging.info("No files to upload")
-        return
+        return []
 
     logging.info("Uploading %d file(s) to dataset '%s' at %s" %
                  (len(fileList), dataset, baseUrl))
 
+    uploaded = []
     for localPath in fileList:
         absPath = os.path.abspath(localPath)
         stat = os.stat(absPath)
@@ -295,17 +296,57 @@ def uploadFiles(passcode, dataset, filePaths, baseUrl, cacheFname, force):
         # not re-upload files that already completed
         dsCache[absPath] = {"mtime": mtime, "size": size}
         cacheWrite(cache, cacheFname)
+        uploaded.append(localPath)
 
     logging.info("Done.")
+    return uploaded
+
+
+def notifyUpload(baseUrl, passcode, dataset, email, uploadedFiles):
+    """Tell the server that an upload finished, so it can email the Cell Browser
+    team a summary. Best effort: any failure is logged as a warning and ignored,
+    so a notification problem never fails the upload itself. The notification
+    endpoint is upload.py on the same host as the tusd server."""
+    parts = urlparse(baseUrl)
+    notifyUrl = "%s://%s/upload.py" % (parts.scheme, parts.netloc)
+    fields = {
+        "cli": "1",
+        "ds": dataset,
+        "passcode": passcode,
+        "email": email,
+        "uploaded_files": "\n".join(os.path.basename(f) for f in uploadedFiles),
+    }
+    body = urlencode(fields).encode("utf-8")
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": str(len(body)),
+    }
+    try:
+        path = urlparse(notifyUrl).path or "/"
+        conn = makeConnection(notifyUrl)
+        try:
+            conn.request("POST", path, body=body, headers=headers)
+            resp = conn.getresponse()
+            resp.read()
+            if resp.status == 200:
+                logging.info("Notified the Cell Browser team about this upload.")
+            else:
+                logging.warning("Upload notification returned HTTP %d "
+                                "(the upload itself was fine)." % resp.status)
+        finally:
+            conn.close()
+    except Exception as e:
+        logging.warning("Could not send the upload notification (%s). "
+                        "The upload itself was fine." % e)
 
 
 def parseArgs():
     " parse the command line and return the argparse namespace "
     epilog = """\
 examples:
-  cbUpload mypass mydataset exprMatrix.tsv.gz meta.tsv
-  cbUpload mypass mydataset file1.bw file2.bw
-  cbUpload -k mypass mydataset myDir/    # upload every file under a directory
+  cbUpload mypass mydataset me@lab.edu exprMatrix.tsv.gz meta.tsv
+  cbUpload mypass mydataset me@lab.edu file1.bw file2.bw
+  cbUpload -k mypass mydataset me@lab.edu myDir/   # upload every file under a directory
 
 The tusd server URL defaults to:
   %s
@@ -314,6 +355,9 @@ It can be overridden with --url or a line 'tusdUrl=...' in %s.
 Only two metadata attributes are sent per file: "dataset" and "passcode".
 Files whose modification time is unchanged since the last successful upload
 are skipped (mtime cache in %s); use -f/--force to re-upload them anyway.
+
+When the upload finishes, a confirmation email listing the uploaded files is
+sent to the UCSC Cell Browser team (cells@ucsc.edu), copied to your email.
 """ % (DEFAULT_URL, CONF_FNAME, CACHE_FNAME)
 
     parser = argparse.ArgumentParser(
@@ -325,6 +369,10 @@ are skipped (mtime cache in %s); use -f/--force to re-upload them anyway.
 
     parser.add_argument("passcode", help="the upload passcode for the dataset")
     parser.add_argument("dataset", help="the dataset identifier to upload into")
+    parser.add_argument("email", help="your submitter email address (the one you "
+                        "registered the dataset with). When the upload finishes, a "
+                        "confirmation is emailed to the Cell Browser team, copied to "
+                        "this address.")
     parser.add_argument("filenames", nargs="+",
                         help="one or more files (or directories) to upload")
 
@@ -363,7 +411,12 @@ def main():
     # the mtime cache lives in the current working directory
     cacheFname = CACHE_FNAME
 
-    uploadFiles(args.passcode, args.dataset, args.filenames, baseUrl, cacheFname, args.force)
+    uploaded = uploadFiles(args.passcode, args.dataset, args.filenames, baseUrl,
+                           cacheFname, args.force)
+
+    if uploaded:
+        notifyUpload(baseUrl, args.passcode, args.dataset, args.email, uploaded)
 
 
-main()
+if __name__ == "__main__":
+    main()
