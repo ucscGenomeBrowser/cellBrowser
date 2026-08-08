@@ -10536,7 +10536,7 @@ var cellbrowser = function() {
         htmls.push("</div>"); // tpLayoutTab
 
         htmls.push("<div id='tpToolsTab'>");
-        htmls.push("<div style='padding:8px'>");
+        htmls.push("<div id='tpToolsTabMain' style='padding:8px'>");
         htmls.push("<div style='margin-bottom:8px'><b>Annotations</b></div>");
         htmls.push("<button id='tpToolsNameSel' style='width:100%;margin-bottom:6px'>Name Selection</button>");
         htmls.push("<button id='tpToolsCustomAnnot' style='width:100%'>Manage Custom Annotations</button>");
@@ -13426,6 +13426,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         field: null,            // metaInfo.name of the cell-type field driving groups
         metaInfo: null,
         a: [], b: [],           // arrays of value-indices (intKeys) per group
+        target: 'A',            // which group a legend click assigns to ('A'|'B')
         bMode: 'rest',          // 'rest' | 'pick'; default one-vs-rest
         aField: '', aValue: '', bField: '', bValue: '',
         test: 'wilcox', lfcCut: 1, padjCut: 0.05, minPct: 0.1, subsample: 5000,
@@ -13486,13 +13487,36 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     function deOpen() {
         if (!db || !db.conf) return;
-        var field = deCellTypeField();
+        // Group by whatever categorical field the legend is currently showing, so
+        // assignment always matches what the user sees (datasets often color by a
+        // clustering field that isn't conf.labelField, e.g. "leiden_1.5 names").
+        // Fall back to the configured cell-type field when the current coloring is
+        // expression or a non-categorical field.
+        var field = null;
+        if (gLegend && gLegend.type==="meta" && gLegend.metaInfo && gLegend.metaInfo.type==="enum")
+            field = gLegend.metaInfo.name;
+        if (!field) field = deCellTypeField();
         if (!field) { alert("This dataset has no cell-type annotation to compare."); return; }
         gDe.field = field;
         gDe.metaInfo = db.findMetaInfo(field);
         gDe.active = true;
 
-        $("#tpLeftTabs").hide();
+        // Host the builder inside the sidebar Tools tab so the tab bar
+        // (Annotation / Genes / Layout / Tools) stays visible and usable.
+        // Switch to the Tools tab and swap its content for the builder.
+        var toolsIdx = $('#tpLeftTabs a[href="#tpToolsTab"]').parent().index();
+        if (toolsIdx >= 0) $("#tpLeftTabs").tabs("option", "active", toolsIdx);
+
+        // While the builder is open, keep it on the Tools tab: block the app's
+        // *programmatic* tab switches (e.g. activateTab("meta") fired when a
+        // selection or coloring changes), but still let the user click any tab
+        // header. jQuery UI marks user clicks with event.originalEvent;
+        // programmatic .tabs("option","active") calls have none.
+        $("#tpLeftTabs").off("tabsbeforeactivate.de").on("tabsbeforeactivate.de", function(event, ui){
+            if (gDe.active && !event.originalEvent &&
+                ui.newPanel && ui.newPanel.attr("id") !== "tpToolsTab")
+                event.preventDefault();
+        });
         deBuildPanel();
 
         // make sure the legend shows the cell-type field so A/B assignment works
@@ -13512,7 +13536,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         deClearGene(true);
         deRemoveStatus();
         $("#tpDeBuilder").remove();
-        $("#tpLeftTabs").show();
+        $("#tpToolsTabMain").show();   // restore the normal Tools-tab content
+        $("#tpLeftTabs").off("tabsbeforeactivate.de");
         $("#tpDeLegHint").remove();
         // restore normal cell-type coloring (drops the A/B override and the augmentation)
         if (gDe.field)
@@ -13533,8 +13558,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         h.push("</div>");
         h.push("<div class='tpDeBody' id='tpDeBody'></div>");
         h.push("</div>");
-        var side = document.getElementById("tpLeftSidebar");
-        if (side) side.insertAdjacentHTML("beforeend", h.join(""));
+        // put the builder into the Tools tab and hide that tab's normal content
+        var host = document.getElementById("tpToolsTab") || document.getElementById("tpLeftSidebar");
+        $("#tpToolsTabMain").hide();
+        if (host) host.insertAdjacentHTML("beforeend", h.join(""));
         $("#tpDeCloseBtn").click(deClose);
     }
 
@@ -13542,14 +13569,19 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var isA = (which==="A");
         var col = isA ? DE_A_COL : DE_B_COL;
         var list = isA ? gDe.a : gDe.b;
+        // a group is the active click target (highlighted) when selected; Group B
+        // in "all other cells" mode can't be a target (nothing to click into)
+        var canTarget = isA || gDe.bMode==='pick';
+        var isActive = canTarget && gDe.target===which;
         var h=[];
-        h.push("<div class='tpDeCard'>");
+        h.push("<div class='tpDeCard"+(isActive?" tpDeActive":"")+"' data-grp='"+which+"'>");
 
-        // Group B mode toggle
+        // Group B mode toggle — Bootstrap btn-group, matching the site's
+        // enriched/depleted markers toggle
         if (!isA) {
-            h.push("<div class='tpDeSeg' id='tpDeBmode'>");
-            h.push("<button data-mode='rest' class='"+(gDe.bMode==='rest'?'tpDeSegOn':'')+"'>All other cells</button>");
-            h.push("<button data-mode='pick' class='"+(gDe.bMode==='pick'?'tpDeSegOn':'')+"'>Pick cell types</button>");
+            h.push("<div class='btn-group btn-group-xs btn-group-justified' id='tpDeBmode' role='group' style='margin-bottom:9px'>");
+            h.push("<div class='btn-group btn-group-xs' role='group'><button type='button' data-mode='rest' class='btn btn-default"+(gDe.bMode==='rest'?' active':'')+"'>All other cells</button></div>");
+            h.push("<div class='btn-group btn-group-xs' role='group'><button type='button' data-mode='pick' class='btn btn-default"+(gDe.bMode==='pick'?' active':'')+"'>Pick cell types</button></div>");
             h.push("</div>");
         }
 
@@ -13572,9 +13604,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         // chips or empty hint
         if (list.length===0) {
-            var hint = isA
+            var hint = isActive
                 ? "Click cell types in the legend to add them here."
-                : "Shift-click legend entries, or use the B button on each row.";
+                : "Select this group above, then click cell types in the legend.";
             h.push("<div class='tpDeHint'>"+hint+"</div>");
         } else {
             h.push("<div class='tpDeChips'>");
@@ -13631,6 +13663,13 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var body = document.getElementById("tpDeBody");
         if (!body) return;
         var h=[];
+        // which group legend clicks go to (clear indication + control)
+        h.push("<div class='tpDeTargetRow'>");
+        h.push("<span class='tpDeTargetLabel'>Add cell types to:</span>");
+        h.push("<div class='btn-group btn-group-xs' id='tpDeTarget' role='group'>");
+        h.push("<button type='button' data-grp='A' class='btn btn-default"+(gDe.target==='A'?' active':'')+"'>Group A</button>");
+        h.push("<button type='button' data-grp='B' class='btn btn-default"+(gDe.target==='B'?' active':'')+"'>Group B</button>");
+        h.push("</div></div>");
         // Group A card
         h.push(deGroupCardHtml("A"));
         // swap
@@ -13695,11 +13734,21 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         $("#tpDeReset").click(deReset);
         $("#tpDeSwap").click(deSwap);
 
-        // B mode toggle
+        // target group selector: which group legend clicks assign to
+        $("#tpDeTarget button").click(function(){
+            deSetTarget($(this).data("grp"));
+        });
+        // clicking a group card also makes it the active target
+        $("#tpDeBody .tpDeCard[data-grp]").click(function(ev){
+            if ($(ev.target).closest("button, select, .tpDeChipX, .btn-group").length) return;
+            deSetTarget($(this).data("grp"));
+        });
+
+        // Group B mode toggle (rest / pick)
         $("#tpDeBmode button").click(function(){
             var m=$(this).data("mode");
-            if (m==='rest' && gDe.bMode==='pick'){ gDe.bMode='rest'; }
-            else if (m==='pick'){ gDe.bMode='pick'; }
+            if (m==='rest'){ gDe.bMode='rest'; if (gDe.target==='B') gDe.target='A'; }
+            else { gDe.bMode='pick'; gDe.target='B'; }
             deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
         });
 
@@ -13775,8 +13824,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
     }
 
     function deReset() {
-        gDe.a=[]; gDe.b=[]; gDe.bMode='rest';
+        gDe.a=[]; gDe.b=[]; gDe.bMode='rest'; gDe.target='A';
         gDe.aField=gDe.aValue=gDe.bField=gDe.bValue='';
+        deUpdateLegendHint();
         gDe.results=null; deCloseResults(); deClearGene(true);
         deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
     }
@@ -13787,37 +13837,45 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         if (!gDe.active) return;
         if (!gLegend || gLegend.type!=="meta" || !gLegend.metaInfo || gLegend.metaInfo.name!==gDe.field) return;
 
-        // header hint (added, not a row-layout change; removed on close)
+        // header hint telling the user which group a click assigns to
         if (!document.getElementById("tpDeLegHint")) {
             var title=document.getElementById("tpLegendTitle");
             if (title) title.insertAdjacentHTML("afterend",
-                "<div id='tpDeLegHint' style='font-size:10.5px;color:#8b8f96;padding:1px 0 3px'>Click &rarr; A, shift-click &rarr; B</div>");
+                "<div id='tpDeLegHint' style='font-size:10.5px;padding:1px 0 3px'></div>");
         }
+        deUpdateLegendHint();
 
+        // Membership tint per row (no per-row buttons — the 4-column grid legend
+        // clips extra items; assignment is by clicking the row into the active
+        // group). Swallow the row's mouseup so the normal legend select doesn't
+        // fire onSelChange -> activateTab("meta") and yank us off the Tools tab.
         var aset=new Set(gDe.a), bset=new Set(gDe.b);
         var rows=document.querySelectorAll('#tpLegendRows .tpLegend');
         rows.forEach(function(row){
             var intKey=parseInt(row.id.split("_")[1]);
-            var inA=aset.has(intKey), inB=bset.has(intKey);
-            row.classList.toggle('tpDeRowA', inA);
-            row.classList.toggle('tpDeRowB', inB);
-
-            var btns=document.createElement('span');
-            btns.className='tpDeLegBtns';
-            btns.innerHTML="<button type='button' class='tpDeLegBtn tpDeLegA"+(inA?' tpDeOn':'')+"'>A</button>"+
-                           "<button type='button' class='tpDeLegBtn tpDeLegB"+(inB?' tpDeOn':'')+"'>B</button>";
-            row.appendChild(btns);
-            btns.children[0].addEventListener('click', function(e){ e.stopPropagation(); e.preventDefault(); deToggleType(intKey,'A'); });
-            btns.children[1].addEventListener('click', function(e){ e.stopPropagation(); e.preventDefault(); deToggleType(intKey,'B'); });
-
-            // intercept the normal legend select (bound on .tpLegendLabel, bubble phase)
+            row.classList.toggle('tpDeRowA', aset.has(intKey));
+            row.classList.toggle('tpDeRowB', bset.has(intKey));
+            row.style.cursor = "pointer";
             row.addEventListener('mouseup', function(e){
                 if (!gDe.active) return;
-                if (e.target.closest && e.target.closest('.tpDeLegBtns')) return;
                 e.stopImmediatePropagation(); e.preventDefault();
-                deToggleType(intKey, e.shiftKey ? 'B' : 'A');
+                deToggleType(intKey, gDe.target);
             }, true);
         });
+    }
+
+    function deUpdateLegendHint() {
+        var el=document.getElementById("tpDeLegHint");
+        if (!el) return;
+        var col = gDe.target==='A' ? DE_A_COL : DE_B_COL;
+        el.innerHTML = "Click a cell type &rarr; <b style='color:#"+col+"'>Group "+gDe.target+"</b>";
+    }
+
+    function deSetTarget(grp) {
+        if (grp==='B' && gDe.bMode==='rest') gDe.bMode='pick'; // can't add to "all other cells"
+        gDe.target = grp;
+        deUpdateLegendHint();
+        deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
     }
 
     function deRefreshLegendMarks() {
@@ -14098,13 +14156,17 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         h.push("<div id='tpDeResBody'>");
         h.push("<div id='tpDeResTableWrap'>");
         // controls
+        // row 1: search box + gene count
         h.push("<div class='tpDeCtrls'>");
         h.push("<input class='tpDeGeneFilter' id='tpDeGeneFilter' placeholder='Filter genes' value='"+gDe.geneFilter+"'>");
-        h.push("<span class='tpDeSide' id='tpDeSide'>"+
-            "<button data-side='all' class='"+(gDe.side==='all'?'tpDeSideOn':'')+"'>All</button>"+
-            "<button data-side='a' class='"+(gDe.side==='a'?'tpDeSideOn':'')+"'>Up in A</button>"+
-            "<button data-side='b' class='"+(gDe.side==='b'?'tpDeSideOn':'')+"'>Up in B</button></span>");
         h.push("<span class='tpDeGeneCount' id='tpDeGeneCount'></span>");
+        h.push("</div>");
+        // row 2: All / Up in A / Up in B, below the search box
+        h.push("<div class='tpDeCtrls2'>");
+        h.push("<span class='btn-group btn-group-xs' id='tpDeSide' role='group'>"+
+            "<button type='button' data-side='all' class='btn btn-default"+(gDe.side==='all'?' active':'')+"'>All</button>"+
+            "<button type='button' data-side='a' class='btn btn-default"+(gDe.side==='a'?' active':'')+"'>Up in A</button>"+
+            "<button type='button' data-side='b' class='btn btn-default"+(gDe.side==='b'?' active':'')+"'>Up in B</button></span>");
         h.push("</div>");
         // grid header
         h.push("<div class='tpDeGridHead'>"+
@@ -14217,12 +14279,17 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             var op=isSel?1:(isSig?0.85:0.55); var rr=isSel?5:3;
             s.push("<circle class='tpDeVolPt' data-sym='"+g.symbol+"' cx='"+sx(g.log2FC).toFixed(1)+"' cy='"+sy(nlg).toFixed(1)+"' r='"+rr+"' fill='"+col+"' fill-opacity='"+op+"' style='cursor:pointer'/>");
         }
-        // labels on 7 most significant
-        var top=sig.slice().sort(function(a,b){return a.pAdj-b.pAdj;}).slice(0,7);
-        for (var t=0;t<top.length;t++){
-            var g2=top[t]; var nlg2=-Math.log10(Math.max(g2.pAdj,1e-300));
-            var anchor=g2.log2FC>0?"end":"start"; var dx=g2.log2FC>0?-6:6;
-            s.push("<text x='"+(sx(g2.log2FC)+dx).toFixed(1)+"' y='"+(sy(nlg2)-6).toFixed(1)+"' font-size='9' font-family='monospace' fill='#6b6f76' text-anchor='"+anchor+"'>"+g2.symbol+"</text>");
+        // No labels by default — with long gene IDs they pile up unreadably.
+        // Label only the gene the user has selected (clicked in the table or
+        // volcano); its point is also drawn larger and in ink above.
+        if (gDe.selectedGene) {
+            for (var t=0;t<genes.length;t++){
+                if (genes[t].symbol!==gDe.selectedGene) continue;
+                var g2=genes[t], nlg2=-Math.log10(Math.max(g2.pAdj,1e-300));
+                var anchor=g2.log2FC>0?"end":"start", dx=g2.log2FC>0?-7:7;
+                s.push("<text x='"+(sx(g2.log2FC)+dx).toFixed(1)+"' y='"+(sy(nlg2)-7).toFixed(1)+"' font-size='11' font-weight='600' font-family='monospace' fill='#23262b' text-anchor='"+anchor+"'>"+g2.symbol+"</text>");
+                break;
+            }
         }
         // axis titles
         s.push("<text x='"+((bx0+bx1)/2)+"' y='262' font-size='9.5' fill='#8b8f96' text-anchor='middle'>log₂ fold change (A / B)</text>");
