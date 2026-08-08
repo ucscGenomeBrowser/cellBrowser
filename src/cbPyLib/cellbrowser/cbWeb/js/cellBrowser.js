@@ -3432,6 +3432,18 @@ var cellbrowser = function() {
         return (v === "on" || v === "true" || v === "1" || v === "yes");
     }
 
+    function cbDeEnabled() {
+        /* Is the differential-expression feature turned on for this site? Gated
+         * behind the "showDiffExp" flag in cb.conf, exactly like showLogin above.
+         * Defaults to OFF so the still-in-progress DE UI (whose statistics are a
+         * placeholder until the compute backend is wired up) does not leak onto
+         * installs like cells.ucsc.edu. A site opts in with "showDiffExp=on". */
+        if (gClientConf === null)
+            return false;
+        var v = (gClientConf["showDiffExp"] || "").trim().toLowerCase();
+        return (v === "on" || v === "true" || v === "1" || v === "yes");
+    }
+
     function cbApiUrl(path) {
         /* build a full URL to an auth/annotation API endpoint */
         var base = (window.cbAnnotApiBase || "");
@@ -4106,7 +4118,8 @@ var cellbrowser = function() {
          htmls.push('<ul class="dropdown-menu">');
          //htmls.push('<li><a href="#" id="tpRenameClusters">Rename clusters...<span class="dropmenu-item-content"></span></a></li>');
          htmls.push('<li><a href="#" id="tpCustomAnnotsMgr" class="dropmenu-item"><span class="dropmenu-item-label">Custom Annotations...</span><span class="dropmenu-item-content">c a</span></a></li>');
-         htmls.push('<li><a href="#" id="tpDeMenu" class="dropmenu-item"><span class="dropmenu-item-label" style="font-weight:600">Differential expression&hellip;</span><span class="dropmenu-item-content"><span style="font-size:9px;font-weight:600;letter-spacing:0.08em;color:#337ab7;border:1px solid #cfe0f0;border-radius:3px;padding:1px 4px">NEW</span></span></a></li>');
+         if (cbDeEnabled())
+             htmls.push('<li><a href="#" id="tpDeMenu" class="dropmenu-item"><span class="dropmenu-item-label" style="font-weight:600">Differential expression&hellip;</span><span class="dropmenu-item-content"><span style="font-size:9px;font-weight:600;letter-spacing:0.08em;color:#337ab7;border:1px solid #cfe0f0;border-radius:3px;padding:1px 4px">NEW</span></span></a></li>');
          //htmls.push('<li><a href="#" id="tpCluster">Run clustering...<span class="dropmenu-item-content"></span></a></li>');
          htmls.push('<li class="disabled"><a href="#" id="tpSetBackground">Set as background cells<span class="dropmenu-item-content">b s</span></a></li>');
          htmls.push('<li class="disabled"><a href="#" id="tpResetBackground">Reset background cells<span class="dropmenu-item-content">b r</span></a></li>');
@@ -10540,8 +10553,10 @@ var cellbrowser = function() {
         htmls.push("<div style='margin-bottom:8px'><b>Annotations</b></div>");
         htmls.push("<button id='tpToolsNameSel' style='width:100%;margin-bottom:6px'>Name Selection</button>");
         htmls.push("<button id='tpToolsCustomAnnot' style='width:100%'>Manage Custom Annotations</button>");
-        htmls.push("<div style='margin:12px 0 8px'><b>Differential expression</b></div>");
-        htmls.push("<button id='tpToolsDe' style='width:100%'>Compare two populations&hellip;</button>");
+        if (cbDeEnabled()) {
+            htmls.push("<div style='margin:12px 0 8px'><b>Differential expression</b></div>");
+            htmls.push("<button id='tpToolsDe' style='width:100%'>Compare two populations&hellip;</button>");
+        }
         htmls.push("</div>");
         htmls.push("</div>"); // tpToolsTab
 
