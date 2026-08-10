@@ -7747,6 +7747,11 @@ var cellbrowser = function() {
         gRecentGenes = [];
         // collections are not real datasets, so ask user which one they want
 
+        // tear down any differential-expression state/overlays: the group
+        // selection, results, and the gene badge belong to the old dataset and
+        // must not carry over (stale chips with no cells, a leftover gene badge).
+        deOnDatasetChange();
+
         if (db!==null && db.heatmap)
             removeHeatmap();
         removeSplit(renderer);
@@ -13558,6 +13563,31 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         if (gDe.field)
             colorByMetaField(gDe.field, function(){ renderer.drawDots(); });
         // gDe.a / gDe.b are kept so re-opening resumes where the user left off
+    }
+
+    function deOnDatasetChange() {
+        /* A new dataset is loading. Remove every DE overlay (builder, results
+         * pop-up, running scrim, gene badge, plot status, legend hint) and reset
+         * the builder state to empty, so nothing carries over from the previous
+         * dataset: group chips reference the old field's value-indices (which map
+         * to nothing here) and the gene badge/coloring is for a gene that may not
+         * exist. Unlike deClose() we do NOT re-color — the old renderer/legend is
+         * about to be rebuilt for the new dataset. */
+        gDe.active = false;
+        $("#tpDeBuilder").remove();
+        $("#tpToolsTabMain").show();
+        $("#tpLeftTabs").off("tabsbeforeactivate.de");
+        $("#tpDeLegHint").remove();
+        deCloseResults();
+        deHideRunning();
+        deRemoveGeneBadge();
+        deRemoveStatus();
+        gDe.field=null; gDe.metaInfo=null;
+        gDe.a=[]; gDe.b=[]; gDe.target='A'; gDe.bMode='rest';
+        gDe.aField=''; gDe.aValue=''; gDe.bField=''; gDe.bValue='';
+        gDe.results=null; gDe.selectedGene=null; gDe.history=[];
+        gDe.sortKey='padj'; gDe.sortDir=1; gDe.geneFilter=''; gDe.side='all';
+        gDe.running=false; gDe.canceled=false; gDe.paramsOpen=false;
     }
 
     // ---- builder panel (§1) --------------------------------------------
