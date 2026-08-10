@@ -954,17 +954,6 @@ th[role=columnheader]:not(.no-sort):hover:after {
 #tpDeRunning .tpDeCancel { margin-top:12px; text-align:right; }
 #tpDeRunning .tpDeCancel button { font-size:12px; border:1px solid var(--tpDeCardBorder); background:#fff; border-radius:5px; padding:4px 10px; cursor:pointer; }
 
-/* gene badge over the plot */
-#tpDeGeneBadge { position:absolute; z-index:19; background:rgba(255,255,255,0.94); border:1px solid var(--tpDeCardBorder);
-  border-radius:6px; padding:7px 9px 7px 11px; box-shadow:0 4px 14px rgba(10,12,15,0.08);
-  display:flex; align-items:center; gap:10px; animation:tpDeFadeUp .15s ease-out; }
-@keyframes tpDeFadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
-#tpDeGeneBadge .tpDeGbSym { font-size:14px; font-weight:600; font-family:monospace; }
-#tpDeGeneBadge .tpDeGbCap { font-size:12px; color:var(--tpDeMuted); }
-#tpDeGeneBadge .tpDeGbRamp { width:64px; height:8px; border-radius:2px;
-  background:linear-gradient(90deg,#e2e2dd,#8fb0c9,#2f5f96,#16234d); }
-#tpDeGeneBadge .tpDeGbX { cursor:pointer; color:var(--tpDeTert); font-size:15px; padding:0 2px; }
-
 /* results pop-up (non-modal dialog) */
 #tpDeResults { font-size:13px; color:var(--tpDeInk); font-family:Arial,Helvetica,sans-serif; }
 /* jQuery UI forces Verdana on .ui-widget content; keep the DE dialog on the
@@ -973,31 +962,25 @@ th[role=columnheader]:not(.no-sort):hover:after {
 #tpDeResults .tpDeResHead { display:flex; align-items:baseline; gap:12px; padding:6px 2px 10px; border-bottom:1px solid var(--tpDeHair); }
 #tpDeResults .tpDeResTitle { font-size:14px; font-weight:600; letter-spacing:-0.01em; }
 #tpDeResults .tpDeResSub { font-size:13px; font-family:monospace; color:var(--tpDeMuted); }
-#tpDeResults .tpDeResActions { margin-left:auto; display:flex; gap:8px; }
-#tpDeResults .tpDeCsv { padding:6px 11px; font-size:13px; border:1px solid var(--tpDeCardBorder); border-radius:5px; background:#fff; cursor:pointer; }
-#tpDeResults .tpDeCsv:hover { border-color:var(--tpDeAccent); color:var(--tpDeAccent); }
 #tpDeResBody { display:flex; height:100%; }
-#tpDeResTableWrap { flex:1; display:flex; flex-direction:column; border-right:1px solid var(--tpDeHair); min-width:0; }
+#tpDeResTableWrap { flex:1; display:flex; flex-direction:column; border-right:1px solid var(--tpDeHair); min-width:0; overflow-y:auto; }
 #tpDeResVolcano { width:392px; flex:none; padding:8px 12px 10px; }
 .tpDeCtrls { display:flex; align-items:center; gap:8px; padding:8px 4px 6px; }
 .tpDeCtrls input.tpDeGeneFilter { width:150px; font-size:13px; padding:4px 8px; border:1px solid var(--tpDeCardBorder); border-radius:4px; }
 .tpDeCtrls2 { padding:0 4px 8px; border-bottom:1px solid var(--tpDeHair); }
-.tpDeSide { display:flex; background:#efece5; border-radius:5px; padding:2px; }
-.tpDeSide button { padding:3px 9px; font-size:12px; border:none; background:none; border-radius:4px; cursor:pointer; color:var(--tpDeMuted); }
-.tpDeSide button.tpDeSideOn { background:#fff; font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,0.06); color:var(--tpDeInk); }
 .tpDeGeneCount { margin-left:auto; font-size:12px; font-family:monospace; color:var(--tpDeTert); }
-#tpDeGrid { flex:1; overflow-y:auto; }
-.tpDeGridHead, .tpDeGridRow { display:grid; grid-template-columns:1.5fr 1fr 1fr 0.8fr 0.8fr; }
-.tpDeGridHead { position:sticky; top:0; background:#f5f3ee; border-bottom:1px solid var(--tpDeHair); }
-.tpDeGridHead > div { padding:7px 6px; font-size:12px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:var(--tpDeTert); cursor:pointer; }
-.tpDeGridHead > div.tpDeSortOn { color:var(--tpDeInk); }
-.tpDeGridHead > div.tpDeNum, .tpDeGridRow > div.tpDeNum { text-align:right; }
-.tpDeGridRow { padding:0; border-bottom:1px solid var(--tpDeHair); cursor:pointer; }
-.tpDeGridRow:hover { background:#faf9f5; }
-.tpDeGridRow.tpDeRowSel { background:#eaf1f8; }
-.tpDeGridRow > div { padding:5px 6px; font-size:13px; }
-.tpDeGene { font-family:monospace; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:6px; }
-.tpDeGene .tpDeDirDot { width:5px; height:5px; border-radius:50%; flex:none; }
+/* results table: Bootstrap .table look, matching the cluster-markers pop-up */
+#tpDeTable { margin-bottom:0; }
+#tpDeTable thead th { position:sticky; top:0; background:#fff; cursor:pointer; white-space:nowrap;
+  border-bottom:2px solid #ddd; }
+#tpDeTable thead th.tpDeSortOn { color:var(--tpDeAccent); }
+#tpDeTable td, #tpDeTable th { font-size:13px; }
+#tpDeTable td.tpDeNum, #tpDeTable th.tpDeNum { text-align:right; }
+#tpDeTable tbody tr { cursor:pointer; }
+#tpDeTable tbody tr:hover { background:#f5f5f5; }
+#tpDeTable tbody tr.tpDeRowSel > td { background:#eaf1f8; }
+.tpDeGene { font-family:monospace; font-weight:500; white-space:nowrap; }
+.tpDeGene .tpDeDirDot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:6px; vertical-align:middle; }
 .tpDeNum { font-family:monospace; }
 #tpDeResVolcano .tpDeVolHead { display:flex; align-items:baseline; }
 #tpDeResVolcano .tpDeVolTitle { font-size:12px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; color:var(--tpDeMuted); }

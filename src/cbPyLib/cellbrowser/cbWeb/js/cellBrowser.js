@@ -13554,7 +13554,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         deHideRunning();
         deCloseResults();
         deClearGene(true);
-        deRemoveStatus();
         $("#tpDeBuilder").remove();
         $("#tpToolsTabMain").show();   // restore the normal Tools-tab content
         $("#tpLeftTabs").off("tabsbeforeactivate.de");
@@ -13567,12 +13566,12 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     function deOnDatasetChange() {
         /* A new dataset is loading. Remove every DE overlay (builder, results
-         * pop-up, running scrim, gene badge, plot status, legend hint) and reset
-         * the builder state to empty, so nothing carries over from the previous
-         * dataset: group chips reference the old field's value-indices (which map
-         * to nothing here) and the gene badge/coloring is for a gene that may not
-         * exist. Unlike deClose() we do NOT re-color — the old renderer/legend is
-         * about to be rebuilt for the new dataset. */
+         * pop-up, running scrim, legend hint) and reset the builder state to
+         * empty, so nothing carries over from the previous dataset: group chips
+         * reference the old field's value-indices (which map to nothing here) and
+         * the gene coloring is for a gene that may not exist. Unlike deClose() we
+         * do NOT re-color — the old renderer/legend is about to be rebuilt for
+         * the new dataset. */
         gDe.active = false;
         $("#tpDeBuilder").remove();
         $("#tpToolsTabMain").show();
@@ -13580,8 +13579,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         $("#tpDeLegHint").remove();
         deCloseResults();
         deHideRunning();
-        deRemoveGeneBadge();
-        deRemoveStatus();
         gDe.field=null; gDe.metaInfo=null;
         gDe.a=[]; gDe.b=[]; gDe.target='A'; gDe.bMode='rest';
         gDe.aField=''; gDe.aValue=''; gDe.bField=''; gDe.bValue='';
@@ -13826,8 +13823,14 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         $("#tpDeBody .tpDeRecent").click(function(){
             var e=gDe.history[parseInt($(this).data("idx"))];
             if (!e) return;
-            gDe.a=e.snap.a.slice(); gDe.b=e.snap.b.slice(); gDe.bMode=e.snap.bMode;
-            deRefreshLegendMarks(); deRenderBody(); deRecolorPlot(); // restores selection, does not re-run
+            // restore that comparison's groups and re-open its results (all recent
+            // comparisons are for the current dataset — history is cleared on
+            // dataset switch). No re-run: the stored results are shown as-is.
+            gDe.a=e.snap.a.slice(); gDe.b=e.snap.b.slice(); gDe.bMode=e.snap.bMode; gDe.target='A';
+            deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
+            if (e.results){ gDe.results=e.results; gDe.selectedGene=null;
+                gDe.geneFilter=''; gDe.side='all'; gDe.sortKey='padj'; gDe.sortDir=1;
+                deShowResults(); }
         });
     }
 
@@ -13951,7 +13954,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             renderer.setColorArr(mi.arr);
             renderer.setColors(legendGetColors(gLegend.rows));
             renderer.drawDots();
-            deRemoveStatus();
             return;
         }
 
@@ -13967,22 +13969,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         renderer.setColorArr(colArr);
         renderer.setColors([DE_A_COL, DE_B_COL, DE_NEUTRAL]);
         renderer.drawDots();
-
-        var nA=deGroupCount(gDe.a);
-        var nB=(gDe.bMode==='rest') ? Math.max(0, db.conf.sampleCount-nA) : deGroupCount(gDe.b);
-        deShowStatus(nA, nB);
     }
-
-    function deShowStatus(nA, nB) {
-        var el=document.getElementById("tpDeStatus");
-        if (!el){ el=document.createElement("div"); el.id="tpDeStatus";
-            el.style.cssText="position:absolute;z-index:18;font-size:11.5px;font-family:monospace;color:#555;background:rgba(255,255,255,0.8);padding:2px 7px;border-radius:4px";
-            document.body.appendChild(el); }
-        var r=deCanvasRect();
-        el.style.left=(r.left+r.width-160)+"px"; el.style.top=(r.top+8)+"px";
-        el.innerHTML="<span style='color:#"+DE_A_COL+"'>A "+deFmt(nA)+"</span> &nbsp;&middot;&nbsp; <span style='color:#"+DE_B_COL+"'>B "+deFmt(nB)+"</span>";
-    }
-    function deRemoveStatus(){ var el=document.getElementById("tpDeStatus"); if(el) el.remove(); }
 
     // ---- validation (§7) -----------------------------------------------
 
@@ -14050,7 +14037,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         var sig=deSignificant(gDe.results.genes, gDe.results);
         var title=deComparisonTitle();
-        gDe.history.unshift({ title:title, n:sig.length, snap:{a:gDe.a.slice(), b:gDe.b.slice(), bMode:gDe.bMode} });
+        gDe.history.unshift({ title:title, n:sig.length, results:gDe.results,
+            snap:{a:gDe.a.slice(), b:gDe.b.slice(), bMode:gDe.bMode} });
         // de-dup by title, keep last 4
         var seen={}; gDe.history=gDe.history.filter(function(e){ if(seen[e.title]) return false; seen[e.title]=1; return true; }).slice(0,4);
 
@@ -14169,6 +14157,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             modal:false, closeOnEscape:true, resizable:true, draggable:true,
             width:w, height:ht, title:"Differential expression results",
             position:{ my:"center", at:"center", of: renderer.canvas },
+            buttons:[{ text:"Download CSV", click: deDownloadCsv }],  // in the dialog button bar, like the marker pop-up
             close:function(){ deCloseResults(); }
         });
     }
@@ -14186,13 +14175,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var h=[];
         h.push("<div class='tpDeResHead'>");
         h.push("<span class='tpDeResSub'>"+sig.length+" significant &middot; "+upA+" up in A, "+upB+" up in B &middot; n="+deFmt(res.nA)+"/"+deFmt(res.nB)+"</span>");
-        h.push("<span class='tpDeResActions'><button class='tpDeCsv' id='tpDeCsv'>&darr; Download CSV</button></span>");
         h.push("</div>");
 
         if (sig.length===0) {
             h.push(deEmptyStateHtml(res));
             $("#tpDeResults").html(h.join(""));
-            $("#tpDeCsv").click(deDownloadCsv);
             $("#tpDeLoosen").click(deLoosen);
             $("#tpDeEditGroups").click(function(){ deCloseResults(); });
             return;
@@ -14213,11 +14200,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             "<button type='button' data-side='a' class='btn btn-default"+(gDe.side==='a'?' active':'')+"'>Up in A</button>"+
             "<button type='button' data-side='b' class='btn btn-default"+(gDe.side==='b'?' active':'')+"'>Up in B</button></span>");
         h.push("</div>");
-        // grid header
-        h.push("<div class='tpDeGridHead'>"+
+        // results table — Bootstrap .table, like the cluster-markers pop-up
+        h.push("<table class='table' id='tpDeTable'><thead><tr>"+
             deHeadCell("name","Gene","")+deHeadCell("lfc","log₂FC","tpDeNum")+deHeadCell("padj","p-adj","tpDeNum")+
-            deHeadCell("pctA","pct A","tpDeNum")+deHeadCell("pctB","pct B","tpDeNum")+"</div>");
-        h.push("<div id='tpDeGrid'></div>");
+            deHeadCell("pctA","pct A","tpDeNum")+deHeadCell("pctB","pct B","tpDeNum")+
+            "</tr></thead><tbody id='tpDeTbody'></tbody></table>");
         h.push("</div>"); // tableWrap
         h.push("<div id='tpDeResVolcano'>"+
             "<div class='tpDeVolHead'><span class='tpDeVolTitle'>Volcano</span><span class='tpDeVolHint'>click a point to color the plot</span></div>"+
@@ -14225,12 +14212,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         h.push("</div>"); // resBody
 
         $("#tpDeResults").html(h.join(""));
-        $("#tpDeCsv").click(deDownloadCsv);
         $("#tpDeGeneFilter").on("input", function(){ gDe.geneFilter=this.value; deRenderTable(); });
-        $("#tpDeSide button").click(function(){ gDe.side=$(this).data("side"); gDe.selectedGene=gDe.selectedGene; deRenderResults(); });
-        $("#tpDeResults .tpDeGridHead > div").click(function(){
+        $("#tpDeSide button").click(function(){ gDe.side=$(this).data("side"); deRenderResults(); });
+        $("#tpDeResults #tpDeTable thead th").click(function(){
             var k=$(this).data("key");
-            if (gDe.sortKey===k) gDe.sortDir=-gDe.sortDir; else { gDe.sortKey=k; gDe.sortDir=(k==='name'?1:1); }
+            if (gDe.sortKey===k) gDe.sortDir=-gDe.sortDir; else { gDe.sortKey=k; gDe.sortDir=1; }
             deRenderResults();
         });
         deRenderTable();
@@ -14240,8 +14226,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
     function deHeadCell(key,label,cls){
         var on=(gDe.sortKey===key);
         var caret=on ? (gDe.sortDir>0 ? " ▴" : " ▾") : "";
-        // default p-adj ascending shows a down caret per spec (▾ descending, ▴ ascending)
-        return "<div data-key='"+key+"' class='"+cls+(on?' tpDeSortOn':'')+"'>"+label+caret+"</div>";
+        return "<th data-key='"+key+"' class='"+cls+(on?' tpDeSortOn':'')+"'>"+label+caret+"</th>";
     }
 
     function deFilteredSortedGenes() {
@@ -14265,25 +14250,25 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     function deRenderTable() {
         var rows=deFilteredSortedGenes();
-        var grid=document.getElementById("tpDeGrid");
+        var tb=document.getElementById("tpDeTbody");
         var cnt=document.getElementById("tpDeGeneCount");
         if (cnt) cnt.textContent=rows.length+" genes";
-        if (!grid) return;
+        if (!tb) return;
         var h=[]; var cap=Math.min(rows.length, 400); // DOM cap per spec
         for (var i=0;i<cap;i++){
             var g=rows[i];
             var dirCol=g.log2FC>0 ? DE_A_COL : DE_B_COL;
             var sel=(g.symbol===gDe.selectedGene) ? " tpDeRowSel" : "";
-            h.push("<div class='tpDeGridRow"+sel+"' data-sym='"+g.symbol+"'>");
-            h.push("<div class='tpDeGene'><span class='tpDeDirDot' style='background:#"+dirCol+"'></span>"+g.symbol+"</div>");
-            h.push("<div class='tpDeNum' style='color:"+(g.log2FC>0?'#a94c2c':'#3a4a8c')+"'>"+g.log2FC.toFixed(2)+"</div>");
-            h.push("<div class='tpDeNum'>"+deFmtP(g.pAdj)+"</div>");
-            h.push("<div class='tpDeNum' style='color:#6b6f76'>"+Math.round(g.pctA*100)+"%</div>");
-            h.push("<div class='tpDeNum' style='color:#6b6f76'>"+Math.round(g.pctB*100)+"%</div>");
-            h.push("</div>");
+            h.push("<tr class='tpDeTrow"+sel+"' data-sym='"+g.symbol+"'>");
+            h.push("<td class='tpDeGene'><span class='tpDeDirDot' style='background:#"+dirCol+"'></span>"+g.symbol+"</td>");
+            h.push("<td class='tpDeNum' style='color:"+(g.log2FC>0?'#a94c2c':'#3a4a8c')+"'>"+g.log2FC.toFixed(2)+"</td>");
+            h.push("<td class='tpDeNum'>"+deFmtP(g.pAdj)+"</td>");
+            h.push("<td class='tpDeNum' style='color:#6b6f76'>"+Math.round(g.pctA*100)+"%</td>");
+            h.push("<td class='tpDeNum' style='color:#6b6f76'>"+Math.round(g.pctB*100)+"%</td>");
+            h.push("</tr>");
         }
-        grid.innerHTML=h.join("");
-        $("#tpDeGrid .tpDeGridRow").click(function(){ deSelectGene($(this).data("sym")); });
+        tb.innerHTML=h.join("");
+        $("#tpDeTbody tr").click(function(){ deSelectGene($(this).data("sym")); });
     }
 
     function deFmtP(p){
@@ -14389,35 +14374,24 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     function deSelectGene(sym) {
         if (!sym) return;
+        // clicking the already-selected gene toggles it off, back to group coloring
+        if (sym===gDe.selectedGene) { deClearGene(); return; }
         gDe.selectedGene=sym;
-        $("#tpDeGrid .tpDeGridRow").removeClass("tpDeRowSel");
-        $("#tpDeGrid .tpDeGridRow[data-sym='"+sym+"']").addClass("tpDeRowSel");
+        $("#tpDeTbody tr").removeClass("tpDeRowSel");
+        $("#tpDeTbody tr[data-sym='"+sym+"']").addClass("tpDeRowSel");
         deRenderVolcano(); // re-render to highlight the point
-        // reuse the existing gene-search coloring path
+        // reuse the existing gene-search coloring path; the legend shows the
+        // gene's expression bins/colors, so no separate on-plot badge is needed
         var geneId=sym;
         if (db.geneSyns){ var ids=db.findGenesExact(sym); if (ids && ids.length) geneId=ids[0]; }
-        colorByLocus(geneId, function(){ renderer.drawDots(); deShowGeneBadge(sym); }, sym);
+        colorByLocus(geneId, function(){ renderer.drawDots(); }, sym);
     }
-
-    function deShowGeneBadge(sym) {
-        deRemoveGeneBadge();
-        var r=deCanvasRect();
-        var h="<div id='tpDeGeneBadge' style='left:"+(r.left+14)+"px;top:"+(r.top+12)+"px'>"+
-            "<div><div class='tpDeGbSym'>"+sym+"</div><div class='tpDeGbCap'>expression, log-normalized</div></div>"+
-            "<div style='display:flex;align-items:center;gap:4px'><span style='font-size:10px;color:#8b8f96'>0</span>"+
-            "<span class='tpDeGbRamp'></span><span style='font-size:10px;color:#8b8f96'>max</span></div>"+
-            "<span class='tpDeGbX' id='tpDeGbX' title='Clear'>&times;</span></div>";
-        document.body.insertAdjacentHTML("beforeend", h);
-        $("#tpDeGbX").click(function(){ deClearGene(); });
-    }
-    function deRemoveGeneBadge(){ var el=document.getElementById("tpDeGeneBadge"); if(el) el.remove(); }
 
     function deClearGene(silent) {
         var had=gDe.selectedGene;
         gDe.selectedGene=null;
-        deRemoveGeneBadge();
         if (silent) return;
-        $("#tpDeGrid .tpDeGridRow").removeClass("tpDeRowSel");
+        $("#tpDeTbody tr").removeClass("tpDeRowSel");
         if (gDe.active && gDe.results) deRenderVolcano();
         // return to group coloring
         if (gDe.active && had && gDe.field)
