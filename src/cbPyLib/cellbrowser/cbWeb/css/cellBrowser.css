@@ -964,7 +964,7 @@ th[role=columnheader]:not(.no-sort):hover:after {
 #tpDeResults .tpDeResSub { font-size:13px; font-family:monospace; color:var(--tpDeMuted); }
 #tpDeResBody { display:flex; height:100%; }
 #tpDeResTableWrap { flex:1; display:flex; flex-direction:column; border-right:1px solid var(--tpDeHair); min-width:0; overflow-y:auto; }
-#tpDeResVolcano { width:392px; flex:none; padding:8px 12px 10px; }
+#tpDeResVolcano { width:360px; flex:none; padding:8px 12px 10px; overflow-y:auto; }
 .tpDeCtrls { display:flex; align-items:center; gap:8px; padding:8px 4px 6px; }
 .tpDeCtrls input.tpDeGeneFilter { width:150px; font-size:13px; padding:4px 8px; border:1px solid var(--tpDeCardBorder); border-radius:4px; }
 .tpDeCtrls2 { padding:0 4px 8px; border-bottom:1px solid var(--tpDeHair); }
@@ -974,12 +974,12 @@ th[role=columnheader]:not(.no-sort):hover:after {
 #tpDeTable thead th { position:sticky; top:0; background:#fff; cursor:pointer; white-space:nowrap;
   border-bottom:2px solid #ddd; }
 #tpDeTable thead th.tpDeSortOn { color:var(--tpDeAccent); }
-#tpDeTable td, #tpDeTable th { font-size:13px; }
+#tpDeTable td, #tpDeTable th { font-size:13px; padding:5px 7px; white-space:nowrap; }
 #tpDeTable td.tpDeNum, #tpDeTable th.tpDeNum { text-align:right; }
 #tpDeTable tbody tr { cursor:pointer; }
 #tpDeTable tbody tr:hover { background:#f5f5f5; }
 #tpDeTable tbody tr.tpDeRowSel > td { background:#eaf1f8; }
-.tpDeGene { font-family:monospace; font-weight:500; white-space:nowrap; }
+.tpDeGene { font-family:monospace; font-weight:500; white-space:nowrap; max-width:120px; overflow:hidden; text-overflow:ellipsis; }
 .tpDeGene .tpDeDirDot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:6px; vertical-align:middle; }
 .tpDeNum { font-family:monospace; }
 #tpDeResVolcano .tpDeVolHead { display:flex; align-items:baseline; }

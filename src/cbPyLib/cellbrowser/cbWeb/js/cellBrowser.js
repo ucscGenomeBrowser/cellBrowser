@@ -13454,7 +13454,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         running: false, canceled: false,
         results: null,          // snapshot: { genes, nA, nB, aLabel, bLabel, lfcCut, padjCut, minPct, test }
         selectedGene: null,
-        sortKey: 'padj', sortDir: 1,
+        sortKey: 'auc', sortDir: -1,
+        plotType: 'volcano',    // 'volcano' | 'ma'
         geneFilter: '', side: 'all',
         history: []
     };
@@ -13583,7 +13584,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         gDe.a=[]; gDe.b=[]; gDe.target='A'; gDe.bMode='rest';
         gDe.aField=''; gDe.aValue=''; gDe.bField=''; gDe.bValue='';
         gDe.results=null; gDe.selectedGene=null; gDe.history=[];
-        gDe.sortKey='padj'; gDe.sortDir=1; gDe.geneFilter=''; gDe.side='all';
+        gDe.sortKey='auc'; gDe.sortDir=-1; gDe.geneFilter=''; gDe.side='all';
         gDe.running=false; gDe.canceled=false; gDe.paramsOpen=false;
     }
 
@@ -13829,7 +13830,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             gDe.a=e.snap.a.slice(); gDe.b=e.snap.b.slice(); gDe.bMode=e.snap.bMode; gDe.target='A';
             deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
             if (e.results){ gDe.results=e.results; gDe.selectedGene=null;
-                gDe.geneFilter=''; gDe.side='all'; gDe.sortKey='padj'; gDe.sortDir=1;
+                gDe.geneFilter=''; gDe.side='all'; gDe.sortKey='auc'; gDe.sortDir=-1;
                 deShowResults(); }
         });
     }
@@ -14033,7 +14034,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             bLabel: (gDe.bMode==='rest') ? "All other cells" : deComparisonTitle().split("  vs  ")[1],
             lfcCut: spec.lfcCut, padjCut: spec.padjCut, minPct: spec.minPct, test: spec.test
         };
-        gDe.sortKey='padj'; gDe.sortDir=1; gDe.geneFilter=''; gDe.side='all'; gDe.selectedGene=null;
+        gDe.sortKey='auc'; gDe.sortDir=-1; gDe.geneFilter=''; gDe.side='all'; gDe.selectedGene=null;
 
         var sig=deSignificant(gDe.results.genes, gDe.results);
         var title=deComparisonTitle();
@@ -14107,7 +14108,14 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 var pAdj=Math.pow(10, -negLog); if (pAdj<1e-300) pAdj=1e-300;
                 var pctA=Math.round((lfc>0 ? 0.3+u3*0.7 : u3*0.7)*100)/100;
                 var pctB=Math.round((lfc<0 ? 0.3+u4*0.7 : u4*0.7)*100)/100;
-                genes.push({symbol:sym, log2FC:lfc, pAdj:pAdj, pctA:pctA, pctB:pctB});
+                // AUC and per-group means, kept consistent with the fake log2FC so
+                // the MA plot / AUC column look sensible (real values come from the
+                // backend). meanA = meanB * 2^lfc; AUC>0.5 when up in A.
+                var meanB=Math.round((0.2 + u2*3)*100)/100;
+                var meanA=Math.round(Math.min(60, meanB*Math.pow(2, lfc))*100)/100;
+                var auc=Math.max(0.02, Math.min(0.98, 0.5 + lfc*0.11 + (u4-0.5)*0.08));
+                auc=Math.round(auc*1000)/1000;
+                genes.push({symbol:sym, log2FC:lfc, pAdj:pAdj, pctA:pctA, pctB:pctB, auc:auc, meanA:meanA, meanB:meanB});
             }
             var nA=deGroupCount(gDe.a);
             var nB=(gDe.bMode==='rest') ? Math.max(0, db.conf.sampleCount-nA) : deGroupCount(gDe.b);
@@ -14151,8 +14159,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         document.body.appendChild(div);
         deRenderResults();
         var r=deCanvasRect();
-        var w=Math.min(840, Math.max(680, r.width-40));
-        var ht=Math.min(470, Math.max(320, r.height-40));
+        var w=Math.min(1040, Math.max(820, r.width-40));
+        var ht=Math.min(560, Math.max(360, r.height-40));
         $("#tpDeResults").dialog({
             modal:false, closeOnEscape:true, resizable:true, draggable:true,
             width:w, height:ht, title:"Differential expression results",
@@ -14202,16 +14210,30 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         h.push("</div>");
         // results table — Bootstrap .table, like the cluster-markers pop-up
         h.push("<table class='table' id='tpDeTable'><thead><tr>"+
-            deHeadCell("name","Gene","")+deHeadCell("lfc","log₂FC","tpDeNum")+deHeadCell("padj","p-adj","tpDeNum")+
-            deHeadCell("pctA","pct A","tpDeNum")+deHeadCell("pctB","pct B","tpDeNum")+
+            deHeadCell("name","Gene","","Gene symbol. Click a row to color the map by this gene and see its distribution below.")+
+            deHeadCell("lfc","log₂FC","tpDeNum","Log2 fold-change of mean expression, A vs B: positive = higher in A, negative = higher in B.")+
+            deHeadCell("auc","AUC","tpDeNum","Effect size — how well this gene alone separates A from B: 0.5 = no difference, 1 = always higher in A, 0 = always higher in B.")+
+            deHeadCell("padj","p-adj","tpDeNum","Benjamini-Hochberg adjusted p-value (FDR). With many cells nearly everything is significant, so read it as a ranking more than an exact cutoff.")+
+            deHeadCell("meanA","mean A","tpDeNum","Mean expression across the cells in Group A.")+
+            deHeadCell("meanB","mean B","tpDeNum","Mean expression across the cells in Group B.")+
+            deHeadCell("pctA","pct A","tpDeNum","Fraction of Group A cells in which this gene is detected (non-zero).")+
+            deHeadCell("pctB","pct B","tpDeNum","Fraction of Group B cells in which this gene is detected (non-zero).")+
             "</tr></thead><tbody id='tpDeTbody'></tbody></table>");
         h.push("</div>"); // tableWrap
         h.push("<div id='tpDeResVolcano'>"+
-            "<div class='tpDeVolHead'><span class='tpDeVolTitle'>Volcano</span><span class='tpDeVolHint'>click a point to color the plot</span></div>"+
-            "<div id='tpDeVolcanoSvg'></div></div>");
+            "<div class='tpDeVolHead'>"+
+              "<span class='btn-group btn-group-xs' id='tpDePlotToggle' role='group'>"+
+                "<button type='button' data-plot='volcano' class='btn btn-default"+(gDe.plotType!=='ma'?' active':'')+"'>Volcano</button>"+
+                "<button type='button' data-plot='ma' class='btn btn-default"+(gDe.plotType==='ma'?' active':'')+"'>MA</button>"+
+              "</span>"+
+              "<span class='tpDeVolHint'>click a point to color the map</span></div>"+
+            "<div id='tpDeVolcanoSvg'></div>"+
+            "<div class='tpDeVolHead' style='margin-top:10px'><span class='tpDeVolTitle'>Distribution</span></div>"+
+            "<div id='tpDeViolin'></div></div>");
         h.push("</div>"); // resBody
 
         $("#tpDeResults").html(h.join(""));
+        activateTooltip("#tpDeTable thead th");
         $("#tpDeGeneFilter").on("input", function(){ gDe.geneFilter=this.value; deRenderTable(); });
         $("#tpDeSide button").click(function(){ gDe.side=$(this).data("side"); deRenderResults(); });
         $("#tpDeResults #tpDeTable thead th").click(function(){
@@ -14219,14 +14241,19 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             if (gDe.sortKey===k) gDe.sortDir=-gDe.sortDir; else { gDe.sortKey=k; gDe.sortDir=1; }
             deRenderResults();
         });
+        $("#tpDePlotToggle button").click(function(){ gDe.plotType=$(this).data("plot"); deRenderResults(); });
         deRenderTable();
-        deRenderVolcano();
+        deRenderPlot();
+        deRenderViolin(gDe.selectedGene);
     }
 
-    function deHeadCell(key,label,cls){
+    function deHeadCell(key,label,cls,tip){
         var on=(gDe.sortKey===key);
         var caret=on ? (gDe.sortDir>0 ? " ▴" : " ▾") : "";
-        return "<th data-key='"+key+"' class='"+cls+(on?' tpDeSortOn':'')+"'>"+label+caret+"</th>";
+        // NB: the title drives the tooltip; do NOT add the .hasTooltip class here —
+        // it is display:inline-flex globally and would break the table layout.
+        var titleAttr = tip ? " title=\""+tip+"\" data-placement=\"top\"" : "";
+        return "<th data-key='"+key+"' class='"+cls+(on?' tpDeSortOn':'')+"'"+titleAttr+">"+label+caret+"</th>";
     }
 
     function deFilteredSortedGenes() {
@@ -14240,7 +14267,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             var va,vb;
             if (key==='name'){ va=a.symbol.toUpperCase(); vb=b.symbol.toUpperCase(); return va<vb?-dir:va>vb?dir:0; }
             if (key==='lfc'){ va=a.log2FC; vb=b.log2FC; }
+            else if (key==='auc'){ va=a.auc; vb=b.auc; }
             else if (key==='padj'){ va=a.pAdj; vb=b.pAdj; }
+            else if (key==='meanA'){ va=a.meanA; vb=b.meanA; }
+            else if (key==='meanB'){ va=a.meanB; vb=b.meanB; }
             else if (key==='pctA'){ va=a.pctA; vb=b.pctA; }
             else { va=a.pctB; vb=b.pctB; }
             return (va-vb)*dir;
@@ -14262,7 +14292,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             h.push("<tr class='tpDeTrow"+sel+"' data-sym='"+g.symbol+"'>");
             h.push("<td class='tpDeGene'><span class='tpDeDirDot' style='background:#"+dirCol+"'></span>"+g.symbol+"</td>");
             h.push("<td class='tpDeNum' style='color:"+(g.log2FC>0?'#a94c2c':'#3a4a8c')+"'>"+g.log2FC.toFixed(2)+"</td>");
+            h.push("<td class='tpDeNum'>"+(g.auc!==undefined?g.auc.toFixed(2):'')+"</td>");
             h.push("<td class='tpDeNum'>"+deFmtP(g.pAdj)+"</td>");
+            h.push("<td class='tpDeNum' style='color:#6b6f76'>"+(g.meanA!==undefined?g.meanA.toFixed(2):'')+"</td>");
+            h.push("<td class='tpDeNum' style='color:#6b6f76'>"+(g.meanB!==undefined?g.meanB.toFixed(2):'')+"</td>");
             h.push("<td class='tpDeNum' style='color:#6b6f76'>"+Math.round(g.pctA*100)+"%</td>");
             h.push("<td class='tpDeNum' style='color:#6b6f76'>"+Math.round(g.pctB*100)+"%</td>");
             h.push("</tr>");
@@ -14329,14 +14362,143 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         $("#tpDeVolcanoSvg .tpDeVolPt").click(function(){ deSelectGene($(this).data("sym")); });
     }
 
+    function deRenderPlot(){ if (gDe.plotType==='ma') deRenderMA(); else deRenderVolcano(); }
+
+    function deRenderMA() {
+        // MA plot: x = average expression (log2 of the mean of the two group means),
+        // y = log2 fold-change. Uses meanA/meanB from the results.
+        var host=document.getElementById("tpDeVolcanoSvg"); if(!host) return;
+        var res=gDe.results; var genes=res.genes;
+        function avgExpr(g){ return Math.log2(((g.meanA||0)+(g.meanB||0))/2 + 1); }
+        var xMax=0, maxAbs=0, i;
+        for (i=0;i<genes.length;i++){ var ax=avgExpr(genes[i]); if(ax>xMax)xMax=ax; var a=Math.abs(genes[i].log2FC); if(a>maxAbs)maxAbs=a; }
+        xMax=xMax*1.05||1; var yMax=Math.ceil(maxAbs*1.08*2)/2||1;
+        var bx0=34,bx1=360,by0=10,by1=238;
+        function sx(v){ return bx0 + (v/xMax)*(bx1-bx0); }
+        function sy(v){ return (by0+by1)/2 - (v/yMax)*((by1-by0)/2); }
+        var lfcCut=res.lfcCut;
+        var s=[];
+        s.push("<svg viewBox='0 0 368 268' style='width:100%;height:auto'>");
+        s.push("<line x1='"+bx0+"' y1='"+by0+"' x2='"+bx0+"' y2='"+by1+"' stroke='#e2e0da'/>");
+        s.push("<line x1='"+bx0+"' y1='"+by1+"' x2='"+bx1+"' y2='"+by1+"' stroke='#e2e0da'/>");
+        // guides at logFC 0 and ±lfcCut
+        s.push("<line x1='"+bx0+"' y1='"+sy(0).toFixed(1)+"' x2='"+bx1+"' y2='"+sy(0).toFixed(1)+"' stroke='#bbb' stroke-dasharray='2 3'/>");
+        s.push("<line x1='"+bx0+"' y1='"+sy(lfcCut).toFixed(1)+"' x2='"+bx1+"' y2='"+sy(lfcCut).toFixed(1)+"' stroke='#cfc9bd' stroke-dasharray='2 4'/>");
+        s.push("<line x1='"+bx0+"' y1='"+sy(-lfcCut).toFixed(1)+"' x2='"+bx1+"' y2='"+sy(-lfcCut).toFixed(1)+"' stroke='#cfc9bd' stroke-dasharray='2 4'/>");
+        var sig=deSignificant(genes, res); var sigSet={}; sig.forEach(function(g){sigSet[g.symbol]=1;});
+        for (var p=0;p<genes.length;p++){
+            var g=genes[p]; var isSig=sigSet[g.symbol]; var isSel=(g.symbol===gDe.selectedGene);
+            var col=isSel ? "#23262b" : (isSig ? "#"+(g.log2FC>0?DE_A_COL:DE_B_COL) : "#cfcec8");
+            var op=isSel?1:(isSig?0.85:0.5); var rr=isSel?5:3;
+            s.push("<circle class='tpDeVolPt' data-sym='"+g.symbol+"' cx='"+sx(avgExpr(g)).toFixed(1)+"' cy='"+sy(g.log2FC).toFixed(1)+"' r='"+rr+"' fill='"+col+"' fill-opacity='"+op+"' style='cursor:pointer'/>");
+        }
+        if (gDe.selectedGene) {
+            for (var t=0;t<genes.length;t++){ if (genes[t].symbol!==gDe.selectedGene) continue;
+                var g2=genes[t];
+                s.push("<text x='"+(sx(avgExpr(g2))-7).toFixed(1)+"' y='"+(sy(g2.log2FC)-7).toFixed(1)+"' font-size='11' font-weight='600' font-family='monospace' fill='#23262b' text-anchor='end'>"+g2.symbol+"</text>"); break; }
+        }
+        s.push("<text x='"+((bx0+bx1)/2)+"' y='262' font-size='9.5' fill='#8b8f96' text-anchor='middle'>average expression (log₂)</text>");
+        s.push("<text x='10' y='"+((by0+by1)/2)+"' font-size='9.5' fill='#8b8f96' text-anchor='middle' transform='rotate(-90 10 "+((by0+by1)/2)+")'>log₂ fold change (A / B)</text>");
+        s.push("</svg>");
+        host.innerHTML=s.join("");
+        $("#tpDeVolcanoSvg .tpDeVolPt").click(function(){ deSelectGene($(this).data("sym")); });
+    }
+
+    // Per-gene A-vs-B expression distribution (violin). Uses the browser's real
+    // per-cell expression vectors (the same ones used to color the map) split by
+    // group membership — no backend needed.
+    function deRenderViolin(sym) {
+        var host=document.getElementById("tpDeViolin"); if(!host) return;
+        if (!sym) { host.innerHTML="<div class='tpDeVolHint' style='padding:8px 2px'>Click a gene above to see its expression in Group A vs Group B.</div>"; return; }
+        var mi=gDe.metaInfo;
+        if (!mi || !mi.arr) { host.innerHTML="<div class='tpDeVolHint' style='padding:8px 2px'>(distribution unavailable)</div>"; return; }
+        host.innerHTML="<div class='tpDeVolHint' style='padding:8px 2px'>Loading "+sym+"&hellip;</div>";
+        var geneId=sym;
+        if (db.geneSyns){ var ids=db.findGenesExact(sym); if (ids && ids.length) geneId=ids[0]; }
+        db.loadExprAndDiscretize(geneId, function(exprArr){
+            if (gDe.selectedGene!==sym) return; // selection changed while loading
+            var arr=mi.arr, aset=new Set(gDe.a), bset=new Set(gDe.b);
+            var aVals=[], bVals=[];
+            for (var i=0;i<exprArr.length;i++){
+                var t=arr[i], e=exprArr[i];
+                if (aset.has(t)) aVals.push(e);
+                else if (gDe.bMode==='rest') bVals.push(e);
+                else if (bset.has(t)) bVals.push(e);
+            }
+            deDrawViolin(host, sym, aVals, bVals);
+        }, null, "none");
+    }
+
+    function deViolinStats(vals) {
+        /* density (histogram) + median/mean for one group's expression values */
+        var n=vals.length, max=0, i;
+        for (i=0;i<n;i++) if (vals[i]>max) max=vals[i];
+        var s=vals.slice().sort(function(a,b){return a-b;});
+        var median = n ? (n%2 ? s[(n-1)/2] : (s[n/2-1]+s[n/2])/2) : 0;
+        var sum=0; for (i=0;i<n;i++) sum+=vals[i];
+        return { n:n, max:max, median:median, mean:n?sum/n:0, sorted:s };
+    }
+
+    function dePctl(sorted, q){ if(!sorted.length) return 0; return sorted[Math.min(sorted.length-1, Math.floor(q*sorted.length))]; }
+
+    function deDrawViolin(host, sym, aVals, bVals) {
+        var W=368, H=170, bx0=40, bx1=356, by0=14, by1=140;
+        var sa=deViolinStats(aVals), sb=deViolinStats(bVals);
+        // cap the y-axis at the 98th percentile so a few high-expressing cells
+        // don't flatten the whole distribution (matrices may be raw counts)
+        var yMax=Math.max(dePctl(sa.sorted,0.98), dePctl(sb.sorted,0.98));
+        if (yMax<=0) yMax=Math.max(sa.max, sb.max, 0.001);
+        yMax*=1.05;
+        var NB=26; // density bins
+        function density(sorted){
+            var d=new Array(NB).fill(0), n=sorted.length, j=0;
+            for (var i=0;i<n;i++){ var bi=Math.min(NB-1, Math.floor(sorted[i]/yMax*NB)); d[bi]++; }
+            // light 3-point smoothing; normalize to peak
+            var sm=d.map(function(v,k){ var a=d[k-1]||0,b=d[k+1]||0; return (a+2*v+b)/4; });
+            var pk=Math.max.apply(null, sm)||1;
+            return sm.map(function(v){ return v/pk; });
+        }
+        function sy(v){ return by1 - (v/yMax)*(by1-by0); }
+        function violin(cx, dens, col){
+            var halfW=52, out=[];
+            // right side down, left side up -> closed mirrored path
+            for (var k=0;k<NB;k++){ var y=sy((k+0.5)/NB*yMax); out.push((k===0?"M":"L")+(cx+dens[k]*halfW).toFixed(1)+" "+y.toFixed(1)); }
+            for (var k2=NB-1;k2>=0;k2--){ var y2=sy((k2+0.5)/NB*yMax); out.push("L"+(cx-dens[k2]*halfW).toFixed(1)+" "+y2.toFixed(1)); }
+            out.push("Z");
+            return "<path d='"+out.join(" ")+"' fill='#"+col+"' fill-opacity='0.35' stroke='#"+col+"' stroke-width='1'/>";
+        }
+        var s=[];
+        s.push("<svg viewBox='0 0 "+W+" "+H+"' style='width:100%;height:auto'>");
+        // y axis
+        s.push("<line x1='"+bx0+"' y1='"+by0+"' x2='"+bx0+"' y2='"+by1+"' stroke='#e2e0da'/>");
+        s.push("<line x1='"+bx0+"' y1='"+by1+"' x2='"+bx1+"' y2='"+by1+"' stroke='#e2e0da'/>");
+        var ticks=[0, yMax/2, yMax];
+        ticks.forEach(function(tv){ s.push("<text x='"+(bx0-4)+"' y='"+(sy(tv)+3).toFixed(1)+"' font-size='9' font-family='monospace' fill='#8b8f96' text-anchor='end'>"+tv.toFixed(1)+"</text>"); });
+        var cxA=Math.round(bx0+(bx1-bx0)*0.32), cxB=Math.round(bx0+(bx1-bx0)*0.72);
+        s.push(violin(cxA, density(sa.sorted), DE_A_COL));
+        s.push(violin(cxB, density(sb.sorted), DE_B_COL));
+        // median lines
+        s.push("<line x1='"+(cxA-16)+"' y1='"+sy(sa.median).toFixed(1)+"' x2='"+(cxA+16)+"' y2='"+sy(sa.median).toFixed(1)+"' stroke='#23262b' stroke-width='1.5'/>");
+        s.push("<line x1='"+(cxB-16)+"' y1='"+sy(sb.median).toFixed(1)+"' x2='"+(cxB+16)+"' y2='"+sy(sb.median).toFixed(1)+"' stroke='#23262b' stroke-width='1.5'/>");
+        // x labels
+        s.push("<text x='"+cxA+"' y='"+(by1+15)+"' font-size='11' font-weight='600' fill='#"+DE_A_COL+"' text-anchor='middle'>A</text>");
+        s.push("<text x='"+cxB+"' y='"+(by1+15)+"' font-size='11' font-weight='600' fill='#"+DE_B_COL+"' text-anchor='middle'>B</text>");
+        s.push("<text x='10' y='"+((by0+by1)/2)+"' font-size='9.5' fill='#8b8f96' text-anchor='middle' transform='rotate(-90 10 "+((by0+by1)/2)+")'>expression</text>");
+        s.push("</svg>");
+        // footer: gene + n + median
+        s.push("<div style='font-size:11px;color:#6b6f76;font-family:monospace;padding:2px 2px 0'>"+
+            sym+" &middot; A n="+deFmt(sa.n)+" med="+sa.median.toFixed(2)+" &middot; B n="+deFmt(sb.n)+" med="+sb.median.toFixed(2)+"</div>");
+        host.innerHTML=s.join("");
+    }
+
     function deDownloadCsv() {
         var res=gDe.results; if(!res) return;
         var rows=res.genes.slice().sort(function(a,b){return a.pAdj-b.pAdj;});
         var aName=res.aLabel, bName=res.bLabel;
-        var lines=["gene,log2FC,p_adj,pct_A,pct_B,group_A,group_B,test"];
+        var lines=["gene,log2FC,auc,p_adj,mean_A,mean_B,pct_A,pct_B,group_A,group_B,test"];
         for (var i=0;i<rows.length;i++){
             var g=rows[i];
-            lines.push([g.symbol, g.log2FC, g.pAdj, g.pctA, g.pctB,
+            lines.push([g.symbol, g.log2FC, g.auc, g.pAdj, g.meanA, g.meanB, g.pctA, g.pctB,
                 '"'+aName.replace(/"/g,'""')+'"', '"'+bName.replace(/"/g,'""')+'"', res.test].join(","));
         }
         var blob=new Blob([lines.join("\n")], {type:"text/csv"});
@@ -14379,7 +14541,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         gDe.selectedGene=sym;
         $("#tpDeTbody tr").removeClass("tpDeRowSel");
         $("#tpDeTbody tr[data-sym='"+sym+"']").addClass("tpDeRowSel");
-        deRenderVolcano(); // re-render to highlight the point
+        deRenderPlot(); // re-render to highlight the point
+        deRenderViolin(sym); // show the gene's A-vs-B distribution
         // reuse the existing gene-search coloring path; the legend shows the
         // gene's expression bins/colors, so no separate on-plot badge is needed
         var geneId=sym;
@@ -14392,7 +14555,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         gDe.selectedGene=null;
         if (silent) return;
         $("#tpDeTbody tr").removeClass("tpDeRowSel");
-        if (gDe.active && gDe.results) deRenderVolcano();
+        if (gDe.active && gDe.results) { deRenderPlot(); deRenderViolin(null); }
         // return to group coloring
         if (gDe.active && had && gDe.field)
             colorByMetaField(gDe.field, function(){ deRecolorPlot(); });
