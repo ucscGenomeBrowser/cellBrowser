@@ -64,12 +64,23 @@ def translateSpec(fe):
 
     test = (fe.get("test") or "wilcox").lower()
     method = _TEST_TO_METHOD.get(test, test)  # unimplemented tests -> worker errors clearly
+
+    parameters = {"min_cells": 25}   # matches the builder's 25-cell floor
+    # Gene-category prefilters (scanpy's mt / ribo / hb trio). Only forwarded when
+    # the builder sends them, so the kernel's defaults apply otherwise (mito on,
+    # ribo/hemo off). See methods/wilcoxon.py _GENE_CATEGORIES.
+    for feKey, paramKey in (("excludeMito", "exclude_mito"),
+                            ("excludeRibo", "exclude_ribo"),
+                            ("excludeHemo", "exclude_hemo")):
+        if feKey in fe:
+            parameters[paramKey] = bool(fe[feKey])
+
     return {
         "dataset": fe["dataset"],
         "pop1": pop("groupA"),
         "pop2": pop("groupB"),
         "method": method,
-        "parameters": {"min_cells": 25},   # matches the builder's 25-cell floor
+        "parameters": parameters,
     }
 
 

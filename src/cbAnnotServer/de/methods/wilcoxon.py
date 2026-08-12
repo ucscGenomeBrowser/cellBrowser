@@ -27,6 +27,12 @@ def run_wilcoxon(adata, pop1_mask, pop2_mask, params=None):
     params     : optional dict; recognized keys:
                    min_cells (int, default 10) — floor per group
                    top_n     (int, default None) — cap returned genes
+                   exclude_mito (bool, default True)  — drop MT-/mt- genes
+                   exclude_ribo (bool, default False) — drop RPS*/RPL* genes
+                   exclude_hemo (bool, default False) — drop hemoglobin genes
+                   exclude_regex (str|list) — extra symbol patterns to drop
+                 Excluded genes are removed before the test, so the FDR
+                 correction reflects only the retained genes.
 
     Returns a list of dicts sorted by ascending FDR:
         {"symbol": str, "logFC": float, "pValue": float, "fdr": float,
@@ -64,6 +70,10 @@ def run_wilcoxon(adata, pop1_mask, pop2_mask, params=None):
     sub = adata[keep].copy()
     sub.obs["_deGroup"] = group[keep].astype(str)
     sub.obs["_deGroup"] = sub.obs["_deGroup"].astype("category")
+
+    drop = _excludedGeneMask(sub.var_names, params)
+    if drop.any() and not drop.all():       # never drop every gene
+        sub = sub[:, ~drop].copy()
 
     sc.tl.rank_genes_groups(
         sub,
@@ -110,6 +120,41 @@ def run_wilcoxon(adata, pop1_mask, pop2_mask, params=None):
     if top_n:
         genes = genes[:int(top_n)]
     return genes
+
+
+# Gene categories that commonly dominate a comparison for technical rather than
+# biological reasons — the same trio scanpy tags in sc.pp.calculate_qc_metrics
+# (mt / ribo / hb). Each maps a spec parameter to a symbol regex (human upper- and
+# mouse title-case). Excluding them *before* the test keeps the FDR honest.
+#   mito : mitochondrial-genome genes (quality / dissociation stress)
+#   ribo : cytoplasmic ribosomal RPS*/RPL* (very high, translational/technical);
+#          nuclear mito-ribosomal MRPL/MRPS are deliberately NOT matched
+#   hemo : hemoglobin subunits (red-blood-cell contamination), excluding the
+#          HBP/HBEGF-type non-subunit genes
+# Anchored (^…$) so the ribo pattern hits structural ribosomal proteins (RPS6,
+# RPL13A, RPLP0, RPSA) but NOT the RPS6-kinase signaling genes (RPS6KA1, RPS6KB1).
+_GENE_CATEGORIES = [
+    ("exclude_mito", True,  r"^(?:MT|mt)[-.]"),
+    ("exclude_ribo", False, r"^(?:RP[SL]\d+[A-Z]*|RPLP\d+|RPSA|Rp[sl]\d+[a-z]*|Rplp\d+|Rpsa)$"),
+    ("exclude_hemo", False, r"^(?:HB[ABDEGMQZ]|Hb[abq])\d*$"),
+]
+
+
+def _excludedGeneMask(var_names, params):
+    """Boolean mask (over var_names) of genes to drop before testing, per the
+    exclude_* flags. A custom 'exclude_regex' (string or list) adds to it."""
+    import re
+    names = [str(g) for g in var_names]
+    mask = np.zeros(len(names), dtype=bool)
+    pats = [rx for key, default, rx in _GENE_CATEGORIES
+            if params.get(key, default)]
+    extra = params.get("exclude_regex")
+    if extra:
+        pats += [extra] if isinstance(extra, str) else list(extra)
+    for rx in pats:
+        pat = re.compile(rx)
+        mask |= np.array([bool(pat.match(n)) for n in names])
+    return mask
 
 
 def _densify(X):
