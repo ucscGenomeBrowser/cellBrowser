@@ -27,6 +27,9 @@ Config via environment (all optional):
     DE_JOB_TIMEOUT    per-job wall-clock cap, seconds (default 600)
     DE_STALE_LOCK_SEC reclaim a lock older than this (default 1800)
     DE_RETENTION_DAYS delete finished job dirs older than this (default 7; 0=keep)
+    DE_WORKER_PIDFILE write our PID here on start, remove on clean exit (optional)
+    DE_WORKER_HEARTBEAT  touch this file every loop so a watchdog can tell a hung
+                         worker from a healthy idle one (optional)
 """
 import os
 import sys
@@ -42,8 +45,22 @@ POLL_SEC   = float(os.environ.get("DE_POLL_SEC", "2"))
 JOB_TIMEOUT= int(os.environ.get("DE_JOB_TIMEOUT", "600"))
 STALE_LOCK = int(os.environ.get("DE_STALE_LOCK_SEC", "1800"))
 RETENTION  = int(os.environ.get("DE_RETENTION_DAYS", "7"))
+PIDFILE    = os.environ.get("DE_WORKER_PIDFILE")
+HEARTBEAT  = os.environ.get("DE_WORKER_HEARTBEAT")
 
 _stop = False
+
+
+def _beat():
+    """Touch the heartbeat file so the watchdog can distinguish a healthy idle
+    worker from a hung one. Best-effort; a failure here must not stop the loop."""
+    if not HEARTBEAT:
+        return
+    try:
+        with open(HEARTBEAT, "a"):
+            os.utime(HEARTBEAT, None)
+    except OSError:
+        pass
 
 
 def log(msg):
@@ -170,22 +187,37 @@ def sweepRetention():
 def main():
     signal.signal(signal.SIGTERM, _onsig)
     signal.signal(signal.SIGINT, _onsig)
+    if PIDFILE:
+        try:
+            with open(PIDFILE, "w") as fh:
+                fh.write("%d\n" % os.getpid())
+        except OSError as e:
+            log("could not write pidfile %s: %s" % (PIDFILE, e))
     log("starting; queue=%s datasets=%s python=%s" % (JOBS_DIR, DATASETS, PYTHON))
     last_sweep = 0
-    while not _stop:
-        did = False
-        for jobdir in pendingJobs():
-            if _stop:
-                break
-            if claim(jobdir):
-                runJob(jobdir)
-                did = True
-        now = time.time()
-        if now - last_sweep > 3600:
-            sweepRetention()
-            last_sweep = now
-        if not did:
-            time.sleep(POLL_SEC)
+    try:
+        while not _stop:
+            _beat()
+            did = False
+            for jobdir in pendingJobs():
+                if _stop:
+                    break
+                if claim(jobdir):
+                    runJob(jobdir)
+                    _beat()   # a long job shouldn't look hung to the watchdog
+                    did = True
+            now = time.time()
+            if now - last_sweep > 3600:
+                sweepRetention()
+                last_sweep = now
+            if not did:
+                time.sleep(POLL_SEC)
+    finally:
+        if PIDFILE:
+            try:
+                os.remove(PIDFILE)
+            except OSError:
+                pass
     log("stopped")
 
 

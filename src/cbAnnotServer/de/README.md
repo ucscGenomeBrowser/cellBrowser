@@ -27,11 +27,19 @@ under the **otto** service account, driven by a filesystem job queue on `/hive`
 1. **cbBuild binary** (preferred) — if `DE_CBBUILD_DIR/<dataset>/` has
    `dataset.json` + `exprMatrix.bin` + `exprMatrix.json` + `meta.tsv`, read it via
    `cbExprReader`. Populations are resolved from `meta.tsv` first, then only the
-   `pop1 ∪ pop2` cells are densified — so a 2M-cell matrix is never fully
-   materialized. Integer matrices (raw counts, `matrixArrType` `Uint32`) are
-   `normalize_total` + `log1p`'d to match the frontend's log-space display;
-   `Float32` matrices (already log-normalized by cbScanpy) are used as-is.
+   `pop1 ∪ pop2` cells are read, into a **sparse** (CSR) matrix — so a 2M-cell
+   matrix is never fully materialized and one-vs-rest stays feasible. Integer
+   matrices (raw counts, `matrixArrType` `Uint32`) are `normalize_total` +
+   `log1p`'d to match the frontend's log-space display; `Float32` matrices
+   (already log-normalized by cbScanpy) are used as-is.
    `DE_CBBUILD_DIR` defaults to `/usr/local/apache/htdocs-cells`.
+
+   Each group is also deterministically thinned to at most
+   `DE_MAX_CELLS_PER_GROUP` cells (default 50000; per-job override
+   `parameters.max_cells_per_group`, 0 disables) before the matrix is read, so a
+   one-vs-rest on a huge atlas can't blow up memory. The result reports both the
+   selected counts (`n_pop1`/`n_pop2`), the tested counts (`n_tested1`/
+   `n_tested2`), and a `subsampled` flag.
 2. **`.h5ad` fallback** — `DE_DATASETS_DIR/<dataset>/anndata.h5ad` (or a single
    `*.h5ad`). Used for dev datasets that were not cbBuild'd on this host.
 
@@ -58,9 +66,7 @@ lock is stale). The enqueuer just drops a `spec.json`; the worker does the rest.
 
 ## Running it
 
-Needs a Python with scanpy (Phase 1). In production this env lives in a shared,
-otto-readable location (TODO: relocate from the current dev env at
-`~mspeir/miniconda3/envs/scanpyenv`).
+Needs a Python with scanpy (Phase 1). For a one-off run:
 
 ```
 DE_WORKER_PYTHON=/path/to/scanpy-env/bin/python \
@@ -68,11 +74,49 @@ DE_WORKER_PYTHON=/path/to/scanpy-env/bin/python \
 ```
 
 Config via env (all optional; see `deWorker.py` header for the full list):
-`DE_JOBS_DIR` (default `/hive/data/inside/cells/deJobs`), `DE_DATASETS_DIR`,
-`DE_WORKER_PYTHON`, `DE_POLL_SEC`, `DE_JOB_TIMEOUT`, `DE_RETENTION_DAYS`.
+`DE_JOBS_DIR` (default `/hive/data/inside/cells/deJobs`), `DE_CBBUILD_DIR`,
+`DE_DATASETS_DIR`, `DE_WORKER_PYTHON`, `DE_POLL_SEC`, `DE_JOB_TIMEOUT`,
+`DE_MAX_CELLS_PER_GROUP`, `DE_RETENTION_DAYS`.
 
-Deploy as a systemd unit (or cron keep-alive) under otto, same pattern as
-`../deploy/` for cbAnnotServer.
+## Durability (deploy)
+
+Everything the worker needs to run unattended under otto is in `deploy/`:
+
+| file | role |
+|---|---|
+| `de.env.sample` | copy to a private `de.env`; queue dir, scanpy python, pidfile/heartbeat/log paths |
+| `runDeWorker.sh` | sources `DE_ENV_FILE` and `exec`s `deWorker.py` (so the tracked PID is the daemon) |
+| `deWorkerWatchdog.sh` | cron keep-alive: restarts the worker if its PID is gone **or** its heartbeat is stale |
+| `deWorker.service` | systemd unit for hosts where you can install one as root (preferred over cron) |
+
+The worker has no HTTP endpoint, so liveness is "pidfile process alive **and**
+heartbeat fresh" — the heartbeat (`DE_WORKER_HEARTBEAT`, touched each loop) catches
+a *hung* worker, not just a dead one. A running job blocks the loop for up to
+`DE_JOB_TIMEOUT`, so the watchdog's staleness threshold defaults to
+`DE_JOB_TIMEOUT + 300` and never mistakes a long job for a hang.
+
+**cron (otto crontab), the fallback where systemd can't be installed:**
+
+```
+* * * * *  DE_ENV_FILE=/hive/data/inside/cells/cbAnnotServer/de.env  ~mspeir/cellBrowser/src/cbAnnotServer/de/deploy/deWorkerWatchdog.sh >> /hive/data/inside/cells/cbAnnotServer/logs/deWorker-watchdog.log 2>&1
+@reboot    DE_ENV_FILE=/hive/data/inside/cells/cbAnnotServer/de.env  ~mspeir/cellBrowser/src/cbAnnotServer/de/deploy/deWorkerWatchdog.sh >> /hive/data/inside/cells/cbAnnotServer/logs/deWorker-watchdog.log 2>&1
+```
+
+(mirrors the existing `cbAnnotServer` watchdog lines in `otto.crontab`.)
+
+**Relocating the scanpy env off a personal home** (otto must be able to read it):
+
+```
+# one-time: pack the working dev env and unpack it under /hive
+conda install -n base -c conda-forge conda-pack        # if not present
+conda pack -n scanpyenv -o /tmp/scanpyenv.tar.gz
+mkdir -p /hive/data/inside/cells/cbAnnotServer/scanpyenv
+tar -xzf /tmp/scanpyenv.tar.gz -C /hive/data/inside/cells/cbAnnotServer/scanpyenv
+/hive/data/inside/cells/cbAnnotServer/scanpyenv/bin/conda-unpack   # fixes hardcoded paths
+```
+
+then set `DE_WORKER_PYTHON=/hive/data/inside/cells/cbAnnotServer/scanpyenv/bin/python`
+in `de.env`.
 
 ## Verified
 
@@ -101,10 +145,11 @@ worker → poll done, real Wilcoxon on adipose-tissue (Diabetic vs rest, 11,979 
 
 ## Still to wire
 
-- Deploy: dev-side `de_submit.py` (direct) + `deWorker.py` as systemd units under
-  otto on a `/hive` host + hgcompute-08; production cbAnnotServer registers the
-  blueprint in proxy mode (`DE_RELAY_URL`); set `deUrl` in cb.conf.
+- Install the durability setup on the `/hive` host: relocate the scanpy env
+  (above), write `de.env`, add the cron watchdog lines (or the systemd unit).
+- Production cbAnnotServer registers the blueprint in proxy mode (`DE_RELAY_URL`)
+  and sets `deUrl` in cb.conf; the dev-side `de_submit.py` runs in direct mode.
 - `de_jobs` table + account tie-in on the production (proxy) tier (per plan).
-- Relocate the scanpy env off a personal home dir to a shared/otto-readable one.
 - Auth on the proxy→direct call (`X-DE-Key` shared secret is stubbed in).
-- Phase-2 params (minPct, subsample) and other tests are not yet in the kernel.
+- Statistics: pseudoreplication caveat in the UI; Memento / pseudobulk as the
+  Phase-2 sounder method. Other scanpy tests (t-test, logreg) are easy adds.
