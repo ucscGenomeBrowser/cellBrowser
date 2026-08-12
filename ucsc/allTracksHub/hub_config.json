@@ -1,0 +1,799 @@
+{
+  "_README": "Curation config for the Cell Browser all-tracks super hub (Redmine #37820). Edit this file (no Python needed) to extend the hub as new datasets arrive: add a collection's modality, a new assay keyword, a new assembly, a junk-dir name, etc. Re-run update_hub.sh afterward. Loaded by build_manifest.py (CFG) and build_stanzas.py.",
+  "served_base": "https://cells.ucsc.edu",
+  "_served_base_doc": "Canonical served host written into manifest track URLs. To STAGE on cells-test, build with HUB_BASE_URL=https://cells-test.gi.ucsc.edu (env var, no manifest rebuild needed) -- build_stanzas/build_hub rewrite the host. Leave this at the production host.",
+  "exclude_assemblies": [
+    "micMur3"
+  ],
+  "_exclude_assemblies_doc": "Assemblies to drop from the served hub (e.g. not present in the UCSC Genome Browser). build_hub.py omits them from genomes.txt and writes their trackDb/metadata to <hub>-disabled/<asm>/ on hive (kept, not web-accessible) instead of the served hub dir; publish skips their unpublished files. micMur3 (Mouse lemur, tabula-microcebus) has no GB assembly -- revisit later.",
+  "exclude_dirs_bam": [
+    "ss2",
+    "smartseq2",
+    "hg38hisat2bams",
+    "hg38hisat2sorted",
+    "bams",
+    "bam"
+  ],
+  "_exclude_dirs_bam_doc": "Directory names holding raw per-cell/per-sample bam files; pruned from the dataset walk (bam is excluded by default anyway).",
+  "exclude_dirs_wip": [
+    "hubtest",
+    "hubtemp",
+    "hub.tmp",
+    "hub_out_max",
+    "temp",
+    "old",
+    "hub-old",
+    "hub-temp",
+    "hub-tmp2",
+    "alpha",
+    "genes_hub",
+    "added-tracks",
+    "hub.tmp2"
+  ],
+  "_exclude_dirs_wip_doc": "Path segments marking work-in-progress/throwaway hubs. NOTE: hub_out is intentionally NOT here (it is cbHub's normal output dir).",
+  "orig_source_dirs": [
+    "orig",
+    "submitter-files",
+    "submitter_files"
+  ],
+  "_orig_source_dirs_doc": "Submitter source dirs; unreferenced files here are dropped ONLY when the collection has a curated hub.",
+  "desc_placeholder_abstract": "please edit desc.conf",
+  "desc_placeholder_title": "sample dataset description",
+  "_desc_placeholder_doc": "Lowercased markers identifying an unedited cbBuild desc template (dataset not ready for the hub).",
+  "assembly_chr1_size": {
+    "248956422": "hg38",
+    "249250621": "hg19",
+    "195471971": "mm10",
+    "197195432": "mm9"
+  },
+  "_assembly_chr1_size_doc": "chr1 size -> assembly, for bigWigInfo-based resolution. ADD A NEW ASSEMBLY HERE (and to genomes.txt) to support new organisms/builds.",
+  "orphan_drop_name_patterns": [
+    "\\.introns\\.bb$",
+    "barChart\\.bb$",
+    "^temp\\.(bb|bw|bigBed|bigWig)$"
+  ],
+  "_orphan_drop_doc": "Regexes matched against the BASENAME of orphan (non-hub) files, which are then dropped. Only orphans are tested, so a hub-backed file of the same name is safe. (1) .introns.bb are intermediates -- the hubs publish the matching .junctions.bb. (2) barChart.bb without a hub stanza cannot be published: a bigBarChart needs barChartBars (the category labels) plus barChartMatrixUrl/SampleUrl, and those exist only in the stanza, so an orphan bar chart has no way to render. The three real bar charts (cortex-dev, healthy-human-skin, mouse-dev-brain) are hub-backed and unaffected. Regenerate a dropped one properly if it is wanted. (3) A bare temp.bb / temp.bw is scratch: cortex-atac/hub/temp.bb was 10 chr1 peaks from 2020 with no original_track_name, and it was surfacing as a track called 'temp'. Note exclude_dirs_wip already covers a temp/ DIRECTORY; this covers the filename.",
+  "modality_rules": [
+    [
+      "\\brna\\b.{0,12}\\batac\\b|\\batac\\b.{0,12}\\brna\\b",
+      "multiome"
+    ],
+    [
+      "h3k27ac",
+      "H3K27ac"
+    ],
+    [
+      "h3k27me?3",
+      "H3K27me3"
+    ],
+    [
+      "h3k4me?3",
+      "H3K4me3"
+    ],
+    [
+      "h3k9me?3",
+      "H3K9me3"
+    ],
+    [
+      "h3k4me?1",
+      "H3K4me1"
+    ],
+    [
+      "h3k36me?3",
+      "H3K36me3"
+    ],
+    [
+      "\\bctcf\\b",
+      "CTCF"
+    ],
+    [
+      "nano.?cut.?tag|cut.?and.?tag|cut.?tag|cut&tag",
+      "CUT&Tag"
+    ],
+    [
+      "(?=.*input)(?=.*chip)",
+      "ChIP"
+    ],
+    [
+      "multiom",
+      "multiome"
+    ],
+    [
+      "archr|readsintss",
+      "ATAC"
+    ],
+    [
+      "\\batac\\b|atac.?seq|sc?n?atac",
+      "ATAC"
+    ],
+    [
+      "methyl",
+      "methylation"
+    ],
+    [
+      "rnapos|rnaneg",
+      "RNA"
+    ],
+    [
+      "\\brna\\b|sc?n?rna|rna.?seq",
+      "RNA"
+    ]
+  ],
+  "_modality_rules_doc": "Ordered [regex, label] pairs (case-insensitive) tested against a track's path + curated labels + filename. First match wins. Add new assays here.",
+  "modality_multiome_is": "ATAC",
+  "_modality_multiome_is_doc": "In the faceted composite (signal + peaks only), a track whose modality resolves to 'multiome' is the ATAC (accessibility) readout of the multiome assay -- the RNA half isn't a browser signal track. Verified per dataset: multiomic-human-heart (ATAC_fragment_files), mouse-lvcp-multiome (scMultiome/atac/), olg-dyn-eae/olg-eae-ms (ArchR ATAC bigWigs). So 'multiome' is resolved to this value.",
+  "collection_modality": {
+    "catlas-mouse-brain": "ATAC",
+    "catlas-mouse-aging": "ATAC",
+    "catlas-paired-tag": "ATAC",
+    "sea-ad-brain-atac": "ATAC",
+    "allen-basal-ganglia-atac": "ATAC",
+    "flybrain-atac": "ATAC",
+    "human-enhancer-atlas": "ATAC",
+    "fetal-chromatin-atlas": "ATAC",
+    "retina": "ATAC",
+    "cardiogenesis-atac": "ATAC",
+    "cortex-atac": "ATAC",
+    "mouse-kidney-atac": "ATAC",
+    "mouse-motor-atac": "ATAC",
+    "neuro-degen-atac": "ATAC",
+    "brainvar": "ATAC",
+    "tabula-microcebus": "RNA",
+    "cortex-dev": "RNA",
+    "multiomic-human-heart": "multiome",
+    "mouse-lvcp-multiome": "multiome",
+    "olg-dyn-eae-multiome": "multiome",
+    "healthy-human-skin": "RNA",
+    "mouse-dev-brain": "RNA",
+    "opc-dev": "ATAC",
+    "tabula-sapiens": "RNA"
+  },
+  "_collection_modality_doc": "Per-collection modality fallback, applied ONLY when modality_rules find nothing. For single-modality studies whose assay isn't in any path/label. Leave multi-modal collections out (let the rules label each track).",
+  "celltype_expansions": {
+    "retina": {
+      "AC": "Amacrine cell",
+      "BC": "Bipolar cell",
+      "HC": "Horizontal cell",
+      "HC0": "Horizontal cell 0",
+      "HC1": "Horizontal cell 1",
+      "RGC": "Retinal ganglion cell",
+      "Rod": "Rod photoreceptor",
+      "Cone": "Cone photoreceptor",
+      "MG": "Muller glia",
+      "RBC": "Rod bipolar cell",
+      "OFFx": "OFF cone bipolar cell"
+    },
+    "cortex-dev": {
+      "Glyc": "Glycolytic",
+      "Mural": "Mural cells",
+      "oRG": "Outer radial glia",
+      "tRG": "Truncated radial glia",
+      "vRG": "Ventricular radial glia",
+      "nIN2": "Newborn interneuron 2",
+      "OPC": "Oligodendrocyte precursor cells",
+      "IPC": "Intermediate progenitor cell",
+      "MGE": "Medial ganglionic eminence",
+      "Choroid": "Choroid plexus",
+      "EN-PFC2": "PFC excitatory neuron 2",
+      "EN-PFC3": "PFC excitatory neuron 3",
+      "EN-V1-1": "V1 excitatory neuron 1",
+      "EN-V1-2": "V1 excitatory neuron 2",
+      "EN-V1-3": "V1 excitatory neuron 3",
+      "IN-CTX-CGE1": "Cortical CGE interneuron 1",
+      "IN-CTX-CGE2": "Cortical CGE interneuron 2",
+      "IN-CTX-MGE1": "Cortical MGE interneuron 1",
+      "IN-CTX-MGE2": "Cortical MGE interneuron 2",
+      "IN-STR": "Striatal interneuron",
+      "IPC-div1": "Dividing intermediate progenitor 1",
+      "IPC-div2": "Dividing intermediate progenitor 2",
+      "IPC-nEN1": "Intermediate progenitor (newborn EN) 1",
+      "IPC-nEN2": "Intermediate progenitor (newborn EN) 2",
+      "IPC-nEN3": "Intermediate progenitor (newborn EN) 3",
+      "MGE-IPC1": "MGE intermediate progenitor 1",
+      "MGE-IPC2": "MGE intermediate progenitor 2",
+      "MGE-IPC3": "MGE intermediate progenitor 3",
+      "MGE-RG1": "MGE radial glia 1",
+      "MGE-RG2": "MGE radial glia 2",
+      "NEN-early1": "Newborn excitatory neuron, early 1",
+      "NEN-early2": "Newborn excitatory neuron, early 2",
+      "NEN-late": "Newborn excitatory neuron, late",
+      "RG-div1": "Dividing radial glia 1",
+      "RG-div2": "Dividing radial glia 2",
+      "RG-early": "Early radial glia",
+      "U1": "Unknown 1",
+      "U2": "Unknown 2",
+      "U3": "Unknown 3",
+      "U4": "Unknown 4"
+    },
+    "fetal-chromatin-atlas": {
+      "Ens glia": "Enteric glia",
+      "Ens neurons": "Enteric neuron"
+    },
+    "olg-dyn-eae-multiome": {
+      "COP": "Committed oligodendrocyte precursor"
+    },
+    "cortex-atac": {
+      "IPC": "Intermediate progenitor cell",
+      "RG": "Radial glia",
+      "MGE": "MGE progenitors",
+      "dlEN": "Deep-layer excitatory neuron",
+      "ulEN": "Upper-layer excitatory neuron",
+      "earlyEN": "Early excitatory neuron",
+      "nEN": "Newborn excitatory neuron",
+      "EndoMural": "Endothelial and mural cells",
+      "AstroOligo": "Astrocytes and oligodendrocytes",
+      "IN_MGE": "MGE-derived interneuron",
+      "IN-MGE": "MGE-derived interneuron",
+      "IN_CGE": "CGE-derived interneuron",
+      "IN-CGE": "CGE-derived interneuron",
+      "Insula": "Insular neurons"
+    },
+    "mouse-epi-juv-brain": {
+      "BG": "Bergmann glia",
+      "EXC1": "Excitatory neuron",
+      "EXC2": "Excitatory neuron",
+      "EXC3": "Excitatory neuron",
+      "EXC4": "Excitatory neuron",
+      "INH1": "Inhibitory neuron",
+      "INH2": "Inhibitory neuron",
+      "INH3": "Inhibitory neuron",
+      "INH4": "Inhibitory neuron",
+      "MGL": "Microglia",
+      "MGL1": "Microglia",
+      "MGL2": "Microglia",
+      "MGL3": "Microglia",
+      "AST3": "Astrocyte",
+      "AST4": "Astrocyte",
+      "AST_NT": "Astrocyte",
+      "AST_TE": "Astrocyte",
+      "OEC": "Olfactory ensheathing cells",
+      "OPC": "Oligodendrocyte precursor cells",
+      "RGC": "Radial glia cells",
+      "VEC": "Vascular endothelial cells",
+      "VLMC": "Vascular leptomeningeal cells",
+      "mOL": "Mature oligodendrocytes",
+      "VSMC": "Vascular smooth muscle cells",
+      "PER": "Pericyte",
+      "MAC": "Macrophage",
+      "CHP": "Choroid plexus",
+      "EPE": "Ependymal cells",
+      "CHP-EPE": "Choroid plexus and ependymal cells",
+      "uni": "Unassigned"
+    },
+    "mouse-brain-cutandtag": {
+      "OEC": "Olfactory ensheathing cells",
+      "OPC": "Oligodendrocyte precursor cells",
+      "VLMC": "Vascular leptomeningeal cells",
+      "mOL": "Mature oligodendrocytes"
+    },
+    "mouse-kidney-atac": {
+      "CNT": "Connecting tubule",
+      "PT1": "Proximal tubule (stage 1)"
+    },
+    "multiomic-human-heart": {
+      "vSMC": "Vascular smooth muscle cells",
+      "Mast": "Mast cells"
+    }
+  },
+  "_celltype_expansions_doc": "Per-dataset acronym -> full cell-type name (case-insensitive key match), for acronyms the longLabel does NOT spell out. Sourced from each dataset's paper (stashed as /hive/data/inside/cells/datasets/<ds>/paper.md). Context-aware by dataset (retina MG = Muller glia; brain MG/MGL = Microglia; mouse-epi RGC = radial glia, not retinal ganglion). Applied only when the label has no '<ACR> - <expansion>' form.",
+  "tissue_from_path": {
+    "fetal-chromatin-atlas": "bigWigs"
+  },
+  "_tissue_from_path_doc": "Collections whose bigWigs are organized by tissue in the path (the segment right after the named marker dir is the per-track tissue), e.g. fetal-chromatin-atlas/hub/bigWigs/<tissue>/<file>. Overrides the collection-level body_parts tissue for these. (human-enhancer-atlas is intentionally NOT here: its bigWigs pool each cell type across all tissues, so 'multiple' is correct for most of them; the tissue-restricted ones are handled by celltype_tissue below.)",
+  "celltype_tissue": {
+    "human-enhancer-atlas": {
+      "Ventricular Cardiomyocyte": "heart",
+      "Atrial Cardiomyocyte": "heart",
+      "Pancreatic Beta Cell": "pancreas",
+      "Pancreatic Alpha Cell": "pancreas",
+      "Glutaminergic Neuron": "brain",
+      "Transitional Zone Cortical Cell": "adrenal",
+      "Zona Fasciculata Cortical Cell": "adrenal",
+      "Zona Glomerulosa Cortical Cell": "adrenal",
+      "Cortical Epithelial-like": "adrenal",
+      "Parietal Cell": "stomach",
+      "Airway Goblet Cell": "esophagus",
+      "Cilliated Cell": "lung"
+    }
+  },
+  "_celltype_tissue_doc": "Per-dataset cell-type -> tissue override, applied AFTER track_tissue by matching the (case/plural-normalized) Cell type. For whole-body atlases labeled 'multiple' (human-enhancer-atlas: one bigWig per cell type pooled across tissues), a minority of cell types are tissue-restricted -- they occur in only one organ's samples in the atlas's own metadata (meta.fixed.tsv). Those get the specific tissue; the pan-tissue majority (fibroblast, macrophage, endothelial, T cell, ...) stay 'multiple'. Derived by counting distinct tissues per cell type in the meta; keys spelled as the collapsed Cell type name.",
+  "lifestage_from_path": {
+    "human-enhancer-atlas": [
+      [
+        "^adult$",
+        "Adult"
+      ],
+      [
+        "^fetal$",
+        "Fetal"
+      ]
+    ],
+    "multiomic-human-heart": [
+      [
+        "^fetal",
+        "Fetal"
+      ],
+      [
+        "^postnatal",
+        "Postnatal"
+      ]
+    ],
+    "brain-spatial-omics": [
+      [
+        "^e\\d",
+        "Embryonic"
+      ],
+      [
+        "^p\\d",
+        "Postnatal"
+      ]
+    ]
+  },
+  "_lifestage_from_path_doc": "Per-dataset [segment-regex, life-stage] rules. For each track, path segments are tested against the dataset's rules in order; first match sets the Life stage facet. Listed only for datasets with an unambiguous stage as a standalone path segment (human-enhancer adult/fetal dirs, multiomic-human-heart fetal/postnatal, brain-spatial-omics e13/p21/p22 dirs). Datasets whose age is embedded in filenames are handled by collection_lifestage instead.",
+  "collection_lifestage": {
+    "fetal-chromatin-atlas": "Fetal",
+    "cortex-atac": "Fetal",
+    "ssd-prenatal-cortex": "Fetal",
+    "mouse-motor-atac": "Embryonic",
+    "mouse-kidney-atac": "Postnatal",
+    "mouse-epi-juv-brain": "Juvenile",
+    "mouse-brain-cutandtag": "Juvenile",
+    "retina": "Adult",
+    "neuro-degen-atac": "Adult",
+    "olg-eae-ms": "Adult",
+    "olg-dyn-eae-multiome": "Adult",
+    "cardiogenesis-atac": "Multiple",
+    "brainvar": "Multiple",
+    "mouse-lvcp-multiome": "Multiple",
+    "multiomic-human-heart": "Multiple",
+    "sea-ad-brain-atac": "Aged"
+  },
+  "_collection_lifestage_doc": "Whole-collection life stage, used when the stage isn't a clean path segment (fallback after lifestage_from_path). Determined per dataset from desc.conf + stashed papers. Uniform single-stage studies: fetal-chromatin/cortex-atac/ssd-prenatal (Fetal), mouse-motor (Embryonic, E9-E13), mouse-kidney (Postnatal, P0-P56), mouse-epi-juv + mouse-brain-cutandtag (Juvenile, P15-P25/P19), retina/neuro-degen/olg-eae-ms/olg-dyn-eae (Adult). 'Multiple' = each track pools cells across >1 stage: cardiogenesis (PCW6/8 embryonic + PCW19 fetal), brainvar (fetal->postnatal DLPFC), mouse-lvcp (P11 postnatal + P60 adult), multiomic-human-heart (the hub/celltype tracks pool fetal+postnatal; disease/fetal & disease/postnatal[-diseased] still get Fetal/Postnatal from the path).",
+  "celltype_lifestage_prefixes": [
+    "Fetal",
+    "Adult",
+    "Juvenile",
+    "Postnatal",
+    "Neonatal",
+    "Embryonic",
+    "Prenatal"
+  ],
+  "_celltype_lifestage_prefixes_doc": "A leading one of these words is stripped from a Cell type (e.g. human-enhancer 'Fetal Excitatory Neuron' -> 'Excitatory Neuron') so fetal/adult versions of the same cell type collapse into one facet value, distinguished by the Life stage facet instead.",
+  "celltype_rollup_enabled": true,
+  "celltype_rollup_protect_regex": "(?i)\\btype\\s+\\d+([/-]\\d+)?[a-z]?$",
+  "celltype_rollup_overrides": {
+    "Endothelial": "Endothelial cell",
+    "Inhibitory neurons": "Inhibitory neuron",
+    "Excitatory neurons": "Excitatory neuron",
+    "Mature oligodendrocytes": "Mature oligodendrocyte",
+    "Microglia, all subtypes together": "Microglia",
+    "Alveolar type 2,Immune": "Alveolar type 2",
+    "Bipolar": "Bipolar cell",
+    "Blue bipolar": "Bipolar cell",
+    "Diffuse bipolar": "Bipolar cell",
+    "Giant bipolar": "Bipolar cell",
+    "Invaginating midget bipolar": "Bipolar cell",
+    "OFF cone bipolar": "Bipolar cell",
+    "Rod bipolar": "Bipolar cell",
+    "Deep-layer excitatory neuron": "Excitatory neuron",
+    "Early excitatory neuron": "Excitatory neuron",
+    "Upper-layer excitatory neuron": "Excitatory neuron",
+    "BDNFneg excitatory neurons": "Excitatory neuron",
+    "BDNFpos excitatory neurons": "Excitatory neuron",
+    "VGLUT2neg excitatory neurons": "Excitatory neuron",
+    "Inhibitory interneurons": "Interneuron",
+    "LAMP5 interneurons": "Interneuron",
+    "Parvalbumin interneurons": "Interneuron",
+    "Somatostatin interneurons": "Interneuron",
+    "VIP interneurons": "Interneuron",
+    "Striatal interneuron": "Interneuron",
+    "CGE-derived interneuron": "Interneuron",
+    "MGE-derived interneuron": "Interneuron",
+    "Alveolar capillary endothelial": "Endothelial cell",
+    "Alveolar endothelial": "Endothelial cell",
+    "Arterial endothelial": "Endothelial cell",
+    "Blood brain barrier endothelial": "Endothelial cell",
+    "Hepatic endothelial": "Endothelial cell",
+    "Placental endothelial": "Endothelial cell",
+    "Proliferating endothelial": "Endothelial cell",
+    "Vascular endothelial": "Endothelial cell",
+    "All endothelial cells": "Endothelial cell",
+    "Basal epithelial": "Epithelial cell",
+    "Colon epithelial": "Epithelial cell",
+    "Esophageal epithelial": "Epithelial cell",
+    "Intestinal epithelial": "Epithelial cell",
+    "Mammary epithelial": "Epithelial cell",
+    "Mammary luminal epithelial": "Epithelial cell",
+    "Thymic epithelial": "Epithelial cell",
+    "Proliferating epithelial": "Epithelial cell",
+    "All epithelial cells": "Epithelial cell",
+    "Striatonigral medium spiny neurons": "Medium spiny neuron",
+    "Striatopallidal medium spiny neurons": "Medium spiny neuron",
+    "Epithelial": "Epithelial cell",
+    "Epithelial cells gata3+": "Epithelial cell",
+    "Bronchiolar and alveolar epithelial": "Epithelial cell",
+    "Broncial and alveolar epithelial": "Epithelial cell",
+    "Ciliated epithelial": "Ciliated cell",
+    "Cilliated epithelial": "Ciliated cell",
+    "Cilliated": "Ciliated cell",
+    "Atrial cardiomyocyes": "Atrial cardiomyocyte"
+  },
+  "celltype_rollup_regex": [
+    [
+      "(?i)positive$",
+      "Unannotated"
+    ],
+    [
+      "(?i)\\bunknown\\b",
+      "Unannotated"
+    ]
+  ],
+  "_celltype_rollup_regex_doc": "Applied in rollup_celltype after the overrides: if a Cell type matches, the WHOLE value becomes the replacement. Folds fetal-chromatin marker-gene clusters ('Igfbp1 dkk1 positive', 'Skor2 npsr1 positive', ...) and unannotated clusters ('Cerebrum unknown.3', 'Kidney unknown.7', 'Unknown neurons', cortex-dev 'Unknown N') into a single 'Unannotated' bucket. Fine label kept in _name.",
+  "_celltype_rollup_doc": "Collapse-in-place rollup of the Cell type facet to a higher level (the full fine label stays in the track Name/_name). rollup_celltype(): strip a trailing parenthetical qualifier ('Fibroblast (General)'->'Fibroblast', 'Smooth muscle (Colon)'->'Smooth muscle') and a trailing subtype number ('T lymphocyte 1 (CD4+)'->'T lymphocyte', 'Diffuse bipolar 3a'->'Diffuse bipolar'), then apply celltype_rollup_overrides. celltype_rollup_protect_regex guards names where the trailing number is part of the identity, not a subtype index (Alveolar type 1/2 = AT1/AT2, kept distinct). Overrides fix merges the rules miss (Endothelial<->Endothelial cell) and re-singularize plurals. Applied AFTER the tissue override so celltype_tissue still matches the fine name. Conservative first pass; extend overrides to collapse further (e.g. named retina bipolar or cortex-dev regional subtypes) if wanted.",
+  "celltype_expansions_global": {
+    "OPC": "Oligodendrocyte precursor cells",
+    "OPCs": "Oligodendrocyte precursor cells",
+    "Oligodendrocyte Precursor": "Oligodendrocyte precursor cells",
+    "Oligodendrocyte Progenitor": "Oligodendrocyte precursor cells",
+    "ExcitatoryNeurons": "Excitatory neurons",
+    "InhibitoryNeurons": "Inhibitory neurons"
+  },
+  "_celltype_expansions_global_doc": "Universal (all-dataset) cell-type acronym/variant -> canonical name, matched case-insensitively on the whole cleaned label. For acronyms that mean the same thing everywhere (OPC = oligodendrocyte precursor cell in every CNS dataset here) and to fold naming variants (Oligodendrocyte Precursor/Progenitor) into one facet value. Applied after the per-dataset celltype_expansions.",
+  "id_noise_subcollections": [
+    "hub",
+    "hub2",
+    "all",
+    "x",
+    "orig",
+    "signal",
+    "bw",
+    "bigwig",
+    "bigwigs",
+    "bigbed",
+    "beds",
+    "data",
+    "out",
+    "hub_out",
+    "added_tracks"
+  ],
+  "_id_noise_subcollections_doc": "Generic container subcollection segments dropped from the (shortened) primaryKey/track id, e.g. <coll>__hub__<name> -> <coll>__<name>. Meaningful subdataset names (hrca, eae_atac, ...) are kept.",
+  "id_strip_suffix_regexes": [
+    "_tilesize_\\d+.*$",
+    "_granges_insertions.*$"
+  ],
+  "_id_strip_suffix_regexes_doc": "Regexes stripped from the end of the track-name part of the id to drop verbose pipeline suffixes (e.g. ArchR _tilesize_100_normMethod_..._archr). Collisions from shortening are de-duped automatically.",
+  "expression_composite": {
+    "modalities": [
+      "RNA"
+    ],
+    "suffix": "Expr",
+    "shortLabel": "Cell Browser expression",
+    "longLabel": "RNA-seq expression coverage from UCSC Cell Browser datasets"
+  },
+  "histone_composite": {
+    "modalities": [
+      "H3K27ac",
+      "H3K27me3",
+      "H3K4me1",
+      "H3K4me3",
+      "H3K9me3",
+      "H3K36me3",
+      "CUT&Tag",
+      "ChIP"
+    ],
+    "suffix": "Histone",
+    "shortLabel": "Cell Browser histone marks",
+    "longLabel": "Histone modification and CUT&Tag tracks from UCSC Cell Browser datasets"
+  },
+  "_histone_composite_doc": "A SECOND faceted composite (parallel to the main signal+peaks one) that holds every track whose modality is a histone mark / CUT&Tag / ChIP-input, so histone data lives in one place instead of being mixed with ATAC. Same facet metadata shape as the main composite, written to <asm>.histone.metadata.tsv. Set to null to fold histone marks back into the main composite.",
+  "ccre_composite": {
+    "suffix": "Ccre",
+    "shortLabel": "Cell Browser cCREs",
+    "longLabel": "Candidate cis-regulatory elements (cCREs) from UCSC Cell Browser datasets"
+  },
+  "_ccre_composite_doc": "A faceted composite (parallel to the signal+peaks and histone ones) holding candidate cis-regulatory element tracks, kept separate from the raw ATAC peaks the way ENCODE cCREs are their own track. A bigBed is classified as a cCRE when its label matches 'ccre' (build_stanzas CCRE_RE); extra_collections roots set datatype:cCRE to force that label. Metadata written to <asm>.ccre.metadata.tsv. Set to null to fold cCREs back in with peaks.",
+  "collection_celltype_colors": {
+    "sea-ad-brain-atac": "sea-ad-celltype-crosswalk.tsv",
+    "catlas-mouse-aging": "celltype-crosswalks/catlas-mouse-aging.tsv",
+    "catlas-mouse-brain": "celltype-crosswalks/catlas-mouse-brain.tsv",
+    "allen-basal-ganglia-atac": "celltype-crosswalks/allen-basal-ganglia-atac.tsv",
+    "catlas-paired-tag": "celltype-crosswalks/catlas-paired-tag.tsv",
+    "mouse-kidney-atac": "celltype-crosswalks/clean5.tsv",
+    "mouse-lvcp-multiome": "celltype-crosswalks/clean5.tsv",
+    "mouse-epi-juv-brain": "celltype-crosswalks/clean5.tsv",
+    "olg-dyn-eae-multiome": "celltype-crosswalks/clean5.tsv",
+    "olg-eae-ms": "celltype-crosswalks/clean5.tsv"
+  },
+  "_collection_celltype_colors_doc": "Per-collection cell-type crosswalk. Each value is a TSV (relative to the build dir) with columns: <hub cellType> <TAB> <canonical cellType> <TAB> <R,G,B> [<TAB> tissue <TAB> life_stage <TAB> condition]. build_stanzas rewrites the Cell_type facet value to the canonical (2nd) column -- harmonizing split labels, e.g. SEA-AD's MTG 'Astro' vs PFC 'Astrocyte' both -> 'Astrocyte' -- and colors each track with the 3rd column, so the genome-browser tracks share cell-type colors across datasets/assemblies (colored by broad cell class, colorblind-conscious palette; see build_celltype_crosswalks.py). The optional 4th-6th columns override the Tissue/Life_stage/Condition facet for that track (used e.g. to fill the CATLAS aging atlas's per-track tissue and age). Codes are paper-curated (Li 2021, Zhang 2022, Zhu 2021, Allen taxonomy); see celltype-crosswalks/.",
+  "collection_cells_dataset": {
+    "sea-ad-brain-atac": "sea-ad-mtg+cohort"
+  },
+  "_collection_cells_dataset_doc": "Override the Cell Browser dataset slug used for a collection's Dataset facet link (subtrackUrls turns it into https://cells.ucsc.edu/?ds=<slug>). Only needed where the collection name is not itself a served slug: sea-ad-brain-atac is served as the cohort dataset of the sea-ad-mtg collection, so linking it by collection name returns 404. Verify a slug with curl -sI https://cells.ucsc.edu/<slug>/dataset.json (the ?ds= page always returns 200 -- it is the single-page-app shell -- so it cannot be used to test).",
+  "track_type_short": {
+    "": "Signal & Peaks",
+    "Histone": "Histone Marks",
+    "Ccre": "cCREs",
+    "Interact": "Interactions",
+    "Sj": "Splice Junc",
+    "Gene": "Genes",
+    "Ann": "Annotations",
+    "MiRNA": "miRNA",
+    "Expr": "RNA Coverage",
+    "BrainSpatial": "Brain Spatial",
+    "MotorNeuron": "Motor Neuron ATAC",
+    "Bar": "Gene Expr"
+  },
+  "_track_type_short_doc": "Short name for each kind of track, used when a track holds data from exactly one dataset: its label becomes '<short name> - <dataset shortLabel>', e.g. 'Splice Junc - Cortex development'. Keyed on the track-name SUFFIX after cellBrowser<Asm> ('' is the main signal-and-peaks composite, 'Bar' the standalone bar charts), NOT on the track's prose shortLabel -- keying it on the label meant renaming a composite here silently dropped it back to the long name. Multi-dataset tracks ignore this and keep their generic label. Add an entry when a new composite kind appears; build_stanzas warns if a suffix is missing.",
+  "_expression_composite_doc": "Faceted-bound signal/peaks tracks whose modality is one of 'modalities' are RNA expression COVERAGE (not chromatin accessibility/histone), so they're routed OUT of the 'signal & peaks' faceted composite into their own plain compositeTrack cellBrowser<Asm><suffix> under the superTrack. Currently only cortex-dev RNA coverage; future RNA-coverage datasets join automatically. Routed by modality so a dataset's annotations/barCharts stay in their own sections.",
+  "separate_collections": {
+    "mouse-motor-atac": {
+      "suffix": "MotorNeuron",
+      "shortLabel": "Motor neuron ATAC",
+      "longLabel": "Motor neuron ATAC signal by sample (age, replicate)"
+    },
+    "brain-spatial-omics": {
+      "suffix": "BrainSpatial",
+      "shortLabel": "Brain spatial multi-omics",
+      "longLabel": "Brain spatial multi-omics signal by cluster, assay and age"
+    }
+  },
+  "_separate_collections_doc": "Whole collections whose tracks are NOT per-cell-type signal (bulk sorted-population ChIP, sample/replicate pseudobulk, or unnamed cluster x assay x age). Every track in these collections is routed OUT of the faceted composite into its own compositeTrack cellBrowser<Asm><suffix> under the per-assembly superTrack (all bigWig). Takes priority over the per-track type routing.",
+  "collection_condition": {
+    "multiomic-human-heart": {
+      "default": "Healthy",
+      "map": {
+        "non-diseased": "Healthy",
+        "non diseased": "Healthy",
+        "diseased": "Diseased"
+      }
+    },
+    "olg-eae-ms": {
+      "default": "",
+      "map": {
+        "control": "Healthy",
+        "ctr": "Healthy",
+        "ctrl": "Healthy",
+        "eae": "EAE"
+      }
+    },
+    "olg-dyn-eae-multiome": {
+      "default": "",
+      "map": {
+        "control": "Healthy",
+        "ctr": "Healthy",
+        "ctrl": "Healthy",
+        "early": "EAE (early)",
+        "peak": "EAE (peak)",
+        "late": "EAE (late)"
+      }
+    },
+    "brainvar": {
+      "default": "Healthy"
+    },
+    "cardiogenesis-atac": {
+      "default": "Healthy"
+    },
+    "cortex-atac": {
+      "default": "Healthy"
+    },
+    "cortex-dev": {
+      "default": "Healthy"
+    },
+    "fetal-chromatin-atlas": {
+      "default": "Healthy"
+    },
+    "human-enhancer-atlas": {
+      "default": "Healthy"
+    },
+    "mouse-brain-cutandtag": {
+      "default": "Healthy"
+    },
+    "mouse-epi-juv-brain": {
+      "default": "Healthy"
+    },
+    "mouse-kidney-atac": {
+      "default": "Healthy"
+    },
+    "mouse-lvcp-multiome": {
+      "default": "Healthy"
+    },
+    "neuro-degen-atac": {
+      "default": "Healthy"
+    },
+    "retina": {
+      "default": "Healthy"
+    }
+  },
+  "_collection_condition_doc": "Condition facet, per collection: {default, map?}. 'map' keys are condition tokens (lowercase) matched as a coded shortLabel suffix (X_Ctr) or as a word in short/long/filename; the value is the facet Condition. The matched token is also stripped from the Cell type (leading word 'Control astrocyte' -> 'Astrocyte', or trailing code 'COP_Ctrl' -> 'COP'), merging condition variants of one cell type. 'default' applies when no token matches. Collections not listed -> 'unknown'. Healthy defaults confirmed per dataset from desc.conf/papers (all faceted collections are normal/reference atlases; disease terms in those studies are GWAS risk-loci mapped onto healthy tissue, not diseased samples). Disease contrasts: multiomic-human-heart (Healthy vs Diseased); olg-eae-ms and olg-dyn-eae-multiome are EAE studies (experimental autoimmune encephalomyelitis, the standard mouse model of multiple sclerosis) -- Control arm mapped to Healthy, EAE (with olg-dyn timepoints early/peak/late) is the disease.",
+  "datatype_labels": {
+    "signal": "Signal (read coverage)",
+    "peaks": "Peaks (enriched regions)",
+    "cCRE": "Candidate cis-regulatory elements (cCREs)"
+  },
+  "_datatype_labels_doc": "Friendly display labels for the Data type facet values (the internal 'signal'/'peaks'/'annotation' are kept for routing; only the metadata cell value is relabeled). Generic on purpose: the faceted composite mixes ATAC accessibility signal with histone-mark (CUT&Tag) coverage, so 'read coverage'/'enriched regions' read correctly alongside the Modality facet (which supplies the assay). NOTE: this is NOT the ENCODE-style 'dataTypes' composite setting (that selector is for a sample x dataType subtrack layout; this hub is one-row-per-track).",
+  "celltype_leading_strip_regex": "^(ADNC\\d+|H3K\\d+(?:me\\d|ac))[\\s_]+",
+  "_celltype_leading_strip_regex_doc": "A leading assay/histone-mark or neuropathology token is stripped from a Cell type. mouse-epi-juv-brain labels its clusters 'H3K27ac EXC1' / 'H3K27me3 uni' and brain-spatial-omics similar -- the mark is redundant with the Modality facet (and is now carried in the track label by track_variant), and leaving it on the front stopped 59 cell types matching the class table. Stripped early in raw_celltype so the remaining cluster code (EXC1, INH1, AST NT, ...) then hits the per-dataset expansion. 'H3K27ac EXC1' -> 'EXC1' -> 'Excitatory neurons 1' -> rollup 'Excitatory neuron'. Note the separator class is [\\s_]+, not \\s+: this strip runs in raw_celltype before underscores are turned into spaces, so the underscore form ('H3K27me3_uni_5') is what actually arrives here.",
+  "celltype_trailing_strip_regex": "\\s+unsure$",
+  "_celltype_trailing_strip_regex_doc": "Stripped from the end of a Cell type before expansion/normalization. Removes the fetal-chromatin annotation-confidence marker ' unsure' ('Megakaryocytes unsure' -> 'Megakaryocytes').",
+  "separate_signal_composites": [
+    {
+      "match_regex": "miRNA[- ]binding|age and region",
+      "suffix": "MiRNA",
+      "shortLabel": "miRNA binding",
+      "longLabel": "Cortex ATAC miRNA-binding read coverage by age and region"
+    }
+  ],
+  "_separate_signal_composites_doc": "bigWig tracks that are NOT per-cell-type signal and shouldn't sit in the faceted composite. Each entry pulls tracks whose shortLabel/longLabel/filename matches match_regex into their own compositeTrack (cellBrowser<Asm><suffix>) under the per-assembly superTrack, out of the facets. cortex-atac 'miRNA-binding for age and region: GW.../adult' pseudobulk-by-sample tracks (their own composite in the source hub) -> the MiRNA composite.",
+  "celltype_ignore_label_regex": "age and region",
+  "_celltype_ignore_label_regex_doc": "If a track's curated longLabel matches this, its cellType is set to unknown -- the track isn't per-cell-type. Catches cortex-atac 'miRNA-binding for age and region: GW20PFC/adult/...' sample tracks (gestational-week + brain-region labels, not cell types).",
+  "celltype_strip_suffix_regex": "[ _](AllEnhancerPredictions|EnhancerPredictions|Enhancerpeaks|MACSpeaks|Specificpeaks|Peaks|cCREs?)$",
+  "_celltype_strip_suffix_regex_doc": "Peak-method and product suffixes tacked onto cell-type labels (cortex-atac: 'Microglia_MACSpeaks', 'IPC_Enhancerpeaks'; the cCRE sets: 'Astrocyte 1 cCREs') -> stripped to the base cell type before acronym expansion. The dataType facet already separates signal vs peaks vs cCRE, so carrying it in the cell type only split the Cell_class lookup: 220 cCRE cell types were landing in Cell_class 'unknown' purely because of the suffix.",
+  "celltype_junk_regex": "aligned|nochim|dedup|filtered\\.sorted|_l00\\d|\\.out\\b|cbhub|trackhub|generatedby|singlecelltrack|exprmatrix",
+  "celltype_generic_words": [
+    "in-vivo",
+    "in vivo",
+    "signal",
+    "coverage",
+    "peaks",
+    "reads",
+    "views",
+    "track",
+    "composite",
+    "barchart",
+    "cluster expression",
+    "median cluster expression",
+    "scatac-seq",
+    "scatac",
+    "atac-seq",
+    "scrna-seq",
+    "scrna",
+    "rna-seq"
+  ],
+  "celltype_max_len": 60,
+  "aggregate_celltype_label": "All cell types",
+  "celltype_species_words": [
+    "Both",
+    "Human",
+    "Mouse"
+  ],
+  "_celltype_species_words_doc": "Species/sample words that leak into the terminal '- X' segment of some labels (retina 'AC Peaks - Both'). When the cleaned Cell type equals one of these, fall back to the leading token of the label (the real cell-class acronym, e.g. AC -> Amacrine cell).",
+  "aggregate_name_regex": "(?i)^peaks(\\.v\\d+)?$",
+  "_celltype_doc": "Heuristics for deriving cellType from curated child labels. aggregate_* assigns 'all clusters' to expression barCharts and merged peak tracks (no single cell type).",
+  "dataset_labels": {
+    "catlas-mouse-brain": "CATLAS Adult Mouse Brain",
+    "catlas-mouse-aging": "CATLAS Mouse Aging Brain",
+    "catlas-paired-tag": "CATLAS Adult Mouse Brain Paired-Tag",
+    "sea-ad-brain-atac": "SEA-AD Brain ATAC",
+    "allen-basal-ganglia-atac": "Allen Basal Ganglia ATAC",
+    "flybrain-atac": "Fly Brain"
+  },
+  "_dataset_labels_doc": "Override for dataset_label(collection) when a collection has no cellbrowser.conf on disk (e.g. the extra_collections track dumps). Checked before the cellbrowser.conf lookup.",
+  "extra_collections": [
+    {
+      "collection": "catlas-mouse-brain",
+      "assembly": "mm10",
+      "roots": [
+        {
+          "path": "catlas-decoder/catlas_mousebrain/bw",
+          "type": "bigWig"
+        }
+      ]
+    },
+    {
+      "collection": "catlas-mouse-aging",
+      "assembly": "mm10",
+      "roots": [
+        {
+          "path": "catlas-decoder/catlas_mouseaging/bigwig",
+          "type": "bigWig"
+        },
+        {
+          "path": "catlas-decoder/catlas_mouseaging/peaks",
+          "type": "bigBed",
+          "datatype": "cCRE"
+        }
+      ]
+    },
+    {
+      "collection": "catlas-paired-tag",
+      "assembly": "mm10",
+      "label_sub": [
+        "\\.(H3K\\w+|ATAC|RNApos|RNAneg)$",
+        ""
+      ],
+      "roots": [
+        {
+          "path": "catlas-decoder/catlas_pairedTag/bw",
+          "type": "bigWig"
+        },
+        {
+          "path": "catlas-decoder/catlas_pairedTag/peaks",
+          "type": "bigBed",
+          "datatype": "cCRE"
+        },
+        {
+          "path": "catlas-decoder/catlas_pairedTag/conns-bb",
+          "type": "bigInteract"
+        }
+      ]
+    },
+    {
+      "collection": "sea-ad-brain-atac",
+      "assembly": "hg38",
+      "label_sub": [
+        "^ADNC(\\d+)",
+        "ADNC\\1 "
+      ],
+      "roots": [
+        {
+          "path": "allen-brain-science/seaad_MTG/bw",
+          "type": "bigWig"
+        },
+        {
+          "path": "allen-brain-science/seaad_PFC/bw",
+          "type": "bigWig"
+        }
+      ]
+    },
+    {
+      "collection": "allen-basal-ganglia-atac",
+      "assembly": "mm10",
+      "label_sub": [
+        "-TileSize.*$",
+        ""
+      ],
+      "roots": [
+        {
+          "path": "allen-brain-science/bg_regrouping_cl/bw",
+          "type": "bigWig"
+        },
+        {
+          "path": "allen-brain-science/bg_merge_D1_D2/bw",
+          "type": "bigWig"
+        },
+        {
+          "path": "allen-brain-science/bg_merge_D1_D2_dorsal_ventral/bw",
+          "type": "bigWig"
+        },
+        {
+          "path": "allen-brain-science/bg_merge_dorsal_ventral/bw",
+          "type": "bigWig"
+        }
+      ]
+    },
+    {
+      "collection": "flybrain-atac",
+      "assembly": "dm6",
+      "label_sub": [
+        "\\.dedup.*$",
+        ""
+      ],
+      "roots": [
+        {
+          "path": "catlas-decoder/geo/flybrain_GSE163697/bigwigs",
+          "type": "bigWig"
+        },
+        {
+          "path": "catlas-decoder/geo/flybrain_GSE163697/peaks",
+          "type": "bigBed"
+        }
+      ]
+    },
+    {
+      "collection": "human-enhancer-atlas",
+      "assembly": "hg38",
+      "roots": [
+        {
+          "path": "catlas-decoder/_converted/hg38",
+          "type": "bigBed",
+          "datatype": "cCRE"
+        },
+        {
+          "path": "catlas-decoder/humanenhancer-extras/ABC_bb",
+          "type": "bigInteract"
+        }
+      ]
+    }
+  ],
+  "_extra_collections_doc": "Track-only sources not laid out as Cell Browser datasets. build_manifest scans each root for big* files and emits manifest rows with the given collection/assembly, excluded=0 (bypasses the desc-readiness gate). type: bigWig|bigBed|bigInteract. Paths are relative to the datasets root. human-enhancer-atlas re-uses the existing served collection so the cCRE bigBeds join it."
+}
