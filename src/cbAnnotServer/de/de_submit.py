@@ -143,7 +143,7 @@ def _statusProxy(relay, key, jobId):
 
 # ---- routes ---------------------------------------------------------------
 
-@bp.route("/api/de", methods=["GET", "POST"])
+@bp.route("", methods=["GET", "POST"], strict_slashes=False)
 def de():
     relay = _cfg("DE_RELAY_URL")
     queue = _cfg("DE_QUEUE_DIR")
@@ -175,5 +175,5 @@ if __name__ == "__main__":
     app = Flask(__name__)
     app.config["DE_QUEUE_DIR"] = os.environ.get("DE_QUEUE_DIR", "/tmp/deJobs")
     os.makedirs(app.config["DE_QUEUE_DIR"], exist_ok=True)
-    app.register_blueprint(bp)
+    app.register_blueprint(bp, url_prefix="/api/de")
     app.run(host="127.0.0.1", port=int(os.environ.get("DE_DEV_PORT", "8899")))
