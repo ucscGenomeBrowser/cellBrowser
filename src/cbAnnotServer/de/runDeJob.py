@@ -70,12 +70,29 @@ def datasetAnnDataPath(dataset, datasets_dir):
     raise ValueError("no AnnData (.h5ad) found for dataset %s" % dataset)
 
 
+def _normField(s):
+    """cbBuild sanitizes metadata field names by stripping non-alphanumerics
+    (e.g. 'Characteristics[developmental stage]' -> 'Characteristicsdevelopmentalstage').
+    The frontend only knows the sanitized name, so map it back to the real
+    AnnData obs column by normalizing both sides the same way."""
+    import re
+    return re.sub(r"[^A-Za-z0-9]", "", str(s))
+
+
+def resolveFieldName(adata, field, label):
+    if field in adata.obs.columns:
+        return field
+    nf = _normField(field)
+    for c in adata.obs.columns:
+        if _normField(c) == nf:
+            return c
+    raise ValueError("%s: field %r not in dataset metadata" % (label, field))
+
+
 def _filterMask(adata, filt, label):
     """Boolean mask for a metadata restriction {field, value}."""
-    field = filt["field"]
+    field = resolveFieldName(adata, filt["field"], label)
     value = str(filt.get("value", ""))
-    if field not in adata.obs.columns:
-        raise ValueError("%s: filter field %r not in dataset metadata" % (label, field))
     return adata.obs[field].astype(str).eq(value).to_numpy()
 
 
@@ -86,9 +103,7 @@ def resolvePopulation(adata, sel, label):
     stype = sel.get("type", "field")
 
     if stype in ("field", "cluster"):
-        field = sel["field"]
-        if field not in adata.obs.columns:
-            raise ValueError("%s: field %r not in dataset metadata" % (label, field))
+        field = resolveFieldName(adata, sel["field"], label)
         wanted = set(str(v) for v in sel["values"])
         mask = adata.obs[field].astype(str).isin(wanted).to_numpy()
 

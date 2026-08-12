@@ -75,29 +75,84 @@ def run_wilcoxon(adata, pop1_mask, pop2_mask, params=None):
 
     res = sub.uns["rank_genes_groups"]
     names = res["names"]["pop1"]
-    scores = res["scores"]["pop1"]
     lfc = res["logfoldchanges"]["pop1"]
     pvals = res["pvals"]["pop1"]
     pvals_adj = res["pvals_adj"]["pop1"]
 
+    # Descriptive stats the UI shows: per-group mean expression, % expressing, and
+    # AUC (effect size). log2FC/p-adj come from scanpy above.
+    a_sub = (sub.obs["_deGroup"] == "pop1").to_numpy()
+    b_sub = ~a_sub
+    meanA, meanB, pctA, pctB = _group_means_pct(sub.X, a_sub, b_sub)
+    auc = _auc_per_gene(sub.X, a_sub, b_sub)
+    col = {g: i for i, g in enumerate(sub.var_names)}  # var order -> the arrays above
+
     genes = []
     for i in range(len(names)):
+        sym = str(names[i])
+        c = col.get(sym)
         genes.append({
-            "symbol": str(names[i]),
-            "logFC": _finite(lfc[i]),
+            "symbol": sym,
+            "log2FC": _finite(lfc[i]),
             "pValue": _finite(pvals[i]),
-            "fdr": _finite(pvals_adj[i]),
-            "score": _finite(scores[i]),
+            "pAdj": _finite(pvals_adj[i]),
+            "auc": None if c is None else _finite(auc[c]),
+            "meanA": None if c is None else _finite(meanA[c]),
+            "meanB": None if c is None else _finite(meanB[c]),
+            "pctA": None if c is None else _finite(pctA[c]),
+            "pctB": None if c is None else _finite(pctB[c]),
         })
 
-    # scanpy already orders by score; sort by FDR then descending |score| so the
-    # output contract is explicit rather than relying on scanpy's internal order.
-    genes.sort(key=lambda g: (g["fdr"], -abs(g["score"])))
+    # order by ascending adjusted p (the client re-sorts; default there is AUC)
+    genes.sort(key=lambda g: (g["pAdj"] if g["pAdj"] is not None else 2.0))
 
     top_n = params.get("top_n")
     if top_n:
         genes = genes[:int(top_n)]
     return genes
+
+
+def _densify(X):
+    import scipy.sparse as sp
+    return X.toarray() if sp.issparse(X) else np.asarray(X)
+
+
+def _group_means_pct(X, a_sub, b_sub):
+    """Per-gene mean expression and fraction expressing (non-zero), per group.
+    Works directly on sparse — cheap, uses the full cell set."""
+    import scipy.sparse as sp
+    Xa, Xb = X[a_sub], X[b_sub]
+    na, nb = int(a_sub.sum()), int(b_sub.sum())
+    meanA = np.asarray(Xa.mean(axis=0)).ravel()
+    meanB = np.asarray(Xb.mean(axis=0)).ravel()
+    if sp.issparse(X):
+        pctA = np.asarray((Xa > 0).sum(axis=0)).ravel() / max(na, 1)
+        pctB = np.asarray((Xb > 0).sum(axis=0)).ravel() / max(nb, 1)
+    else:
+        pctA = (Xa > 0).mean(axis=0)
+        pctB = (Xb > 0).mean(axis=0)
+    return meanA, meanB, pctA, pctB
+
+
+def _auc_per_gene(X, a_sub, b_sub, cap=2500):
+    """Mann-Whitney AUC per gene = P(expr in A > expr in B): 0.5 = no separation,
+    1 = always higher in A. Ranks are computed on a densified (optionally
+    subsampled, to bound memory) cell subset."""
+    from scipy.stats import rankdata
+    a_idx = np.flatnonzero(a_sub)
+    b_idx = np.flatnonzero(b_sub)
+    # deterministic subsample for the ranking if a group is very large
+    if a_idx.size > cap:
+        a_idx = a_idx[np.linspace(0, a_idx.size - 1, cap).astype(int)]
+    if b_idx.size > cap:
+        b_idx = b_idx[np.linspace(0, b_idx.size - 1, cap).astype(int)]
+    n1, n2 = a_idx.size, b_idx.size
+    both = np.concatenate([a_idx, b_idx])
+    M = _densify(X[both])                      # (n1+n2) x n_genes
+    ranks = rankdata(M, axis=0)                # rank each gene column
+    R1 = ranks[:n1].sum(axis=0)                # sum of A-ranks per gene
+    U1 = R1 - n1 * (n1 + 1) / 2.0
+    return U1 / (n1 * n2)
 
 
 def _finite(x):
