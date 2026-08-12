@@ -191,7 +191,7 @@ def main():
                 fh.write("%d\n" % os.getpid())
         except OSError as e:
             log("could not write pidfile %s: %s" % (PIDFILE, e))
-    log("starting; queue=%s datasets=%s python=%s" % (JOBS_DIR, DATASETS, PYTHON))
+    log("starting; queue=%s python=%s" % (JOBS_DIR, PYTHON))
     last_sweep = 0
     try:
         while not _stop:
