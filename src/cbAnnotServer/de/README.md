@@ -57,10 +57,31 @@ Deploy as a systemd unit (or cron keep-alive) under otto, same pattern as
 Wilcoxon DE on `adipose-tissue` (Diabetic vs NonDiabetic, 11,979 vs 14,371) in
 ~4 s, writing status=done + a ranked result.json (CST3, LUM, APOE, …).
 
+## Enqueuer
+
+`de_submit.py` is the Flask blueprint the frontend talks to (one URL: POST the
+builder spec, GET `?jobId=` for status/result). One codebase, two modes:
+
+- **direct** (`DE_QUEUE_DIR` set; instance has `/hive`): writes `spec.json` here,
+  reads status/result back. This is the dev-side service, run as otto.
+- **proxy** (`DE_RELAY_URL` set; production, no `/hive`): forwards to the direct
+  instance over HTTPS. Production has no `/hive` (Matt, 2026-08-12), so this tier
+  is required.
+
+It translates the builder spec (groupA/groupB/field) into the worker `spec.json`
+shape, including one-vs-rest and the per-group metadata filter. Run the standalone
+dev server (direct mode) with `python de_submit.py` (needs Flask).
+
+Verified 2026-08-12: full loop on hgwdev — POST spec → direct Flask → queue →
+worker → poll done, real Wilcoxon on adipose-tissue (Diabetic vs rest, 11,979 vs
+14,371, 2006 genes).
+
 ## Still to wire
 
-- The enqueuer: the Cell Browser Flask backend's `/api/de` submit/poll routes
-  write `spec.json` here and read status/result back (see `de_submit.py`, TBD).
-  If the backend host has `/hive` (its SQLite already lives there), it writes the
-  queue directly; otherwise a dev-side Flask service does, reached over HTTPS.
-- Relocate the scanpy env off a personal home dir; run as otto.
+- Deploy: dev-side `de_submit.py` (direct) + `deWorker.py` as systemd units under
+  otto on a `/hive` host + hgcompute-08; production cbAnnotServer registers the
+  blueprint in proxy mode (`DE_RELAY_URL`); set `deUrl` in cb.conf.
+- `de_jobs` table + account tie-in on the production (proxy) tier (per plan).
+- Relocate the scanpy env off a personal home dir to a shared/otto-readable one.
+- Auth on the proxy→direct call (`X-DE-Key` shared secret is stubbed in).
+- Phase-2 params (minPct, subsample) and other tests are not yet in the kernel.

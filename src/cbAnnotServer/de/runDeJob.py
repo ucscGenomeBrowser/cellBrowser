@@ -70,8 +70,19 @@ def datasetAnnDataPath(dataset, datasets_dir):
     raise ValueError("no AnnData (.h5ad) found for dataset %s" % dataset)
 
 
+def _filterMask(adata, filt, label):
+    """Boolean mask for a metadata restriction {field, value}."""
+    field = filt["field"]
+    value = str(filt.get("value", ""))
+    if field not in adata.obs.columns:
+        raise ValueError("%s: filter field %r not in dataset metadata" % (label, field))
+    return adata.obs[field].astype(str).eq(value).to_numpy()
+
+
 def resolvePopulation(adata, sel, label):
-    """Turn a population selector into a boolean mask over adata.n_obs."""
+    """Turn a population selector into a boolean mask over adata.n_obs.
+    An optional sel["filter"] = {field, value} narrows the population to cells
+    also matching that metadata field (the per-group cross-field restriction)."""
     stype = sel.get("type", "field")
 
     if stype in ("field", "cluster"):
@@ -79,14 +90,9 @@ def resolvePopulation(adata, sel, label):
         if field not in adata.obs.columns:
             raise ValueError("%s: field %r not in dataset metadata" % (label, field))
         wanted = set(str(v) for v in sel["values"])
-        col = adata.obs[field].astype(str)
-        mask = col.isin(wanted).to_numpy()
-        if not mask.any():
-            raise ValueError(
-                "%s: no cells match %s in %r" % (label, sorted(wanted), field))
-        return mask
+        mask = adata.obs[field].astype(str).isin(wanted).to_numpy()
 
-    if stype == "cellIds":
+    elif stype == "cellIds":
         wanted = set(str(x) for x in sel["ids"])
         names = adata.obs_names.astype(str)
         mask = np.array([n in wanted for n in names], dtype=bool)
@@ -96,17 +102,24 @@ def resolvePopulation(adata, sel, label):
             raise ValueError(
                 "%s: matched %d of %d cell ids (barcode format mismatch?)"
                 % (label, found, len(wanted)))
-        return mask
 
-    if stype == "cellIdx":
+    elif stype == "cellIdx":
         idx = np.asarray(sel["idx"], dtype=int)
         if idx.min() < 0 or idx.max() >= adata.n_obs:
             raise ValueError("%s: cell index out of range" % label)
         mask = np.zeros(adata.n_obs, dtype=bool)
         mask[idx] = True
-        return mask
 
-    raise ValueError("%s: unknown selector type %r" % (label, stype))
+    else:
+        raise ValueError("%s: unknown selector type %r" % (label, stype))
+
+    filt = sel.get("filter")
+    if filt and filt.get("field"):
+        mask = mask & _filterMask(adata, filt, label)
+
+    if not mask.any():
+        raise ValueError("%s: no cells match the selection" % label)
+    return mask
 
 
 def writeStatus(outdir, **kw):
@@ -136,7 +149,17 @@ def runJob(spec, outdir, datasets_dir):
 
         status("running", "resolving populations")
         pop1 = resolvePopulation(adata, spec["pop1"], "pop1")
-        pop2 = resolvePopulation(adata, spec["pop2"], "pop2")
+        p2 = spec["pop2"]
+        if p2 == "rest" or (isinstance(p2, dict) and p2.get("type") == "rest"):
+            # one-vs-rest: everything not in pop1, optionally within a filter
+            pop2 = ~pop1
+            filt = p2.get("filter") if isinstance(p2, dict) else None
+            if filt and filt.get("field"):
+                pop2 = pop2 & _filterMask(adata, filt, "pop2")
+            if not pop2.any():
+                raise ValueError("pop2 (rest) has no cells")
+        else:
+            pop2 = resolvePopulation(adata, p2, "pop2")
 
         status("running", "running test")
         genes = METHODS[method](adata, pop1, pop2, spec.get("parameters"))
