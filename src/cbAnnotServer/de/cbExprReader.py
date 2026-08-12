@@ -1,0 +1,180 @@
+"""
+Read the uniform cbBuild expression output (exprMatrix.bin + exprMatrix.json +
+meta.tsv) so the DE worker can run on any published dataset without a source
+.h5ad. This is the Python port of the reader in cbData.js (loadExprVec /
+gunzipAndConvert); it decodes the SAME files the web frontend serves, so DE runs
+on exactly the numbers the user sees in the browser.
+
+Record format (see cellbrowser.py exprEncode / cbData.js loadExprVec):
+    a per-gene record in exprMatrix.bin is zlib-compressed and, once inflated:
+      - 2 bytes  : uint16 length of the descriptor string (little-endian)
+      - descLen  : the descriptor string (ascii; the gene id/symbol)
+      - N*itemsize bytes : the expression vector, N = sampleCount, one value per
+                           cell, dtype given by dataset.json "matrixArrType"
+    exprMatrix.json maps geneKey -> [byteOffset, byteLength] into exprMatrix.bin.
+    meta.tsv is a tab-separated table, first column = cellId, one row per cell in
+    matrix-column order.
+
+cbData.js hardcodes 4 bytes/value (it only ever built Float32/Uint32/Int32);
+here we honor the true itemsize of the declared dtype so the reader stays correct
+if that ever changes. A handful of old datasets on disk are mis-built (bin is
+8-byte but matrixArrType says Uint32) and the browser misrenders them too; we
+raise a clear error rather than silently returning garbage.
+"""
+import csv
+import json
+import os
+import struct
+import zlib
+
+import numpy as np
+
+# matrixArrType (cbData.js makeType) -> numpy dtype. Little-endian to match the
+# struct.pack("<...") the builder uses.
+_DTYPE = {
+    "double": "<f8", "float64": "<f8",
+    "float": "<f4", "float32": "<f4",
+    "int32": "<i4",
+    "uint32": "<u4", "dword": "<u4",
+    "uint16": "<u2", "word": "<u2",
+    "uint8": "<u1", "byte": "<u1",
+}
+
+
+def _numpyDtype(matrixArrType):
+    dt = _DTYPE.get(str(matrixArrType).lower())
+    if dt is None:
+        raise ValueError("unknown matrixArrType %r" % matrixArrType)
+    return np.dtype(dt)
+
+
+class CbExprReader:
+    """Decoder for one cbBuild output directory."""
+
+    def __init__(self, datasetDir):
+        self.dir = datasetDir
+        confPath = os.path.join(datasetDir, "dataset.json")
+        with open(confPath) as fh:
+            self.conf = json.load(fh)
+        self.sampleCount = int(self.conf["sampleCount"])
+        self.dtype = _numpyDtype(self.conf["matrixArrType"])
+        self.itemsize = self.dtype.itemsize
+
+        with open(os.path.join(datasetDir, "exprMatrix.json")) as fh:
+            self.offsets = json.load(fh)          # geneKey -> [offset, length]
+        # Underscore-prefixed keys (e.g. "_range" for ATAC datasets) are not
+        # genes; cbData.js skips them and so do we.
+        self.geneKeys = [k for k in self.offsets  # var order == matrix order
+                         if not k.startswith("_")]
+        # display symbol: the part after "|" (cbBuild's "geneId|symbol"), else the key
+        self.geneSyms = [k.split("|", 1)[1] if "|" in k else k
+                         for k in self.geneKeys]
+        self.binPath = os.path.join(datasetDir, "exprMatrix.bin")
+        self._binFh = None
+
+    # -- expression -------------------------------------------------------
+
+    def _fh(self):
+        if self._binFh is None:
+            self._binFh = open(self.binPath, "rb")
+        return self._binFh
+
+    def readGene(self, geneKey):
+        """Decode one gene's expression vector (length sampleCount)."""
+        off, length = self.offsets[geneKey]
+        fh = self._fh()
+        fh.seek(int(off))
+        raw = zlib.decompress(fh.read(int(length)))
+        descLen = struct.unpack("<H", raw[:2])[0]
+        body = raw[2 + descLen:]
+        expected = self.itemsize * self.sampleCount
+        if len(body) != expected:
+            raise ValueError(
+                "%s: expression record is %d bytes, expected %d "
+                "(%d cells x %d-byte %s). Dataset is mis-built; "
+                "matrixArrType does not match exprMatrix.bin."
+                % (geneKey, len(body), expected, self.sampleCount,
+                   self.itemsize, self.conf["matrixArrType"]))
+        return np.frombuffer(body, dtype=self.dtype)
+
+    def readMatrix(self, cellIdx=None):
+        """Build a dense (n_cells x n_genes) float32 matrix.
+
+        cellIdx : optional 1-D int array of cell (row) positions to keep. When
+                  given, only those cells are materialized — this is how the DE
+                  worker avoids densifying a 2M-cell matrix: it resolves the two
+                  populations from metadata first, then reads just their union.
+        """
+        if cellIdx is None:
+            rows = self.sampleCount
+            take = None
+        else:
+            cellIdx = np.asarray(cellIdx, dtype=int)
+            rows = cellIdx.size
+            take = cellIdx
+        M = np.empty((rows, len(self.geneKeys)), dtype=np.float32)
+        for j, key in enumerate(self.geneKeys):
+            vec = self.readGene(key)
+            M[:, j] = vec if take is None else vec[take]
+        return M
+
+    # -- metadata ---------------------------------------------------------
+
+    def readMeta(self):
+        """Return (cellIds list, obs dict of column->list) from meta.tsv.
+        Row order matches the expression-matrix column order."""
+        import pandas as pd
+        path = os.path.join(self.dir, "meta.tsv")
+        df = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False,
+                         quoting=csv.QUOTE_NONE)
+        cellIds = df.iloc[:, 0].astype(str).tolist()
+        if len(cellIds) != self.sampleCount:
+            raise ValueError(
+                "meta.tsv has %d rows but sampleCount is %d"
+                % (len(cellIds), self.sampleCount))
+        df.index = cellIds
+        return cellIds, df
+
+    def close(self):
+        if self._binFh is not None:
+            self._binFh.close()
+            self._binFh = None
+
+
+def readAnnData(datasetDir, cellIdx=None, normalize="auto"):
+    """Decode a cbBuild output dir into an AnnData (cells x genes).
+
+    cellIdx   : optional int array — build only these rows (the pop1|pop2 union).
+    normalize : "auto"  -> total-normalize + log1p when the matrix is an integer
+                           dtype (raw counts), leave float matrices as-is
+                           (cbScanpy already writes log-normalized values);
+                "log1p" -> always normalize_total + log1p;
+                "none"  -> use the stored values verbatim.
+
+    Wilcoxon p-values and AUC are invariant to a monotonic per-gene transform, so
+    normalization only affects log2FC and the reported group means — matching the
+    frontend's log-space display.
+    """
+    import anndata as ad
+    import pandas as pd
+
+    r = CbExprReader(datasetDir)
+    try:
+        cellIds, obs = r.readMeta()
+        X = r.readMatrix(cellIdx)
+        if cellIdx is not None:
+            keep = np.asarray(cellIdx, dtype=int)
+            obs = obs.iloc[keep]
+        var = pd.DataFrame(index=pd.Index(r.geneSyms, name=None))
+        var["geneKey"] = r.geneKeys
+        adata = ad.AnnData(X=X, obs=obs, var=var)
+    finally:
+        r.close()
+
+    doNorm = normalize == "log1p" or (
+        normalize == "auto" and np.issubdtype(r.dtype, np.integer))
+    if doNorm:
+        import scanpy as sc
+        sc.pp.normalize_total(adata, target_sum=1e4)
+        sc.pp.log1p(adata)
+    return adata

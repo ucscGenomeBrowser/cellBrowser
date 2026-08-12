@@ -10,11 +10,34 @@ under the **otto** service account, driven by a filesystem job queue on `/hive`
   pending jobs (`worker.lock`, restart-safe), and runs each in its own subprocess
   so a crash/OOM can't take down the daemon. Handles per-job timeout and
   retention cleanup.
-- `runDeJob.py` — runs one job: reads `spec.json`, loads the dataset AnnData,
-  resolves the two populations to cell masks, dispatches to the method, writes
-  `result.json` + `status.json` (atomic).
+- `runDeJob.py` — runs one job: reads `spec.json`, loads the dataset's
+  expression, resolves the two populations to cell masks, dispatches to the
+  method, writes `result.json` + `status.json` (atomic).
+- `cbExprReader.py` — Python port of the cbData.js expression reader. Decodes the
+  uniform **cbBuild web output** (`exprMatrix.bin` + `exprMatrix.json` +
+  `meta.tsv`) so DE runs on any published dataset — the same files, and the same
+  numbers, the frontend serves — with no source `.h5ad` required.
 - `methods/wilcoxon.py` — Phase 1 kernel: Scanpy Wilcoxon rank-sum, CPU.
   (`memento.py` / `rapids.py` come in later phases.)
+
+## Where the expression comes from
+
+`runDeJob.py` prefers the **cbBuild output** and falls back to a source `.h5ad`:
+
+1. **cbBuild binary** (preferred) — if `DE_CBBUILD_DIR/<dataset>/` has
+   `dataset.json` + `exprMatrix.bin` + `exprMatrix.json` + `meta.tsv`, read it via
+   `cbExprReader`. Populations are resolved from `meta.tsv` first, then only the
+   `pop1 ∪ pop2` cells are densified — so a 2M-cell matrix is never fully
+   materialized. Integer matrices (raw counts, `matrixArrType` `Uint32`) are
+   `normalize_total` + `log1p`'d to match the frontend's log-space display;
+   `Float32` matrices (already log-normalized by cbScanpy) are used as-is.
+   `DE_CBBUILD_DIR` defaults to `/usr/local/apache/htdocs-cells`.
+2. **`.h5ad` fallback** — `DE_DATASETS_DIR/<dataset>/anndata.h5ad` (or a single
+   `*.h5ad`). Used for dev datasets that were not cbBuild'd on this host.
+
+A few old datasets on disk are mis-built (their `exprMatrix.bin` is 8-byte but
+`matrixArrType` says `Uint32`); the reader raises a clear error rather than
+returning garbage — the browser misrenders those datasets too.
 
 ## Job queue protocol
 
