@@ -14160,7 +14160,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         deRenderResults();
         var r=deCanvasRect();
         var w=Math.min(1040, Math.max(820, r.width-40));
-        var ht=Math.min(560, Math.max(360, r.height-40));
+        var ht=Math.min(640, Math.max(360, r.height-40));
         $("#tpDeResults").dialog({
             modal:false, closeOnEscape:true, resizable:true, draggable:true,
             width:w, height:ht, title:"Differential expression results",
@@ -14211,8 +14211,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         // results table — Bootstrap .table, like the cluster-markers pop-up
         h.push("<table class='table' id='tpDeTable'><thead><tr>"+
             deHeadCell("name","Gene","","Gene symbol. Click a row to color the map by this gene and see its distribution below.")+
-            deHeadCell("lfc","log₂FC","tpDeNum","Log2 fold-change of mean expression, A vs B: positive = higher in A, negative = higher in B.")+
-            deHeadCell("auc","AUC","tpDeNum","Effect size — how well this gene alone separates A from B: 0.5 = no difference, 1 = always higher in A, 0 = always higher in B.")+
+            deHeadCell("lfc","log₂FC","tpDeNum","log₂ fold change of mean expression, A vs B: positive = higher in A, negative = higher in B.")+
+            deHeadCell("auc","AUC","tpDeNum","How well this gene alone separates A from B. 0.5 = no difference, 1 = always higher in A, 0 = always higher in B.")+
             deHeadCell("padj","p-adj","tpDeNum","Benjamini-Hochberg adjusted p-value (FDR). With many cells nearly everything is significant, so read it as a ranking more than an exact cutoff.")+
             deHeadCell("meanA","mean A","tpDeNum","Mean expression across the cells in Group A.")+
             deHeadCell("meanB","mean B","tpDeNum","Mean expression across the cells in Group B.")+
