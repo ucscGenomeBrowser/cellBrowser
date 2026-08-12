@@ -97,13 +97,21 @@ class CbExprReader:
                    self.itemsize, self.conf["matrixArrType"]))
         return np.frombuffer(body, dtype=self.dtype)
 
-    def readMatrix(self, cellIdx=None):
-        """Build a dense (n_cells x n_genes) float32 matrix.
+    def readMatrix(self, cellIdx=None, sparse=True):
+        """Build a (n_cells x n_genes) float32 matrix.
 
         cellIdx : optional 1-D int array of cell (row) positions to keep. When
                   given, only those cells are materialized — this is how the DE
-                  worker avoids densifying a 2M-cell matrix: it resolves the two
-                  populations from metadata first, then reads just their union.
+                  worker avoids reading a whole 2M-cell matrix: it resolves the
+                  two populations from metadata first, then reads just their union.
+        sparse  : return a scipy CSR matrix (default). Single-cell matrices are
+                  ~90% zeros, so this is the memory difference between a feasible
+                  one-vs-rest on a large atlas and an OOM. Pass False for a dense
+                  ndarray (handy for small tests).
+
+        Genes are decoded one at a time (each is a column), so peak memory is one
+        gene vector plus the accumulated nonzeros — never a dense n_cells x n_genes
+        block.
         """
         if cellIdx is None:
             rows = self.sampleCount
@@ -112,11 +120,31 @@ class CbExprReader:
             cellIdx = np.asarray(cellIdx, dtype=int)
             rows = cellIdx.size
             take = cellIdx
-        M = np.empty((rows, len(self.geneKeys)), dtype=np.float32)
-        for j, key in enumerate(self.geneKeys):
+        nGenes = len(self.geneKeys)
+
+        if not sparse:
+            M = np.empty((rows, nGenes), dtype=np.float32)
+            for j, key in enumerate(self.geneKeys):
+                vec = self.readGene(key)
+                M[:, j] = vec if take is None else vec[take]
+            return M
+
+        import scipy.sparse as sp
+        data, indices, indptr = [], [], [0]   # CSC: one column per gene
+        for key in self.geneKeys:
             vec = self.readGene(key)
-            M[:, j] = vec if take is None else vec[take]
-        return M
+            if take is not None:
+                vec = vec[take]
+            nz = np.flatnonzero(vec)
+            indices.append(nz.astype(np.int32))
+            data.append(vec[nz].astype(np.float32))
+            indptr.append(indptr[-1] + nz.size)
+        data = np.concatenate(data) if data else np.zeros(0, np.float32)
+        indices = (np.concatenate(indices) if indices
+                   else np.zeros(0, np.int32))
+        M = sp.csc_matrix((data, indices, np.asarray(indptr, dtype=np.int64)),
+                          shape=(rows, nGenes))
+        return M.tocsr()   # scanpy/AnnData prefer CSR
 
     # -- metadata ---------------------------------------------------------
 
@@ -141,7 +169,7 @@ class CbExprReader:
             self._binFh = None
 
 
-def readAnnData(datasetDir, cellIdx=None, normalize="auto"):
+def readAnnData(datasetDir, cellIdx=None, normalize="auto", sparse=True):
     """Decode a cbBuild output dir into an AnnData (cells x genes).
 
     cellIdx   : optional int array — build only these rows (the pop1|pop2 union).
@@ -161,7 +189,7 @@ def readAnnData(datasetDir, cellIdx=None, normalize="auto"):
     r = CbExprReader(datasetDir)
     try:
         cellIds, obs = r.readMeta()
-        X = r.readMatrix(cellIdx)
+        X = r.readMatrix(cellIdx, sparse=sparse)
         if cellIdx is not None:
             keep = np.asarray(cellIdx, dtype=int)
             obs = obs.iloc[keep]

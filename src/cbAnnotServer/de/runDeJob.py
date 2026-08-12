@@ -51,6 +51,12 @@ DATASETS_DIR = os.environ.get(
 # dataset without a source .h5ad (see cbExprReader.py). Preferred over DATASETS_DIR.
 CBBUILD_DIR = os.environ.get(
     "DE_CBBUILD_DIR", "/usr/local/apache/htdocs-cells")
+# Ceiling on cells tested per group. A one-vs-rest comparison on a large atlas
+# would otherwise read every cell into the group of interest's complement; even
+# sparse that can be tens of GB. Above this, each group is deterministically
+# thinned (evenly spaced, reproducible) before the matrix is read — Wilcoxon
+# p-values and AUC are stable under this kind of subsampling. 0 disables the cap.
+MAX_CELLS_PER_GROUP = int(os.environ.get("DE_MAX_CELLS_PER_GROUP", "50000"))
 
 METHODS = {
     "wilcoxon": wilcoxon.run_wilcoxon,
@@ -182,7 +188,22 @@ def _resolveBothPops(obs, spec):
     return pop1, pop2
 
 
-def runJob(spec, outdir, datasets_dir, cbbuild_dir=CBBUILD_DIR):
+def _thinMask(mask, cap):
+    """Deterministically subsample a boolean mask down to at most `cap` True
+    cells, evenly spaced over the selected positions (reproducible, no RNG).
+    Returns (thinned_mask, full_count)."""
+    idx = np.flatnonzero(mask)
+    full = idx.size
+    if cap and full > cap:
+        pick = idx[np.linspace(0, full - 1, cap).astype(int)]
+        thin = np.zeros_like(mask)
+        thin[pick] = True
+        return thin, full
+    return mask, full
+
+
+def runJob(spec, outdir, datasets_dir, cbbuild_dir=CBBUILD_DIR,
+           max_cells=MAX_CELLS_PER_GROUP):
     t0 = time.time()
 
     def status(state, stage=None, error=None):
@@ -209,16 +230,22 @@ def runJob(spec, outdir, datasets_dir, cbbuild_dir=CBBUILD_DIR):
 
             status("running", "resolving populations")
             pop1, pop2 = _resolveBothPops(obs, spec)
-            union = np.flatnonzero(pop1 | pop2)
+            # Thin each group before reading so the union we densify stays bounded.
+            cap = int((spec.get("parameters") or {}).get(
+                "max_cells_per_group", max_cells))
+            t1, full1 = _thinMask(pop1, cap)
+            t2, full2 = _thinMask(pop2, cap)
+            union = np.flatnonzero(t1 | t2)
 
             status("running", "loading expression")
             adata = cer.readAnnData(cbdir, cellIdx=union)
-            m1 = pop1[union]
-            m2 = pop2[union]
+            m1 = t1[union]
+            m2 = t2[union]
 
             status("running", "running test")
             genes = METHODS[method](adata, m1, m2, spec.get("parameters"))
-            n1, n2 = int(pop1.sum()), int(pop2.sum())
+            n1, n2 = full1, full2
+            subsampled = (full1 > int(m1.sum())) or (full2 > int(m2.sum()))
         else:
             # Fallback: a source .h5ad (dev datasets that were not cbBuild'd here).
             import anndata as ad
@@ -231,12 +258,17 @@ def runJob(spec, outdir, datasets_dir, cbbuild_dir=CBBUILD_DIR):
             status("running", "running test")
             genes = METHODS[method](adata, pop1, pop2, spec.get("parameters"))
             n1, n2 = int(pop1.sum()), int(pop2.sum())
+            m1, m2 = pop1, pop2
+            subsampled = False
 
         result = {
             "dataset": spec["dataset"],
             "method": method,
-            "n_pop1": n1,
+            "n_pop1": n1,             # cells selected
             "n_pop2": n2,
+            "n_tested1": int(m1.sum()),   # cells actually tested (after any thinning)
+            "n_tested2": int(m2.sum()),
+            "subsampled": bool(subsampled),
             "genes": genes,
         }
         tmp = os.path.join(outdir, "result.json.tmp")
