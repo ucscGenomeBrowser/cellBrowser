@@ -16,7 +16,6 @@ The frontend (cellBrowser.js deSubmitJobHttp) speaks one URL:
 
 Config keys (app.config or env, env wins for the standalone dev server):
     DE_QUEUE_DIR    job queue root (enables *direct* mode)
-    DE_DATASETS_DIR dataset AnnData root (informational; the worker reads it)
     DE_RELAY_URL    direct-instance URL (enables *proxy* mode)
     DE_RELAY_KEY    shared secret sent as X-DE-Key on the relayed call (optional)
 

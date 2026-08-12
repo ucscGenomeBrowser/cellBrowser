@@ -2,7 +2,8 @@
 """
 Run one differential-expression job on the worker (hgcompute-08).
 
-Reads a job spec, loads the dataset's AnnData, resolves the two populations to
+Reads a job spec, reads the dataset's expression from the cbBuild web output
+(exprMatrix.bin + meta.tsv, via cbExprReader), resolves the two populations to
 cell masks, dispatches to the requested compute method, and writes results and
 status back to the job directory. Deliberately transport-agnostic: it only
 touches the filesystem job dir, so it works whether the CB backend writes specs
@@ -24,11 +25,11 @@ Spec shape (see plan "Job Submission API"):
 
 Population selector types:
     field / cluster : {"field": <obs column>, "values": [...]}  (values matched as strings)
-    cellIds         : {"ids": [<barcode str> ...]}   matched against adata.obs_names
-    cellIdx         : {"idx": [<int> ...]}            positional indices into adata
+    cellIds         : {"ids": [<barcode str> ...]}   matched against the cell ids
+    cellIdx         : {"idx": [<int> ...]}            positional indices into the matrix
 
 CLI (for testing without a queue):
-    runDeJob.py --spec path/to/spec.json --datasets-dir /hive/... --out path/to/outdir
+    runDeJob.py --spec path/to/spec.json --cbbuild-dir /path/to/docroot --out outdir
     runDeJob.py <jobId>            # uses DE_JOBS_DIR/<jobId>
 """
 import argparse
@@ -44,11 +45,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from methods import wilcoxon
 
 DE_JOBS_DIR = os.environ.get("DE_JOBS_DIR", "/hive/data/inside/cells/deJobs")
-DATASETS_DIR = os.environ.get(
-    "DE_DATASETS_DIR", "/hive/data/inside/cells/datasets")
 # Root of the cbBuild web output (dataset dirs with exprMatrix.bin + meta.tsv).
-# This is the uniform format the frontend serves, so DE can run on any published
-# dataset without a source .h5ad (see cbExprReader.py). Preferred over DATASETS_DIR.
+# This is the uniform format the frontend serves, so DE can run on any dataset a
+# user can open, reading exactly what the browser shows (see cbExprReader.py).
 CBBUILD_DIR = os.environ.get(
     "DE_CBBUILD_DIR", "/usr/local/apache/htdocs-cells")
 # Ceiling on cells tested per group. A one-vs-rest comparison on a large atlas
@@ -75,24 +74,6 @@ def datasetCbBuildDir(dataset, cbbuild_dir):
     if all(os.path.isfile(os.path.join(d, f)) for f in need):
         return d
     return None
-
-
-def datasetAnnDataPath(dataset, datasets_dir):
-    """Locate the AnnData file for a dataset. cbScanpy writes anndata.h5ad in
-    the dataset's build dir; fall back to any single *.h5ad there."""
-    d = os.path.join(datasets_dir, dataset)
-    cand = os.path.join(d, "anndata.h5ad")
-    if os.path.isfile(cand):
-        return cand
-    if os.path.isdir(d):
-        h5ads = [f for f in os.listdir(d) if f.endswith(".h5ad")]
-        if len(h5ads) == 1:
-            return os.path.join(d, h5ads[0])
-        if len(h5ads) > 1:
-            raise ValueError(
-                "dataset %s has multiple .h5ad files; spec must disambiguate"
-                % dataset)
-    raise ValueError("no AnnData (.h5ad) found for dataset %s" % dataset)
 
 
 def _normField(s):
@@ -202,7 +183,7 @@ def _thinMask(mask, cap):
     return mask, full
 
 
-def runJob(spec, outdir, datasets_dir, cbbuild_dir=CBBUILD_DIR,
+def runJob(spec, outdir, cbbuild_dir=CBBUILD_DIR,
            max_cells=MAX_CELLS_PER_GROUP):
     t0 = time.time()
 
@@ -216,50 +197,41 @@ def runJob(spec, outdir, datasets_dir, cbbuild_dir=CBBUILD_DIR,
         if method not in METHODS:
             raise ValueError("unknown method %r" % method)
 
+        # Read the uniform cbBuild binary matrix — the same files (and numbers)
+        # the frontend serves, so DE runs on any dataset a user can open. Resolve
+        # the populations from meta.tsv first, then read only the pop1|pop2 union.
         cbdir = datasetCbBuildDir(spec["dataset"], cbbuild_dir)
-        if cbdir:
-            # Preferred path: read the uniform cbBuild binary matrix. Resolve the
-            # populations from meta.tsv first, then densify only the pop1|pop2
-            # union so we never materialize a whole large matrix.
-            import cbExprReader as cer
-            reader = cer.CbExprReader(cbdir)
-            try:
-                _cellIds, obs = reader.readMeta()
-            finally:
-                reader.close()
+        if not cbdir:
+            raise ValueError(
+                "no cbBuild expression output for dataset %r under %s "
+                "(need dataset.json + exprMatrix.bin + exprMatrix.json + meta.tsv)"
+                % (spec["dataset"], cbbuild_dir))
 
-            status("running", "resolving populations")
-            pop1, pop2 = _resolveBothPops(obs, spec)
-            # Thin each group before reading so the union we densify stays bounded.
-            cap = int((spec.get("parameters") or {}).get(
-                "max_cells_per_group", max_cells))
-            t1, full1 = _thinMask(pop1, cap)
-            t2, full2 = _thinMask(pop2, cap)
-            union = np.flatnonzero(t1 | t2)
+        import cbExprReader as cer
+        reader = cer.CbExprReader(cbdir)
+        try:
+            _cellIds, obs = reader.readMeta()
+        finally:
+            reader.close()
 
-            status("running", "loading expression")
-            adata = cer.readAnnData(cbdir, cellIdx=union)
-            m1 = t1[union]
-            m2 = t2[union]
+        status("running", "resolving populations")
+        pop1, pop2 = _resolveBothPops(obs, spec)
+        # Thin each group before reading so the union we read stays bounded.
+        cap = int((spec.get("parameters") or {}).get(
+            "max_cells_per_group", max_cells))
+        t1, full1 = _thinMask(pop1, cap)
+        t2, full2 = _thinMask(pop2, cap)
+        union = np.flatnonzero(t1 | t2)
 
-            status("running", "running test")
-            genes = METHODS[method](adata, m1, m2, spec.get("parameters"))
-            n1, n2 = full1, full2
-            subsampled = (full1 > int(m1.sum())) or (full2 > int(m2.sum()))
-        else:
-            # Fallback: a source .h5ad (dev datasets that were not cbBuild'd here).
-            import anndata as ad
-            path = datasetAnnDataPath(spec["dataset"], datasets_dir)
-            adata = ad.read_h5ad(path)
+        status("running", "loading expression")
+        adata = cer.readAnnData(cbdir, cellIdx=union)
+        m1 = t1[union]
+        m2 = t2[union]
 
-            status("running", "resolving populations")
-            pop1, pop2 = _resolveBothPops(adata.obs, spec)
-
-            status("running", "running test")
-            genes = METHODS[method](adata, pop1, pop2, spec.get("parameters"))
-            n1, n2 = int(pop1.sum()), int(pop2.sum())
-            m1, m2 = pop1, pop2
-            subsampled = False
+        status("running", "running test")
+        genes = METHODS[method](adata, m1, m2, spec.get("parameters"))
+        n1, n2 = full1, full2
+        subsampled = (full1 > int(m1.sum())) or (full2 > int(m2.sum()))
 
         result = {
             "dataset": spec["dataset"],
@@ -289,7 +261,8 @@ def main():
     ap.add_argument("jobId", nargs="?", help="job id under DE_JOBS_DIR")
     ap.add_argument("--spec", help="path to spec.json (overrides jobId lookup)")
     ap.add_argument("--out", help="output dir (default: the spec's dir)")
-    ap.add_argument("--datasets-dir", default=DATASETS_DIR)
+    ap.add_argument("--cbbuild-dir", default=CBBUILD_DIR,
+                    help="root of cbBuild web output (dataset dirs)")
     args = ap.parse_args()
 
     if args.spec:
@@ -304,7 +277,7 @@ def main():
     with open(specpath) as fh:
         spec = json.load(fh)
     os.makedirs(outdir, exist_ok=True)
-    sys.exit(runJob(spec, outdir, args.datasets_dir))
+    sys.exit(runJob(spec, outdir, args.cbbuild_dir))
 
 
 if __name__ == "__main__":

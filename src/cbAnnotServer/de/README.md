@@ -10,9 +10,10 @@ under the **otto** service account, driven by a filesystem job queue on `/hive`
   pending jobs (`worker.lock`, restart-safe), and runs each in its own subprocess
   so a crash/OOM can't take down the daemon. Handles per-job timeout and
   retention cleanup.
-- `runDeJob.py` — runs one job: reads `spec.json`, loads the dataset's
-  expression, resolves the two populations to cell masks, dispatches to the
-  method, writes `result.json` + `status.json` (atomic).
+- `runDeJob.py` — runs one job: reads `spec.json`, reads the dataset's expression
+  from the cbBuild output (via `cbExprReader`), resolves the two populations to
+  cell masks, dispatches to the method, writes `result.json` + `status.json`
+  (atomic).
 - `cbExprReader.py` — Python port of the cbData.js expression reader. Decodes the
   uniform **cbBuild web output** (`exprMatrix.bin` + `exprMatrix.json` +
   `meta.tsv`) so DE runs on any published dataset — the same files, and the same
@@ -22,26 +23,28 @@ under the **otto** service account, driven by a filesystem job queue on `/hive`
 
 ## Where the expression comes from
 
-`runDeJob.py` prefers the **cbBuild output** and falls back to a source `.h5ad`:
+`runDeJob.py` reads the **cbBuild web output** — the same files the frontend
+serves, so DE runs on any dataset a user can open, with no source `.h5ad`. If
+`DE_CBBUILD_DIR/<dataset>/` has `dataset.json` + `exprMatrix.bin` +
+`exprMatrix.json` + `meta.tsv`, `cbExprReader` decodes it; a dataset missing those
+is a clear job error. `DE_CBBUILD_DIR` defaults to `/usr/local/apache/htdocs-cells`.
 
-1. **cbBuild binary** (preferred) — if `DE_CBBUILD_DIR/<dataset>/` has
-   `dataset.json` + `exprMatrix.bin` + `exprMatrix.json` + `meta.tsv`, read it via
-   `cbExprReader`. Populations are resolved from `meta.tsv` first, then only the
-   `pop1 ∪ pop2` cells are read, into a **sparse** (CSR) matrix — so a 2M-cell
-   matrix is never fully materialized and one-vs-rest stays feasible. Integer
-   matrices (raw counts, `matrixArrType` `Uint32`) are `normalize_total` +
-   `log1p`'d to match the frontend's log-space display; `Float32` matrices
-   (already log-normalized by cbScanpy) are used as-is.
-   `DE_CBBUILD_DIR` defaults to `/usr/local/apache/htdocs-cells`.
+Populations are resolved from `meta.tsv` first, then only the `pop1 ∪ pop2` cells
+are read, into a **sparse** (CSR) matrix — so a 2M-cell matrix is never fully
+materialized and one-vs-rest stays feasible. Integer matrices (raw counts,
+`matrixArrType` `Uint32`) are `normalize_total` + `log1p`'d to match the
+frontend's log-space display; `Float32` matrices (already log-normalized by
+cbScanpy) are used as-is.
 
-   Each group is also deterministically thinned to at most
-   `DE_MAX_CELLS_PER_GROUP` cells (default 50000; per-job override
-   `parameters.max_cells_per_group`, 0 disables) before the matrix is read, so a
-   one-vs-rest on a huge atlas can't blow up memory. The result reports both the
-   selected counts (`n_pop1`/`n_pop2`), the tested counts (`n_tested1`/
-   `n_tested2`), and a `subsampled` flag.
-2. **`.h5ad` fallback** — `DE_DATASETS_DIR/<dataset>/anndata.h5ad` (or a single
-   `*.h5ad`). Used for dev datasets that were not cbBuild'd on this host.
+Each group is also deterministically thinned to at most `DE_MAX_CELLS_PER_GROUP`
+cells (default 50000; per-job override `parameters.max_cells_per_group`, 0
+disables) before the matrix is read, so a one-vs-rest on a huge atlas can't blow
+up memory. The result reports the selected counts (`n_pop1`/`n_pop2`), the tested
+counts (`n_tested1`/`n_tested2`), and a `subsampled` flag.
+
+The reader is validated exact: on a dataset decoded independently from
+`exprMatrix.tsv.gz`, log2FC / p-adj / AUC match to the bit and means to float32
+rounding.
 
 A few old datasets on disk are mis-built (their `exprMatrix.bin` is 8-byte but
 `matrixArrType` says `Uint32`); the reader raises a clear error rather than
@@ -75,8 +78,8 @@ DE_WORKER_PYTHON=/path/to/scanpy-env/bin/python \
 
 Config via env (all optional; see `deWorker.py` header for the full list):
 `DE_JOBS_DIR` (default `/hive/data/inside/cells/deJobs`), `DE_CBBUILD_DIR`,
-`DE_DATASETS_DIR`, `DE_WORKER_PYTHON`, `DE_POLL_SEC`, `DE_JOB_TIMEOUT`,
-`DE_MAX_CELLS_PER_GROUP`, `DE_RETENTION_DAYS`.
+`DE_WORKER_PYTHON`, `DE_POLL_SEC`, `DE_JOB_TIMEOUT`, `DE_MAX_CELLS_PER_GROUP`,
+`DE_RETENTION_DAYS`.
 
 ## Durability (deploy)
 

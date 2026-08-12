@@ -21,7 +21,7 @@ or a stale lock (worker died mid-job).
 
 Config via environment (all optional):
     DE_JOBS_DIR       job queue root         (default /hive/data/inside/cells/deJobs)
-    DE_DATASETS_DIR   dataset AnnData root   (default /hive/data/inside/cells/datasets)
+    DE_CBBUILD_DIR    cbBuild web output root (dataset dirs; runDeJob reads it)
     DE_WORKER_PYTHON  python that has scanpy (default this interpreter)
     DE_POLL_SEC       queue poll interval    (default 2)
     DE_JOB_TIMEOUT    per-job wall-clock cap, seconds (default 600)
@@ -39,7 +39,6 @@ import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JOBS_DIR   = os.environ.get("DE_JOBS_DIR", "/hive/data/inside/cells/deJobs")
-DATASETS   = os.environ.get("DE_DATASETS_DIR", "/hive/data/inside/cells/datasets")
 PYTHON     = os.environ.get("DE_WORKER_PYTHON", sys.executable)
 POLL_SEC   = float(os.environ.get("DE_POLL_SEC", "2"))
 JOB_TIMEOUT= int(os.environ.get("DE_JOB_TIMEOUT", "600"))
@@ -142,7 +141,6 @@ def runJob(jobdir):
     jobId = os.path.basename(jobdir)
     env = dict(os.environ)
     env["DE_JOBS_DIR"] = JOBS_DIR
-    env["DE_DATASETS_DIR"] = DATASETS
     cmd = [PYTHON, os.path.join(HERE, "runDeJob.py"), jobId]
     log("running job %s" % jobId)
     t0 = time.time()
