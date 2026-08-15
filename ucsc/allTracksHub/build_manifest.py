@@ -31,7 +31,7 @@ HTDOCS_REAL = os.path.realpath(HTDOCS)
 # for everything the build produces. Point OUTDIR elsewhere with CBHUB_OUT.
 CONFDIR = os.path.dirname(os.path.abspath(__file__))
 OUTDIR = os.environ.get(
-    "CBHUB_OUT", "/hive/users/mspeir/claude/cell-browser/all-tracks-hub-build")
+    "CBHUB_OUT", "/hive/data/inside/cells/all-tracks-hub-build")
 if not os.path.isdir(OUTDIR):
     os.makedirs(OUTDIR, exist_ok=True)
 BIGWIGINFO = "/cluster/bin/x86_64/bigWigInfo"

@@ -40,7 +40,7 @@ about 5 MB that is regenerated every time: `manifest.tsv`, `discovery.pkl`, `sta
 CBHUB_OUT=/some/work/dir ./update_hub.sh
 ```
 
-The default is `/hive/users/mspeir/claude/cell-browser/all-tracks-hub-build`. `hub_config.json`
+The default is `/hive/data/inside/cells/all-tracks-hub-build`. `hub_config.json`
 is read from *this* directory, since it is tracked input rather than output.
 
 ## Staging vs production

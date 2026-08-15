@@ -35,7 +35,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # same default as build_manifest.OUTDIR; keep the two in step
-OUT="${CBHUB_OUT:-/hive/users/mspeir/claude/cell-browser/all-tracks-hub-build}"
+OUT="${CBHUB_OUT:-/hive/data/inside/cells/all-tracks-hub-build}"
 echo "code:   $(pwd)"
 echo "output: $OUT"
 echo
