@@ -13461,8 +13461,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         sortKey: 'auc', sortDir: -1,
         plotType: 'volcano',    // 'volcano' | 'ma'
         geneFilter: '', side: 'all',
-        history: [],            // in-memory recents (anonymous users)
-        saved: []               // this user's saved comparisons (logged in), from the server
+        history: [],            // in-memory recents (this session)
+        saved: [],              // this user's saved comparisons (logged in), from the server
+        savedOpen: true, recentOpen: false   // collapsible comparison-list sections
     };
 
     // ---- small helpers -------------------------------------------------
@@ -13758,32 +13759,12 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         h.push("<button class='tpDeReset' id='tpDeReset'>Reset</button>");
         h.push("</div>");
 
-        // saved comparisons (signed in) or in-memory recents (anonymous)
-        if (isLoggedIn()){
-            if (gDe.saved.length){
-                h.push("<div class='tpDeRecentLabel'>Saved comparisons</div>");
-                for (var si=0; si<gDe.saved.length; si++){
-                    var sv=gDe.saved[si];
-                    h.push("<div class='tpDeSaved' data-id='"+sv.id+"'>");
-                    h.push("<div class='tpDeSavedMain'>");
-                    h.push("<div class='tpDeRecentTitle'>"+deEsc(sv.label)+"</div>");
-                    h.push("<div class='tpDeRecentSub'>"+deSavedDate(sv.updated_at)+"</div>");
-                    h.push("</div>");
-                    h.push("<span class='tpDeSavedAct tpDeSavedShare' title='Copy a shareable link'>Share</span>");
-                    h.push("<span class='tpDeSavedAct tpDeSavedDel' title='Delete this saved comparison'>&times;</span>");
-                    h.push("</div>");
-                }
-            }
-        } else if (gDe.history.length){
-            h.push("<div class='tpDeRecentLabel'>Recent comparisons</div>");
-            for (var i=0;i<gDe.history.length;i++){
-                var e=gDe.history[i];
-                h.push("<div class='tpDeRecent' data-idx='"+i+"'>");
-                h.push("<div class='tpDeRecentTitle'>"+deEsc(e.title)+"</div>");
-                h.push("<div class='tpDeRecentSub'>"+e.n+" significant genes</div>");
-                h.push("</div>");
-            }
-        }
+        // comparison lists as collapsible sections: Saved (persistent, signed in)
+        // and Recent (this session). Both shown for a signed-in user.
+        if (isLoggedIn() && gDe.saved.length)
+            h.push(deListSection("saved", "Saved comparisons", gDe.savedOpen, deSavedRowsHtml()));
+        if (gDe.history.length)
+            h.push(deListSection("recent", "Recent comparisons", gDe.recentOpen, deRecentRowsHtml()));
 
         body.innerHTML = h.join("");
         deWireBody();
@@ -13853,6 +13834,14 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             if (e.results){ gDe.results=e.results; gDe.selectedGene=null;
                 gDe.geneFilter=''; gDe.side='all'; gDe.sortKey='auc'; gDe.sortDir=-1;
                 deShowResults(); }
+        });
+
+        // collapsible section headers (Saved / Recent)
+        $("#tpDeBody .tpDeListHead").click(function(){
+            var sec=$(this).data("sec");
+            if (sec==="saved") gDe.savedOpen=!gDe.savedOpen;
+            else if (sec==="recent") gDe.recentOpen=!gDe.recentOpen;
+            deRenderBody();
         });
 
         // saved comparisons: open on row click; share / delete on their controls
@@ -14242,8 +14231,24 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             buttons:deButtons,
             close:function(){ deCloseResults(); }
         });
+
+        // The pop-up is non-modal (so the map recolors when you click a gene), so
+        // there is no overlay to catch an outside click. Add one, but keep it open
+        // for clicks on the map (#tpMaxPlot) and the builder/sidebar so those stay
+        // usable. Deferred so the click that opened it doesn't immediately close it.
+        setTimeout(function(){
+            $(document).on("mousedown.tpDeOutside", function(ev){
+                if (!$("#tpDeResults").length) return;
+                var t=$(ev.target);
+                if (t.closest(".ui-dialog").length) return;      // inside a jQuery UI dialog
+                if (t.closest("#tpMaxPlot").length) return;      // the map + its controls
+                if (t.closest("#tpLeftSidebar").length) return;  // the DE builder / sidebar
+                deCloseResults();
+            });
+        }, 0);
     }
     function deCloseResults() {
+        $(document).off("mousedown.tpDeOutside");
         if ($("#tpDeResults").length && $("#tpDeResults").hasClass("ui-dialog-content"))
             $("#tpDeResults").dialog("destroy");
         $("#tpDeResults").remove();
@@ -14269,6 +14274,42 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var d=new Date(iso); if (isNaN(d.getTime())) return "";
         try { return d.toLocaleDateString(undefined, {year:"numeric",month:"short",day:"numeric"}); }
         catch(e){ return String(iso).slice(0,10); }
+    }
+
+    function deListSection(key, title, open, innerHtml){
+        // collapsible header + body, like the "Test settings" section
+        var caret = open ? "▾" : "▸";
+        var h="<div class='tpDeListSec'>";
+        h+="<div class='tpDeListHead' data-sec='"+key+"'><span class='tpDeListCaret'>"+caret+"</span>"+title+"</div>";
+        if (open) h+="<div class='tpDeListBody'>"+innerHtml+"</div>";
+        h+="</div>";
+        return h;
+    }
+
+    function deSavedRowsHtml(){
+        var h="";
+        for (var i=0;i<gDe.saved.length;i++){
+            var sv=gDe.saved[i];
+            h+="<div class='tpDeSaved' data-id='"+sv.id+"'>"
+              +"<div class='tpDeSavedMain'><div class='tpDeRecentTitle'>"+deEsc(sv.label)+"</div>"
+              +"<div class='tpDeRecentSub'>"+deSavedDate(sv.updated_at)+"</div></div>"
+              +"<span class='tpDeSavedAct tpDeSavedShare' title='Copy a shareable link'>Share</span>"
+              +"<span class='tpDeSavedAct tpDeSavedDel' title='Delete this saved comparison'>&times;</span>"
+              +"</div>";
+        }
+        return h;
+    }
+
+    function deRecentRowsHtml(){
+        var h="";
+        for (var i=0;i<gDe.history.length;i++){
+            var e=gDe.history[i];
+            h+="<div class='tpDeRecent' data-idx='"+i+"'>"
+              +"<div class='tpDeRecentTitle'>"+deEsc(e.title)+"</div>"
+              +"<div class='tpDeRecentSub'>"+e.n+" significant genes</div>"
+              +"</div>";
+        }
+        return h;
     }
 
     function deLoadSavedList(){

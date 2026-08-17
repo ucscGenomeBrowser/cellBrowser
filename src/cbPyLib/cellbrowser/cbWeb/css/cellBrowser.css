@@ -930,6 +930,14 @@ th[role=columnheader]:not(.no-sort):hover:after {
 .tpDeRecent .tpDeRecentTitle { font-size:13px; line-height:1.4; }
 .tpDeRecent .tpDeRecentSub { font-size:12px; font-family:monospace; color:var(--tpDeMuted); }
 
+/* collapsible comparison-list sections (Saved / Recent) */
+.tpDeListSec { margin-top:6px; }
+.tpDeListHead { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em;
+  color:var(--tpDeTert); cursor:pointer; user-select:none; padding:2px 0; }
+.tpDeListHead:hover { color:var(--tpDeInk); }
+.tpDeListCaret { display:inline-block; width:12px; color:var(--tpDeMuted); }
+.tpDeListBody { margin-top:4px; }
+
 /* saved comparisons: like a recent row, plus Share / delete controls */
 .tpDeSaved { display:flex; align-items:center; gap:6px; padding:7px 9px; border:1px solid var(--tpDeCardBorder);
   border-radius:5px; background:#fff; margin-bottom:5px; }
