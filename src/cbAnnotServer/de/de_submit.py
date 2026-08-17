@@ -56,7 +56,13 @@ def translateSpec(fe):
         g = fe.get(sideKey)
         if g == "rest":
             return "rest"
-        sel = {"type": "field", "field": field, "values": g.get("values", [])}
+        # A group on a custom-annotation field arrives as explicit cell barcodes
+        # (the field isn't in meta.tsv); a group on a real metadata field arrives
+        # as field+values for the worker to resolve.
+        if g.get("ids") is not None:
+            sel = {"type": "cellIds", "ids": g["ids"]}
+        else:
+            sel = {"type": "field", "field": field, "values": g.get("values", [])}
         if g.get("filter") and g["filter"].get("field"):
             sel["filter"] = {"field": g["filter"]["field"], "value": g["filter"].get("value", "")}
         return sel

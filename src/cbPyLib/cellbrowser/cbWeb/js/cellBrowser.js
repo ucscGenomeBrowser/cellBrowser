@@ -14001,29 +14001,65 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         return aLab+"  vs  "+bLab;
     }
 
+    function deIsCustomField() {
+        return !!(gDe.metaInfo && gDe.metaInfo.isCustom);
+    }
+
+    function deValuesToCellIds(intKeys) {
+        // Custom-annotation fields don't exist in the dataset's meta.tsv, so the
+        // worker can't resolve them by name. Resolve the selected values to the
+        // actual cell barcodes here (mi.arr is the per-cell value vector, the same
+        // one deRecolorPlot uses; db.cellIds are the barcodes, i.e. the meta.tsv
+        // key column). deEnsureCellData guarantees both are loaded before this runs.
+        var arr=gDe.metaInfo.arr, want=new Set(intKeys), ids=db.cellIds, out=[];
+        for (var i=0;i<arr.length;i++)
+            if (want.has(arr[i])) out.push(ids[i]);
+        return out;
+    }
+
     function deBuildSpec() {
+        var custom = deIsCustomField();
+        function grp(list, filtField, filtVal) {
+            var filter = filtField ? {field:filtField, value:filtVal} : null;
+            // real metadata field -> field+values (worker resolves via meta.tsv);
+            // custom field -> explicit barcodes (worker's cellIds selector)
+            return custom ? { ids: deValuesToCellIds(list), filter: filter }
+                          : { values: list.map(deTypeLabel), filter: filter };
+        }
         return {
             dataset: db.name || (db.conf && db.conf.name),
             field: gDe.field,
-            groupA: { values: gDe.a.map(deTypeLabel), filter: gDe.aField ? {field:gDe.aField, value:gDe.aValue} : null },
-            groupB: gDe.bMode==='rest' ? "rest"
-                     : { values: gDe.b.map(deTypeLabel), filter: gDe.bField ? {field:gDe.bField, value:gDe.bValue} : null },
+            groupA: grp(gDe.a, gDe.aField, gDe.aValue),
+            groupB: gDe.bMode==='rest' ? "rest" : grp(gDe.b, gDe.bField, gDe.bValue),
             test: gDe.test, minPct: gDe.minPct, subsample: gDe.subsample,
             lfcCut: gDe.lfcCut, padjCut: gDe.padjCut
         };
     }
 
+    function deEnsureCellData(onReady) {
+        // For a custom field, deBuildSpec needs the field's per-cell vector and the
+        // cell barcodes; load them (once) before building the spec. No-op — and
+        // synchronous — for real metadata fields, which resolve server-side.
+        if (!deIsCustomField()) { onReady(); return; }
+        var mi=gDe.metaInfo;
+        function haveIds(){ if (db.cellIds) onReady(); else db.loadCellIds(null, function(){ onReady(); }); }
+        if (mi.arr) haveIds();
+        else db.loadMetaVec(mi, function(arr){ mi.arr=arr; haveIds(); });
+    }
+
     function deRun() {
         if (deValidate() || gDe.running) return;
-        var spec=deBuildSpec();
-        gDe.running=true; gDe.canceled=false;
-        deRenderBody();       // reflect Running… + disabled button
-        deShowRunning();
-        deSubmitJob(spec,
-            function(p,label){ deUpdateProgress(p,label); },
-            function(result){ if (gDe.canceled) return; gDe.running=false; deHideRunning(); deOnResults(result, spec); deRenderBody(); },
-            function(err){ gDe.running=false; deHideRunning(); deRenderBody(); alert("Differential expression failed: "+err); }
-        );
+        deEnsureCellData(function(){       // custom fields: load barcodes first
+            var spec=deBuildSpec();
+            gDe.running=true; gDe.canceled=false;
+            deRenderBody();       // reflect Running… + disabled button
+            deShowRunning();
+            deSubmitJob(spec,
+                function(p,label){ deUpdateProgress(p,label); },
+                function(result){ if (gDe.canceled) return; gDe.running=false; deHideRunning(); deOnResults(result, spec); deRenderBody(); },
+                function(err){ gDe.running=false; deHideRunning(); deRenderBody(); alert("Differential expression failed: "+err); }
+            );
+        });
     }
 
     function deOnResults(result, spec) {
