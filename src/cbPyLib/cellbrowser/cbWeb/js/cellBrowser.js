@@ -7708,6 +7708,10 @@ var cellbrowser = function() {
             var annotShareToken = getVar("annotShare");
             if (annotShareToken)
                 loadSharedAnnotations(annotShareToken, function(err) { if (err) alert(err); });
+
+            var deShareToken = getVar("deShare");
+            if (deShareToken)
+                deOpenShared(deShareToken);
             else
                 syncCustomFieldsFromServer();
         }
@@ -13457,7 +13461,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         sortKey: 'auc', sortDir: -1,
         plotType: 'volcano',    // 'volcano' | 'ma'
         geneFilter: '', side: 'all',
-        history: []
+        history: [],            // in-memory recents (anonymous users)
+        saved: []               // this user's saved comparisons (logged in), from the server
     };
 
     // ---- small helpers -------------------------------------------------
@@ -13521,6 +13526,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         gDe.field = field;
         gDe.metaInfo = db.findMetaInfo(field);
         gDe.active = true;
+        deLoadSavedList();   // async; re-renders the builder when the list arrives
 
         // Host the builder inside the sidebar Tools tab so the tab bar
         // (Annotation / Genes / Layout / Tools) stays visible and usable.
@@ -13752,13 +13758,28 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         h.push("<button class='tpDeReset' id='tpDeReset'>Reset</button>");
         h.push("</div>");
 
-        // recent comparisons
-        if (gDe.history.length){
+        // saved comparisons (signed in) or in-memory recents (anonymous)
+        if (isLoggedIn()){
+            if (gDe.saved.length){
+                h.push("<div class='tpDeRecentLabel'>Saved comparisons</div>");
+                for (var si=0; si<gDe.saved.length; si++){
+                    var sv=gDe.saved[si];
+                    h.push("<div class='tpDeSaved' data-id='"+sv.id+"'>");
+                    h.push("<div class='tpDeSavedMain'>");
+                    h.push("<div class='tpDeRecentTitle'>"+deEsc(sv.label)+"</div>");
+                    h.push("<div class='tpDeRecentSub'>"+deSavedDate(sv.updated_at)+"</div>");
+                    h.push("</div>");
+                    h.push("<span class='tpDeSavedAct tpDeSavedShare' title='Copy a shareable link'>Share</span>");
+                    h.push("<span class='tpDeSavedAct tpDeSavedDel' title='Delete this saved comparison'>&times;</span>");
+                    h.push("</div>");
+                }
+            }
+        } else if (gDe.history.length){
             h.push("<div class='tpDeRecentLabel'>Recent comparisons</div>");
             for (var i=0;i<gDe.history.length;i++){
                 var e=gDe.history[i];
                 h.push("<div class='tpDeRecent' data-idx='"+i+"'>");
-                h.push("<div class='tpDeRecentTitle'>"+e.title+"</div>");
+                h.push("<div class='tpDeRecentTitle'>"+deEsc(e.title)+"</div>");
                 h.push("<div class='tpDeRecentSub'>"+e.n+" significant genes</div>");
                 h.push("</div>");
             }
@@ -13833,6 +13854,15 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 gDe.geneFilter=''; gDe.side='all'; gDe.sortKey='auc'; gDe.sortDir=-1;
                 deShowResults(); }
         });
+
+        // saved comparisons: open on row click; share / delete on their controls
+        $("#tpDeBody .tpDeSaved .tpDeSavedMain").click(function(){
+            deOpenSaved(parseInt($(this).closest(".tpDeSaved").data("id")));
+        });
+        $("#tpDeBody .tpDeSavedShare").click(function(ev){ ev.stopPropagation();
+            deShareSaved(parseInt($(this).closest(".tpDeSaved").data("id"))); });
+        $("#tpDeBody .tpDeSavedDel").click(function(ev){ ev.stopPropagation();
+            deDeleteSaved(parseInt($(this).closest(".tpDeSaved").data("id"))); });
     }
 
     // ---- group assignment ----------------------------------------------
@@ -14068,7 +14098,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             genes: result.genes, nA: result.nA, nB: result.nB,
             aLabel: deComparisonTitle().split("  vs  ")[0],
             bLabel: (gDe.bMode==='rest') ? "All other cells" : deComparisonTitle().split("  vs  ")[1],
-            lfcCut: spec.lfcCut, padjCut: spec.padjCut, minPct: spec.minPct, test: spec.test
+            lfcCut: spec.lfcCut, padjCut: spec.padjCut, minPct: spec.minPct, test: spec.test,
+            spec: spec           // the recipe, so the pop-up can Save this comparison
         };
         gDe.sortKey='auc'; gDe.sortDir=-1; gDe.geneFilter=''; gDe.side='all'; gDe.selectedGene=null;
 
@@ -14197,11 +14228,18 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var r=deCanvasRect();
         var w=Math.min(1040, Math.max(820, r.width-40));
         var ht=Math.min(640, Math.max(360, r.height-40));
+        // Save sits next to Download CSV in the dialog button bar. Only offered
+        // when signed in (it persists to the account); the whole DE feature is
+        // already behind showDiffExp, so no extra flag check here.
+        var deButtons=[];
+        if (isLoggedIn())
+            deButtons.push({ text:"Save", click: deSaveComparison });
+        deButtons.push({ text:"Download CSV", click: deDownloadCsv });
         $("#tpDeResults").dialog({
             modal:false, closeOnEscape:true, resizable:true, draggable:true,
             width:w, height:ht, title:"Differential expression results",
             position:{ my:"center", at:"center", of: renderer.canvas },
-            buttons:[{ text:"Download CSV", click: deDownloadCsv }],  // in the dialog button bar, like the marker pop-up
+            buttons:deButtons,
             close:function(){ deCloseResults(); }
         });
     }
@@ -14209,6 +14247,135 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         if ($("#tpDeResults").length && $("#tpDeResults").hasClass("ui-dialog-content"))
             $("#tpDeResults").dialog("destroy");
         $("#tpDeResults").remove();
+    }
+
+    // ---- save / load / share saved comparisons -------------------------
+    // Persist a comparison to the logged-in user's account: the two population
+    // selectors + method/params (the recipe, re-run on open) plus a small cached
+    // significant-gene subset (LZString-compressed) for an instant preview. See
+    // the cbAnnotServer /api/de/saved endpoints (de_saved.py).
+
+    function deEsc(s){ return String(s==null?"":s).replace(/[&<>"]/g, function(c){
+        return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
+
+    function deToast(msg){
+        // brief, non-blocking confirmation (the Save button sits in the results
+        // dialog, so the updated list in the builder is out of view)
+        var t=$("<div class='tpDeToast'></div>").text(msg).appendTo("body");
+        setTimeout(function(){ t.fadeOut(400, function(){ t.remove(); }); }, 1400);
+    }
+
+    function deSavedDate(iso){
+        var d=new Date(iso); if (isNaN(d.getTime())) return "";
+        try { return d.toLocaleDateString(undefined, {year:"numeric",month:"short",day:"numeric"}); }
+        catch(e){ return String(iso).slice(0,10); }
+    }
+
+    function deLoadSavedList(){
+        // Pull this user's saved comparisons for the current dataset. No-op when
+        // signed out — the builder shows in-memory recents in that case.
+        if (!isLoggedIn() || !db || !db.name) { gDe.saved=[]; return; }
+        $.ajax({ url:cbApiUrl("/api/de/saved/"+cbDatasetPath(db.name)), dataType:"json",
+                 xhrFields:{withCredentials:true} })
+            .done(function(resp){ gDe.saved=(resp && resp.items) || []; if (gDe.active) deRenderBody(); })
+            .fail(function(){ gDe.saved=[]; });
+    }
+
+    function deSaveComparison(){
+        if (!isLoggedIn()) { showLoginDialog("signin"); return; }
+        var res=gDe.results, spec=res && res.spec;
+        if (!res || !spec) { alert("Nothing to save yet — run a comparison first."); return; }
+        var defLabel=(res.aLabel||"A")+" vs "+(res.bLabel||"B");
+        var label=window.prompt("Save this comparison as:", defLabel);
+        if (label===null) return;              // cancelled
+        label=(label.trim() || defLabel).slice(0,255);
+
+        // cache only the significant genes (what the table shows), compressed
+        var sig=deSignificant(res.genes, res);
+        var cache={ genes:sig, nA:res.nA, nB:res.nB, aLabel:res.aLabel, bLabel:res.bLabel,
+                    lfcCut:res.lfcCut, padjCut:res.padjCut, minPct:res.minPct, test:res.test };
+        var payload={
+            label: label,
+            pop1: spec.groupA, pop2: spec.groupB, method: spec.test,
+            parameters: { field:spec.field, minPct:spec.minPct, subsample:spec.subsample,
+                          lfcCut:spec.lfcCut, padjCut:spec.padjCut },
+            results: LZString.compressToBase64(JSON.stringify(cache))
+        };
+        cbApiPost("/api/de/saved/"+cbDatasetPath(db.name), payload,
+            function(){ deLoadSavedList(); deToast("Comparison saved"); },
+            function(msg){ alert("Could not save comparison: "+msg); });
+    }
+
+    function deSpecFromSaved(it){
+        // Rebuild the builder spec from a stored comparison so it can be re-run.
+        var p=it.parameters||{};
+        return { dataset: db.name||(db.conf&&db.conf.name), field:p.field,
+                 groupA: it.pop1, groupB: it.pop2, test: it.method,
+                 minPct:p.minPct, subsample:p.subsample, lfcCut:p.lfcCut, padjCut:p.padjCut };
+    }
+
+    function deCacheToResults(cache, spec){
+        return { genes:cache.genes, nA:cache.nA, nB:cache.nB,
+                 aLabel:cache.aLabel, bLabel:cache.bLabel,
+                 lfcCut:cache.lfcCut, padjCut:cache.padjCut, minPct:cache.minPct, test:cache.test,
+                 spec:spec, cached:true };
+    }
+
+    function deShowCachedThenRerun(it, allowRerun){
+        var spec=deSpecFromSaved(it), cache=null;
+        try { cache=JSON.parse(LZString.decompressFromBase64(it.results)); } catch(e){}
+        if (cache){
+            gDe.results=deCacheToResults(cache, spec);
+            gDe.selectedGene=null; gDe.geneFilter=''; gDe.side='all'; gDe.sortKey='auc'; gDe.sortDir=-1;
+            deShowResults();
+        }
+        if (!allowRerun) return;
+        // upgrade the cached preview to the full interactive result in the background
+        gDe.canceled=false;
+        deSubmitJob(spec, function(){},
+            function(result){
+                if (!gDe.results) return;
+                gDe.results.genes=result.genes; gDe.results.nA=result.nA; gDe.results.nB=result.nB;
+                gDe.results.cached=false;
+                if ($("#tpDeResults").length) deRenderResults();
+            },
+            function(){ /* backend unavailable: keep the cached preview */ });
+    }
+
+    function deOpenSaved(id){
+        $.ajax({ url:cbApiUrl("/api/de/saved/item/"+id), dataType:"json", xhrFields:{withCredentials:true} })
+            .done(function(resp){ if (resp && resp.item) deShowCachedThenRerun(resp.item, true); })
+            .fail(function(){ alert("Could not open that saved comparison."); });
+    }
+
+    function deShareSaved(id){
+        cbApiPost("/api/de/saved/item/"+id+"/share", {},
+            function(resp){
+                var url=new URL(window.location.href);
+                url.searchParams.set("deShare", resp.token);
+                window.prompt("Shareable link (anyone with it can view this comparison):", url.toString());
+            },
+            function(msg){ alert("Could not create a share link: "+msg); });
+    }
+
+    function deDeleteSaved(id){
+        if (!window.confirm("Delete this saved comparison?")) return;
+        $.ajax({ url:cbApiUrl("/api/de/saved/item/"+id), method:"DELETE", xhrFields:{withCredentials:true} })
+            .done(function(){ deLoadSavedList(); })
+            .fail(function(){ alert("Could not delete that saved comparison."); });
+    }
+
+    function deOpenShared(token){
+        // Public read of a shared comparison (?deShare=<token>). Read-only: shows
+        // the sharer's cached results, no background re-run.
+        if (!cbDeEnabled()) return;
+        $.ajax({ url:cbApiUrl("/api/de/saved/shared/"+encodeURIComponent(token)), dataType:"json",
+                 xhrFields:{withCredentials:true} })
+            .done(function(resp){
+                if (!resp || !resp.item) { alert("Shared comparison not found."); return; }
+                deShowCachedThenRerun(resp.item, false);
+            })
+            .fail(function(){ alert("Could not load the shared comparison."); });
     }
 
     function deRenderResults() {

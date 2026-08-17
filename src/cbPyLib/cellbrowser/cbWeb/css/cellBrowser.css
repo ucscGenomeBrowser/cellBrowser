@@ -930,6 +930,23 @@ th[role=columnheader]:not(.no-sort):hover:after {
 .tpDeRecent .tpDeRecentTitle { font-size:13px; line-height:1.4; }
 .tpDeRecent .tpDeRecentSub { font-size:12px; font-family:monospace; color:var(--tpDeMuted); }
 
+/* saved comparisons: like a recent row, plus Share / delete controls */
+.tpDeSaved { display:flex; align-items:center; gap:6px; padding:7px 9px; border:1px solid var(--tpDeCardBorder);
+  border-radius:5px; background:#fff; margin-bottom:5px; }
+.tpDeSaved:hover { border-color:var(--tpDeAccent); }
+.tpDeSaved .tpDeSavedMain { flex:1 1 auto; min-width:0; cursor:pointer; }
+.tpDeSaved .tpDeRecentTitle { font-size:13px; line-height:1.4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tpDeSaved .tpDeRecentSub { font-size:12px; font-family:monospace; color:var(--tpDeMuted); }
+.tpDeSavedAct { flex:none; cursor:pointer; color:var(--tpDeTert); border-radius:4px; padding:1px 5px; user-select:none; }
+.tpDeSavedShare { font-size:12px; }
+.tpDeSavedDel { font-size:15px; line-height:1; }
+.tpDeSavedAct:hover { color:var(--tpDeAccent); background:#ece9e2; }
+
+/* transient confirmation toast (e.g. after saving a comparison) */
+.tpDeToast { position:fixed; left:50%; bottom:40px; transform:translateX(-50%); z-index:100000;
+  background:rgba(35,38,43,0.92); color:#fff; font-size:13px; padding:8px 16px; border-radius:5px;
+  box-shadow:0 2px 10px rgba(0,0,0,0.25); pointer-events:none; }
+
 /* legend A/B buttons (added while builder open) */
 .tpDeLegBtns { display:inline-flex; gap:3px; margin-left:6px; vertical-align:middle; }
 .tpDeLegBtn { width:19px; height:19px; border-radius:4px; font-size:11px; font-weight:600; line-height:17px;
