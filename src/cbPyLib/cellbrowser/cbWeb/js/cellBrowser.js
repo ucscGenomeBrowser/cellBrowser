@@ -14088,7 +14088,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             aLabel: deComparisonTitle().split("  vs  ")[0],
             bLabel: (gDe.bMode==='rest') ? "All other cells" : deComparisonTitle().split("  vs  ")[1],
             lfcCut: spec.lfcCut, padjCut: spec.padjCut, minPct: spec.minPct, test: spec.test,
-            spec: spec           // the recipe, so the pop-up can Save this comparison
+            filters: result.filters,   // the gene filters the backend actually applied
+            spec: spec                 // the recipe, so the pop-up can Save this comparison
         };
         gDe.sortKey='auc'; gDe.sortDir=-1; gDe.geneFilter=''; gDe.side='all'; gDe.selectedGene=null;
 
@@ -14130,7 +14131,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                     fetch(url+"?jobId="+encodeURIComponent(sub.jobId))
                         .then(function(r){ return r.json(); })
                         .then(function(st){
-                            if (st.status==="done") onDone({genes:st.result.genes, nA:st.result.n_pop1, nB:st.result.n_pop2});
+                            if (st.status==="done") onDone({genes:st.result.genes, nA:st.result.n_pop1, nB:st.result.n_pop2, filters:st.result.filters});
                             else if (st.status==="failed") onErr(st.error||"job failed");
                             else { onProgress(st.progress? st.progress*100 : null, st.stage||"running"); setTimeout(poll, 2000); }
                         }).catch(function(e){ onErr(""+e); });
@@ -14334,7 +14335,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         // cache only the significant genes (what the table shows), compressed
         var sig=deSignificant(res.genes, res);
         var cache={ genes:sig, nA:res.nA, nB:res.nB, aLabel:res.aLabel, bLabel:res.bLabel,
-                    lfcCut:res.lfcCut, padjCut:res.padjCut, minPct:res.minPct, test:res.test };
+                    lfcCut:res.lfcCut, padjCut:res.padjCut, minPct:res.minPct, test:res.test,
+                    filters:res.filters };
         var payload={
             label: label,
             pop1: spec.groupA, pop2: spec.groupB, method: spec.test,
@@ -14359,7 +14361,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         return { genes:cache.genes, nA:cache.nA, nB:cache.nB,
                  aLabel:cache.aLabel, bLabel:cache.bLabel,
                  lfcCut:cache.lfcCut, padjCut:cache.padjCut, minPct:cache.minPct, test:cache.test,
-                 spec:spec, cached:true };
+                 filters:cache.filters, spec:spec, cached:true };
     }
 
     function deShowCachedThenRerun(it, allowRerun){
@@ -14738,12 +14740,35 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
     function deDownloadCsv() {
         var res=gDe.results; if(!res) return;
         var rows=res.genes.slice().sort(function(a,b){return a.pAdj-b.pAdj;});
-        var aName=res.aLabel, bName=res.bLabel;
-        var lines=["gene,log2FC,auc,p_adj,mean_A,mean_B,pct_A,pct_B,group_A,group_B,test"];
+        var aName=res.aLabel, bName=res.bLabel, f=res.filters||{};
+        function q(s){ return '"'+String(s).replace(/"/g,'""')+'"'; }
+        function sig(g){ return (Math.abs(g.log2FC)>=res.lfcCut && g.pAdj<res.padjCut
+                                 && Math.max(g.pctA,g.pctB)>=res.minPct) ? 1 : 0; }
+        var excl=[];
+        if (f.exclude_mito) excl.push("mitochondrial");
+        if (f.exclude_ribo) excl.push("ribosomal");
+        if (f.exclude_hemo) excl.push("hemoglobin");
+        // self-documenting header (commented) so a downloaded file states exactly
+        // what it contains — same gene set the FDR is computed over
+        var lines=[
+            "# UCSC Cell Browser differential expression",
+            "# dataset: "+(db.name||""),
+            "# group A: "+aName+" (n="+deFmt(res.nA)+")",
+            "# group B: "+bName+" (n="+deFmt(res.nB)+")",
+            "# test: Wilcoxon rank-sum",
+            "# gene filters (define the tested set = the FDR denominator = the rows below):",
+            "#   detected in >= "+(f.min_gene_cells!=null?f.min_gene_cells:3)+" cells in a group",
+            "#   detected in >= "+Math.round((f.min_pct!=null?f.min_pct:res.minPct||0)*100)+"% of a group",
+            "#   excluded gene classes: "+(excl.length?excl.join(", "):"none"),
+            "# p_adj: Benjamini-Hochberg FDR over the "+rows.length+" genes below",
+            "# significant column: 1 = |log2FC| >= "+res.lfcCut+" and p_adj < "+res.padjCut
+        ];
+        if (res.cached) lines.push("# note: significant-gene subset of a saved comparison");
+        lines.push("gene,log2FC,auc,p_adj,mean_A,mean_B,pct_A,pct_B,significant,group_A,group_B,test");
         for (var i=0;i<rows.length;i++){
             var g=rows[i];
-            lines.push([g.symbol, g.log2FC, g.auc, g.pAdj, g.meanA, g.meanB, g.pctA, g.pctB,
-                '"'+aName.replace(/"/g,'""')+'"', '"'+bName.replace(/"/g,'""')+'"', res.test].join(","));
+            lines.push([g.symbol, g.log2FC, g.auc, g.pAdj, g.meanA, g.meanB, g.pctA, g.pctB, sig(g),
+                q(aName), q(bName), res.test].join(","));
         }
         var blob=new Blob([lines.join("\n")], {type:"text/csv"});
         var a=document.createElement("a"); a.href=URL.createObjectURL(blob);
