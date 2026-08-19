@@ -42,7 +42,7 @@ import traceback
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from methods import wilcoxon
+import wilcoxon_np
 
 DE_JOBS_DIR = os.environ.get("DE_JOBS_DIR", "/hive/data/inside/cells/deJobs")
 # Root of the cbBuild web output (dataset dirs with exprMatrix.bin + meta.tsv).
@@ -58,7 +58,7 @@ CBBUILD_DIR = os.environ.get(
 MAX_CELLS_PER_GROUP = int(os.environ.get("DE_MAX_CELLS_PER_GROUP", "50000"))
 
 METHODS = {
-    "wilcoxon": wilcoxon.run_wilcoxon,
+    "wilcoxon": wilcoxon_np.run_wilcoxon,   # numpy/scipy kernel (no scanpy)
 }
 
 
@@ -241,6 +241,7 @@ def runJob(spec, outdir, cbbuild_dir=CBBUILD_DIR,
             "n_tested1": int(m1.sum()),   # cells actually tested (after any thinning)
             "n_tested2": int(m2.sum()),
             "subsampled": bool(subsampled),
+            "filters": wilcoxon_np.resolve_filters(spec.get("parameters")),
             "genes": genes,
         }
         tmp = os.path.join(outdir, "result.json.tmp")

@@ -71,9 +71,15 @@ def translateSpec(fe):
     method = _TEST_TO_METHOD.get(test, test)  # unimplemented tests -> worker errors clearly
 
     parameters = {"min_cells": 25}   # matches the builder's 25-cell floor
+    # Detection floor: minPct is a PRE-test filter (defines the tested universe, so
+    # the FDR/downloaded set match what the table shows). lfcCut/padjCut stay
+    # client-side significance thresholds — filtering genes by their p-value before
+    # BH would bias the correction, so those are deliberately NOT sent.
+    if fe.get("minPct") is not None:
+        parameters["min_pct"] = float(fe["minPct"])
     # Gene-category prefilters (scanpy's mt / ribo / hb trio). Only forwarded when
-    # the builder sends them, so the kernel's defaults apply otherwise (mito on,
-    # ribo/hemo off). See methods/wilcoxon.py _GENE_CATEGORIES.
+    # the builder sends them, so the kernel's defaults apply otherwise (all on).
+    # See wilcoxon_np.py _GENE_CATEGORIES.
     for feKey, paramKey in (("excludeMito", "exclude_mito"),
                             ("excludeRibo", "exclude_ribo"),
                             ("excludeHemo", "exclude_hemo")):
@@ -127,6 +133,7 @@ def _statusDirect(queue, jobId):
             "genes": res.get("genes", []),
             "n_pop1": res.get("n_pop1"),
             "n_pop2": res.get("n_pop2"),
+            "filters": res.get("filters"),
         }
     return out
 

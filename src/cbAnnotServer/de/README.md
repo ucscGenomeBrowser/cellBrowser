@@ -18,8 +18,23 @@ under the **otto** service account, driven by a filesystem job queue on `/hive`
   uniform **cbBuild web output** (`exprMatrix.bin` + `exprMatrix.json` +
   `meta.tsv`) so DE runs on any published dataset — the same files, and the same
   numbers, the frontend serves — with no source `.h5ad` required.
-- `methods/wilcoxon.py` — Phase 1 kernel: Scanpy Wilcoxon rank-sum, CPU.
-  (`memento.py` / `rapids.py` come in later phases.)
+- `wilcoxon_np.py` — the compute kernel: Wilcoxon rank-sum DE in numpy + scipy
+  only (no scanpy/AnnData). Verified bit-identical to scanpy's
+  `rank_genes_groups(method="wilcoxon")` on Float32 and Uint32 datasets, and ~10×
+  faster. Also computes the AUC effect size, per-group means and % expressing, and
+  applies the gene filters (see below). `methods/wilcoxon.py` is the original
+  scanpy implementation, kept as the validation oracle but no longer used at
+  runtime. (`memento.py` / `rapids.py` come in later phases.)
+
+  **Gene filtering** happens in the kernel, before the test, so the
+  Benjamini-Hochberg FDR is computed over exactly the reported (and downloaded)
+  gene set. Two detection floors define that set: `min_gene_cells` (default 3,
+  detected in ≥N cells in at least one group) and `min_pct` (the builder's minPct,
+  detected in ≥X% of at least one group). Category exclusions — mitochondrial,
+  ribosomal, hemoglobin — are all on by default. `lfcCut`/`padjCut` are NOT
+  applied here: filtering genes by their p-value before BH would bias the FDR, so
+  those stay client-side significance thresholds. The result carries a `filters`
+  summary so the downloaded CSV is self-documenting.
 
 ## Where the expression comes from
 
