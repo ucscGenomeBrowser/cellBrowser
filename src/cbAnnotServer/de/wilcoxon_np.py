@@ -94,10 +94,11 @@ def _finite(x):
     return None if (np.isnan(x) or np.isinf(x)) else x
 
 
-def wilcoxon_np(X, a_mask, b_mask, var_names, params=None):
+def wilcoxon_np(X, a_mask, b_mask, var_names, params=None, progress=None):
     """Two-group Wilcoxon DE of A vs B, numpy/scipy only. Returns a list of dicts
     (schema: symbol, log2FC, pValue, pAdj, auc, meanA, meanB, pctA, pctB), sorted
-    by ascending adjusted p."""
+    by ascending adjusted p. `progress(frac, done, total)` is called during the
+    rank loop, if given (the slow step on a large comparison)."""
     params = params or {}
     min_cells = int(params.get("min_cells", 10))          # floor per GROUP
     min_gene_cells = int(params.get("min_gene_cells", 3))  # low-expression gene filter
@@ -145,13 +146,17 @@ def wilcoxon_np(X, a_mask, b_mask, var_names, params=None):
     if sp.issparse(Xsub):
         Xsub = Xsub.tocsc()                                # cheap column slicing
     R1 = np.empty(kcols.size, dtype=float)
+    total = kcols.size
     step = max(1, 2_000_000 // max(N, 1))
-    for lo in range(0, kcols.size, step):
+    for lo in range(0, total, step):
         cols = kcols[lo:lo + step]
         block = Xsub[:, cols]
         block = block.toarray() if sp.issparse(block) else np.asarray(block)
         ranks = rankdata(block, axis=0)                    # average ties, per gene
         R1[lo:lo + step] = ranks[:n1].sum(axis=0)
+        if progress is not None:
+            done = min(lo + step, total)
+            progress(done / total, done, total)
 
     std = np.sqrt(n1 * n2 * (N + 1) / 12.0)
     z = (R1 - n1 * (N + 1) / 2.0) / std

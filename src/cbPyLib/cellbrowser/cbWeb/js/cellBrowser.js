@@ -13510,6 +13510,17 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         return out;
     }
 
+    function deSetField(field){
+        // switch the field DE compares on: clear the (field-specific) groups and
+        // filters, recolor the map by the new field so its legend drives A/B
+        if (!field || field===gDe.field) return;
+        gDe.field = field;
+        gDe.metaInfo = db.findMetaInfo(field);
+        gDe.a=[]; gDe.b=[]; gDe.target='A'; gDe.bMode='rest';
+        gDe.aField=''; gDe.aValue=''; gDe.bField=''; gDe.bValue='';
+        colorByMetaField(field, function(){ renderer.drawDots(); deRenderBody(); deRecolorPlot(); });
+    }
+
     // ---- open / close --------------------------------------------------
 
     function deOpen() {
@@ -13681,6 +13692,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         h.push("<select class='tpDeFilterField'><option value=''>No filter</option>");
         for (var j=0;j<fields.length;j++){
             var fn=fields[j].name;
+            if (fn===gDe.field) continue;   // no point filtering by the field being compared
             h.push("<option value='"+fn+"'"+(fn===fSel?" selected":"")+">"+(fields[j].label||fn)+"</option>");
         }
         h.push("</select>");
@@ -13713,6 +13725,20 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var body = document.getElementById("tpDeBody");
         if (!body) return;
         var h=[];
+        // which metadata field to compare on — any enum field, including custom
+        // annotations. Switching it recolors the map so its values become the
+        // legend you assign A/B from.
+        var efields = deMetaEnumFields();
+        if (efields.length){
+            h.push("<div class='tpDeFieldRow'>");
+            h.push("<span class='tpDeFieldLabel'>Compare by</span>");
+            h.push("<select class='tpDeField' id='tpDeField'>");
+            for (var ei=0; ei<efields.length; ei++){
+                var ef=efields[ei];
+                h.push("<option value='"+deEsc(ef.name)+"'"+(ef.name===gDe.field?" selected":"")+">"+deEsc(ef.label||ef.name)+"</option>");
+            }
+            h.push("</select></div>");
+        }
         // which group legend clicks go to (clear indication + control)
         h.push("<div class='tpDeTargetRow'>");
         h.push("<span class='tpDeTargetLabel'>Add cell types to:</span>");
@@ -13774,6 +13800,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
     function deOpt(val,label,cur){ return "<option value='"+val+"'"+(val===cur?" selected":"")+">"+label+"</option>"; }
 
     function deWireBody() {
+        $("#tpDeField").change(function(){ deSetField($(this).val()); });
         $("#tpDeSettingsHead").click(function(){ gDe.paramsOpen=!gDe.paramsOpen; deRenderBody(); });
         $("#tpDeRun").click(deRun);
         $("#tpDeReset").click(deReset);
@@ -14134,7 +14161,12 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                         .then(function(st){
                             if (st.status==="done") { gDe.jobId=null; onDone({genes:st.result.genes, nA:st.result.n_pop1, nB:st.result.n_pop2, filters:st.result.filters}); }
                             else if (st.status==="failed" || st.status==="canceled") { gDe.jobId=null; onErr(st.error||st.status); }
-                            else { onProgress(st.progress? st.progress*100 : null, st.stage||"running"); setTimeout(poll, 2000); }
+                            else {
+                                var label = st.stage || "running";
+                                if (st.step && st.nSteps) label = "Step "+st.step+" of "+st.nSteps+": "+label;
+                                onProgress(st.progress!=null ? st.progress*100 : null, label);
+                                setTimeout(poll, 2000);
+                            }
                         }).catch(function(e){ onErr(""+e); });
                 };
                 poll();

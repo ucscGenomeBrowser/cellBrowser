@@ -195,12 +195,14 @@ def runJob(spec, outdir, cbbuild_dir=CBBUILD_DIR,
            max_cells=MAX_CELLS_PER_GROUP):
     t0 = time.time()
 
-    def status(state, stage=None, error=None):
-        writeStatus(outdir, state=state, stage=stage,
-                    elapsed=round(time.time() - t0, 2), error=error)
+    NSTEPS = 4
+
+    def status(state, stage=None, step=None, progress=None, error=None):
+        writeStatus(outdir, state=state, stage=stage, step=step, nSteps=NSTEPS,
+                    progress=progress, elapsed=round(time.time() - t0, 2), error=error)
 
     try:
-        status("running", "loading data")
+        status("running", "Loading metadata", 1)
         method = spec.get("method", "wilcoxon")
         if method not in METHODS:
             raise ValueError("unknown method %r" % method)
@@ -222,7 +224,7 @@ def runJob(spec, outdir, cbbuild_dir=CBBUILD_DIR,
         finally:
             reader.close()
 
-        status("running", "resolving populations")
+        status("running", "Resolving populations", 2)
         pop1, pop2 = _resolveBothPops(obs, spec)
         # Thin each group before reading so the union we read stays bounded.
         cap = int((spec.get("parameters") or {}).get(
@@ -231,13 +233,25 @@ def runJob(spec, outdir, cbbuild_dir=CBBUILD_DIR,
         t2, full2 = _thinMask(pop2, cap)
         union = np.flatnonzero(t1 | t2)
 
-        status("running", "loading expression")
+        status("running", "Loading expression", 3)
         X, var_names = cer.readExpr(cbdir, cellIdx=union)
         m1 = t1[union]
         m2 = t2[union]
 
-        status("running", "running test")
-        genes = METHODS[method](X, m1, m2, var_names, spec.get("parameters"))
+        status("running", "Testing genes", 4, progress=0.0)
+        # throttled progress writer for the (potentially slow) rank loop
+        last = [0.0]
+
+        def onGeneProgress(frac, done, total):
+            now = time.time()
+            if frac < 1.0 and now - last[0] < 0.7:
+                return
+            last[0] = now
+            status("running", "Testing genes (%s of %s)" % (
+                format(done, ","), format(total, ",")), 4, progress=frac)
+
+        genes = METHODS[method](X, m1, m2, var_names, spec.get("parameters"),
+                                progress=onGeneProgress)
         n1, n2 = full1, full2
         subsampled = (full1 > int(m1.sum())) or (full2 > int(m2.sum()))
 

@@ -879,6 +879,11 @@ th[role=columnheader]:not(.no-sort):hover:after {
 /* which group legend clicks are assigned to */
 .tpDeTargetRow { display:flex; align-items:center; gap:8px; }
 .tpDeTargetRow .tpDeTargetLabel { font-size:13px; color:var(--tpDeMuted); white-space:nowrap; }
+/* "Compare by" field selector at the top of the builder */
+.tpDeFieldRow { display:flex; align-items:center; gap:8px; margin-bottom:2px; }
+.tpDeFieldRow .tpDeFieldLabel { font-size:13px; color:var(--tpDeMuted); white-space:nowrap; }
+.tpDeFieldRow .tpDeField { flex:1 1 0; min-width:0; font-size:13px; padding:4px 5px;
+  border:1px solid var(--tpDeCardBorder); border-radius:5px; background:#fff; }
 .tpDeCard.tpDeActive { border-color:var(--tpDeAccent); box-shadow:0 0 0 1px var(--tpDeAccent); }
 
 .tpDeCard { background:var(--tpDeCard); border:1px solid var(--tpDeCardBorder); border-radius:7px; padding:11px 11px 12px; }

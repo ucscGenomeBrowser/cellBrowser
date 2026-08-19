@@ -124,6 +124,9 @@ def _statusDirect(queue, jobId):
         "jobId": jobId,
         "status": st.get("state", "running"),
         "stage": st.get("stage"),
+        "step": st.get("step"),
+        "nSteps": st.get("nSteps"),
+        "progress": st.get("progress"),
         "elapsed": st.get("elapsed"),
         "error": st.get("error"),
     }
