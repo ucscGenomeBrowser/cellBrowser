@@ -13986,18 +13986,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         el.innerHTML = "Click a cell type &rarr; <b style='color:#"+col+"'>Group "+gDe.target+"</b>";
     }
 
-    function deExitGeneColoring() {
-        // A clicked result gene recolors the map by its expression, which replaces
-        // the metadata legend used for A/B assignment. Undo that — back to the
-        // grouping field (+ A/B marks) — so building the next comparison doesn't
-        // require re-picking the field from the Annotation tab / dropdown.
-        if (!gDe.active || !gDe.field || !gDe.selectedGene) return;
-        gDe.selectedGene = null;
-        colorByMetaField(gDe.field, function(){ renderer.drawDots(); deRecolorPlot(); });
-    }
-
     function deSetTarget(grp) {
-        deExitGeneColoring();   // clicking a group to assign returns to the field legend
         if (grp==='B' && gDe.bMode==='rest') gDe.bMode='pick'; // can't add to "all other cells"
         gDe.target = grp;
         deUpdateLegendHint();
@@ -14020,7 +14009,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     function deRecolorPlot() {
         if (!gDe.active) return;
-        if (gDe.selectedGene) return; // gene coloring takes precedence
         var mi=gDe.metaInfo;
         var hasA=gDe.a.length>0;
         var hasB=(gDe.bMode==='rest') ? hasA : gDe.b.length>0;
@@ -14332,9 +14320,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         if ($("#tpDeResults").length && $("#tpDeResults").hasClass("ui-dialog-content"))
             $("#tpDeResults").dialog("destroy");
         $("#tpDeResults").remove();
-        // returning to the builder: if a clicked gene had recolored the map, put
-        // the grouping legend back so the next comparison is ready to build
-        deExitGeneColoring();
     }
 
     // ---- save / load / share saved comparisons -------------------------
@@ -14887,29 +14872,23 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     function deSelectGene(sym) {
         if (!sym) return;
-        // clicking the already-selected gene toggles it off, back to group coloring
+        // clicking the already-selected gene toggles the highlight off
         if (sym===gDe.selectedGene) { deClearGene(); return; }
         gDe.selectedGene=sym;
         $("#tpDeTbody tr").removeClass("tpDeRowSel");
         $("#tpDeTbody tr[data-sym='"+sym+"']").addClass("tpDeRowSel");
-        deRenderPlot(); // re-render to highlight the point
-        deRenderViolin(sym); // show the gene's A-vs-B distribution
-        // reuse the existing gene-search coloring path; the legend shows the
-        // gene's expression bins/colors, so no separate on-plot badge is needed
-        var geneId=sym;
-        if (db.geneSyns){ var ids=db.findGenesExact(sym); if (ids && ids.length) geneId=ids[0]; }
-        colorByLocus(geneId, function(){ renderer.drawDots(); }, sym);
+        deRenderPlot();       // highlight the point in the volcano/MA
+        deRenderViolin(sym);  // show the gene's A-vs-B distribution in the pop-up
+        // We deliberately do NOT recolor the map by the gene: the results pop-up
+        // covers the canvas (so nobody sees it) and it would replace the grouping
+        // legend needed to build the next comparison. The violin is the per-gene view.
     }
 
     function deClearGene(silent) {
-        var had=gDe.selectedGene;
         gDe.selectedGene=null;
         if (silent) return;
         $("#tpDeTbody tr").removeClass("tpDeRowSel");
         if (gDe.active && gDe.results) { deRenderPlot(); deRenderViolin(null); }
-        // return to group coloring
-        if (gDe.active && had && gDe.field)
-            colorByMetaField(gDe.field, function(){ deRecolorPlot(); });
     }
 
     // only export these functions
