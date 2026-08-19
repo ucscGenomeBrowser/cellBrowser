@@ -13771,9 +13771,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         h.push("<div class='tpDeSettingsHead' id='tpDeSettingsHead'><b>Test settings</b><span class='tpDeSummary'>"+sum+"</span></div>");
         if (gDe.paramsOpen) {
             h.push("<div class='tpDeSettingsBody'>");
+            // Wilcoxon rank-sum is the only implemented test (see de/wilcoxon_np.py
+            // and runDeJob METHODS); don't offer tests that would fail on submit.
             h.push(deSetRow("Test","<select id='tpDeTest'>"+
-                deOpt("wilcox","Wilcoxon rank-sum",gDe.test)+deOpt("ttest","Student's t-test",gDe.test)+
-                deOpt("logreg","Logistic regression",gDe.test)+deOpt("binom","Binomial",gDe.test)+"</select>"));
+                deOpt("wilcox","Wilcoxon rank-sum",gDe.test)+"</select>"));
             h.push(deSetRow("Min. log₂ fold change","<input id='tpDeLfc' type='number' step='0.1' value='"+gDe.lfcCut+"'>"));
             h.push(deSetRow("Adjusted p cutoff","<input id='tpDePadj' type='number' step='0.01' value='"+gDe.padjCut+"'>"));
             h.push(deSetRow("Min. fraction expressing","<input id='tpDeMinPct' type='number' step='0.05' value='"+gDe.minPct+"'>"));
