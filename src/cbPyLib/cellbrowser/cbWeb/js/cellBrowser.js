@@ -14218,13 +14218,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var r=deCanvasRect();
         var w=Math.min(1040, Math.max(820, r.width-40));
         var ht=Math.min(640, Math.max(360, r.height-40));
-        // Save sits next to Download CSV in the dialog button bar. Only offered
-        // when signed in (it persists to the account); the whole DE feature is
-        // already behind showDiffExp, so no extra flag check here.
-        var deButtons=[];
-        if (isLoggedIn())
-            deButtons.push({ text:"Save", click: deSaveComparison });
-        deButtons.push({ text:"Download CSV", click: deDownloadCsv });
+        // Save to account sits next to Download CSV. Shown to everyone so the
+        // feature is discoverable, but greyed out when signed out — clicking it
+        // then opens the sign-in dialog (deSaveComparison), and the tooltip says so.
+        var deButtons=[{ text:"Save to account", click: deSaveComparison },
+                       { text:"Download CSV", click: deDownloadCsv }];
         $("#tpDeResults").dialog({
             modal:false, closeOnEscape:true, resizable:true, draggable:true,
             width:w, height:ht, title:"Differential expression results",
@@ -14232,6 +14230,12 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             buttons:deButtons,
             close:function(){ deCloseResults(); }
         });
+        if (!isLoggedIn()) {
+            $("#tpDeResults").closest(".ui-dialog").find(".ui-dialog-buttonpane button")
+                .filter(function(){ return $(this).text()==="Save to account"; })
+                .addClass("tpDeBtnDisabled")
+                .attr("title", "Sign in to save comparisons to your account");
+        }
 
         // The pop-up is non-modal (so the map recolors when you click a gene), so
         // there is no overlay to catch an outside click. Add one, but keep it open

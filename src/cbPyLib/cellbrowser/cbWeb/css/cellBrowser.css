@@ -950,6 +950,10 @@ th[role=columnheader]:not(.no-sort):hover:after {
 .tpDeSavedDel { font-size:15px; line-height:1; }
 .tpDeSavedAct:hover { color:var(--tpDeAccent); background:#ece9e2; }
 
+/* "Save to account" shown greyed when signed out (still clickable -> opens sign-in) */
+.ui-dialog-buttonpane button.tpDeBtnDisabled { opacity:0.5; }
+.ui-dialog-buttonpane button.tpDeBtnDisabled:hover { opacity:0.65; }
+
 /* transient confirmation toast (e.g. after saving a comparison) */
 .tpDeToast { position:fixed; left:50%; bottom:40px; transform:translateX(-50%); z-index:100000;
   background:rgba(35,38,43,0.92); color:#fff; font-size:13px; padding:8px 16px; border-radius:5px;
