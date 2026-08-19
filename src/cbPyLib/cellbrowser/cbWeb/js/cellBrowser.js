@@ -13450,7 +13450,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         field: null,            // metaInfo.name of the cell-type field driving groups
         metaInfo: null,
         a: [], b: [],           // arrays of value-indices (intKeys) per group
-        target: 'A',            // which group a legend click assigns to ('A'|'B')
+        valFilter: '',          // text filter for the in-builder value list
+        target: 'A',            // which group a value click assigns to ('A'|'B')
         bMode: 'rest',          // 'rest' | 'pick'; default one-vs-rest
         aField: '', aValues: [], bField: '', bValues: [],   // per-group cross-field filter (multi-value)
         test: 'wilcox', lfcCut: 1, padjCut: 0.05, minPct: 0.1, subsample: 5000,
@@ -13516,7 +13517,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         if (!field || field===gDe.field) return;
         gDe.field = field;
         gDe.metaInfo = db.findMetaInfo(field);
-        gDe.a=[]; gDe.b=[]; gDe.target='A'; gDe.bMode='rest';
+        gDe.a=[]; gDe.b=[]; gDe.target='A'; gDe.bMode='rest'; gDe.valFilter='';
         gDe.aField=''; gDe.aValues=[]; gDe.bField=''; gDe.bValues=[];
         colorByMetaField(field, function(){ renderer.drawDots(); deRenderBody(); deRecolorPlot(); });
     }
@@ -13756,6 +13757,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         h.push("<button type='button' data-grp='A' class='btn btn-default"+(gDe.target==='A'?' active':'')+"'>Group A</button>");
         h.push("<button type='button' data-grp='B' class='btn btn-default"+(gDe.target==='B'?' active':'')+"'>Group B</button>");
         h.push("</div></div>");
+        // clickable list of the field's values, right here next to the A/B toggle
+        // (so assignment doesn't require the far-right legend)
+        h.push(deValueListHtml());
         // Group A card
         h.push(deGroupCardHtml("A"));
         // swap
@@ -13812,6 +13816,14 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     function deWireBody() {
         $("#tpDeField").change(function(){ deSetField($(this).val()); });
+        // value list: filter narrows it (re-render only the list, keep input focus);
+        // clicking a value assigns it to the active group
+        $("#tpDeValFilter").on("input", function(){
+            gDe.valFilter = this.value;
+            $("#tpDeValList").html(deValueRowsHtml());
+            deWireValueRows();
+        });
+        deWireValueRows();
         $("#tpDeSettingsHead").click(function(){ gDe.paramsOpen=!gDe.paramsOpen; deRenderBody(); });
         $("#tpDeRun").click(deRun);
         $("#tpDeReset").click(deReset);
@@ -13984,6 +13996,58 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         if (!el) return;
         var col = gDe.target==='A' ? DE_A_COL : DE_B_COL;
         el.innerHTML = "Click a cell type &rarr; <b style='color:#"+col+"'>Group "+gDe.target+"</b>";
+    }
+
+    function deValueRowsHtml() {
+        // rows only (so the filter input can re-render the list without losing focus).
+        // Sorted by cell count so the biggest/most-relevant values are on top — the
+        // key to staying usable on fields with many values (e.g. "Sub Cell Type").
+        var mi = gDe.metaInfo;
+        if (!mi || !mi.valCounts) return "";
+        var aset = new Set(gDe.a), bset = new Set(gDe.b);
+        var rows = [];
+        for (var k=0; k<mi.valCounts.length; k++)
+            rows.push({ key:k, label:deTypeLabel(k), count:deTypeCount(k) });
+        rows.sort(function(x,y){ return y.count - x.count; });
+        var filt = (gDe.valFilter||"").toLowerCase();
+        var h = [], shown = 0;
+        for (var i=0;i<rows.length;i++){
+            var r=rows[i];
+            if (filt && r.label.toLowerCase().indexOf(filt)===-1) continue;
+            var inA=aset.has(r.key), inB=bset.has(r.key);
+            var tint = inA ? deTint(DE_A_COL,0.85) : (inB ? deTint(DE_B_COL,0.85) : "");
+            h.push("<div class='tpDeValRow"+((inA||inB)?" tpDeValOn":"")+"' data-key='"+r.key+"'"+
+                   (tint?" style='background:"+tint+"'":"")+">");
+            h.push("<span class='tpDeValDot' style='background:#"+deTypeColor(r.key)+"'></span>");
+            h.push("<span class='tpDeValLbl' title='"+deEsc(r.label)+"'>"+deEsc(r.label)+"</span>");
+            h.push("<span class='tpDeValN'>"+r.count.toLocaleString()+"</span>");
+            if (inA)      h.push("<span class='tpDeValBadge' style='background:#"+DE_A_COL+"'>A</span>");
+            else if (inB) h.push("<span class='tpDeValBadge' style='background:#"+DE_B_COL+"'>B</span>");
+            else          h.push("<span class='tpDeValBadge tpDeValBadgeEmpty'></span>");
+            h.push("</div>");
+            shown++;
+        }
+        if (shown===0) h.push("<div class='tpDeValEmpty'>No matches</div>");
+        return h.join("");
+    }
+
+    function deValueListHtml() {
+        var mi = gDe.metaInfo;
+        if (!mi || !mi.valCounts || !mi.valCounts.length) return "";
+        return "<div class='tpDeValHead'>"+
+               "<input class='tpDeValFilter' id='tpDeValFilter' placeholder='Filter "+
+                    deEsc(mi.label||mi.name)+"…' value='"+deEsc(gDe.valFilter||"")+"'>"+
+               "<span class='tpDeValTot'>"+mi.valCounts.length+"</span>"+
+               "</div>"+
+               "<div class='tpDeValList' id='tpDeValList'>"+deValueRowsHtml()+"</div>";
+    }
+
+    function deWireValueRows() {
+        $("#tpDeBody .tpDeValRow").click(function(){
+            var st = $("#tpDeValList").scrollTop();       // keep the scroll position
+            deToggleType(parseInt($(this).data("key")), gDe.target);
+            $("#tpDeValList").scrollTop(st);
+        });
     }
 
     function deSetTarget(grp) {

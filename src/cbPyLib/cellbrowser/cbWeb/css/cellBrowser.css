@@ -884,6 +884,25 @@ th[role=columnheader]:not(.no-sort):hover:after {
 .tpDeFieldRow .tpDeFieldLabel { font-size:13px; color:var(--tpDeMuted); white-space:nowrap; }
 .tpDeFieldRow .tpDeField { flex:1 1 0; min-width:0; font-size:13px; padding:4px 5px;
   border:1px solid var(--tpDeCardBorder); border-radius:5px; background:#fff; }
+/* in-builder clickable value list (assign to A/B without the far-right legend) */
+.tpDeValHead { display:flex; align-items:center; gap:6px; margin-top:7px; }
+.tpDeValFilter { flex:1 1 0; min-width:0; font-size:13px; padding:4px 6px;
+  border:1px solid var(--tpDeCardBorder); border-radius:5px; }
+.tpDeValTot { font-size:12px; font-family:monospace; color:var(--tpDeTert); }
+.tpDeValList { max-height:220px; overflow-y:auto; margin-top:5px; background:#fff;
+  border:1px solid var(--tpDeCardBorder); border-radius:5px; }
+.tpDeValRow { display:flex; align-items:center; gap:7px; padding:4px 8px; cursor:pointer;
+  font-size:13px; border-bottom:1px solid #f1eee7; }
+.tpDeValRow:last-child { border-bottom:none; }
+.tpDeValRow:hover { background:#f5f2ec; }
+.tpDeValRow.tpDeValOn:hover { filter:brightness(0.97); }
+.tpDeValDot { width:10px; height:10px; border-radius:50%; flex:none; }
+.tpDeValLbl { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tpDeValN { font-size:11px; font-family:monospace; color:var(--tpDeMuted); }
+.tpDeValBadge { flex:none; width:15px; height:15px; line-height:15px; text-align:center;
+  font-size:11px; font-weight:600; color:#fff; border-radius:3px; }
+.tpDeValBadge.tpDeValBadgeEmpty { background:transparent; }
+.tpDeValEmpty { padding:8px; font-size:12px; color:var(--tpDeTert); text-align:center; }
 .tpDeCard.tpDeActive { border-color:var(--tpDeAccent); box-shadow:0 0 0 1px var(--tpDeAccent); }
 
 .tpDeCard { background:var(--tpDeCard); border:1px solid var(--tpDeCardBorder); border-radius:7px; padding:11px 11px 12px; }
