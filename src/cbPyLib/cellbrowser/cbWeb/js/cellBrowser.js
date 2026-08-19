@@ -13452,7 +13452,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         a: [], b: [],           // arrays of value-indices (intKeys) per group
         target: 'A',            // which group a legend click assigns to ('A'|'B')
         bMode: 'rest',          // 'rest' | 'pick'; default one-vs-rest
-        aField: '', aValue: '', bField: '', bValue: '',
+        aField: '', aValues: [], bField: '', bValues: [],   // per-group cross-field filter (multi-value)
         test: 'wilcox', lfcCut: 1, padjCut: 0.05, minPct: 0.1, subsample: 5000,
         paramsOpen: false,
         running: false, canceled: false, jobId: null,
@@ -13517,7 +13517,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         gDe.field = field;
         gDe.metaInfo = db.findMetaInfo(field);
         gDe.a=[]; gDe.b=[]; gDe.target='A'; gDe.bMode='rest';
-        gDe.aField=''; gDe.aValue=''; gDe.bField=''; gDe.bValue='';
+        gDe.aField=''; gDe.aValues=[]; gDe.bField=''; gDe.bValues=[];
         colorByMetaField(field, function(){ renderer.drawDots(); deRenderBody(); deRecolorPlot(); });
     }
 
@@ -13600,7 +13600,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         deHideRunning();
         gDe.field=null; gDe.metaInfo=null;
         gDe.a=[]; gDe.b=[]; gDe.target='A'; gDe.bMode='rest';
-        gDe.aField=''; gDe.aValue=''; gDe.bField=''; gDe.bValue='';
+        gDe.aField=''; gDe.aValues=[]; gDe.bField=''; gDe.bValues=[];
         gDe.results=null; gDe.selectedGene=null; gDe.history=[];
         gDe.sortKey='auc'; gDe.sortDir=-1; gDe.geneFilter=''; gDe.side='all';
         gDe.running=false; gDe.canceled=false; gDe.paramsOpen=false;
@@ -13687,27 +13687,37 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         // filter row (secondary cross-field capability)
         var fields = deMetaEnumFields();
         var fSel = isA ? gDe.aField : gDe.bField;
-        var vSel = isA ? gDe.aValue : gDe.bValue;
+        var vSel = isA ? gDe.aValues : gDe.bValues;   // selected filter values (array)
         h.push("<div class='tpDeFilterRow' data-grp='"+which+"'>");
         h.push("<select class='tpDeFilterField'><option value=''>No filter</option>");
         for (var j=0;j<fields.length;j++){
             var fn=fields[j].name;
             if (fn===gDe.field) continue;   // no point filtering by the field being compared
-            h.push("<option value='"+fn+"'"+(fn===fSel?" selected":"")+">"+(fields[j].label||fn)+"</option>");
+            h.push("<option value='"+deEsc(fn)+"'"+(fn===fSel?" selected":"")+">"+deEsc(fields[j].label||fn)+"</option>");
         }
         h.push("</select>");
         h.push("<select class='tpDeFilterValue'>");
         if (fSel){
             var fi=db.findMetaInfo(fSel);
-            h.push("<option value=''>All "+(fi.label||fSel)+"</option>");
+            h.push("<option value=''>Add value&hellip;</option>");
             var vc=fi.valCounts||[];
-            for (var v=0;v<vc.length;v++)
-                h.push("<option value='"+vc[v][0]+"'"+(vc[v][0]===vSel?" selected":"")+">"+vc[v][0]+"</option>");
+            for (var v=0;v<vc.length;v++){
+                if (vSel.indexOf(vc[v][0])>-1) continue;   // already added
+                h.push("<option value='"+deEsc(vc[v][0])+"'>"+deEsc(vc[v][0])+"</option>");
+            }
         } else {
             h.push("<option value=''>&mdash;</option>");
         }
         h.push("</select>");
         h.push("</div>");
+        // selected filter values as removable chips (multiple allowed)
+        if (fSel && vSel.length){
+            h.push("<div class='tpDeFilterChips' data-grp='"+which+"'>");
+            for (var vi=0; vi<vSel.length; vi++)
+                h.push("<span class='tpDeFilterChip'>"+deEsc(vSel[vi])+
+                       "<span class='tpDeFilterChipX' data-grp='"+which+"' data-idx='"+vi+"'>&times;</span></span>");
+            h.push("</div>");
+        }
 
         h.push("</div>"); // card
         return h.join("");
@@ -13831,15 +13841,24 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             deRemoveType(k, grp);
         });
 
-        // filters
+        // filters (multi-value: the dropdown adds a value, chips remove them)
         $("#tpDeBody .tpDeFilterField").change(function(){
             var grp=$(this).closest(".tpDeFilterRow").data("grp"); var val=this.value;
-            if (grp==="A"){ gDe.aField=val; gDe.aValue=""; } else { gDe.bField=val; gDe.bValue=""; }
+            if (grp==="A"){ gDe.aField=val; gDe.aValues=[]; } else { gDe.bField=val; gDe.bValues=[]; }
             deRenderBody();
         });
         $("#tpDeBody .tpDeFilterValue").change(function(){
             var grp=$(this).closest(".tpDeFilterRow").data("grp"); var val=this.value;
-            if (grp==="A") gDe.aValue=val; else gDe.bValue=val;
+            if (!val) return;
+            var arr = (grp==="A") ? gDe.aValues : gDe.bValues;
+            if (arr.indexOf(val)===-1) arr.push(val);
+            deRenderBody();
+        });
+        $("#tpDeBody .tpDeFilterChipX").click(function(ev){
+            ev.stopPropagation();
+            var grp=$(this).data("grp"), idx=parseInt($(this).data("idx"));
+            (grp==="A" ? gDe.aValues : gDe.bValues).splice(idx,1);
+            deRenderBody();
         });
 
         // settings inputs -> state
@@ -13914,13 +13933,13 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         } else {
             gDe.a=b; gDe.b=a;
         }
-        var af=gDe.aField, av=gDe.aValue; gDe.aField=gDe.bField; gDe.aValue=gDe.bValue; gDe.bField=af; gDe.bValue=av;
+        var af=gDe.aField, av=gDe.aValues; gDe.aField=gDe.bField; gDe.aValues=gDe.bValues; gDe.bField=af; gDe.bValues=av;
         deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
     }
 
     function deReset() {
         gDe.a=[]; gDe.b=[]; gDe.bMode='rest'; gDe.target='A';
-        gDe.aField=gDe.aValue=gDe.bField=gDe.bValue='';
+        gDe.aField=''; gDe.bField=''; gDe.aValues=[]; gDe.bValues=[];
         deUpdateLegendHint();
         gDe.results=null; deCloseResults(); deClearGene(true);
         deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
@@ -14041,9 +14060,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             var names=list.map(deTypeLabel);
             return names.length<=2 ? names.join(" + ") : (names[0]+" +"+(names.length-1)+" more");
         }
-        var aLab=lab(gDe.a); if (gDe.aValue) aLab+=" · "+gDe.aValue;
+        var aLab=lab(gDe.a); if (gDe.aValues.length) aLab+=" · "+gDe.aValues.join("/");
         var bLab=(gDe.bMode==='rest') ? "All other cells" : lab(gDe.b);
-        if (gDe.bMode!=='rest' && gDe.bValue) bLab+=" · "+gDe.bValue;
+        if (gDe.bMode!=='rest' && gDe.bValues.length) bLab+=" · "+gDe.bValues.join("/");
         return aLab+"  vs  "+bLab;
     }
 
@@ -14065,8 +14084,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     function deBuildSpec() {
         var custom = deIsCustomField();
-        function grp(list, filtField, filtVal) {
-            var filter = filtField ? {field:filtField, value:filtVal} : null;
+        function grp(list, filtField, filtVals) {
+            var filter = (filtField && filtVals.length) ? {field:filtField, values:filtVals.slice()} : null;
             // real metadata field -> field+values (worker resolves via meta.tsv);
             // custom field -> explicit barcodes (worker's cellIds selector)
             return custom ? { ids: deValuesToCellIds(list), filter: filter }
@@ -14075,8 +14094,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         return {
             dataset: db.name || (db.conf && db.conf.name),
             field: gDe.field,
-            groupA: grp(gDe.a, gDe.aField, gDe.aValue),
-            groupB: gDe.bMode==='rest' ? "rest" : grp(gDe.b, gDe.bField, gDe.bValue),
+            groupA: grp(gDe.a, gDe.aField, gDe.aValues),
+            groupB: gDe.bMode==='rest' ? "rest" : grp(gDe.b, gDe.bField, gDe.bValues),
             test: gDe.test, minPct: gDe.minPct, subsample: gDe.subsample,
             lfcCut: gDe.lfcCut, padjCut: gDe.padjCut
         };

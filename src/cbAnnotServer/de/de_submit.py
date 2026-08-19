@@ -63,8 +63,14 @@ def translateSpec(fe):
             sel = {"type": "cellIds", "ids": g["ids"]}
         else:
             sel = {"type": "field", "field": field, "values": g.get("values", [])}
-        if g.get("filter") and g["filter"].get("field"):
-            sel["filter"] = {"field": g["filter"]["field"], "value": g["filter"].get("value", "")}
+        gf = g.get("filter")
+        if gf and gf.get("field"):
+            flt = {"field": gf["field"]}
+            if gf.get("values") is not None:     # multi-value filter (new)
+                flt["values"] = list(gf["values"])
+            else:                                # single value (back-compat)
+                flt["value"] = gf.get("value", "")
+            sel["filter"] = flt
         return sel
 
     test = (fe.get("test") or "wilcox").lower()

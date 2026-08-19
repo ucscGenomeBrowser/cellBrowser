@@ -902,6 +902,12 @@ th[role=columnheader]:not(.no-sort):hover:after {
 /* min-width:0 lets the selects shrink instead of spilling past the sidebar when
    an option label is long (e.g. "subset clusters") */
 .tpDeFilterRow select { flex:1 1 0; min-width:0; max-width:100%; font-size:13px; padding:4px 5px; border:1px solid var(--tpDeCardBorder); border-radius:5px; background:#fff; }
+/* selected filter values (multi-value) shown as removable chips */
+.tpDeFilterChips { display:flex; flex-wrap:wrap; gap:4px; margin-top:5px; }
+.tpDeFilterChip { display:inline-flex; align-items:center; gap:5px; font-size:12px; background:#efece5;
+  border:1px solid var(--tpDeCardBorder); border-radius:12px; padding:2px 4px 2px 8px; }
+.tpDeFilterChip .tpDeFilterChipX { cursor:pointer; font-size:13px; line-height:1; padding:0 3px; border-radius:50%; color:var(--tpDeTert); }
+.tpDeFilterChip .tpDeFilterChipX:hover { color:var(--tpDeInk); background:#ddd8cf; }
 
 .tpDeSwap { display:flex; align-items:center; gap:8px; }
 .tpDeSwap .tpDeSwapLine { flex:1; height:1px; background:var(--tpDeHair); }

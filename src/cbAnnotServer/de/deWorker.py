@@ -260,7 +260,9 @@ def _popSummary(p):
             s = "+".join(str(v) for v in p.get("values", []))
         f = p.get("filter")
         if f and f.get("field"):
-            s += " [%s=%s]" % (f.get("field"), f.get("value"))
+            val = ("+".join(str(v) for v in f["values"])
+                   if f.get("values") is not None else f.get("value"))
+            s += " [%s=%s]" % (f.get("field"), val)
         return s
     return ""
 

@@ -104,8 +104,12 @@ def resolveFieldName(obs, field, label):
 
 
 def _filterMask(obs, filt, label):
-    """Boolean mask for a metadata restriction {field, value}."""
+    """Boolean mask for a metadata restriction: {field, values:[...]} (multi-value)
+    or {field, value} (single, back-compat)."""
     field = resolveFieldName(obs, filt["field"], label)
+    if filt.get("values") is not None:
+        wanted = set(str(v) for v in filt["values"])
+        return obs[field].astype(str).isin(wanted).to_numpy()
     value = str(filt.get("value", ""))
     return obs[field].astype(str).eq(value).to_numpy()
 
