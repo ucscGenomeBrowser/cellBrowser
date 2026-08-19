@@ -28,6 +28,7 @@ import struct
 import zlib
 
 import numpy as np
+import scipy.sparse as sp
 
 # matrixArrType (cbData.js makeType) -> numpy dtype. Little-endian to match the
 # struct.pack("<...") the builder uses.
@@ -129,7 +130,6 @@ class CbExprReader:
                 M[:, j] = vec if take is None else vec[take]
             return M
 
-        import scipy.sparse as sp
         data, indices, indptr = [], [], [0]   # CSC: one column per gene
         for key in self.geneKeys:
             vec = self.readGene(key)
@@ -169,40 +169,71 @@ class CbExprReader:
             self._binFh = None
 
 
-def readAnnData(datasetDir, cellIdx=None, normalize="auto", sparse=True):
-    """Decode a cbBuild output dir into an AnnData (cells x genes).
+def _should_normalize(dtype, normalize):
+    """Whether to total-normalize + log1p. "auto" does it for integer dtypes (raw
+    counts); float matrices are cbScanpy's already-log-normalized values."""
+    return normalize == "log1p" or (
+        normalize == "auto" and np.issubdtype(dtype, np.integer))
 
-    cellIdx   : optional int array — build only these rows (the pop1|pop2 union).
-    normalize : "auto"  -> total-normalize + log1p when the matrix is an integer
-                           dtype (raw counts), leave float matrices as-is
-                           (cbScanpy already writes log-normalized values);
-                "log1p" -> always normalize_total + log1p;
-                "none"  -> use the stored values verbatim.
 
-    Wilcoxon p-values and AUC are invariant to a monotonic per-gene transform, so
-    normalization only affects log2FC and the reported group means — matching the
-    frontend's log-space display.
+def _normalize_total_log1p(X, target_sum=1e4):
+    """numpy/scipy port of scanpy's normalize_total(target_sum) + log1p (natural
+    log) — so the runtime path needs no scanpy. Each cell is scaled to `target_sum`
+    total counts, then log1p'd; zero-count cells stay zero. Sparsity-preserving.
+
+    Wilcoxon p-values and AUC are invariant to this monotonic per-gene transform,
+    so it only affects log2FC and the reported group means (the log-space display).
     """
+    if sp.issparse(X):
+        X = X.tocsr()
+        row = np.asarray(X.sum(axis=1)).ravel()
+        inv = np.zeros(row.shape, dtype=X.dtype)
+        nz = row > 0
+        inv[nz] = (target_sum / row[nz]).astype(X.dtype)
+        X = (sp.diags(inv) @ X).tocsr()
+        X.data = np.log1p(X.data)
+        return X
+    X = np.asarray(X, dtype=np.float32)
+    row = X.sum(axis=1, keepdims=True)
+    inv = np.divide(target_sum, row, out=np.zeros_like(row), where=row > 0)
+    return np.log1p(X * inv)
+
+
+def readExpr(datasetDir, cellIdx=None, normalize="auto", sparse=True):
+    """Decode a cbBuild output dir to (X, var_names): the (cells x genes) matrix
+    (optionally only the `cellIdx` rows — the pop1|pop2 union) and the gene symbols.
+    No AnnData, no scanpy — this is what the DE kernel needs; populations are
+    resolved from meta.tsv separately (see runDeJob)."""
+    r = CbExprReader(datasetDir)
+    try:
+        X = r.readMatrix(cellIdx, sparse=sparse)
+        var_names = list(r.geneSyms)
+        dtype = r.dtype
+    finally:
+        r.close()
+    if _should_normalize(dtype, normalize):
+        X = _normalize_total_log1p(X)
+    return X, var_names
+
+
+def readAnnData(datasetDir, cellIdx=None, normalize="auto", sparse=True):
+    """Decode into an AnnData (cells x genes). Convenience for testing / the
+    scanpy validation oracle — the runtime path uses readExpr and needs neither
+    anndata nor scanpy. Uses the same numpy normalization as readExpr."""
     import anndata as ad
     import pandas as pd
 
     r = CbExprReader(datasetDir)
     try:
-        cellIds, obs = r.readMeta()
+        _cellIds, obs = r.readMeta()
         X = r.readMatrix(cellIdx, sparse=sparse)
         if cellIdx is not None:
-            keep = np.asarray(cellIdx, dtype=int)
-            obs = obs.iloc[keep]
+            obs = obs.iloc[np.asarray(cellIdx, dtype=int)]
         var = pd.DataFrame(index=pd.Index(r.geneSyms, name=None))
         var["geneKey"] = r.geneKeys
-        adata = ad.AnnData(X=X, obs=obs, var=var)
+        dtype = r.dtype
     finally:
         r.close()
-
-    doNorm = normalize == "log1p" or (
-        normalize == "auto" and np.issubdtype(r.dtype, np.integer))
-    if doNorm:
-        import scanpy as sc
-        sc.pp.normalize_total(adata, target_sum=1e4)
-        sc.pp.log1p(adata)
-    return adata
+    if _should_normalize(dtype, normalize):
+        X = _normalize_total_log1p(X)
+    return ad.AnnData(X=X, obs=obs, var=var)

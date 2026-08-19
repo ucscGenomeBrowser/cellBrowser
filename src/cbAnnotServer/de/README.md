@@ -84,10 +84,13 @@ lock is stale). The enqueuer just drops a `spec.json`; the worker does the rest.
 
 ## Running it
 
-Needs a Python with scanpy (Phase 1). For a one-off run:
+Needs a Python with **numpy, scipy, and pandas** — that's it. The runtime path
+(`runDeJob` → `cbExprReader.readExpr` → `wilcoxon_np`) imports neither scanpy nor
+anndata; normalization and the Wilcoxon test are done in numpy/scipy. (scanpy is
+only needed to run the `methods/wilcoxon.py` validation oracle.) For a one-off run:
 
 ```
-DE_WORKER_PYTHON=/path/to/scanpy-env/bin/python \
+DE_WORKER_PYTHON=/path/to/env/bin/python \
   python3 deWorker.py
 ```
 

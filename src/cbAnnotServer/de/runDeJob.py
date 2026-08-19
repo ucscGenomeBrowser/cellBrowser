@@ -58,7 +58,7 @@ CBBUILD_DIR = os.environ.get(
 MAX_CELLS_PER_GROUP = int(os.environ.get("DE_MAX_CELLS_PER_GROUP", "50000"))
 
 METHODS = {
-    "wilcoxon": wilcoxon_np.run_wilcoxon,   # numpy/scipy kernel (no scanpy)
+    "wilcoxon": wilcoxon_np.wilcoxon_np,   # numpy/scipy kernel (no scanpy/anndata)
 }
 
 
@@ -224,12 +224,12 @@ def runJob(spec, outdir, cbbuild_dir=CBBUILD_DIR,
         union = np.flatnonzero(t1 | t2)
 
         status("running", "loading expression")
-        adata = cer.readAnnData(cbdir, cellIdx=union)
+        X, var_names = cer.readExpr(cbdir, cellIdx=union)
         m1 = t1[union]
         m2 = t2[union]
 
         status("running", "running test")
-        genes = METHODS[method](adata, m1, m2, spec.get("parameters"))
+        genes = METHODS[method](X, m1, m2, var_names, spec.get("parameters"))
         n1, n2 = full1, full2
         subsampled = (full1 > int(m1.sum())) or (full2 > int(m2.sum()))
 
