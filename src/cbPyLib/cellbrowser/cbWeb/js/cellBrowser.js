@@ -13986,7 +13986,18 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         el.innerHTML = "Click a cell type &rarr; <b style='color:#"+col+"'>Group "+gDe.target+"</b>";
     }
 
+    function deExitGeneColoring() {
+        // A clicked result gene recolors the map by its expression, which replaces
+        // the metadata legend used for A/B assignment. Undo that — back to the
+        // grouping field (+ A/B marks) — so building the next comparison doesn't
+        // require re-picking the field from the Annotation tab / dropdown.
+        if (!gDe.active || !gDe.field || !gDe.selectedGene) return;
+        gDe.selectedGene = null;
+        colorByMetaField(gDe.field, function(){ renderer.drawDots(); deRecolorPlot(); });
+    }
+
     function deSetTarget(grp) {
+        deExitGeneColoring();   // clicking a group to assign returns to the field legend
         if (grp==='B' && gDe.bMode==='rest') gDe.bMode='pick'; // can't add to "all other cells"
         gDe.target = grp;
         deUpdateLegendHint();
@@ -14321,6 +14332,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         if ($("#tpDeResults").length && $("#tpDeResults").hasClass("ui-dialog-content"))
             $("#tpDeResults").dialog("destroy");
         $("#tpDeResults").remove();
+        // returning to the builder: if a clicked gene had recolored the map, put
+        // the grouping legend back so the next comparison is ready to build
+        deExitGeneColoring();
     }
 
     // ---- save / load / share saved comparisons -------------------------
