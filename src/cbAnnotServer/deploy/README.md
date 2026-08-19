@@ -24,6 +24,7 @@ static Cell Browser served from the docroot.
 | `run-gunicorn.sh` | Activates the venv and execs gunicorn; run by systemd/cron |
 | `cbAnnotServer.service` | systemd unit (recommended keep-alive) |
 | `watchdog.sh` | cron keep-alive fallback if systemd isn't available |
+| `restart-gunicorn.sh` | reload (`SIGHUP`) or hard-restart the running gunicorn; run as its owner (otto) |
 | `apache-cells-api.conf` | ProxyPass snippet to paste into the cells vhosts |
 | `cb.conf.sample` | Site config template for the docroot (read by the frontend) |
 
