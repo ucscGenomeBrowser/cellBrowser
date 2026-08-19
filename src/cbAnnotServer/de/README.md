@@ -123,6 +123,7 @@ Everything the worker needs to run unattended under otto is in `deploy/`:
 | `de.env.sample` | copy to a private `de.env`; queue dir, scanpy python, pidfile/heartbeat/log paths |
 | `runDeWorker.sh` | sources `DE_ENV_FILE` and `exec`s `deWorker.py` (so the tracked PID is the daemon) |
 | `deWorkerWatchdog.sh` | cron keep-alive: restarts the worker if its PID is gone **or** its heartbeat is stale |
+| `restart-worker.sh` | stop the worker and respawn it (to pick up new code / de.env); run as its owner (otto) |
 | `deWorker.service` | systemd unit for hosts where you can install one as root (preferred over cron) |
 
 The worker has no HTTP endpoint, so liveness is "pidfile process alive **and**
