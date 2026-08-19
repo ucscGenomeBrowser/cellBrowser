@@ -885,24 +885,26 @@ th[role=columnheader]:not(.no-sort):hover:after {
 .tpDeFieldRow .tpDeField { flex:1 1 0; min-width:0; font-size:13px; padding:4px 5px;
   border:1px solid var(--tpDeCardBorder); border-radius:5px; background:#fff; }
 /* in-builder clickable value list (assign to A/B without the far-right legend) */
-.tpDeValHead { display:flex; align-items:center; gap:6px; margin-top:7px; }
-.tpDeValFilter { flex:1 1 0; min-width:0; font-size:13px; padding:4px 6px;
-  border:1px solid var(--tpDeCardBorder); border-radius:5px; }
+.tpDeValHead { display:flex; align-items:baseline; justify-content:space-between; gap:6px; margin-top:8px; }
+.tpDeValTo { font-size:12px; font-weight:600; letter-spacing:0.02em; }
 .tpDeValTot { font-size:12px; font-family:monospace; color:var(--tpDeTert); }
-.tpDeValList { max-height:220px; overflow-y:auto; margin-top:5px; background:#fff;
+.tpDeValFilter { width:100%; box-sizing:border-box; font-size:13px; padding:5px 8px; margin-top:4px;
   border:1px solid var(--tpDeCardBorder); border-radius:5px; }
-.tpDeValRow { display:flex; align-items:center; gap:7px; padding:4px 8px; cursor:pointer;
+/* max-height deliberately ends mid-row so a partial row signals there's more to scroll */
+.tpDeValList { max-height:250px; overflow-y:auto; margin-top:5px; background:#fff;
+  border:1px solid var(--tpDeCardBorder); border-radius:5px; }
+.tpDeValRow { display:flex; align-items:center; gap:8px; padding:6px 10px; cursor:pointer;
   font-size:13px; border-bottom:1px solid #f1eee7; }
 .tpDeValRow:last-child { border-bottom:none; }
-.tpDeValRow:hover { background:#f5f2ec; }
+.tpDeValRow:hover { background:#f0ece4; }
 .tpDeValRow.tpDeValOn:hover { filter:brightness(0.97); }
-.tpDeValDot { width:10px; height:10px; border-radius:50%; flex:none; }
+.tpDeValDot { width:11px; height:11px; border-radius:50%; flex:none; }
 .tpDeValLbl { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tpDeValN { font-size:11px; font-family:monospace; color:var(--tpDeMuted); }
-.tpDeValBadge { flex:none; width:15px; height:15px; line-height:15px; text-align:center;
+.tpDeValBadge { flex:none; width:16px; height:16px; line-height:16px; text-align:center;
   font-size:11px; font-weight:600; color:#fff; border-radius:3px; }
 .tpDeValBadge.tpDeValBadgeEmpty { background:transparent; }
-.tpDeValEmpty { padding:8px; font-size:12px; color:var(--tpDeTert); text-align:center; }
+.tpDeValEmpty { padding:10px; font-size:12px; color:var(--tpDeTert); text-align:center; }
 .tpDeCard.tpDeActive { border-color:var(--tpDeAccent); box-shadow:0 0 0 1px var(--tpDeAccent); }
 
 .tpDeCard { background:var(--tpDeCard); border:1px solid var(--tpDeCardBorder); border-radius:7px; padding:11px 11px 12px; }

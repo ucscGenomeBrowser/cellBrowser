@@ -13667,8 +13667,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         // chips or empty hint
         if (list.length===0) {
             var hint = isActive
-                ? "Click cell types in the legend to add them here."
-                : "Select this group above, then click cell types in the legend.";
+                ? "Pick cell types from the list above."
+                : "Click here, then pick cell types from the list above.";
             h.push("<div class='tpDeHint'>"+hint+"</div>");
         } else {
             h.push("<div class='tpDeChips'>");
@@ -13752,7 +13752,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         }
         // which group legend clicks go to (clear indication + control)
         h.push("<div class='tpDeTargetRow'>");
-        h.push("<span class='tpDeTargetLabel'>Add cell types to:</span>");
+        h.push("<span class='tpDeTargetLabel'>Add to:</span>");
         h.push("<div class='btn-group btn-group-xs' id='tpDeTarget' role='group'>");
         h.push("<button type='button' data-grp='A' class='btn btn-default"+(gDe.target==='A'?' active':'')+"'>Group A</button>");
         h.push("<button type='button' data-grp='B' class='btn btn-default"+(gDe.target==='B'?' active':'')+"'>Group B</button>");
@@ -13833,10 +13833,13 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         $("#tpDeTarget button").click(function(){
             deSetTarget($(this).data("grp"));
         });
-        // clicking a group card also makes it the active target
+        // clicking a group card also makes it the active target, and brings the
+        // value list (which now assigns to that group) into view
         $("#tpDeBody .tpDeCard[data-grp]").click(function(ev){
             if ($(ev.target).closest("button, select, .tpDeChipX, .btn-group").length) return;
             deSetTarget($(this).data("grp"));
+            var vh=document.querySelector("#tpDeBody .tpDeValHead");
+            if (vh) vh.scrollIntoView({block:"nearest", behavior:"smooth"});
         });
 
         // Group B mode toggle (rest / pick)
@@ -14034,12 +14037,15 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
     function deValueListHtml() {
         var mi = gDe.metaInfo;
         if (!mi || !mi.valCounts || !mi.valCounts.length) return "";
+        var tcol = gDe.target==='A' ? DE_A_COL : DE_B_COL;
         return "<div class='tpDeValHead'>"+
+               "<span class='tpDeValTo' style='color:#"+tcol+"'>Adding to Group "+gDe.target+"</span>"+
+               "<span class='tpDeValTot'>"+mi.valCounts.length+" types</span>"+
+               "</div>"+
                "<input class='tpDeValFilter' id='tpDeValFilter' placeholder='Filter "+
                     deEsc(mi.label||mi.name)+"…' value='"+deEsc(gDe.valFilter||"")+"'>"+
-               "<span class='tpDeValTot'>"+mi.valCounts.length+"</span>"+
-               "</div>"+
-               "<div class='tpDeValList' id='tpDeValList'>"+deValueRowsHtml()+"</div>";
+               "<div class='tpDeValList' id='tpDeValList' style='border-left:3px solid #"+tcol+"'>"+
+                    deValueRowsHtml()+"</div>";
     }
 
     function deWireValueRows() {
