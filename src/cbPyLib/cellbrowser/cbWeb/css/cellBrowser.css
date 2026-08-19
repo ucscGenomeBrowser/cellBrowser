@@ -890,9 +890,10 @@ th[role=columnheader]:not(.no-sort):hover:after {
 .tpDeValTot { font-size:12px; font-family:monospace; color:var(--tpDeTert); }
 .tpDeValFilter { width:100%; box-sizing:border-box; font-size:13px; padding:5px 8px; margin-top:4px;
   border:1px solid var(--tpDeCardBorder); border-radius:5px; }
-/* max-height deliberately ends mid-row so a partial row signals there's more to scroll */
-.tpDeValList { max-height:250px; overflow-y:auto; margin-top:5px; background:#fff;
-  border:1px solid var(--tpDeCardBorder); border-radius:5px; }
+/* flex:none stops the builder's flex column from shrinking this to 1-2 rows on a
+   short window; it holds its height (up to 40vh) and the builder scrolls instead */
+.tpDeValList { flex:none; max-height:40vh; min-height:150px; overflow-y:auto; margin-top:5px;
+  background:#fff; border:1px solid var(--tpDeCardBorder); border-radius:5px; }
 .tpDeValRow { display:flex; align-items:center; gap:8px; padding:6px 10px; cursor:pointer;
   font-size:13px; border-bottom:1px solid #f1eee7; }
 .tpDeValRow:last-child { border-bottom:none; }
