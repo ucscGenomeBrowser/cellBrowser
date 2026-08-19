@@ -82,6 +82,15 @@ and any children (`DE_CANCEL_POLL` sets how often a running job is checked for a
 cancel request). BLAS/OpenMP threads are capped per job by `DE_CPU_LIMIT`
 (default 20) so one job can't saturate the host.
 
+## Job log
+
+The worker appends one TSV row per finished job to `DE_JOB_LOG` (default
+`deJobs.tsv` next to the queue) — for seeing who uses the feature and how it
+performs. Columns: `timestamp, jobId, requester, remote, dataset, field, groupA,
+groupB, method, n_pop1, n_pop2, n_genes, runtime_s, status`. The requester
+(logged-in email, else client IP) is captured by the submit API into the spec's
+`_meta` and read back here; `status` is `done`/`failed`/`canceled`/`timeout`.
+
 A job is *pending* when it has `spec.json`, no result, and is unclaimed (or the
 lock is stale). The enqueuer just drops a `spec.json`; the worker does the rest.
 

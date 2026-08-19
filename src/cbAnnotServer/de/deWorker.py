@@ -33,12 +33,16 @@ Config via environment (all optional):
 """
 import os
 import sys
+import json
 import time
 import signal
 import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JOBS_DIR   = os.environ.get("DE_JOBS_DIR", "/hive/data/inside/cells/deJobs")
+# Append-only TSV, one row per finished job: who ran what, on which data, how long.
+DE_JOB_LOG = os.environ.get("DE_JOB_LOG",
+    os.path.join(os.path.dirname(JOBS_DIR.rstrip("/")) or ".", "deJobs.tsv"))
 PYTHON     = os.environ.get("DE_WORKER_PYTHON", sys.executable)
 POLL_SEC   = float(os.environ.get("DE_POLL_SEC", "2"))
 JOB_TIMEOUT= int(os.environ.get("DE_JOB_TIMEOUT", "600"))
@@ -168,6 +172,7 @@ def runJob(jobdir):
     if os.path.exists(cancelFlag):
         log("job %s canceled before start" % jobId)
         _writeState(jobdir, "canceled", "canceled before it started")
+        _logJob(jobdir, "canceled", 0.0)
         return
 
     env = dict(os.environ)
@@ -198,13 +203,17 @@ def runJob(jobdir):
                     outcome = "timeout"
                     break
 
+    runtime = time.time() - t0
     if outcome == "canceled":
         _writeState(jobdir, "canceled", "canceled by the user")
+        logStatus = "canceled"
     elif outcome == "timeout":
         _writeState(jobdir, "failed", "job exceeded the %d s time limit" % JOB_TIMEOUT)
+        logStatus = "timeout"
     else:
         ok = (p.returncode == 0)
-        log("job %s finished rc=%d in %.1fs" % (jobId, p.returncode, time.time() - t0))
+        logStatus = "done" if ok else "failed"
+        log("job %s finished rc=%d in %.1fs" % (jobId, p.returncode, runtime))
         if not ok:
             try:
                 with open(logPath, "rb") as fh:
@@ -212,14 +221,85 @@ def runJob(jobdir):
                 log("job %s output tail: %s" % (jobId, tail))
             except OSError:
                 pass
+    _logJob(jobdir, logStatus, runtime)
 
 
 def _writeState(jobdir, state, error=None):
-    import json
     tmp = os.path.join(jobdir, "status.json.tmp")
     with open(tmp, "w") as fh:
         json.dump({"state": state, "error": error}, fh)
     os.replace(tmp, os.path.join(jobdir, "status.json"))
+
+
+# ---- per-job TSV log ------------------------------------------------------
+
+_LOG_HEADER = ("timestamp\tjobId\trequester\tremote\tdataset\tfield\tgroupA\t"
+               "groupB\tmethod\tn_pop1\tn_pop2\tn_genes\truntime_s\tstatus")
+
+
+def _readJsonFile(path):
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
+def _popField(p):
+    return p.get("field", "") if isinstance(p, dict) else ""
+
+
+def _popSummary(p):
+    """Compact human summary of a population selector for the log."""
+    if p == "rest":
+        return "rest"
+    if isinstance(p, dict):
+        if p.get("type") == "cellIds" or "ids" in p:
+            s = "cells:%d" % len(p.get("ids", []))
+        else:
+            s = "+".join(str(v) for v in p.get("values", []))
+        f = p.get("filter")
+        if f and f.get("field"):
+            s += " [%s=%s]" % (f.get("field"), f.get("value"))
+        return s
+    return ""
+
+
+def _tsv(v):
+    return str(v).replace("\t", " ").replace("\r", " ").replace("\n", " ")
+
+
+def _logJob(jobdir, status, runtime_s):
+    """Append one TSV row for a finished job (any outcome). Best-effort."""
+    spec = _readJsonFile(os.path.join(jobdir, "spec.json")) or {}
+    res = _readJsonFile(os.path.join(jobdir, "result.json")) or {}
+    meta = spec.get("_meta") or {}
+    p1, p2 = spec.get("pop1"), spec.get("pop2")
+    row = [
+        time.strftime("%Y-%m-%d %H:%M:%S"),
+        os.path.basename(jobdir),
+        meta.get("requester") or "",
+        meta.get("remote") or "",
+        spec.get("dataset") or "",
+        _popField(p1) or _popField(p2) or "",
+        _popSummary(p1),
+        _popSummary(p2),
+        spec.get("method") or "",
+        res.get("n_pop1", ""),
+        res.get("n_pop2", ""),
+        len(res["genes"]) if isinstance(res.get("genes"), list) else "",
+        "%.2f" % runtime_s,
+        status,
+    ]
+    line = "\t".join(_tsv(c) for c in row)
+    try:
+        newfile = not os.path.exists(DE_JOB_LOG)
+        with open(DE_JOB_LOG, "a") as fh:
+            if newfile:
+                fh.write(_LOG_HEADER + "\n")
+            fh.write(line + "\n")
+    except OSError as e:
+        log("could not append to job log %s: %s" % (DE_JOB_LOG, e))
 
 
 def sweepRetention():

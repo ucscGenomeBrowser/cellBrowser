@@ -101,8 +101,26 @@ def _jobDir(queue, jobId):
     return os.path.join(queue, jobId)
 
 
-def _submitDirect(queue, feSpec):
+def _requesterMeta():
+    """Who submitted this job, for the DE job log: the logged-in email if there is
+    a session, else the client IP (honoring X-Forwarded-For behind the proxy)."""
+    user = None
+    try:
+        from flask_login import current_user
+        if current_user and current_user.is_authenticated:
+            user = getattr(current_user, "email", None) or ("user#%s" % current_user.get_id())
+    except Exception:
+        user = None
+    xff = request.headers.get("X-Forwarded-For", "")
+    remote = (xff.split(",")[0].strip() if xff else request.remote_addr) or ""
+    return {"requester": user, "remote": remote,
+            "submitted_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+
+
+def _submitDirect(queue, feSpec, meta=None):
     spec = translateSpec(feSpec)
+    if meta:
+        spec["_meta"] = meta            # requester/remote/time, for the worker's job log
     jobId = "de_" + secrets.token_hex(6)
     d = _jobDir(queue, jobId)
     os.makedirs(d, exist_ok=True)
@@ -205,7 +223,7 @@ def de():
             if relay:
                 return jsonify(_submitProxy(relay, key, feSpec))
             if queue:
-                return jsonify(_submitDirect(queue, feSpec))
+                return jsonify(_submitDirect(queue, feSpec, _requesterMeta()))
         except KeyError as e:
             return jsonify({"status": "failed", "error": "missing field %s" % e}), 400
         return jsonify({"status": "failed", "error": "DE backend not configured"}), 503
