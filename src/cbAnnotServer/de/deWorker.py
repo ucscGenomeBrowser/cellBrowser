@@ -44,6 +44,7 @@ POLL_SEC   = float(os.environ.get("DE_POLL_SEC", "2"))
 JOB_TIMEOUT= int(os.environ.get("DE_JOB_TIMEOUT", "600"))
 STALE_LOCK = int(os.environ.get("DE_STALE_LOCK_SEC", "1800"))
 RETENTION  = int(os.environ.get("DE_RETENTION_DAYS", "7"))
+CANCEL_POLL= float(os.environ.get("DE_CANCEL_POLL", "1"))  # how often a running job checks cancel.flag
 PIDFILE    = os.environ.get("DE_WORKER_PIDFILE")
 HEARTBEAT  = os.environ.get("DE_WORKER_HEARTBEAT")
 
@@ -78,7 +79,7 @@ def isFinished(jobdir):
     if os.path.isfile(os.path.join(jobdir, "result.json")):
         return True
     st = _readStatusState(jobdir)
-    return st in ("done", "failed")
+    return st in ("done", "failed", "canceled")
 
 
 def _readStatusState(jobdir):
@@ -136,31 +137,88 @@ def pendingJobs():
     return out
 
 
+def _killTree(p):
+    """Stop the job subprocess and any children (it gets its own session, so we
+    can signal the whole process group). SIGTERM, then SIGKILL if it lingers."""
+    def _pg(sig):
+        try:
+            os.killpg(os.getpgid(p.pid), sig)
+        except Exception:
+            try:
+                p.send_signal(sig)
+            except Exception:
+                pass
+    _pg(signal.SIGTERM)
+    try:
+        p.wait(timeout=5)
+    except Exception:
+        _pg(signal.SIGKILL)
+        try:
+            p.wait(timeout=5)
+        except Exception:
+            pass
+
+
 def runJob(jobdir):
-    """Run one job in a subprocess via runDeJob.py <jobId>."""
+    """Run one job in a subprocess via runDeJob.py <jobId>, polling for a cancel
+    request (cancel.flag written by the API) and the per-job timeout. Each job runs
+    in its own session so we can kill it and any children on cancel/timeout."""
     jobId = os.path.basename(jobdir)
+    cancelFlag = os.path.join(jobdir, "cancel.flag")
+    if os.path.exists(cancelFlag):
+        log("job %s canceled before start" % jobId)
+        _writeState(jobdir, "canceled", "canceled before it started")
+        return
+
     env = dict(os.environ)
     env["DE_JOBS_DIR"] = JOBS_DIR
     cmd = [PYTHON, os.path.join(HERE, "runDeJob.py"), jobId]
     log("running job %s" % jobId)
     t0 = time.time()
-    try:
-        r = subprocess.run(cmd, env=env, timeout=JOB_TIMEOUT,
-                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        ok = (r.returncode == 0)
-        log("job %s finished rc=%d in %.1fs" % (jobId, r.returncode, time.time() - t0))
-        if not ok and r.stdout:
-            log("job %s output tail: %s" % (jobId, r.stdout.decode(errors="replace")[-500:]))
-    except subprocess.TimeoutExpired:
-        log("job %s TIMED OUT after %ds" % (jobId, JOB_TIMEOUT))
-        _writeFailed(jobdir, "job exceeded the %d s time limit" % JOB_TIMEOUT)
+    # write child output to a per-job log file (not a PIPE) so a chatty job can't
+    # deadlock on a full pipe while we poll
+    logPath = os.path.join(jobdir, "run.log")
+    with open(logPath, "wb") as logf:
+        p = subprocess.Popen(cmd, env=env, stdout=logf, stderr=subprocess.STDOUT,
+                             start_new_session=True)
+        outcome = "done"
+        while True:
+            try:
+                p.wait(timeout=CANCEL_POLL)
+                break  # finished on its own
+            except subprocess.TimeoutExpired:
+                if os.path.exists(cancelFlag):
+                    log("job %s canceled — killing it" % jobId)
+                    _killTree(p)
+                    outcome = "canceled"
+                    break
+                if time.time() - t0 > JOB_TIMEOUT:
+                    log("job %s TIMED OUT after %ds — killing it" % (jobId, JOB_TIMEOUT))
+                    _killTree(p)
+                    outcome = "timeout"
+                    break
+
+    if outcome == "canceled":
+        _writeState(jobdir, "canceled", "canceled by the user")
+    elif outcome == "timeout":
+        _writeState(jobdir, "failed", "job exceeded the %d s time limit" % JOB_TIMEOUT)
+    else:
+        ok = (p.returncode == 0)
+        log("job %s finished rc=%d in %.1fs" % (jobId, p.returncode, time.time() - t0))
+        if not ok:
+            try:
+                with open(logPath, "rb") as fh:
+                    tail = fh.read()[-500:].decode(errors="replace")
+                log("job %s output tail: %s" % (jobId, tail))
+            except OSError:
+                pass
 
 
-def _writeFailed(jobdir, msg):
+def _writeState(jobdir, state, error=None):
     import json
     tmp = os.path.join(jobdir, "status.json.tmp")
     with open(tmp, "w") as fh:
-        json.dump({"state": "failed", "error": msg}, fh)
+        json.dump({"state": state, "error": error}, fh)
     os.replace(tmp, os.path.join(jobdir, "status.json"))
 
 

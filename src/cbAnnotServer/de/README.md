@@ -73,8 +73,14 @@ Each job is a directory `DE_JOBS_DIR/<jobId>/`:
 |---|---|---|
 | `spec.json` | the enqueuer (CB backend) | the request (dataset, pop1, pop2, method, parameters) |
 | `worker.lock` | the worker | claim marker (PID) |
-| `status.json` | the kernel | `{state: running\|done\|failed, stage, elapsed, error}` |
-| `result.json` | the kernel | `{genes: [...], n_pop1, n_pop2}` on success |
+| `cancel.flag` | the API (`DELETE /api/de?jobId=`) | cancel request; the worker kills a running job or skips an unstarted one |
+| `status.json` | the worker/kernel | `{state: running\|done\|failed\|canceled, stage, elapsed, error}` |
+| `result.json` | the kernel | `{genes: [...], n_pop1, n_pop2, filters}` on success |
+
+A job runs in its own process session, so on cancel or timeout the worker kills it
+and any children (`DE_CANCEL_POLL` sets how often a running job is checked for a
+cancel request). BLAS/OpenMP threads are capped per job by `DE_CPU_LIMIT`
+(default 20) so one job can't saturate the host.
 
 A job is *pending* when it has `spec.json`, no result, and is unclaimed (or the
 lock is stale). The enqueuer just drops a `spec.json`; the worker does the rest.

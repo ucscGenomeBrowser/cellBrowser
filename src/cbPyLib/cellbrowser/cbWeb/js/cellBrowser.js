@@ -13455,7 +13455,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         aField: '', aValue: '', bField: '', bValue: '',
         test: 'wilcox', lfcCut: 1, padjCut: 0.05, minPct: 0.1, subsample: 5000,
         paramsOpen: false,
-        running: false, canceled: false,
+        running: false, canceled: false, jobId: null,
         results: null,          // snapshot: { genes, nA, nB, aLabel, bLabel, lfcCut, padjCut, minPct, test }
         selectedGene: null,
         sortKey: 'auc', sortDir: -1,
@@ -14126,13 +14126,14 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             .then(function(r){ return r.json(); })
             .then(function(sub){
                 if (!sub || !sub.jobId) throw new Error("no jobId returned");
+                gDe.jobId = sub.jobId;    // so Cancel can tell the backend to stop it
                 var poll=function(){
                     if (gDe.canceled) return;
                     fetch(url+"?jobId="+encodeURIComponent(sub.jobId))
                         .then(function(r){ return r.json(); })
                         .then(function(st){
-                            if (st.status==="done") onDone({genes:st.result.genes, nA:st.result.n_pop1, nB:st.result.n_pop2, filters:st.result.filters});
-                            else if (st.status==="failed") onErr(st.error||"job failed");
+                            if (st.status==="done") { gDe.jobId=null; onDone({genes:st.result.genes, nA:st.result.n_pop1, nB:st.result.n_pop2, filters:st.result.filters}); }
+                            else if (st.status==="failed" || st.status==="canceled") { gDe.jobId=null; onErr(st.error||st.status); }
                             else { onProgress(st.progress? st.progress*100 : null, st.stage||"running"); setTimeout(poll, 2000); }
                         }).catch(function(e){ onErr(""+e); });
                 };
@@ -14192,7 +14193,18 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             "<div class='tpDeCancel'><button id='tpDeCancel'>Cancel</button></div>"+
             "</div></div>";
         document.body.insertAdjacentHTML("beforeend", h);
-        $("#tpDeCancel").click(function(){ gDe.canceled=true; gDe.running=false; deHideRunning(); deRenderBody(); });
+        $("#tpDeCancel").click(deCancelJob);
+    }
+
+    function deCancelJob(){
+        // stop watching locally, and tell the backend to actually stop the job
+        // (it kills the running compute, or skips it if not yet started)
+        gDe.canceled=true; gDe.running=false;
+        var url = (typeof gClientConf !== "undefined" && gClientConf && gClientConf["deUrl"]) || window.cbDeUrl || null;
+        if (url && gDe.jobId)
+            fetch(url+"?jobId="+encodeURIComponent(gDe.jobId), {method:"DELETE"}).catch(function(){});
+        gDe.jobId=null;
+        deHideRunning(); deRenderBody();
     }
     function deUpdateProgress(p, label) {
         var fill=document.getElementById("tpDeProgFill"), st=document.getElementById("tpDeStage");

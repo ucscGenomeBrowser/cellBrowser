@@ -39,6 +39,14 @@ import sys
 import time
 import traceback
 
+# Cap BLAS / OpenMP threads so a single DE job can't saturate a big host. These
+# must be set before numpy (hence any scipy) is imported. DE_CPU_LIMIT overrides
+# the default of 20; setdefault leaves an explicitly-set value in the env alone.
+_cpuLimit = os.environ.get("DE_CPU_LIMIT", "20")
+for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+             "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ.setdefault(_var, _cpuLimit)
+
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

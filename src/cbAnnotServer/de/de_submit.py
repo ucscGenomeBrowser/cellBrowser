@@ -164,9 +164,33 @@ def _statusProxy(relay, key, jobId):
     return r.json()
 
 
+# ---- cancel ---------------------------------------------------------------
+
+def _cancelDirect(queue, jobId):
+    if not jobId or "/" in jobId or ".." in jobId:
+        return {"status": "failed", "error": "bad jobId"}
+    d = _jobDir(queue, jobId)
+    if not os.path.isdir(d):
+        return {"status": "failed", "error": "unknown jobId"}
+    # drop a marker the worker polls for: it kills a running job or skips one that
+    # hasn't started yet (see deWorker.runJob).
+    try:
+        open(os.path.join(d, "cancel.flag"), "w").close()
+    except OSError as e:
+        return {"status": "failed", "error": "could not request cancel: %s" % e}
+    return {"jobId": jobId, "status": "canceling"}
+
+
+def _cancelProxy(relay, key, jobId):
+    import requests
+    headers = {"X-DE-Key": key} if key else {}
+    r = requests.delete(relay, params={"jobId": jobId}, headers=headers, timeout=15)
+    return r.json()
+
+
 # ---- routes ---------------------------------------------------------------
 
-@bp.route("", methods=["GET", "POST"], strict_slashes=False)
+@bp.route("", methods=["GET", "POST", "DELETE"], strict_slashes=False)
 def de():
     relay = _cfg("DE_RELAY_URL")
     queue = _cfg("DE_QUEUE_DIR")
@@ -181,6 +205,14 @@ def de():
                 return jsonify(_submitDirect(queue, feSpec))
         except KeyError as e:
             return jsonify({"status": "failed", "error": "missing field %s" % e}), 400
+        return jsonify({"status": "failed", "error": "DE backend not configured"}), 503
+
+    if request.method == "DELETE":     # cancel a running/queued job
+        jobId = request.args.get("jobId")
+        if relay:
+            return jsonify(_cancelProxy(relay, key, jobId))
+        if queue:
+            return jsonify(_cancelDirect(queue, jobId))
         return jsonify({"status": "failed", "error": "DE backend not configured"}), 503
 
     jobId = request.args.get("jobId")
