@@ -892,7 +892,7 @@ th[role=columnheader]:not(.no-sort):hover:after {
   border:1px solid var(--tpDeCardBorder); border-radius:5px; }
 /* flex:none stops the builder's flex column from shrinking this to 1-2 rows on a
    short window; it holds its height (up to 40vh) and the builder scrolls instead */
-.tpDeValList { flex:none; max-height:40vh; min-height:150px; overflow-y:auto; margin-top:5px;
+.tpDeValList { flex:none; max-height:305px; min-height:150px; overflow-y:auto; margin-top:5px;
   background:#fff; border:1px solid var(--tpDeCardBorder); border-radius:5px; }
 .tpDeValRow { display:flex; align-items:center; gap:8px; padding:6px 10px; cursor:pointer;
   font-size:13px; border-bottom:1px solid #f1eee7; }
@@ -942,14 +942,14 @@ th[role=columnheader]:not(.no-sort):hover:after {
 .tpDeSeg button.tpDeSegOn { background:#fff; font-weight:600; color:var(--tpDeInk); box-shadow:0 1px 2px rgba(0,0,0,0.07); }
 .tpDeRestNote { font-size:13px; color:var(--tpDeTert); line-height:1.5; }
 
-.tpDeSettings .tpDeSettingsHead { display:flex; align-items:center; padding:9px 11px; cursor:pointer; }
+.tpDeSettings .tpDeSettingsHead { display:flex; align-items:center; padding:4px 11px; cursor:pointer; }
 .tpDeSettings .tpDeSettingsHead b { font-size:13px; font-weight:600; }
 .tpDeSettings .tpDeSummary { margin-left:auto; font-size:12px; font-family:monospace; color:var(--tpDeMuted); }
-.tpDeSettingsBody { padding:2px 11px 12px; border-top:1px solid var(--tpDeHair); }
-.tpDeSetRow { display:flex; align-items:center; gap:9px; margin-top:9px; }
+.tpDeSettingsBody { padding:1px 11px 6px; border-top:1px solid var(--tpDeHair); }
+.tpDeSetRow { display:flex; align-items:center; gap:9px; margin-top:4px; }
 .tpDeSetRow label { flex:1 1 auto; min-width:0; font-size:13px; }
 .tpDeSetRow select, .tpDeSetRow input { flex:0 1 150px; min-width:0; max-width:150px; font-size:13px; padding:3px 5px; border:1px solid var(--tpDeCardBorder); border-radius:4px; }
-.tpDeFoot { font-size:12px; color:var(--tpDeMuted); margin-top:9px; }
+.tpDeFoot { font-size:11px; color:var(--tpDeMuted); margin-top:5px; }
 
 .tpDeBanner { background:#fdf3ed; border:1px solid #efd0bc; border-radius:6px; padding:9px 11px; font-size:13px; color:#8a4a26; line-height:1.5; }
 .tpDeRunRow { display:flex; gap:8px; }
