@@ -394,6 +394,26 @@ TYPE_SHORT = CFG.get("track_type_short", {})
 _type_short_warned = set()
 
 
+def harmonize_celltype(r, lf, canon):
+    """(celltype, xw_tissue, xw_life, xw_cond) for a track, or (None, ...) if the cluster
+    is a QC artefact the caller should drop.
+
+    Factored out so the composites that are routed before the main cell-type resolution
+    (interactions, split-out collections) can label themselves from the same harmonized
+    name the faceted composite uses, instead of falling back to the raw filename. One
+    implementation, so those labels cannot drift from the facet values."""
+    base = raw_celltype(r, lf)
+    ct = canon.get(base, base)
+    ct = rollup_celltype(ct)
+    xw_tissue = xw_life = xw_cond = ""
+    cw = CELLTYPE_CROSSWALK.get(r["collection"])
+    if cw and ct in cw:
+        ct, _color, xw_tissue, xw_life, xw_cond = cw[ct]
+    if ct:
+        ct = normalize_celltype_final(ct)      # None => QC cluster
+    return ct, xw_tissue, xw_life, xw_cond
+
+
 def indent_stanza(stanza, width=4):
     """Indent a subtrack stanza to show the hierarchy, as the trackDb .ra files in the
     kent tree do (chainNet, encode3): a top-level track sits flush left and each level
@@ -752,6 +772,7 @@ def track_variant(r, lf, stem, dtype, modality=""):
 _CODE_CRUFT = [
     r"-TileSize-.*$", r"[-_]normMethod[-_].*$", r"[-_]ArchR$",
     r"\.sorted\.narrowPeak$", r"_peaks_bed$", r"_peaks$", r"\.peaks$", r"\.filtered$",
+    r"\.interact$", r"\.inter$",   # bigInteract filename tails, not the cluster name
 ]
 
 # Pipeline bookkeeping tokens inside a code -- assay, species, normalization, binning,
@@ -1561,8 +1582,25 @@ def main():
             if sepcoll:
                 sfx = sepcoll["suffix"]
                 idval = fit_id(comp + sfx, idbase, used)
+                # The source label here is the bare ArchR output filename
+                # ("C10-TileSize-100-normMethod-ReadsInTSS-ArchR"), so strip that tail and
+                # say what the track is. These clusters have no published cell-type name,
+                # so the cluster code is the identity; the histone mark distinguishes the
+                # copies of one cluster profiled with different marks.
+                _code = compact_code(source_cluster_code("", stem))
+                _mod = modality_of(r["collection"], r["subcollection"], srccomp,
+                                   r["abs_path"], short, long_, stem, r["collection"])
+                _mark = _mod if _mod in HISTONE_MODALITIES else ""
+                _ds = bm.dataset_label(r["collection"])
+                _slong = _sshort = None
+                if _code:
+                    _slong = "Cluster %s%s%s" % (
+                        _code, ", " + _mark if _mark else "",
+                        " (%s)" % _ds if _ds else "")
+                    _sshort = _fit(("%s %s" % (_code, _mark)).strip(), SHORT_BUDGET)
                 sepcoll_buckets.setdefault(r["collection"], []).append(
-                    render_child(comp + sfx + "_" + idval, comp + sfx, r, lf))
+                    render_child(comp + sfx + "_" + idval, comp + sfx, r, lf,
+                                 long_override=_slong, short_override=_sshort))
                 comp_colls[comp + sfx].add(r["collection"])
                 continue
             if ttype == "bigBarChart":
@@ -1578,8 +1616,30 @@ def main():
                 continue
             if ttype == "bigInteract":
                 idval = fit_id(comp + "Interact", idbase, used)
+                # These carried the raw filename as both labels ("AstroOligo_AllEnhancer
+                # Predictions"), which is where nearly every remaining underscore came
+                # from. Build them from the same harmonized cell type the faceted
+                # composite uses, plus the prediction method when the filename names one.
+                _ict, _, _, _ = harmonize_celltype(r, lf, celltype_canon)
+                _imeth = _imeth_short = ""
+                for _pat, _lng, _sht in PEAK_METHOD:
+                    _sfxp = _pat.rstrip("$")
+                    if re.search(r"[ _]" + _pat, stem or "", re.I) or \
+                       re.search(r"/%s/" % _sfxp, r["abs_path"], re.I):
+                        _imeth, _imeth_short = _lng, _sht
+                        break
+                _ilong = _ishort = None
+                if _ict:
+                    _ds = bm.dataset_label(r["collection"])
+                    _ilong = "Predicted interactions, %s%s%s" % (
+                        _ict[0].lower() + _ict[1:],
+                        ", " + _imeth if _imeth else "",
+                        " (%s)" % _ds if _ds else "")
+                    _ishort = build_short_label(
+                        _ict, _imeth_short or "int", track_labels(r, lf)[0])
                 interact_children.append(
-                    render_child(comp + "Interact_" + idval, comp + "Interact", r, lf))
+                    render_child(comp + "Interact_" + idval, comp + "Interact", r, lf,
+                                 long_override=_ilong, short_override=_ishort))
                 comp_colls[comp + "Interact"].add(r["collection"])
                 continue
             if ttype == "bigBed" and dtype == "annotation":   # genuine annotation
@@ -1639,32 +1699,20 @@ def main():
             if tcomp == comp and idval != idbase:
                 collisions.append("%s\t%s\t-> %s" % (asm, idbase, idval))
             # cellType: clean + collapse A/B, then the global C canonical merge.
-            base_ct = raw_celltype(r, lf)
-            celltype = celltype_canon.get(base_ct, base_ct)
             # tissue: per-track (path/body_parts), but a tissue-restricted cell type in a
             # whole-body atlas overrides the collection's 'multiple' with its one organ.
+            # Computed off the pre-rollup name, as before.
+            _pre = celltype_canon.get(raw_celltype(r, lf), raw_celltype(r, lf))
             tissue = track_tissue(r)
             ct_tissue = CELLTYPE_TISSUE.get(r["collection"], {}).get(
-                _ct_matchkey(celltype)) if celltype else None
+                _ct_matchkey(_pre)) if _pre else None
             if ct_tissue:
                 tissue = ct_tissue
-            # collapse the fine cell type to a higher level for the facet (full fine
-            # label remains in the _name column); done after the tissue override above.
-            celltype = rollup_celltype(celltype)
-            # per-collection crosswalk: harmonize the facet value + color the track
-            # by that cell type (e.g. SEA-AD subclass colors from the reference h5ad)
-            # per-collection crosswalk: harmonize the facet label + fill tissue/life/
-            # condition. Its color is ignored -- coloring is global (by broad class).
-            xw_tissue = xw_life = xw_cond = ""
-            _cw = CELLTYPE_CROSSWALK.get(r["collection"])
-            if _cw and celltype in _cw:
-                celltype, _xw_color, xw_tissue, xw_life, xw_cond = _cw[celltype]
-            # final cleanup + QC drop (doublet/low-quality/batch are not cell types)
-            if celltype:
-                celltype = normalize_celltype_final(celltype)
-                if celltype is None:
-                    qc_dropped.append("%s\t%s" % (asm, idbase))
-                    continue
+            celltype, xw_tissue, xw_life, xw_cond = harmonize_celltype(r, lf, celltype_canon)
+            # QC clusters (doublet / low-quality / batch) are not cell types
+            if celltype is None and _pre:
+                qc_dropped.append("%s\t%s" % (asm, idbase))
+                continue
             # resolve the final facet values (SEA-AD gets its region + ADNC level
             # from the path/filename since the generic parsers do not fit it)
             tissue_v = xw_tissue or tissue
