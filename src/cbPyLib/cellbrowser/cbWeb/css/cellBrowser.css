@@ -1053,3 +1053,22 @@ th[role=columnheader]:not(.no-sort):hover:after {
 .tpDeEmptyBtns { display:flex; gap:8px; margin-top:5px; }
 .tpDeEmptyBtns .tpDeLoosen { background:var(--tpDeAccent); color:#fff; border:none; padding:7px 13px; font-size:13px; border-radius:5px; cursor:pointer; }
 .tpDeEmptyBtns .tpDeEditGroups { background:#fff; border:1px solid var(--tpDeCardBorder); padding:7px 13px; font-size:13px; border-radius:5px; cursor:pointer; }
+
+/* Debug timing bar (?debug=1): fixed strip along the bottom of the window that
+   shows the ms spent in each dataset-load phase. Only created when debug mode is
+   on; see cbTiming() in cellBrowser.js. Dark, monospace, out of the way. */
+#tpDebugBar {
+    position: fixed; left: 0; right: 0; bottom: 0; height: 32px; line-height: 32px;
+    background: rgba(24,24,24,0.90); color: #d8d8d8;
+    font-family: Menlo, Consolas, monospace; font-size: 13px;
+    padding: 0 14px; white-space: nowrap; overflow-x: auto;
+    border-top: 1px solid #444; z-index: 100000;
+}
+#tpDebugBar .tpDebugSeg { margin-right: 20px; }
+#tpDebugBar .tpDebugTag { color: #7fb0ff; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+#tpDebugBar .tpDebugLbl { color: #9fd0ff; }
+#tpDebugBar .tpDebugVal { color: #ffd48a; }
+#tpDebugBar .tpDebugTot { color: #9fe6a0; }
+#tpDebugBar .tpDebugDraw { color: #f0a0ff; }
+#tpDebugBar .tpDebugClose { float: right; cursor: pointer; color: #aaa; margin-left: 14px; font-weight: bold; }
+#tpDebugBar .tpDebugClose:hover { color: #fff; }

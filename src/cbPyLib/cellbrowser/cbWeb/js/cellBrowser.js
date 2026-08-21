@@ -11,7 +11,13 @@
 "use strict";
 
 var cellbrowser = function() {
-    const DEBUG = false;
+    // Debug mode: verbose console logging plus a timing bar along the bottom of
+    // the window. Off by default; enabled at runtime with the URL parameter
+    // ?debug=1 (inspired by the genome browser's &measureTiming). Set from the
+    // URL in main() -- not here, because the URL helpers rely on regexes that are
+    // initialized further down and aren't ready during module evaluation. See
+    // initDebugMode() and cbTiming().
+    let DEBUG = false;
 
     // Src: https://stackoverflow.com/questions/56393880/how-do-i-detect-dark-mode-using-javascript
     const darkModeMq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
@@ -283,6 +289,85 @@ var cellbrowser = function() {
         if (DEBUG) {
             console.log(formatString(msg, args));
         }
+    }
+
+    // --- Debug timing (like the genome browser's measureTiming) ---------------
+    // A running timer over the main dataset-load phases. Each cbTiming(label)
+    // call records the milliseconds since the previous call and appends a segment
+    // to the on-screen debug bar (and the console). Reset per dataset load. All
+    // calls are no-ops unless debug mode is on (?debug=1), so the marks sprinkled
+    // through the load path cost nothing in normal use.
+    var gDebugTiming = { t0: null, last: null, rows: [], lastDraw: null };
+
+    function initDebugMode() {
+        /* turn on debug mode if the URL has ?debug=1 (or ?debug=on). Call once at
+           startup, after the URL helpers' regexes are initialized. */
+        var debugVar = getVar("debug");
+        DEBUG = (debugVar==="1" || debugVar==="on");
+        if (DEBUG)
+            console.log("cellBrowser: debug mode on (?debug=1)");
+    }
+
+    function cbTimingReset() {
+        /* start a fresh timing run (called at the top of loadDataset) */
+        gDebugTiming = { t0: null, last: null, rows: [], lastDraw: null };
+    }
+
+    function wrapDrawTiming(rend) {
+        /* wrap a MaxPlot's drawDots so each WebGL draw logs its duration and
+           updates the live 'draw' segment of the debug bar. Only called when
+           debug mode is on, so normal use keeps the original method untouched. */
+        if (!rend || rend._drawTimingWrapped) return;
+        rend._drawTimingWrapped = true;
+        var orig = rend.drawDots;
+        rend.drawDots = function() {
+            var t = performance.now();
+            var ret = orig.apply(rend, arguments);
+            var ms = performance.now() - t;
+            gDebugTiming.lastDraw = ms;
+            console.log("cbTiming drawDots: "+ms.toFixed(1)+" ms");
+            updateDebugBar();
+            return ret;
+        };
+    }
+
+    function cbTiming(label) {
+        /* record ms elapsed since the last cbTiming() call under 'label' */
+        if (!DEBUG) return;
+        var now = performance.now();
+        if (gDebugTiming.t0===null) { gDebugTiming.t0 = now; gDebugTiming.last = now; }
+        var delta = now - gDebugTiming.last;
+        var total = now - gDebugTiming.t0;
+        gDebugTiming.rows.push([label, delta, total]);
+        console.log("cbTiming "+label+": +"+delta.toFixed(0)+" ms (total "+total.toFixed(0)+" ms)");
+        gDebugTiming.last = now;
+        updateDebugBar();
+    }
+
+    function updateDebugBar() {
+        /* draw/refresh the fixed timing bar along the bottom of the window */
+        if (!DEBUG) return;
+        var el = document.getElementById("tpDebugBar");
+        if (!el) {
+            el = document.createElement("div");
+            el.id = "tpDebugBar";
+            document.body.appendChild(el);
+        }
+        var htmls = ["<span class='tpDebugSeg tpDebugTag'>debug</span>"];
+        var total = 0;
+        for (var i=0; i<gDebugTiming.rows.length; i++) {
+            var r = gDebugTiming.rows[i];
+            total = r[2];
+            htmls.push("<span class='tpDebugSeg'><span class='tpDebugLbl'>"+r[0]+
+                "</span> <span class='tpDebugVal'>+"+r[1].toFixed(0)+" ms</span></span>");
+        }
+        htmls.push("<span class='tpDebugSeg tpDebugTot'>total "+total.toFixed(0)+" ms</span>");
+        if (gDebugTiming.lastDraw!==null)
+            htmls.push("<span class='tpDebugSeg tpDebugDraw'>draw "+gDebugTiming.lastDraw.toFixed(1)+" ms</span>");
+        htmls.push("<span class='tpDebugClose' title='hide (reload without debug=1 to disable)'>&times;</span>");
+        el.innerHTML = htmls.join("");
+        el.style.display = "block";
+        el.querySelector(".tpDebugClose").onclick = function() { el.style.display = "none"; };
     }
 
     const getRandomIndexes = (length, size) =>
@@ -5444,6 +5529,7 @@ var cellbrowser = function() {
                } else {
                     $("#splitJoinDiv").hide();
                }
+               cbTiming("render");
            }
        }
 
@@ -5491,6 +5577,7 @@ var cellbrowser = function() {
 
        function gotFirstCoords(coords, info, clusterMids) {
            /* XX very ugly way to implement promises. Need to rewrite with promise() one day . */
+           cbTiming("coords");
            gotCoords(coords, info, clusterMids);
            chosenSetValue("tpLayoutCombo", coordIdx);
            doneOnePart();
@@ -7600,6 +7687,7 @@ var cellbrowser = function() {
 
     function onConfigLoaded(datasetName) {
         /* dataset config JSON is loaded -> build the entire user interface */
+        cbTiming("config");
         // this is a collection if it does not have any field information
         if (db.conf.sampleDesc)
             gSampleDesc = db.conf.sampleDesc;
@@ -7658,6 +7746,7 @@ var cellbrowser = function() {
                 (db.conf.sampleCount > 200000 ? 2 : undefined);
             renderer = new MaxPlot(rendDiv, canvTop, canvLeft, canvWidth, canvHeight, {lightMode: lightMode, drawMode: drawMode});
             window.renderer = renderer;
+            if (DEBUG) wrapDrawTiming(renderer); // time each WebGL draw in the debug bar
 
             document.body.appendChild(rendDiv);
             activateTooltip(".mpButton");
@@ -7747,6 +7836,9 @@ var cellbrowser = function() {
          * When a dataset is opened through the UI, the variables have to
          * be reset, as their values (gene or meta data) may not exist
          * there. If it's opened via a URL, the variables must stay. */
+
+        cbTimingReset();
+        cbTiming("dataset "+datasetName);
 
         gRecentGenes = [];
         // collections are not real datasets, so ask user which one they want
@@ -13400,6 +13492,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         /* Load the site config first (it may set the login API endpoint), then
          * start the app. loadClientConf always calls back, even if cb.conf is
          * absent, so startup is never blocked by a missing config file. */
+        initDebugMode();
         loadClientConf(function() {
             // rootMd5 is baked into index.html from the dataset.json sitting next
             // to the code. With dataRoot set we read a different dataset.json, so
