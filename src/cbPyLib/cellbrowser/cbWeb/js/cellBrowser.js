@@ -14254,8 +14254,12 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             return custom ? { ids: deValuesToCellIds(list), filter: filter }
                           : { values: list.map(deTypeLabel), filter: filter };
         }
+        var dsName = db.name || (db.conf && db.conf.name);
         return {
-            dataset: db.name || (db.conf && db.conf.name),
+            dataset: dsName,
+            // absolute dataset URL so the (possibly off-host) DE worker can fetch
+            // the served expression files over HTTP — see deCache.py on the server
+            dataUrl: cbUtil.absDataUrl([dsName]),
             field: gDe.field,
             groupA: grp(gDe.a, gDe.aField, gDe.aValues),
             groupB: gDe.bMode==='rest' ? "rest" : grp(gDe.b, gDe.bField, gDe.bValues),

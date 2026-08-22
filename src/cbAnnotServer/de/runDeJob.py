@@ -64,6 +64,12 @@ CBBUILD_DIR = os.environ.get(
 # thinned (evenly spaced, reproducible) before the matrix is read — Wilcoxon
 # p-values and AUC are stable under this kind of subsampling. 0 disables the cap.
 MAX_CELLS_PER_GROUP = int(os.environ.get("DE_MAX_CELLS_PER_GROUP", "50000"))
+# /hive cache for expression fetched over HTTP (see deCache.py). Used when a job
+# carries a dataUrl -- i.e. the worker runs off the web host (hgcompute-08) and
+# pulls the served files instead of reading a local docroot.
+DE_CACHE_DIR = os.environ.get(
+    "DE_CACHE_DIR", "/hive/data/inside/cells/cbAnnotServer/exprCache")
+DE_CACHE_MAX_GB = float(os.environ.get("DE_CACHE_MAX_GB", "100"))
 
 METHODS = {
     "wilcoxon": wilcoxon_np.wilcoxon_np,   # numpy/scipy kernel (no scanpy/anndata)
@@ -82,6 +88,29 @@ def datasetCbBuildDir(dataset, cbbuild_dir):
     if all(os.path.isfile(os.path.join(d, f)) for f in need):
         return d
     return None
+
+
+def resolveDatasetDir(spec, cbbuild_dir, status=None):
+    """Return a local directory holding the dataset's four cbBuild files.
+
+    Preferred path: the job carries spec['dataUrl'] (the absolute dataset URL the
+    browser loaded from), so we fetch the served files over HTTP into the /hive
+    cache and return that dir -- this is what lets the worker run on a compute
+    host with no view of the web docroot. Fallback: no dataUrl, so read a local
+    docroot (DE_CBBUILD_DIR), for a worker co-located with the web host."""
+    dataUrl = spec.get("dataUrl")
+    if dataUrl:
+        import deCache
+        maxBytes = int(DE_CACHE_MAX_GB * (1024 ** 3))
+        return deCache.ensureDataset(dataUrl, DE_CACHE_DIR, maxBytes, status=status)
+    cbdir = datasetCbBuildDir(spec["dataset"], cbbuild_dir)
+    if not cbdir:
+        raise ValueError(
+            "no cbBuild expression output for dataset %r under %s "
+            "(need dataset.json + exprMatrix.bin + exprMatrix.json + meta.tsv), "
+            "and no dataUrl to fetch it over HTTP"
+            % (spec["dataset"], cbbuild_dir))
+    return cbdir
 
 
 def _normField(s):
@@ -206,20 +235,18 @@ def runJob(spec, outdir, cbbuild_dir=CBBUILD_DIR,
                     progress=progress, elapsed=round(time.time() - t0, 2), error=error)
 
     try:
-        status("running", "Loading metadata", 1)
+        status("running", "Loading dataset", 1)
         method = spec.get("method", "wilcoxon")
         if method not in METHODS:
             raise ValueError("unknown method %r" % method)
 
         # Read the uniform cbBuild binary matrix — the same files (and numbers)
-        # the frontend serves, so DE runs on any dataset a user can open. Resolve
-        # the populations from meta.tsv first, then read only the pop1|pop2 union.
-        cbdir = datasetCbBuildDir(spec["dataset"], cbbuild_dir)
-        if not cbdir:
-            raise ValueError(
-                "no cbBuild expression output for dataset %r under %s "
-                "(need dataset.json + exprMatrix.bin + exprMatrix.json + meta.tsv)"
-                % (spec["dataset"], cbbuild_dir))
+        # the frontend serves, so DE runs on any dataset a user can open. Fetch
+        # them over HTTP into the /hive cache (or read a local docroot), then
+        # resolve populations from meta.tsv and read only the pop1|pop2 union.
+        cbdir = resolveDatasetDir(
+            spec, cbbuild_dir,
+            status=lambda msg: status("running", msg, 1))
 
         import cbExprReader as cer
         reader = cer.CbExprReader(cbdir)

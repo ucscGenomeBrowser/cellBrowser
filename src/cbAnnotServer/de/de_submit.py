@@ -92,13 +92,20 @@ def translateSpec(fe):
         if feKey in fe:
             parameters[paramKey] = bool(fe[feKey])
 
-    return {
+    out = {
         "dataset": fe["dataset"],
         "pop1": pop("groupA"),
         "pop2": pop("groupB"),
         "method": method,
         "parameters": parameters,
     }
+    # Absolute dataset URL the browser loaded from. The worker uses it to fetch
+    # the served expression files over HTTP (see deCache.py), so a compute host
+    # with no docroot can still run the job. Multiple web hosts share one queue,
+    # so this must travel per-job rather than be a single worker-side setting.
+    if fe.get("dataUrl"):
+        out["dataUrl"] = fe["dataUrl"]
+    return out
 
 
 # ---- direct mode (has /hive) ---------------------------------------------
