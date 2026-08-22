@@ -70,11 +70,14 @@ def _fetchJson(url):
 
 
 def _dirBytes(path):
+    """Bytes a directory actually occupies on disk. Uses allocated blocks
+    (st_blocks*512), not apparent size: on /hive a 64 MB file can take ~128 MB of
+    blocks, so counting st_size would let the cache grow to ~2x the intended cap."""
     total = 0
     for root, _dirs, files in os.walk(path):
         for f in files:
             try:
-                total += os.path.getsize(os.path.join(root, f))
+                total += os.stat(os.path.join(root, f)).st_blocks * 512
             except OSError:
                 pass
     return total
