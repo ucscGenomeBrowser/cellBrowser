@@ -26,7 +26,7 @@ from urllib.parse import urlparse, urljoin, urlencode
 # ---- defaults / constants ----
 
 # the tusd server of the cell browser (NOT the genome browser)
-DEFAULT_URL = "https://cells-submit.gi.ucsc.edu/files"
+DEFAULT_URL = "https://cells-submit.gi.ucsc.edu/files/"
 
 # tus protocol version we speak
 TUS_VERSION = "1.0.0"
