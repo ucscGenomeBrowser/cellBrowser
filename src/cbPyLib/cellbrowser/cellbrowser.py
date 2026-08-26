@@ -6623,7 +6623,9 @@ def copyMarkers(outDir):
         localSrc = join(MARKER_SOURCE_DIR, fname)
         if isfile(localSrc):
             logging.info("Copying marker database from %s" % localSrc)
-            if not os.path.samefile(localSrc, destPath):
+            # samefile() stats both sides, so it raises on a first run into a
+            # fresh output directory, where the destination does not exist yet
+            if not (isfile(destPath) and os.path.samefile(localSrc, destPath)):
                 shutil.copy(localSrc, destPath)
             present.append(fname)
         else:
@@ -6864,7 +6866,18 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         gaTag = getConfig("gaTag")
         writeGaScript(ofh, gaTag)
 
-    md5 = md5WithPython(join(outDir, "dataset.json"))
+    # rootMd5 is only a cache-buster for the top-level dataset.json. A directory
+    # that holds just the code and reads its data from elsewhere (cb.conf
+    # dataRoot) has no dataset.json of its own, so fall back to an empty string
+    # rather than aborting: the frontend treats a missing md5 as "no md5".
+    rootJson = join(outDir, "dataset.json")
+    if isfile(rootJson):
+        md5 = md5WithPython(rootJson)
+    else:
+        logging.info("%s does not exist: writing index.html without a dataset.json md5. "
+                "This is expected for a code-only directory that gets its data via "
+                "the dataRoot setting in cb.conf." % rootJson)
+        md5 = ""
 
     ofh.write('</head>\n')
     ofh.write('<body>\n')

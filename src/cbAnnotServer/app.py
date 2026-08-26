@@ -39,8 +39,10 @@ def create_app(config_class=Config):
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     from annotations import annotations_bp
     app.register_blueprint(annotations_bp, url_prefix="/api/annotations")
-    # from de import de_bp
-    # app.register_blueprint(de_bp, url_prefix="/api/de")
+    from de.de_submit import bp as de_bp
+    app.register_blueprint(de_bp, url_prefix="/api/de")
+    from de.de_saved import bp as de_saved_bp
+    app.register_blueprint(de_saved_bp, url_prefix="/api/de/saved")
 
     # OAuth (Google / ORCID) is optional. Import inside try/except so the
     # service still boots on a host where Authlib isn't installed yet — OAuth

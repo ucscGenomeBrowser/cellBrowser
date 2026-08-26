@@ -847,3 +847,228 @@ th[role=columnheader]:not(.no-sort):hover:after {
 /* dataset search result highlighting */
 .tpDatasetLabel mark { background: #fff176; color: inherit; padding: 0 1px; border-radius: 2px; }
 .list-group-item.active .tpDatasetLabel mark { background: #ffe57f; }
+
+/* ============================================================
+   Differential Expression feature (Redmine #24912)
+   New surfaces only. A/B group colors are load-bearing (do not
+   swap without preserving warm-vs-cool contrast). Accent maps to
+   the Cell Browser primary (#337ab7).
+   ============================================================ */
+:root {
+  --tpDeAccent: #337ab7;
+  --tpDeA: #c2603a; --tpDeAtint: #fbf1ec; --tpDeAborder: #eccdbe; --tpDeAtext: #a94c2c; --tpDeAmuted: #9a7f70;
+  --tpDeB: #42559f; --tpDeBtint: #eef0f9; --tpDeBborder: #c6cce8; --tpDeBtext: #3a4a8c; --tpDeBmuted: #77809f;
+  --tpDeCard: #fff; --tpDeCardBorder: #e2e0da; --tpDeInk: #23262b; --tpDeMuted: #6b6f76; --tpDeTert: #8b8f96;
+  --tpDeTrack: #eceae4; --tpDeHair: #e7e5df;
+}
+/* builder lives inside the sidebar Tools tab; flows normally, plain white bg
+   and the default UI font, so it matches the rest of the sidebar */
+#tpDeBuilder { background:#fff; font-size:13px; color:var(--tpDeInk);
+  font-family:Arial,Helvetica,sans-serif; }
+#tpDeBuilder .tpDeHead { padding:11px 4px 11px; border-bottom:1px solid var(--tpDeHair); position:relative; }
+#tpDeBuilder .tpDeTitle { font-size:15px; font-weight:600; letter-spacing:-0.01em; }
+#tpDeBuilder .tpDeSub { font-size:13px; color:var(--tpDeTert); margin-top:2px; }
+#tpDeBuilder .tpDeClose { position:absolute; right:2px; top:9px; font-size:18px; color:var(--tpDeTert);
+  cursor:pointer; line-height:1; padding:2px 5px; border-radius:4px; }
+#tpDeBuilder .tpDeClose:hover { color:var(--tpDeInk); background:#ece9e2; }
+/* the body scrolls when the group lists get long (e.g. after 'swap' materializes
+   all-other-cells), mirroring #tpMetaPanel on the Annotation tab */
+#tpDeBuilder .tpDeBody { padding:12px 2px 16px; display:flex; flex-direction:column; gap:10px;
+  max-height:calc(100vh - 165px); overflow-y:auto; overflow-x:hidden; }
+
+/* which group legend clicks are assigned to */
+.tpDeTargetRow { display:flex; align-items:center; gap:8px; }
+.tpDeTargetRow .tpDeTargetLabel { font-size:13px; color:var(--tpDeMuted); white-space:nowrap; }
+/* "Compare by" field selector at the top of the builder */
+.tpDeFieldRow { display:flex; align-items:center; gap:8px; margin-bottom:2px; }
+.tpDeFieldRow .tpDeFieldLabel { font-size:13px; color:var(--tpDeMuted); white-space:nowrap; }
+.tpDeFieldRow .tpDeField { flex:1 1 0; min-width:0; font-size:13px; padding:4px 5px;
+  border:1px solid var(--tpDeCardBorder); border-radius:5px; background:#fff; }
+/* in-builder clickable value list (assign to A/B without the far-right legend) */
+.tpDeValHead { display:flex; align-items:baseline; justify-content:space-between; gap:6px; margin-top:8px; }
+.tpDeValTo { font-size:12px; font-weight:600; letter-spacing:0.02em; }
+.tpDeValTot { font-size:12px; font-family:monospace; color:var(--tpDeTert); }
+.tpDeValFilter { width:100%; box-sizing:border-box; font-size:13px; padding:5px 8px; margin-top:4px;
+  border:1px solid var(--tpDeCardBorder); border-radius:5px; }
+/* flex:none stops the builder's flex column from shrinking this to 1-2 rows on a
+   short window; it holds its height (up to 40vh) and the builder scrolls instead */
+.tpDeValList { flex:none; max-height:305px; min-height:150px; overflow-y:auto; margin-top:5px;
+  background:#fff; border:1px solid var(--tpDeCardBorder); border-radius:5px; }
+.tpDeValRow { display:flex; align-items:center; gap:8px; padding:6px 10px; cursor:pointer;
+  font-size:13px; border-bottom:1px solid #f1eee7; }
+.tpDeValRow:last-child { border-bottom:none; }
+.tpDeValRow:hover { background:#f0ece4; }
+.tpDeValRow.tpDeValOn:hover { filter:brightness(0.97); }
+.tpDeValDot { width:11px; height:11px; border-radius:50%; flex:none; }
+.tpDeValLbl { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tpDeValN { font-size:11px; font-family:monospace; color:var(--tpDeMuted); }
+.tpDeValBadge { flex:none; width:16px; height:16px; line-height:16px; text-align:center;
+  font-size:11px; font-weight:600; color:#fff; border-radius:3px; }
+.tpDeValBadge.tpDeValBadgeEmpty { background:transparent; }
+.tpDeValEmpty { padding:10px; font-size:12px; color:var(--tpDeTert); text-align:center; }
+.tpDeCard.tpDeActive { border-color:var(--tpDeAccent); box-shadow:0 0 0 1px var(--tpDeAccent); }
+
+.tpDeCard { background:var(--tpDeCard); border:1px solid var(--tpDeCardBorder); border-radius:7px; padding:11px 11px 12px; }
+.tpDeCardHead { display:flex; align-items:center; gap:7px; margin-bottom:9px; }
+.tpDeDot { width:9px; height:9px; border-radius:50%; flex:none; }
+.tpDeCardLabel { font-size:13px; font-weight:600; letter-spacing:0.02em; }
+.tpDeCount { margin-left:auto; font-size:13px; font-family:monospace; color:var(--tpDeMuted); }
+.tpDeCount.tpDeWarn { color:#b4522c; }
+.tpDeHint { font-size:13px; color:var(--tpDeMuted); line-height:1.5; padding:6px 8px; border:1px dashed var(--tpDeCardBorder); border-radius:5px; }
+.tpDeChips { display:flex; flex-wrap:wrap; gap:5px; }
+.tpDeChip { display:inline-flex; align-items:center; gap:6px; border-radius:20px; padding:3px 4px 3px 8px; font-size:13px; border:1px solid; }
+.tpDeChip .tpDeChipDot { width:7px; height:7px; border-radius:50%; flex:none; }
+.tpDeChip .tpDeChipN { font-size:12px; font-family:monospace; }
+.tpDeChip .tpDeChipX { cursor:pointer; font-size:13px; padding:0 2px; border-radius:50%; }
+.tpDeFilterRow { display:flex; gap:6px; margin-top:9px; }
+/* min-width:0 lets the selects shrink instead of spilling past the sidebar when
+   an option label is long (e.g. "subset clusters") */
+.tpDeFilterRow select { flex:1 1 0; min-width:0; max-width:100%; font-size:13px; padding:4px 5px; border:1px solid var(--tpDeCardBorder); border-radius:5px; background:#fff; }
+/* selected filter values (multi-value) shown as removable chips */
+.tpDeFilterChips { display:flex; flex-wrap:wrap; gap:4px; margin-top:5px; }
+.tpDeFilterChip { display:inline-flex; align-items:center; gap:5px; font-size:12px; background:#efece5;
+  border:1px solid var(--tpDeCardBorder); border-radius:12px; padding:2px 4px 2px 8px; }
+.tpDeFilterChip .tpDeFilterChipX { cursor:pointer; font-size:13px; line-height:1; padding:0 3px; border-radius:50%; color:var(--tpDeTert); }
+.tpDeFilterChip .tpDeFilterChipX:hover { color:var(--tpDeInk); background:#ddd8cf; }
+
+.tpDeSwap { display:flex; align-items:center; gap:8px; }
+.tpDeSwap .tpDeSwapLine { flex:1; height:1px; background:var(--tpDeHair); }
+.tpDeSwapBtn { font-size:12px; color:var(--tpDeTert); border:1px solid var(--tpDeCardBorder); background:#fff;
+  border-radius:20px; padding:3px 10px; cursor:pointer; }
+.tpDeSwapBtn:hover { border-color:var(--tpDeAccent); color:var(--tpDeAccent); }
+
+.tpDeSeg { display:flex; background:#efece5; border-radius:5px; padding:2px; margin-bottom:9px; }
+.tpDeSeg button { flex:1; padding:5px 0; font-size:13px; border:none; background:none; border-radius:4px; cursor:pointer; color:var(--tpDeMuted); }
+.tpDeSeg button.tpDeSegOn { background:#fff; font-weight:600; color:var(--tpDeInk); box-shadow:0 1px 2px rgba(0,0,0,0.07); }
+.tpDeRestNote { font-size:13px; color:var(--tpDeTert); line-height:1.5; }
+
+.tpDeSettings .tpDeSettingsHead { display:flex; align-items:center; padding:4px 11px; cursor:pointer; }
+.tpDeSettings .tpDeSettingsHead b { font-size:13px; font-weight:600; }
+.tpDeSettings .tpDeSummary { margin-left:auto; font-size:12px; font-family:monospace; color:var(--tpDeMuted); }
+.tpDeSettingsBody { padding:1px 11px 6px; border-top:1px solid var(--tpDeHair); }
+.tpDeSetRow { display:flex; align-items:center; gap:9px; margin-top:4px; }
+.tpDeSetRow label { flex:1 1 auto; min-width:0; font-size:13px; }
+.tpDeSetRow select, .tpDeSetRow input { flex:0 1 150px; min-width:0; max-width:150px; font-size:13px; padding:3px 5px; border:1px solid var(--tpDeCardBorder); border-radius:4px; }
+.tpDeFoot { font-size:11px; color:var(--tpDeMuted); margin-top:5px; }
+
+.tpDeBanner { background:#fdf3ed; border:1px solid #efd0bc; border-radius:6px; padding:9px 11px; font-size:13px; color:#8a4a26; line-height:1.5; }
+.tpDeRunRow { display:flex; gap:8px; }
+.tpDeRun { flex:1; padding:9px 12px; border-radius:6px; font-size:14px; font-weight:600; color:#fff; background:var(--tpDeAccent); border:none; cursor:pointer; }
+.tpDeRun:disabled { background:#cfccc5; color:#8b8f96; cursor:default; }
+.tpDeReset { padding:9px 12px; border:1px solid var(--tpDeCardBorder); background:#fff; border-radius:6px; cursor:pointer; font-size:14px; }
+
+.tpDeRecentLabel { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:var(--tpDeTert); margin-top:6px; }
+.tpDeRecent { padding:7px 9px; border:1px solid var(--tpDeCardBorder); border-radius:5px; background:#fff; margin-bottom:5px; cursor:pointer; }
+.tpDeRecent:hover { border-color:var(--tpDeAccent); }
+.tpDeRecent .tpDeRecentTitle { font-size:13px; line-height:1.4; }
+.tpDeRecent .tpDeRecentSub { font-size:12px; font-family:monospace; color:var(--tpDeMuted); }
+
+/* collapsible comparison-list sections (Saved / Recent) */
+.tpDeListSec { margin-top:6px; }
+.tpDeListHead { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em;
+  color:var(--tpDeTert); cursor:pointer; user-select:none; padding:2px 0; }
+.tpDeListHead:hover { color:var(--tpDeInk); }
+.tpDeListCaret { display:inline-block; width:12px; color:var(--tpDeMuted); }
+.tpDeListBody { margin-top:4px; }
+
+/* saved comparisons: like a recent row, plus Share / delete controls */
+.tpDeSaved { display:flex; align-items:center; gap:6px; padding:7px 9px; border:1px solid var(--tpDeCardBorder);
+  border-radius:5px; background:#fff; margin-bottom:5px; }
+.tpDeSaved:hover { border-color:var(--tpDeAccent); }
+.tpDeSaved .tpDeSavedMain { flex:1 1 auto; min-width:0; cursor:pointer; }
+.tpDeSaved .tpDeRecentTitle { font-size:13px; line-height:1.4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tpDeSaved .tpDeRecentSub { font-size:12px; font-family:monospace; color:var(--tpDeMuted); }
+.tpDeSavedAct { flex:none; cursor:pointer; color:var(--tpDeTert); border-radius:4px; padding:1px 5px; user-select:none; }
+.tpDeSavedShare { font-size:12px; }
+.tpDeSavedDel { font-size:15px; line-height:1; }
+.tpDeSavedAct:hover { color:var(--tpDeAccent); background:#ece9e2; }
+
+/* "Save to account" shown greyed when signed out (still clickable -> opens sign-in) */
+.ui-dialog-buttonpane button.tpDeBtnDisabled { opacity:0.5; }
+.ui-dialog-buttonpane button.tpDeBtnDisabled:hover { opacity:0.65; }
+
+/* transient confirmation toast (e.g. after saving a comparison) */
+.tpDeToast { position:fixed; left:50%; bottom:40px; transform:translateX(-50%); z-index:100000;
+  background:rgba(35,38,43,0.92); color:#fff; font-size:13px; padding:8px 16px; border-radius:5px;
+  box-shadow:0 2px 10px rgba(0,0,0,0.25); pointer-events:none; }
+
+/* legend A/B buttons (added while builder open) */
+.tpDeLegBtns { display:inline-flex; gap:3px; margin-left:6px; vertical-align:middle; }
+.tpDeLegBtn { width:19px; height:19px; border-radius:4px; font-size:11px; font-weight:600; line-height:17px;
+  text-align:center; border:1px solid #d6d3cc; background:#fff; color:#b7b4ad; cursor:pointer; padding:0; }
+.tpDeLegBtn.tpDeLegA.tpDeOn { background:var(--tpDeA); border-color:var(--tpDeA); color:#fff; }
+.tpDeLegBtn.tpDeLegB.tpDeOn { background:var(--tpDeB); border-color:var(--tpDeB); color:#fff; }
+.tpLegend.tpDeRowA { background:var(--tpDeAtint); border-color:var(--tpDeAborder) !important; }
+.tpLegend.tpDeRowB { background:var(--tpDeBtint); border-color:var(--tpDeBborder) !important; }
+
+/* running overlay confined to the plot area */
+#tpDeRunning { position:absolute; z-index:20; background:rgba(255,255,255,0.72);
+  display:flex; align-items:center; justify-content:center; }
+#tpDeRunning .tpDeRunCard { width:330px; background:#fff; border:1px solid var(--tpDeCardBorder); border-radius:9px;
+  box-shadow:0 16px 42px rgba(10,12,15,0.16); padding:20px 24px; }
+#tpDeRunning .tpDeRunTop { display:flex; align-items:center; gap:10px; font-size:14px; font-weight:600; }
+#tpDeSpinner { width:15px; height:15px; border:2px solid #dcdad3; border-top-color:var(--tpDeAccent);
+  border-radius:50%; animation:tpDeSpin .8s linear infinite; flex:none; }
+@keyframes tpDeSpin { to { transform:rotate(360deg); } }
+#tpDeRunning .tpDeProgTrack { height:5px; background:var(--tpDeTrack); border-radius:3px; margin-top:14px; overflow:hidden; }
+#tpDeRunning .tpDeProgFill { height:100%; width:0; background:var(--tpDeAccent); border-radius:3px; transition:width .3s ease; }
+#tpDeRunning .tpDeStage { margin-top:9px; font-size:13px; font-family:monospace; color:var(--tpDeTert); }
+#tpDeRunning .tpDeCancel { margin-top:12px; text-align:right; }
+#tpDeRunning .tpDeCancel button { font-size:12px; border:1px solid var(--tpDeCardBorder); background:#fff; border-radius:5px; padding:4px 10px; cursor:pointer; }
+
+/* results pop-up (non-modal dialog) */
+#tpDeResults { font-size:13px; color:var(--tpDeInk); font-family:Arial,Helvetica,sans-serif; }
+/* jQuery UI forces Verdana on .ui-widget content; keep the DE dialog on the
+   default UI font (its title bar is part of the widget chrome) */
+.ui-dialog:has(#tpDeResults), .ui-dialog:has(#tpDeResults) .ui-dialog-title { font-family:Arial,Helvetica,sans-serif; }
+#tpDeResults .tpDeResHead { display:flex; align-items:baseline; gap:12px; padding:6px 2px 10px; border-bottom:1px solid var(--tpDeHair); }
+#tpDeResults .tpDeResTitle { font-size:14px; font-weight:600; letter-spacing:-0.01em; }
+#tpDeResults .tpDeResSub { font-size:13px; font-family:monospace; color:var(--tpDeMuted); }
+#tpDeResBody { display:flex; height:100%; }
+#tpDeResTableWrap { flex:1; display:flex; flex-direction:column; border-right:1px solid var(--tpDeHair); min-width:0; overflow-y:auto; }
+#tpDeResVolcano { width:360px; flex:none; padding:8px 12px 10px; overflow-y:auto; }
+.tpDeCtrls { display:flex; align-items:center; gap:8px; padding:8px 4px 6px; }
+.tpDeCtrls input.tpDeGeneFilter { width:150px; font-size:13px; padding:4px 8px; border:1px solid var(--tpDeCardBorder); border-radius:4px; }
+.tpDeCtrls2 { padding:0 4px 8px; border-bottom:1px solid var(--tpDeHair); }
+.tpDeGeneCount { margin-left:auto; font-size:12px; font-family:monospace; color:var(--tpDeTert); }
+/* results table: Bootstrap .table look, matching the cluster-markers pop-up */
+#tpDeTable { margin-bottom:0; }
+#tpDeTable thead th { position:sticky; top:0; background:#fff; cursor:pointer; white-space:nowrap;
+  border-bottom:2px solid #ddd; }
+#tpDeTable thead th.tpDeSortOn { color:var(--tpDeAccent); }
+#tpDeTable td, #tpDeTable th { font-size:13px; padding:5px 7px; white-space:nowrap; }
+#tpDeTable td.tpDeNum, #tpDeTable th.tpDeNum { text-align:right; }
+#tpDeTable tbody tr { cursor:pointer; }
+#tpDeTable tbody tr:hover { background:#f5f5f5; }
+#tpDeTable tbody tr.tpDeRowSel > td { background:#eaf1f8; }
+.tpDeGene { font-family:monospace; font-weight:500; white-space:nowrap; max-width:120px; overflow:hidden; text-overflow:ellipsis; }
+.tpDeGene .tpDeDirDot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+.tpDeNum { font-family:monospace; }
+#tpDeResVolcano .tpDeVolHead { display:flex; align-items:baseline; }
+#tpDeResVolcano .tpDeVolTitle { font-size:12px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; color:var(--tpDeMuted); }
+#tpDeResVolcano .tpDeVolHint { margin-left:auto; font-size:12px; color:var(--tpDeTert); }
+.tpDeEmpty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; height:100%; padding:0 40px; text-align:center; }
+.tpDeEmpty h3 { font-size:15px; font-weight:600; margin:0; }
+.tpDeEmpty p { font-size:14px; color:var(--tpDeTert); line-height:1.6; max-width:520px; }
+.tpDeEmptyBtns { display:flex; gap:8px; margin-top:5px; }
+.tpDeEmptyBtns .tpDeLoosen { background:var(--tpDeAccent); color:#fff; border:none; padding:7px 13px; font-size:13px; border-radius:5px; cursor:pointer; }
+.tpDeEmptyBtns .tpDeEditGroups { background:#fff; border:1px solid var(--tpDeCardBorder); padding:7px 13px; font-size:13px; border-radius:5px; cursor:pointer; }
+
+/* Debug timing bar (?debug=1): fixed strip along the bottom of the window that
+   shows the ms spent in each dataset-load phase. Only created when debug mode is
+   on; see cbTiming() in cellBrowser.js. Dark, monospace, out of the way. */
+#tpDebugBar {
+    position: fixed; left: 0; right: 0; bottom: 0; height: 32px; line-height: 32px;
+    background: rgba(24,24,24,0.90); color: #d8d8d8;
+    font-family: Menlo, Consolas, monospace; font-size: 13px;
+    padding: 0 14px; white-space: nowrap; overflow-x: auto;
+    border-top: 1px solid #444; z-index: 100000;
+}
+#tpDebugBar .tpDebugSeg { margin-right: 20px; }
+#tpDebugBar .tpDebugTag { color: #7fb0ff; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+#tpDebugBar .tpDebugLbl { color: #9fd0ff; }
+#tpDebugBar .tpDebugVal { color: #ffd48a; }
+#tpDebugBar .tpDebugTot { color: #9fe6a0; }
+#tpDebugBar .tpDebugDraw { color: #f0a0ff; }
+#tpDebugBar .tpDebugClose { float: right; cursor: pointer; color: #aaa; margin-left: 14px; font-weight: bold; }
+#tpDebugBar .tpDebugClose:hover { color: #fff; }

@@ -27,28 +27,60 @@ def loadConfig(fname):
     exec("\n".join(lines), g, conf)
     return conf
 
+def walkAllDatasets(htdocs):
+    """Recursively walk htdocs/dataset.json to find all leaf dataset names.
+       Returns a sorted list."""
+    results = []
+    def visit(conf, base):
+        for ds in conf.get("datasets", []):
+            name = ds.get("name", "")
+            confPath = join(base, name, "dataset.json")
+            if not isfile(confPath):
+                continue
+            with open(confPath) as f:
+                dsConf = json.load(f)
+            if dsConf.get("datasets"):
+                visit(dsConf, base)
+            else:
+                results.append(name)
+    rootPath = join(htdocs, "dataset.json")
+    if isfile(rootPath):
+        with open(rootPath) as f:
+            rootConf = json.load(f)
+        visit(rootConf, htdocs)
+    return sorted(results)
+
 def main():
     # Set up script arguments
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Get all values for a list of datasets for specified cellbrowser.conf tag")
-    parser.add_argument('datasetFile', type=str, help='file containing list of datasets in first column')
+    parser.add_argument('datasetFile', type=str, nargs='?',
+        help='file containing list of datasets in first column (optional if --all is set)')
     parser.add_argument('tag', type=str, help='cellbrowser.conf tag you want values for, e.g. body_parts')
+    parser.add_argument('-a', '--all', action='store_true',
+        help='walk all datasets in htdocs and include them in output; any datasets from datasetFile are kept and any new ones are appended')
+    parser.add_argument('--htdocs', action='store', default='/usr/local/apache/htdocs-cells/',
+        help='directory to walk for --all mode (default: /usr/local/apache/htdocs-cells/)')
     parser.add_argument('-d', '--descConf', action='store_true', help='search for tag in desc.conf instead of cellbrowser.conf')
     parser.add_argument('-j', '--json', action='store_true', help='search for tag in dataset.json in apache htdocs directory instead of cellbrowser.conf')
     parser.add_argument('-s', '--sort', action='store_true', help='sort results')
     parser.add_argument('-k', '--sortField', action='store', help='name of field to sort on')
     args = parser.parse_args()
 
-    dFtype = Path(args.datasetFile).suffix
+    if not args.datasetFile and not args.all:
+        parser.error("must provide a datasetFile or use --all")
 
-    if dFtype == ".csv":
-        dsep = ","
-    elif dFtype == ".tsv":
-        dsep = "\t"
-    else:
-        print("datasetFile must have tsv or csv file extension")
-        exit(1)
+    dsep = "\t"
+    if args.datasetFile:
+        dFtype = Path(args.datasetFile).suffix
+        if dFtype == ".csv":
+            dsep = ","
+        elif dFtype == ".tsv":
+            dsep = "\t"
+        else:
+            print("datasetFile must have tsv or csv file extension")
+            exit(1)
 
     if "," in args.tag:
         tags = args.tag.split(",")
@@ -56,51 +88,72 @@ def main():
         tags = args.tag.split()
     tagIndex = dict()
 
-    with open(args.datasetFile) as dfh:
-        header = dfh.readline().rstrip().split(dsep)
-        if not header[0].startswith("#"):
-            print("First line needs to be a header line with column names and must start with '#'")
-            exit(1)
+    # Collect input rows: either from datasetFile, from a full walk, or both
+    header = ["#dataset"]
+    inputRows = []
+    existingNames = set()
 
-        for tag in tags:
-            try:
-                n = header.index(tag)
-                tagIndex[tag] = n
-            except ValueError:
-                header.append(tag)
-                n = header.index(tag)
-                tagIndex[tag] = n
-        print(*header, sep=dsep)
+    if args.datasetFile:
+        with open(args.datasetFile) as dfh:
+            header = dfh.readline().rstrip().split(dsep)
+            if not header[0].startswith("#"):
+                print("First line needs to be a header line with column names and must start with '#'", file=sys.stderr)
+                exit(1)
+            for line in dfh:
+                if line.startswith('#'):
+                    continue
+                row = line.rstrip().split(dsep)
+                inputRows.append(row)
+                existingNames.add(row[0])
 
-        outRows = []
-        for line in dfh:
-            if not line.startswith('#'):
-                splitLine = line.rstrip().split(dsep)
-                dname = splitLine[0]
+    if args.all:
+        allNames = walkAllDatasets(args.htdocs)
+        newNames = [n for n in allNames if n not in existingNames]
+        for n in newNames:
+            inputRows.append([n])
+        if args.datasetFile:
+            sys.stderr.write(f"Walked {args.htdocs}: {len(allNames)} datasets found, "
+                f"{len(newNames)} added ({len(existingNames)} already in {args.datasetFile})\n")
+        else:
+            sys.stderr.write(f"Walked {args.htdocs}: {len(newNames)} datasets found\n")
 
-                if args.descConf:
-                    confName = join("/hive/data/inside/cells/datasets", dname, "desc.conf")
-                elif args.json:
-                    confName = join("/usr/local/apache/htdocs-cells/", dname, "dataset.json")
+    for tag in tags:
+        try:
+            n = header.index(tag)
+            tagIndex[tag] = n
+        except ValueError:
+            header.append(tag)
+            n = header.index(tag)
+            tagIndex[tag] = n
+    print(*header, sep=dsep)
+
+    outRows = []
+    for splitLine in inputRows:
+        dname = splitLine[0]
+
+        if args.descConf:
+            confName = join("/hive/data/inside/cells/datasets", dname, "desc.conf")
+        elif args.json:
+            confName = join("/usr/local/apache/htdocs-cells/", dname, "dataset.json")
+        else:
+            confName = join("/hive/data/inside/cells/datasets", dname, "cellbrowser.conf")
+
+        if isfile(confName):
+            conf = loadConfig(confName)
+            for tag in tagIndex:
+                n = tagIndex[tag]
+                if tag in conf:
+                    tagVal = str(conf[tag])
+                    tagVal = re.sub('[\[\]\'"]', '', tagVal)
+                    if n <= len(splitLine) - 1:
+                        splitLine[n] = tagVal
+                    else:
+                        splitLine.append(tagVal)
                 else:
-                    confName = join("/hive/data/inside/cells/datasets", dname, "cellbrowser.conf")
-
-                if isfile(confName):
-                    conf = loadConfig(confName)
-                    for tag in tagIndex:
-                        n = tagIndex[tag]
-                        if tag in conf:
-                            tagVal = str(conf[tag])
-                            tagVal = re.sub('[\[\]\'"]', '', tagVal)
-                            if n <= len(splitLine) - 1:
-                                splitLine[n] = tagVal
-                            else:
-                                splitLine.append(tagVal)
-                        else:
-                            splitLine.append("")
-                    outRows.append(splitLine)
-                else:
-                    sys.stderr.write('Warning: "' + dname + '" does not have a cellbrowser.conf and/or desc.conf. You might want to double check your input file.\n')
+                    splitLine.append("")
+            outRows.append(splitLine)
+        else:
+            sys.stderr.write('Warning: "' + dname + '" does not have a ' + basename(confName) + '.\n')
 
     if args.sort:
         if args.sortField:

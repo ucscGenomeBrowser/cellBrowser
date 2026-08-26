@@ -47,6 +47,7 @@ and use features like split-screen comparison and heatmaps.
    ui/datasets
    ui/visualization
    ui/analysis
+   ui/diffexp
    ui/accounts
    ui/faq
 
