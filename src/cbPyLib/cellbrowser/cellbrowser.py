@@ -5770,6 +5770,93 @@ def findParentConfigs(inFname, dataRoot, currentName):
     logging.debug("parent datasets of %s are: %s, full path: %s, parts %s" % (inFname, fnameList, fullPath, pathParts))
     return list(reversed(fnameList)), fullPath, list(reversed(parentInfos))
 
+def loadCollLinks(collInfo, webRoot, collFname):
+    """ Resolve the 'links' setting of a collection.
+
+    A collection can list datasets that live elsewhere in the tree, so that the same
+    dataset shows up in more than one collection without a second copy on disk:
+
+        links = ["sea-ad-mtg/cohort"]
+
+    An entry is the dataset's name, which is its path relative to the web root, the
+    same string that appears as "name" in its own dataset.json. To relabel or reorder
+    the dataset inside this collection, use a dict instead of a string:
+
+        links = [{"name" : "sea-ad-mtg/cohort", "shortLabel" : "Middle temporal gyrus", "priority" : 5}]
+
+    Returns the dataset.json contents of every link target, as if they were
+    subdirectories of this collection. The caller merges them with the real
+    subdirectories, so links take part in the same 'priority' sort.
+    """
+    links = collInfo.get("links")
+    if not links:
+        return []
+
+    if not isinstance(links, list):
+        errAbort("'links' in %s must be a list, e.g. links = [\"sea-ad-mtg/cohort\"]" % collFname)
+
+    selfName = collInfo.get("name", "")
+    linkDatasets = []
+
+    for link in links:
+        override = {}
+        if isinstance(link, dict):
+            override = dict(link)
+            linkName = override.pop("name", None)
+            if linkName is None:
+                errAbort("An entry of 'links' in %s is a dict without a 'name', in %s" % (collFname, repr(link)))
+        elif isinstance(link, str):
+            linkName = link
+        else:
+            errAbort("An entry of 'links' in %s must be a string or a dict, not %s" % (collFname, repr(link)))
+
+        linkName = linkName.strip().strip("/")
+        if linkName=="":
+            errAbort("'links' in %s contains an empty dataset name" % collFname)
+
+        # linking to yourself or to something below you would show the same dataset
+        # twice and, for a collection, make the dataset list recurse
+        if linkName==selfName or (selfName!="" and linkName.startswith(selfName+"/")):
+            errAbort("'links' in %s points to '%s', which is the collection itself or one of its "
+                    "own subdirectories. A link is only for datasets outside this collection." %
+                    (collFname, linkName))
+
+        jsonFname = join(webRoot, linkName, "dataset.json")
+        if not isfile(jsonFname):
+            errAbort("'links' in %s points to '%s' but %s does not exist. A link target has to be "
+                    "built before the collection that links to it. Build '%s' first, then rebuild "
+                    "this collection." % (collFname, linkName, jsonFname, linkName))
+
+        linkInfo = readJson(jsonFname, keepOrder=True)
+
+        if not "shortLabel" in linkInfo:
+            errAbort("%s has no 'shortLabel', so '%s' cannot be linked from %s. Rebuild that "
+                    "dataset, then retry." % (jsonFname, linkName, collFname))
+        if not "md5" in linkInfo:
+            linkInfo["md5"] = calcMd5ForDataset(linkInfo)
+
+        # the JS resolves a dataset by its name as a path from the web root, so the name
+        # has to stay the target's real location, not something relative to this collection
+        linkInfo["name"] = linkName
+        linkInfo["isLink"] = True
+        linkInfo.update(override)
+
+        if linkInfo.get("visibility")=="hide":
+            logging.warning("'links' in %s points to '%s', but that dataset sets visibility='hide', "
+                    "so it will not appear in the dataset list." % (collFname, linkName))
+
+        linkDatasets.append(linkInfo)
+
+    seen = set()
+    for ds in linkDatasets:
+        if ds["name"] in seen:
+            errAbort("'links' in %s lists '%s' more than once" % (collFname, ds["name"]))
+        seen.add(ds["name"])
+
+    logging.info("Collection %s links to %d datasets: %s" %
+            (collFname, len(linkDatasets), ", ".join([ds["name"] for ds in linkDatasets])))
+    return linkDatasets
+
 def rebuildCollections(dataRoot, webRoot, collList):
     " recreate the dataset.json files for a list of cellbrowser.conf files of collections "
     collList = list(collList)
@@ -5792,6 +5879,19 @@ def rebuildCollections(dataRoot, webRoot, collList):
 
         # the collections summary comes from the JSON files
         datasets = subdirDatasetJsonData(webCollDir)
+
+        # datasets that live elsewhere in the tree but are shown here as well, see 'links'.
+        # They are merged before summarizing so they take part in the same 'priority' sort
+        # as the real subdirectories.
+        linkDatasets = loadCollLinks(collInfo, webRoot, collFname)
+        if linkDatasets:
+            subDirNames = set([ds["name"] for ds in datasets])
+            for ds in linkDatasets:
+                if ds["name"] in subDirNames:
+                    errAbort("'links' in %s points to '%s', but a subdirectory of this collection "
+                            "already provides that dataset." % (collFname, ds["name"]))
+            datasets = list(sorted(datasets + linkDatasets, key=lambda k: k.get('priority', 10)))
+
         collSumm = summarizeDatasets(datasets)
 
         # sort the top level datasets alphabetically
@@ -6019,6 +6119,13 @@ def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None
 
         inConf = loadConfig(inConfFname)
         inDir = dirname(abspath(inConfFname))
+
+        # 'links' only means something for a collection, and this is a real dataset, so the
+        # setting would be quietly dropped. Say so, it is an easy file to get wrong.
+        if "links" in inConf:
+            logging.warning("%s sets 'links', but this is a dataset, not a collection, so the setting "
+                    "is ignored. Move 'links' to the cellbrowser.conf of the collection that should "
+                    "show the linked datasets." % inConfFname)
 
         outConf = OrderedDict()
         outConf["fileVersions"] = dict()
@@ -6628,6 +6735,10 @@ def summarizeDatasets(datasets):
         # the above tags are replaced with the more modern dictionary 'facets' (the old code is still there, for backwards compatibility
         if "facets" in ds:
             summDs["facets"] = dict(ds["facets"])
+
+        # the dataset really lives in another collection, we only show it here, see 'links'
+        if ds.get("isLink"):
+            summDs["isLink"] = True
 
         # these are generated
         if "sampleCount" in ds:
