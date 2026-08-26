@@ -6795,7 +6795,7 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         #"ext/jquery-ui-1.11.3.custom.css",
         "ext/jquery.tipsy.1.0.3.min.css", "ext/bootstrap.min.css",
         "ext/introjs.2.4.0.min.css", "ext/bootstrap-submenu.min.css",
-        "ext/bootstrap-dropmenu.min.css", "ext/font-awesome.css",
+        "ext/bootstrap-dropmenu.min.css",
         "ext/googleMaterialIcons.css", "ext/chosen.1.8.2.min.css",
         "ext/select2.4.0.4.min.css",
         "ext/selectize.bootstrap3.css",
