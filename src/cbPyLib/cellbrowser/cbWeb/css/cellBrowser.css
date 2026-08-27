@@ -1058,18 +1058,28 @@ th[role=columnheader]:not(.no-sort):hover:after {
    shows the ms spent in each dataset-load phase. Only created when debug mode is
    on; see cbTiming() in cellBrowser.js. Dark, monospace, out of the way. */
 #tpDebugBar {
-    position: fixed; left: 0; right: 0; bottom: 0; height: 32px; line-height: 32px;
+    position: fixed; left: 0; right: 0; bottom: 0;
     background: rgba(24,24,24,0.90); color: #d8d8d8;
     font-family: Menlo, Consolas, monospace; font-size: 13px;
-    padding: 0 14px; white-space: nowrap; overflow-x: auto;
+    padding: 0 14px;
     border-top: 1px solid #444; z-index: 100000;
 }
+/* one row per timing run: the dataset load, then a DE job. Each scrolls on its
+   own, and the right padding keeps a long row from running under the close box. */
+#tpDebugBar .tpDebugRow {
+    height: 32px; line-height: 32px; white-space: nowrap; overflow-x: auto;
+    padding-right: 26px;
+}
+#tpDebugBar .tpDebugRow + .tpDebugRow { border-top: 1px solid #3a3a3a; }
 #tpDebugBar .tpDebugSeg { margin-right: 20px; }
 #tpDebugBar .tpDebugTag { color: #7fb0ff; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
 #tpDebugBar .tpDebugLbl { color: #9fd0ff; }
 #tpDebugBar .tpDebugVal { color: #ffd48a; }
 #tpDebugBar .tpDebugTot { color: #9fe6a0; }
-#tpDebugBar .tpDebugGroup { color: #7fb0ff; font-weight: bold; border-left: 1px solid #555; padding-left: 20px; }
+#tpDebugBar .tpDebugGroup { color: #7fb0ff; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
 #tpDebugBar .tpDebugDraw { color: #f0a0ff; }
-#tpDebugBar .tpDebugClose { float: right; cursor: pointer; color: #aaa; margin-left: 14px; font-weight: bold; }
+#tpDebugBar .tpDebugClose {
+    position: absolute; right: 12px; top: 0; height: 32px; line-height: 32px;
+    cursor: pointer; color: #aaa; font-weight: bold;
+}
 #tpDebugBar .tpDebugClose:hover { color: #fff; }

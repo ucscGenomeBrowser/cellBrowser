@@ -372,7 +372,10 @@ var cellbrowser = function() {
     }
 
     function updateDebugBar() {
-        /* draw/refresh the fixed timing bar along the bottom of the window */
+        /* draw/refresh the fixed timing bar along the bottom of the window. Each
+           timing run gets its own row and the bar grows upward, so the load
+           numbers keep the position they had before a DE run was added, and the
+           close box stays put instead of being buried under a long line. */
         if (!DEBUG) return;
         var el = document.getElementById("tpDebugBar");
         if (!el) {
@@ -380,28 +383,41 @@ var cellbrowser = function() {
             el.id = "tpDebugBar";
             document.body.appendChild(el);
         }
-        var htmls = ["<span class='tpDebugSeg tpDebugTag'>debug</span>"];
+        var rows = [];      // one finished row of html per timing run
+        var segs = null;    // segments of the row being built
         var total = 0;
-        var haveMark = false;
+
+        function endRow(extra) {
+            if (segs===null) return;
+            segs.push("<span class='tpDebugSeg tpDebugTot'>total "+total.toFixed(0)+" ms</span>");
+            if (extra) segs.push(extra);
+            rows.push("<div class='tpDebugRow'>"+segs.join("")+"</div>");
+        }
+        function startRow(label, cls) {
+            endRow();
+            segs = ["<span class='tpDebugSeg "+cls+"'>"+label+"</span>"];
+            total = 0;
+        }
+
+        startRow("debug", "tpDebugTag");        // the dataset-load run leads the bar
         for (var i=0; i<gDebugTiming.rows.length; i++) {
             var r = gDebugTiming.rows[i];
-            if (r.group!==undefined) {          // a new run starts here: close the last one
-                if (haveMark)
-                    htmls.push("<span class='tpDebugSeg tpDebugTot'>total "+total.toFixed(0)+" ms</span>");
-                htmls.push("<span class='tpDebugSeg tpDebugGroup'>"+r.group+"</span>");
-                total = 0; haveMark = false;
+            if (r.group!==undefined) {          // a new run: give it a row of its own
+                startRow(r.group, "tpDebugGroup");
                 continue;
             }
             total = r.total;
-            haveMark = true;
-            htmls.push("<span class='tpDebugSeg'><span class='tpDebugLbl'>"+r.label+
+            segs.push("<span class='tpDebugSeg'><span class='tpDebugLbl'>"+r.label+
                 "</span> <span class='tpDebugVal'>+"+r.delta.toFixed(0)+" ms</span></span>");
         }
-        htmls.push("<span class='tpDebugSeg tpDebugTot'>total "+total.toFixed(0)+" ms</span>");
-        if (gDebugTiming.lastDraw!==null)
-            htmls.push("<span class='tpDebugSeg tpDebugDraw'>draw "+gDebugTiming.lastDraw.toFixed(1)+" ms</span>");
-        htmls.push("<span class='tpDebugClose' title='hide (reload without debug=1 to disable)'>&times;</span>");
-        el.innerHTML = htmls.join("");
+        // the last redraw is whatever the renderer did most recently, so it belongs
+        // to the run at the bottom -- after a DE recolor, that is the DE row
+        var drawSeg = (gDebugTiming.lastDraw===null) ? null :
+            "<span class='tpDebugSeg tpDebugDraw'>draw "+gDebugTiming.lastDraw.toFixed(1)+" ms</span>";
+        endRow(drawSeg);
+
+        el.innerHTML = rows.join("") +
+            "<span class='tpDebugClose' title='hide (reload without debug=1 to disable)'>&times;</span>";
         el.style.display = "block";
         el.querySelector(".tpDebugClose").onclick = function() { el.style.display = "none"; };
     }
@@ -14515,9 +14531,12 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         deRenderResults();
         var r=deCanvasRect();
         var w=Math.min(1040, Math.max(820, r.width-40));
-        // in debug mode a 32px bar is pinned to the bottom of the window, above
-        // everything else, so shrink and lift the dialog to keep its buttons clear
-        var barHeight=DEBUG ? 34 : 0;
+        // in debug mode a bar is pinned to the bottom of the window above everything
+        // else, so shrink and lift the dialog to keep its buttons clear. It carries a
+        // row per timing run and the DE row already exists by now, so measure it
+        // rather than assuming a height.
+        var barEl=DEBUG ? document.getElementById("tpDebugBar") : null;
+        var barHeight=(barEl && barEl.style.display!=="none") ? barEl.offsetHeight+2 : 0;
         var ht=Math.min(640, Math.max(360, r.height-40-barHeight));
         // Save to account sits next to Download CSV. Shown to everyone so the
         // feature is discoverable, but greyed out when signed out — clicking it
@@ -14527,7 +14546,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         $("#tpDeResults").dialog({
             modal:false, closeOnEscape:true, resizable:true, draggable:true,
             width:w, height:ht, title:"Differential expression results",
-            position:{ my:"center", at:(DEBUG ? "center center-17" : "center"), of: renderer.canvas },
+            position:{ my:"center", of: renderer.canvas,
+                at:(barHeight ? "center center-"+Math.round(barHeight/2) : "center") },
             buttons:deButtons,
             close:function(){ deCloseResults(); }
         });
