@@ -327,6 +327,16 @@
         "^p\\d",
         "Postnatal"
       ]
+    ],
+    "brainvar": [
+      [
+        "^prenatal",
+        "Prenatal"
+      ],
+      [
+        "^postnatal",
+        "Postnatal"
+      ]
     ]
   },
   "_lifestage_from_path_doc": "Per-dataset [segment-regex, life-stage] rules. For each track, path segments are tested against the dataset's rules in order; first match sets the Life stage facet. Listed only for datasets with an unambiguous stage as a standalone path segment (human-enhancer adult/fetal dirs, multiomic-human-heart fetal/postnatal, brain-spatial-omics e13/p21/p22 dirs). Datasets whose age is embedded in filenames are handled by collection_lifestage instead.",
@@ -505,6 +515,11 @@
     "olg-eae-ms": "celltype-crosswalks/clean5.tsv"
   },
   "_collection_celltype_colors_doc": "Per-collection cell-type crosswalk. Each value is a TSV (relative to the build dir) with columns: <hub cellType> <TAB> <canonical cellType> <TAB> <R,G,B> [<TAB> tissue <TAB> life_stage <TAB> condition]. build_stanzas rewrites the Cell_type facet value to the canonical (2nd) column -- harmonizing split labels, e.g. SEA-AD's MTG 'Astro' vs PFC 'Astrocyte' both -> 'Astrocyte' -- and colors each track with the 3rd column, so the genome-browser tracks share cell-type colors across datasets/assemblies (colored by broad cell class, colorblind-conscious palette; see build_celltype_crosswalks.py). The optional 4th-6th columns override the Tissue/Life_stage/Condition facet for that track (used e.g. to fill the CATLAS aging atlas's per-track tissue and age). Codes are paper-curated (Li 2021, Zhang 2022, Zhu 2021, Allen taxonomy); see celltype-crosswalks/.",
+  "collection_ignore_hub_stanzas": [
+    "sea-ad-brain-atac",
+    "allen-basal-ganglia-atac"
+  ],
+  "_collection_ignore_hub_stanzas_doc": "Collections whose source hub stanzas are unusable, so every track in them is built as if the collection had no curated hub at all: the Cell type comes from the manifest original_track_name (the source FILENAME) and the stanza is generated (bigWigInfo data range + autoScale on) instead of copied. Normally the wrangler-written stanza is better and is preferred everywhere -- corpus-wide its shortLabel classifies 1245 tracks the filename cannot. These two are the exception, and they fail in TWO independent ways. (1) Labels: SEA-AD files are 'ADNC0L2-3IT.bw' but its hub stanzas are named 'L2/3IT_ADNC:0' -- the ADNC neuropathology token moves from the front to the back and the layer name loses its hyphen, so label_sub (^ADNC(\\d+)), celltype_leading_strip_regex (which strips a LEADING ADNC token) and the keys of sea-ad-celltype-crosswalk.tsv ('L2-3IT', 'L5-6NP', 'Lamp5-Lhx6', 'Sst-Chodl') all miss; 72 hg38 cortical-layer tracks and 89 mm10 allen-basal-ganglia tracks lose their broad cell class and their shared-palette colour. (2) Scaling: both hubs declare a bare 'type bigWig' with no data range, so 184 hg38 + 89 mm10 tracks lose the default viewLimits that bigWigInfo would supply. Ignoring the stanzas outright fixes both and reproduces the output that was visually QA'd on 2026-08-03. Add a collection here only when its hub stanzas are genuinely a different naming scheme from its curation -- the fix for a merely MISSING crosswalk row is to add the row.",
   "collection_cells_dataset": {
     "sea-ad-brain-atac": "sea-ad-mtg+cohort"
   },
@@ -795,5 +810,28 @@
       ]
     }
   ],
-  "_extra_collections_doc": "Track-only sources not laid out as Cell Browser datasets. build_manifest scans each root for big* files and emits manifest rows with the given collection/assembly, excluded=0 (bypasses the desc-readiness gate). type: bigWig|bigBed|bigInteract. Paths are relative to the datasets root. human-enhancer-atlas re-uses the existing served collection so the cCRE bigBeds join it."
+  "_extra_collections_doc": "Track-only sources not laid out as Cell Browser datasets. build_manifest scans each root for big* files and emits manifest rows with the given collection/assembly, excluded=0 (bypasses the desc-readiness gate). type: bigWig|bigBed|bigInteract. Paths are relative to the datasets root. human-enhancer-atlas re-uses the existing served collection so the cCRE bigBeds join it.",
+  "collection_cohorts": {
+    "multiomic-human-heart": {
+      "fetal": [
+        "fetal cohort",
+        "fet"
+      ],
+      "postnatal": [
+        "postnatal cohort",
+        "postnat"
+      ]
+    },
+    "brainvar": {
+      "prenatal": [
+        "prenatal",
+        "pre"
+      ],
+      "postnatal": [
+        "postnatal",
+        "post"
+      ]
+    }
+  },
+  "_collection_cohorts_doc": "Collections that serve a whole-dataset copy of each cell type plus per-cohort copies. {collection: {segment: [longDescriptor, shortDescriptor]}}. A segment matches a path directory (bw/prenatal/) or a leading filename token (Prenatal_ExN.bw); the matching descriptor is appended to the label so the copies do not collide on one name. multiomic-human-heart: hub/celltype/ vs hub/disease/{fetal,postnatal}/. brainvar: the original combined-stage bw/ tracks vs the stage-split bw/{prenatal,postnatal}/ set."
 }

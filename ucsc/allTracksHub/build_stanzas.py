@@ -72,6 +72,13 @@ DROP_KEYS = {
     "view", "container", "priority", "visibility", "html", "_genome",
     "parentcontainer", "dragandrop", "centerlabelsdense", "configurable",
     "metadata", "subgroup1", "subgroup2", "subgroup3",
+    # Scaling is set once on the faceted composite parent as `autoScale group`, so every
+    # selected subtrack shares one scale and tracks at the same locus are directly
+    # comparable. A per-subtrack autoScale would override that inherited setting, and
+    # hubCheck errAborts outright on an individual bigWig that declares `autoScale group`
+    # (hubCheck.c: it belongs "in the parent composite stanza instead") -- 637 subtracks
+    # had inherited exactly that verbatim from their source hubs.
+    "autoscale",
 }
 
 # stanza keys whose values are URLs relative to the hub dir and need absolutizing
@@ -360,6 +367,26 @@ CELLTYPE_TRAIL_RE = re.compile(_trail, re.I) if _trail else None
 # leading assay/histone-mark token stripped from a cellType (redundant with the modality facet)
 _lead = CFG.get("celltype_leading_strip_regex", "")
 CELLTYPE_LEAD_RE = re.compile(_lead, re.I) if _lead else None
+
+# Collections whose source hub stanzas are NOT usable, so every track in them is built
+# as if it had no curated stanza at all: cellType from the manifest original_track_name
+# (the source FILENAME) and a generated stanza (bigWigInfo data range, autoScale on).
+# See the _doc in hub_config.json. Two independent things go wrong when these hubs'
+# stanzas are trusted: the labels are in a different naming scheme than the curation
+# written for the collection (so label_sub, the leading-token strip and the per-collection
+# crosswalk all miss, costing 72 hg38 + 89 mm10 tracks their cell class and colour), and
+# the stanzas declare a bare `type bigWig` with no data range (so 184 hg38 + 89 mm10
+# tracks lose the default viewLimits they would get from bigWigInfo).
+IGNORE_HUB_STANZAS = set(CFG.get("collection_ignore_hub_stanzas", []))
+
+
+def curated_ref(ref, row):
+    """The curated hub leaf for a manifest row, or None when the row's collection is in
+    IGNORE_HUB_STANZAS. Every lf lookup goes through this so a collection cannot be
+    opted out of the hub labels but still pick up the hub's stanza settings."""
+    if row["collection"] in IGNORE_HUB_STANZAS:
+        return None
+    return ref.get(os.path.realpath(row["abs_path"]))
 
 # whole collections routed out of the faceted composite into their own composite
 SEPARATE_COLLECTIONS = CFG.get("separate_collections", {})
@@ -668,11 +695,14 @@ ALLEN_GROUPING = {
     "bg_merge_D1_D2_dorsal_ventral": ("D1/D2 + dorsal/ventral merge", "D1D2DV"),
 }
 
-# multiomic-human-heart splits its per-cell-type tracks into whole-dataset (hub/celltype/)
-# and per-cohort (hub/disease/{fetal,postnatal}/) copies; the cohort prefix is dropped
-# from the cell type, so the two collide.
-HEART_COHORT = {"fetal": ("fetal cohort", "fet"),
-                "postnatal": ("postnatal cohort", "postnat")}
+# Some collections serve a whole-dataset copy of each cell type AND per-cohort copies
+# (multiomic-human-heart: hub/celltype/ vs hub/disease/{fetal,postnatal}/; brainvar:
+# bw/ vs bw/{prenatal,postnatal}/). The cohort token is stripped from the cell type, so
+# without a descriptor the copies collide on one label. Keyed by collection in
+# hub_config.json as {segment: [longDescriptor, shortDescriptor]}; a segment matches
+# either a path directory or a leading filename token (Prenatal_ExN).
+COLLECTION_COHORTS = {coll: {k: tuple(v) for k, v in rules.items()}
+                      for coll, rules in CFG.get("collection_cohorts", {}).items()}
 
 # catlas mouse aging: a two-letter brain-region prefix on the filename (DH.Asc.03).
 # This is a Tissue refinement rather than a label suffix -- feeding it to the facet
@@ -757,12 +787,11 @@ def track_variant(r, lf, stem, dtype, modality=""):
                 add(lng, sht)
                 break
 
-    # multiomic heart cohort split (whole-dataset vs fetal/postnatal copies)
-    if coll == "multiomic-human-heart":
-        for key, (lng, sht) in HEART_COHORT.items():
-            if "/%s/" % key in path or re.match(r"(?i)^%s[_.]" % key, stem or ""):
-                add(lng, sht)
-                break
+    # cohort split: whole-dataset copy vs per-cohort copies of the same cell type
+    for key, (lng, sht) in COLLECTION_COHORTS.get(coll, {}).items():
+        if "/%s/" % key in path or re.match(r"(?i)^%s[_.]" % key, stem or ""):
+            add(lng, sht)
+            break
 
     return ", ".join(lng_parts), " ".join(sht_parts)
 
@@ -1421,13 +1450,19 @@ def render_child(child_name, composite, row, lf, color=None, long_override=None,
     label = row["original_track_name"] or stem
 
     emitted = set(["track", "parent"])
-    if lf:
-        type_full = lf.get("type_full") or row["track_type"]
-    elif row["track_type"] == "bigWig":
+    type_full = (lf or {}).get("type_full") or row["track_type"]
+    # A bigWig whose `type` line carries no data range leaves hgTracks with no default
+    # viewLimits, so it draws against the built-in 0:127. BrainVar's gene-activity tiles
+    # top out near 6 and rendered as a flat line that way. Fill the range in from
+    # bigWigInfo. This bites curated tracks too, not just orphans: a source hub commonly
+    # sets autoScale on the COMPOSITE PARENT, and this build flattens every subtrack into
+    # one native composite without copying the parent, so the child arrives with no
+    # scaling at all (232 subtracks corpus-wide have no range, no autoScale and no
+    # viewLimits). Only the default is supplied -- an explicit viewLimits still wins.
+    if type_full == "bigWig":
         mm = bigwig_minmax(row["abs_path"])
-        type_full = "bigWig " + mm if mm else "bigWig"
-    else:
-        type_full = row["track_type"]
+        if mm:
+            type_full = "bigWig " + mm
     lines.append("type " + type_full)
     lines.append("bigDataUrl " + track_url)
     emitted.update(["type", "bigdataurl"])
@@ -1445,11 +1480,17 @@ def render_child(child_name, composite, row, lf, color=None, long_override=None,
                 v = base + "/" + v.lstrip("./")
             lines.append("%s %s" % (k, v))
             emitted.add(kl)
+        # Give a curated bigWig the same height default the generated path uses when its
+        # stanza sets none. Scaling is NOT set here -- it is inherited from the parent
+        # composite's `autoScale group` (see DROP_KEYS).
+        if row["track_type"] == "bigWig" and "maxheightpixels" not in emitted:
+            lines.append("maxHeightPixels 100:30:8")
+            emitted.add("maxheightpixels")
     else:
         # generated defaults for orphan / hub-less tracks
         if row["track_type"] == "bigWig":
-            lines += ["autoScale on", "maxHeightPixels 100:30:8"]
-            emitted.update(["autoscale", "maxheightpixels"])
+            lines += ["maxHeightPixels 100:30:8"]   # scaling comes from the parent
+            emitted.add("maxheightpixels")
 
     if color and "color" not in emitted:
         lines.append("color " + color)
@@ -1515,7 +1556,7 @@ def main():
     _key_forms = defaultdict(Counter)
     for rows_ in by_asm.values():
         for r in rows_:
-            base = raw_celltype(r, ref.get(os.path.realpath(r["abs_path"])))
+            base = raw_celltype(r, curated_ref(ref, r))
             if base:
                 _key_forms[celltype_normkey(base)][base] += 1
     celltype_canon = {}
@@ -1556,8 +1597,7 @@ def main():
             if r["track_url"] in allen_skip:   # redundant byte-identical allen copy
                 allen_dupes.append("%s\t%s" % (asm, r["abs_path"]))
                 continue
-            rp = os.path.realpath(r["abs_path"])
-            lf = ref.get(rp)
+            lf = curated_ref(ref, r)
             idbase = shorten_id(r["master_track_name"])
             ttype = r["track_type"]
             stem = re.sub(r"\.(bw|bigwig|bb|bigbed)$", "",
@@ -1834,6 +1874,14 @@ def main():
             "defaultSortField Dataset",
             # NB: code (hgTrackUi.c) reads lowercase "maxCheckboxes"; doc's is a typo.
             "maxCheckboxes 200",
+            # One scale for every subtrack the user has selected, so two tracks drawn at
+            # the same locus are directly comparable -- with per-track autoScale, tracks
+            # whose values differ by orders of magnitude looked equally tall. Set HERE and
+            # not on the children: hgTracks groups by tdb->parent (wigTrack.c setMinMax),
+            # and hubCheck rejects `autoScale group` on an individual bigWig. Limits come
+            # from the data in the CURRENT WINDOW (preDrawAutoScale scans preDraw), not
+            # genome-wide, so one outlying region elsewhere cannot flatten the view.
+            "autoScale group",
             "html %s.html" % comp,
         ]
 
@@ -1869,6 +1917,7 @@ def main():
                 "subtrackUrls Dataset=%s/?ds=$$" % TARGET_BASE,
                 "defaultSortField Dataset",
                 "maxCheckboxes 200",
+                "autoScale group",       # see the main composite above
                 "html %s.html" % (hc),
             ]))
             blocks += histone_children
@@ -1940,7 +1989,9 @@ def main():
                 "track " + comp + sfx,
                 "compositeTrack on",
                 "type bigWig",
-                "autoScale on",
+                # group, not on: one scale across the composite so its tracks are
+                # comparable at a locus. Same reasoning as the main faceted composite.
+                "autoScale group",
                 "maxHeightPixels 128:36:16",
                 "visibility hide",
                 "shortLabel %s" % _ss,
@@ -1960,7 +2011,9 @@ def main():
                 "track " + comp + ecfg["suffix"],
                 "compositeTrack on",
                 "type bigWig",
-                "autoScale on",
+                # group, not on: one scale across the composite so its tracks are
+                # comparable at a locus. Same reasoning as the main faceted composite.
+                "autoScale group",
                 "maxHeightPixels 128:36:16",
                 "visibility hide",
                 "shortLabel %s" % _es,
@@ -1980,7 +2033,9 @@ def main():
                 "track " + comp + ccfg["suffix"],
                 "compositeTrack on",
                 "type bigWig",
-                "autoScale on",
+                # group, not on: one scale across the composite so its tracks are
+                # comparable at a locus. Same reasoning as the main faceted composite.
+                "autoScale group",
                 "maxHeightPixels 128:36:16",
                 "visibility hide",
                 "shortLabel %s" % _ps,
