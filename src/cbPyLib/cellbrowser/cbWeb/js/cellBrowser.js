@@ -297,6 +297,14 @@ var cellbrowser = function() {
     // to the on-screen debug bar (and the console). Reset per dataset load. All
     // calls are no-ops unless debug mode is on (?debug=1), so the marks sprinkled
     // through the load path cost nothing in normal use.
+    //
+    // The bar can hold more than one timing run, separated by cbTimingGroup().
+    // The load phases are the first run; a differential expression job, which the
+    // user may start minutes later, is a second one, so its numbers are measured
+    // from the click and not from page load.
+    //
+    // rows entries are {label, delta, total} for a mark, or {group:name} for the
+    // start of a run.
     var gDebugTiming = { t0: null, last: null, rows: [], lastDraw: null };
 
     function initDebugMode() {
@@ -304,6 +312,10 @@ var cellbrowser = function() {
            startup, after the URL helpers' regexes are initialized. */
         var debugVar = getVar("debug");
         DEBUG = (debugVar==="1" || debugVar==="on");
+        // maxPlot.js and maxHeat.js are separate modules and cannot see the DEBUG
+        // above, which is private to this one. They read window.doDebug instead --
+        // maxPlot's debug() already did, it was just never set anywhere.
+        window.doDebug = DEBUG;
         if (DEBUG)
             console.log("cellBrowser: debug mode on (?debug=1)");
     }
@@ -311,6 +323,21 @@ var cellbrowser = function() {
     function cbTimingReset() {
         /* start a fresh timing run (called at the top of loadDataset) */
         gDebugTiming = { t0: null, last: null, rows: [], lastDraw: null };
+    }
+
+    function cbTimingGroup(name) {
+        /* start a new timing run on the same bar, keeping the runs already there.
+           Deltas and the total of the marks that follow are counted from here. A
+           second run under the same name replaces the first, so repeatedly running
+           the same thing does not make the bar grow without end. */
+        if (!DEBUG) return;
+        for (var i=0; i<gDebugTiming.rows.length; i++)
+            if (gDebugTiming.rows[i].group===name) { gDebugTiming.rows.length = i; break; }
+        var now = performance.now();
+        gDebugTiming.rows.push({group:name});
+        gDebugTiming.t0 = now;
+        gDebugTiming.last = now;
+        updateDebugBar();
     }
 
     function wrapDrawTiming(rend) {
@@ -338,7 +365,7 @@ var cellbrowser = function() {
         if (gDebugTiming.t0===null) { gDebugTiming.t0 = now; gDebugTiming.last = now; }
         var delta = now - gDebugTiming.last;
         var total = now - gDebugTiming.t0;
-        gDebugTiming.rows.push([label, delta, total]);
+        gDebugTiming.rows.push({label:label, delta:delta, total:total});
         console.log("cbTiming "+label+": +"+delta.toFixed(0)+" ms (total "+total.toFixed(0)+" ms)");
         gDebugTiming.last = now;
         updateDebugBar();
@@ -355,11 +382,20 @@ var cellbrowser = function() {
         }
         var htmls = ["<span class='tpDebugSeg tpDebugTag'>debug</span>"];
         var total = 0;
+        var haveMark = false;
         for (var i=0; i<gDebugTiming.rows.length; i++) {
             var r = gDebugTiming.rows[i];
-            total = r[2];
-            htmls.push("<span class='tpDebugSeg'><span class='tpDebugLbl'>"+r[0]+
-                "</span> <span class='tpDebugVal'>+"+r[1].toFixed(0)+" ms</span></span>");
+            if (r.group!==undefined) {          // a new run starts here: close the last one
+                if (haveMark)
+                    htmls.push("<span class='tpDebugSeg tpDebugTot'>total "+total.toFixed(0)+" ms</span>");
+                htmls.push("<span class='tpDebugSeg tpDebugGroup'>"+r.group+"</span>");
+                total = 0; haveMark = false;
+                continue;
+            }
+            total = r.total;
+            haveMark = true;
+            htmls.push("<span class='tpDebugSeg'><span class='tpDebugLbl'>"+r.label+
+                "</span> <span class='tpDebugVal'>+"+r.delta.toFixed(0)+" ms</span></span>");
         }
         htmls.push("<span class='tpDebugSeg tpDebugTot'>total "+total.toFixed(0)+" ms</span>");
         if (gDebugTiming.lastDraw!==null)
@@ -14305,14 +14341,20 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     function deRun() {
         if (deValidate() || gDe.running) return;
+        cbTimingGroup("de");               // a DE run is its own group on the debug bar
         deEnsureCellData(function(){       // custom fields: load barcodes first
+            cbTiming("de cellData");       // ~0 ms unless a custom field needed barcodes
             var spec=deBuildSpec();
             gDe.running=true; gDe.canceled=false;
             deRenderBody();       // reflect Running… + disabled button
             deShowRunning();
+            cbTiming("de submit");         // spec build + the Running… repaint
             deSubmitJob(spec,
                 function(p,label){ deUpdateProgress(p,label); },
-                function(result){ if (gDe.canceled) return; gDe.running=false; deHideRunning(); deOnResults(result, spec); deRenderBody(); },
+                function(result){ if (gDe.canceled) return; gDe.running=false;
+                    // result.elapsed is the backend's own runtime, when it reported one
+                    cbTiming("de job"+(result.elapsed!=null ? " (server "+result.elapsed+"s)" : ""));
+                    deHideRunning(); deOnResults(result, spec); deRenderBody(); },
                 function(err){ gDe.running=false; deHideRunning(); deRenderBody(); alert("Differential expression failed: "+err); }
             );
         });
@@ -14369,7 +14411,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                     fetch(url+"?jobId="+encodeURIComponent(sub.jobId))
                         .then(function(r){ return r.json(); })
                         .then(function(st){
-                            if (st.status==="done") { gDe.jobId=null; onDone({genes:st.result.genes, nA:st.result.n_pop1, nB:st.result.n_pop2, filters:st.result.filters}); }
+                            // elapsed is the worker's own runtime (runDeJob.py writes it
+                            // to status.json); the debug bar shows it next to the round trip
+                            if (st.status==="done") { gDe.jobId=null; onDone({genes:st.result.genes, nA:st.result.n_pop1, nB:st.result.n_pop2, filters:st.result.filters, elapsed:st.elapsed}); }
                             else if (st.status==="failed" || st.status==="canceled") { gDe.jobId=null; onErr(st.error||st.status); }
                             else {
                                 var label = st.stage || "running";
@@ -14471,7 +14515,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         deRenderResults();
         var r=deCanvasRect();
         var w=Math.min(1040, Math.max(820, r.width-40));
-        var ht=Math.min(640, Math.max(360, r.height-40));
+        // in debug mode a 32px bar is pinned to the bottom of the window, above
+        // everything else, so shrink and lift the dialog to keep its buttons clear
+        var barHeight=DEBUG ? 34 : 0;
+        var ht=Math.min(640, Math.max(360, r.height-40-barHeight));
         // Save to account sits next to Download CSV. Shown to everyone so the
         // feature is discoverable, but greyed out when signed out — clicking it
         // then opens the sign-in dialog (deSaveComparison), and the tooltip says so.
@@ -14480,7 +14527,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         $("#tpDeResults").dialog({
             modal:false, closeOnEscape:true, resizable:true, draggable:true,
             width:w, height:ht, title:"Differential expression results",
-            position:{ my:"center", at:"center", of: renderer.canvas },
+            position:{ my:"center", at:(DEBUG ? "center center-17" : "center"), of: renderer.canvas },
             buttons:deButtons,
             close:function(){ deCloseResults(); }
         });
@@ -14505,6 +14552,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 deCloseResults();
             });
         }, 0);
+        cbTiming("de render");     // volcano plot + gene table + dialog
     }
     function deCloseResults() {
         $(document).off("mousedown.tpDeOutside");

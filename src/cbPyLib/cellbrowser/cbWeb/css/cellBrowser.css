@@ -1069,6 +1069,7 @@ th[role=columnheader]:not(.no-sort):hover:after {
 #tpDebugBar .tpDebugLbl { color: #9fd0ff; }
 #tpDebugBar .tpDebugVal { color: #ffd48a; }
 #tpDebugBar .tpDebugTot { color: #9fe6a0; }
+#tpDebugBar .tpDebugGroup { color: #7fb0ff; font-weight: bold; border-left: 1px solid #555; padding-left: 20px; }
 #tpDebugBar .tpDebugDraw { color: #f0a0ff; }
 #tpDebugBar .tpDebugClose { float: right; cursor: pointer; color: #aaa; margin-left: 14px; font-weight: bold; }
 #tpDebugBar .tpDebugClose:hover { color: #fff; }
