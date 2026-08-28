@@ -76,8 +76,9 @@ DROP_KEYS = {
     # selected subtrack shares one scale and tracks at the same locus are directly
     # comparable. A per-subtrack autoScale would override that inherited setting, and
     # hubCheck errAborts outright on an individual bigWig that declares `autoScale group`
-    # (hubCheck.c: it belongs "in the parent composite stanza instead") -- 637 subtracks
-    # had inherited exactly that verbatim from their source hubs.
+    # (hubCheck.c: it belongs "in the parent composite stanza instead") -- 475 subtracks
+    # corpus-wide (402 hg38, 73 mm10) had inherited exactly that verbatim from their
+    # source hubs, and a further 677 carried `autoScale on`; all 1152 are dropped here.
     "autoscale",
 }
 
