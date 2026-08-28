@@ -31,6 +31,11 @@
     "hub.tmp2"
   ],
   "_exclude_dirs_wip_doc": "Path segments marking work-in-progress/throwaway hubs. NOTE: hub_out is intentionally NOT here (it is cbHub's normal output dir).",
+  "exclude_track_paths": [
+    ["^brainvar/gene-activity/hub/bw/(ExN|Glia|InN|NN)-TileSize-100-normMethod-ReadsInTSS-ArchR\\.bw$", "BrainVar cell-type aggregate: superseded by the prenatal/ and postnatal/ pair of the same cell type"],
+    ["^neuro-degen-atac/peaks\\.bb$", "superseded by peaks.v2.bb, which is what the dataset's own hub.txt serves as 'track peaks' (the peaks.bb bigDataUrl line is commented out there). peaks.bb survives only as an unreferenced file on disk, so it is an orphan the walk picks up; both files collide on the same track id and shipped as two indistinguishable 'All cell types, peaks' tracks."]
+  ],
+  "_exclude_track_paths_doc": "Hand-curated per-file denylist, for individual track files that are technically fine (so no other rule catches them) but should not ship. Ordered [regex, note] pairs; the regex is re.search-matched against the file's path relative to /hive/data/inside/cells/datasets, and the note says why. A match sets excluded=1 with reason 'manually_excluded' and is listed by path in inventory-report.md. Anchor patterns with ^...$ so a pattern cannot reach a same-named file in another dataset -- e.g. the BrainVar aggregates share their basenames with the submitter-files/ copies (already dropped as orig_source_file) and with the prenatal/postnatal files, which differ only by directory. Applied to extra_collections roots too. This is the LAST resort: prefer a rule that describes the class of file (exclude_dirs_wip, orphan_drop_name_patterns, ...) so new datasets are handled without another hand edit.",
   "orig_source_dirs": [
     "orig",
     "submitter-files",
