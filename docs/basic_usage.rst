@@ -42,7 +42,7 @@ You can use the ``-p PORT`` option to specify on which port the webserver will r
 
     cbBuild -o ~/public_html/cells/ -p 8888
 
-Pointint your web browser to ``http://localhost:8888`` to view your cell browser. To stop the cbBuild web server, 
+Point your web browser to ``http://localhost:8888`` to view your cell browser. To stop the cbBuild web server, 
 press Ctrl-C. To keep it running in the background, press Ctrl-Z and put it into the background with ``bg``. 
 If you have stopped the web server, you can always run the same ``cbBuild`` command to restart it. 
 Restarting the web server will not re-export the entire expression matrix again if there is already one under
