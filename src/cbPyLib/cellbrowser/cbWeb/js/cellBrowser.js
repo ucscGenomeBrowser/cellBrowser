@@ -36,8 +36,10 @@ var cellbrowser = function() {
     var gCbUser = null;
 
     // Which sign-in providers the backend offers, from GET /api/auth/providers:
-    // {password:true, google:bool, orcid:bool}. null = not yet fetched. Used to
-    // decide which OAuth buttons to show in the login dialog.
+    // {password:true, providers:[{slug,label}, ...]}. null = not yet fetched.
+    // The list is whatever the server's providers.conf configured, so a site
+    // that adds Microsoft or CILogon gets a button here with no code change --
+    // nothing in this file names an individual provider.
     var gAuthProviders = null;
 
     // Site config from the web root "cb.conf" file (see loadClientConf).
@@ -3666,39 +3668,58 @@ var cellbrowser = function() {
             dataType: "json",
             xhrFields: { withCredentials: true }
         }).done(function(data) {
-            gAuthProviders = data || { password: true };
+            gAuthProviders = data || { password: true, providers: [] };
+            if (!gAuthProviders.providers)
+                gAuthProviders.providers = [];   // older backend: no OAuth at all
             if (onDone) onDone(gAuthProviders);
         }).fail(function() {
-            gAuthProviders = { password: true, google: false, orcid: false };
+            gAuthProviders = { password: true, providers: [] };
             if (onDone) onDone(gAuthProviders);
         });
     }
 
-    function oauthSignIn(provider) {
+    function oauthSignIn(provider, isLink) {
         /* Start the OAuth flow. This must be a top-level navigation (not an
          * AJAX call): the provider shows its own consent page and then redirects
          * back to our callback, which drops the user back into the app already
-         * signed in. */
-        window.location.href = cbApiUrl("/api/auth/oauth/" + provider + "/login");
+         * signed in.
+         * isLink adds ?link=1, which the backend reads as "add this as another
+         * way to sign in to the account I am already using" rather than "sign
+         * me in" -- see _link_identity() in oauth.py. */
+        var url = cbApiUrl("/api/auth/oauth/" + provider + "/login");
+        window.location.href = isLink ? (url + "?link=1") : url;
+    }
+
+    function oauthButton(prov, isLink) {
+        /* One provider button. The label comes from the server's conf file, so
+         * it is built with .text() rather than string concatenation -- a label
+         * is operator-supplied, not developer-supplied. */
+        return $("<button>")
+            .attr("type", "button")
+            .addClass("tpOAuthBtn ui-button ui-widget ui-corner-all")
+            .attr("data-provider", prov.slug)
+            .data("provider", prov.slug)
+            .text(prov.label || ("Sign in with " + prov.slug))
+            .click(function() { oauthSignIn(prov.slug, isLink); });
     }
 
     function renderOAuthButtons() {
-        /* Fill #tpOAuthRow with a button per live OAuth provider. Hidden
-         * entirely when no OAuth provider is configured, so a password-only
-         * backend shows the plain email/password dialog with nothing extra. */
+        /* Fill #tpOAuthRow with a button per configured provider, in the order
+         * the server listed them. Nothing here knows the name of any particular
+         * provider: adding one is a server-side conf change. Hidden entirely
+         * when no OAuth provider is configured, so a password-only backend shows
+         * the plain email/password dialog with nothing extra. */
         var row = $("#tpOAuthRow");
         if (row.length === 0)
             return;
         fetchAuthProviders(function(p) {
-            var btns = [];
-            if (p.google)
-                btns.push("<button type='button' class='tpOAuthBtn ui-button ui-widget ui-corner-all' data-provider='google'>Sign in with Google</button>");
-            if (p.orcid)
-                btns.push("<button type='button' class='tpOAuthBtn ui-button ui-widget ui-corner-all' data-provider='orcid'>Sign in with ORCID</button>");
-            if (btns.length === 0) { row.hide(); return; }
-            row.html(btns.join("")
-                + "<div class='tpOAuthOr'><span>or use an email and password</span></div>").show();
-            row.find(".tpOAuthBtn").click(function() { oauthSignIn($(this).data("provider")); });
+            var provs = p.providers || [];
+            if (provs.length === 0) { row.hide(); return; }
+            row.empty();
+            for (var i = 0; i < provs.length; i++)
+                row.append(oauthButton(provs[i], false));
+            row.append("<div class='tpOAuthOr'><span>or use an email and password</span></div>");
+            row.show();
         });
     }
 
@@ -3715,6 +3736,7 @@ var cellbrowser = function() {
             var items = [];
             items.push('<li class="dropdown-header" style="padding:3px 20px">Signed in as<br><span id="tpAccountEmail"></span></li>');
             items.push('<li role="separator" class="divider"></li>');
+            items.push('<li><a href="#" id="tpLinkedSignInsLink">Linked sign-ins&hellip;</a></li>');
             items.push('<li><a href="#" id="tpSignOutLink">Sign out</a></li>');
             menu.html(items.join(""));
             // set via .text() rather than HTML — email is user-controlled and the
@@ -3750,6 +3772,174 @@ var cellbrowser = function() {
         var el = $("#tpAuthMsg");
         el.text(text || "");
         if (isOk) el.addClass("tpAuthMsgOk"); else el.removeClass("tpAuthMsgOk");
+    }
+
+    function showLinkedSignInsDialog() {
+        /* Manage the ways this account can sign in: the password, plus each
+         * linked external provider.
+         *
+         * This exists because the same person can reach us through more than
+         * one issuer -- signing in with Google directly and through a broker
+         * like CILogon produces two different subjects. Without a way to link
+         * them, the second one silently becomes a second, empty account with
+         * none of the user's saved annotations. Linking from here attaches the
+         * new identity to the account they are already signed in to. */
+        if (!isLoggedIn()) { showLoginDialog("signin"); return; }
+
+        var htmls = [];
+        htmls.push("<style>"
+            + "#tpLinkedList{list-style:none;padding:0;margin:0 0 14px 0}"
+            + "#tpLinkedList li{padding:6px 0;border-bottom:1px solid #eee;display:flex;align-items:center}"
+            + "#tpLinkedList li .tpLinkedWho{flex:1}"
+            + "#tpLinkedList li .tpLinkedSub{color:#888;font-size:90%}"
+            + "#tpLinkedMsg{color:#b00;min-height:1.1em;margin:8px 0}"
+            + "#tpLinkedMsg.tpAuthMsgOk{color:#080}"
+            + "#tpLinkedAddRow button.tpOAuthBtn{display:block;width:100%;margin-bottom:8px;padding:8px}"
+            + "</style>");
+        htmls.push("<div id='tpLinkedMsg'></div>");
+        htmls.push("<ul id='tpLinkedList'><li>Loading&hellip;</li></ul>");
+        htmls.push("<div style='font-weight:bold;margin-bottom:6px'>Add another way to sign in</div>");
+        htmls.push("<div id='tpLinkedAddRow'></div>");
+
+        $("#tpLinkedDialog").remove();
+        $(document.body).append("<div id='tpLinkedDialog' style='display:none'>" + htmls.join("") + "</div>");
+        $("#tpLinkedDialog").dialog({
+            modal: true,
+            title: "Linked sign-ins",
+            width: 460,
+            closeOnEscape: true,
+            close: function() { $("#tpLinkedDialog").remove(); }
+        });
+
+        refreshLinkedSignIns();
+
+        // The "add" buttons start the same OAuth flow as the sign-in dialog,
+        // but with link=1 so the callback attaches rather than creates.
+        fetchAuthProviders(function(p) {
+            var row = $("#tpLinkedAddRow");
+            if (row.length === 0)
+                return;   // dialog closed while the request was in flight
+            var provs = p.providers || [];
+            row.empty();
+            if (provs.length === 0) {
+                row.text("This site has no external sign-in providers configured.");
+                return;
+            }
+            for (var i = 0; i < provs.length; i++)
+                row.append(oauthButton(provs[i], true));
+        });
+    }
+
+    function linkedMsg(text, isOk) {
+        var el = $("#tpLinkedMsg");
+        el.text(text || "");
+        if (isOk) el.addClass("tpAuthMsgOk"); else el.removeClass("tpAuthMsgOk");
+    }
+
+    function refreshLinkedSignIns() {
+        /* (Re)fill the list in the linked-sign-ins dialog from the server. */
+        $.ajax({
+            url: cbApiUrl("/api/auth/identities"),
+            dataType: "json",
+            xhrFields: { withCredentials: true }
+        }).done(function(data) {
+            var list = $("#tpLinkedList");
+            if (list.length === 0)
+                return;   // dialog closed while the request was in flight
+            list.empty();
+
+            if (data.hasPassword)
+                list.append($("<li>").append($("<span>").addClass("tpLinkedWho")
+                    .append($("<b>").text("Password"))
+                    .append($("<div>").addClass("tpLinkedSub")
+                        .text((gCbUser && gCbUser.email) || ""))));
+
+            var ids = data.identities || [];
+            // How many ways in are there in total? The server refuses to remove
+            // the last one, so disable the button rather than offer a click
+            // that can only fail.
+            var total = ids.length + (data.hasPassword ? 1 : 0);
+
+            for (var i = 0; i < ids.length; i++) {
+                var ident = ids[i];
+                // Provider slug, email and name all come from an external
+                // identity provider, so build with .text(), never HTML.
+                var who = $("<span>").addClass("tpLinkedWho")
+                    .append($("<b>").text(ident.provider))
+                    .append($("<div>").addClass("tpLinkedSub")
+                        .text(ident.email || ident.display_name || ""));
+                var btn = $("<button>").attr("type", "button")
+                    .addClass("ui-button ui-widget ui-corner-all")
+                    .text("Unlink")
+                    .data("identityId", ident.id);
+                if (total < 2)
+                    btn.prop("disabled", true)
+                       .attr("title", "This is the only way to sign in to this account");
+                else
+                    btn.click(onUnlinkClick);
+                list.append($("<li>").append(who).append(btn));
+            }
+
+            if (list.children().length === 0)
+                list.append($("<li>").text("No sign-in methods on record."));
+        }).fail(function() {
+            $("#tpLinkedList").empty().append($("<li>").text("Could not load your sign-in methods."));
+        });
+    }
+
+    function onUnlinkClick() {
+        var btn = $(this);
+        var id = btn.data("identityId");
+        if (!confirm("Remove this sign-in from your account? Your saved annotations are not affected."))
+            return;
+        btn.prop("disabled", true);
+        $.ajax({
+            url: cbApiUrl("/api/auth/identities/" + id),
+            method: "DELETE",
+            dataType: "json",
+            xhrFields: { withCredentials: true }
+        }).done(function() {
+            linkedMsg("Sign-in removed.", true);
+            checkLoginState(function() { refreshLinkedSignIns(); });
+        }).fail(function(xhr) {
+            btn.prop("disabled", false);
+            var msg = (xhr.responseJSON && xhr.responseJSON.error) || "could not remove this sign-in";
+            linkedMsg(msg, false);
+        });
+    }
+
+    function handleOAuthReturn() {
+        /* The OAuth callback redirects the browser back here with a cbAuth
+         * query parameter saying how it went (see _back_to_app in oauth.py).
+         * Report it, then strip our parameters from the URL so a reload or a
+         * bookmark does not carry them along. */
+        if (typeof URLSearchParams === "undefined")
+            return;
+        var params = new URLSearchParams(window.location.search);
+        var status = params.get("cbAuth");
+        if (!status)
+            return;
+        var provider = params.get("provider") || "that provider";
+        var reason = params.get("reason");
+
+        if (status === "linked")
+            alert("Sign-in method added: " + provider + ".");
+        else if (reason === "link-taken")
+            alert("That " + provider + " login is already attached to a different Cell Browser "
+                + "account. Sign in to that account instead, or contact us to have the two merged.");
+        else if (reason === "no-subject")
+            alert("That sign-in provider did not return enough information to identify you. "
+                + "Please try a different sign-in method.");
+        else
+            alert("Sign-in failed. Please try again.");
+
+        // Drop our own parameters, keep everything else the app put there.
+        params.delete("cbAuth");
+        params.delete("provider");
+        params.delete("reason");
+        var qs = params.toString();
+        window.history.replaceState({}, "",
+            window.location.pathname + (qs ? "?" + qs : "") + window.location.hash);
     }
 
     function showLoginDialog(initialTab) {
@@ -4358,6 +4548,7 @@ var cellbrowser = function() {
        if (cbLoginEnabled()) {
            $('#tpAccountMenu').on('click', '#tpSignInLink', function(ev) { ev.preventDefault(); showLoginDialog("signin"); });
            $('#tpAccountMenu').on('click', '#tpSignOutLink', function(ev) { ev.preventDefault(); cbSignOut(); });
+           $('#tpAccountMenu').on('click', '#tpLinkedSignInsLink', function(ev) { ev.preventDefault(); showLinkedSignInsDialog(); });
            refreshAuthUi();  // reflect whatever we already know; checkLoginState() refines it
        }
 
@@ -13592,6 +13783,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         setupKeyboard();
         buildMenuBar();
         checkLoginState();  // updates the account menu once /api/auth/me responds
+        // Report and clear the ?cbAuth=... an OAuth callback redirected us back
+        // with. Runs after buildMenuBar() so the account menu is already in place.
+        if (cbLoginEnabled())
+            handleOAuthReturn();
 
         var datasetName = getDatasetNameFromUrl()
         // pre-load dataset.json here?

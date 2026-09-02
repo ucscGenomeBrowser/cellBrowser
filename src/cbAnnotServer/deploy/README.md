@@ -27,6 +27,8 @@ static Cell Browser served from the docroot.
 | `restart-gunicorn.sh` | reload (`SIGHUP`) or hard-restart the running gunicorn; run as its owner (otto) |
 | `apache-cells-api.conf` | ProxyPass snippet to paste into the cells vhosts |
 | `cb.conf.sample` | Site config template for the docroot (read by the frontend) |
+| `providers.conf.sample` | Sign-in provider template (server-side, holds secrets, chmod 600) |
+| `migrate_identities.py` | One-off DB migration to the `oauth_identities` table |
 
 ## One-time setup
 
@@ -62,9 +64,7 @@ cron watchdog sources). See `config.py` for the full list.
 | `CBANNOT_MAIL_SERVER` | SMTP host, e.g. `localhost` (hgwdev/cells run a local Sendmail on port 25) |
 | `CBANNOT_MAIL_PORT` | `25` for the local MTA |
 | `CBANNOT_MAIL_FROM` | envelope/from address, e.g. `noreply@cells.ucsc.edu` |
-| `CBANNOT_GOOGLE_CLIENT_ID` / `CBANNOT_GOOGLE_CLIENT_SECRET` | Google OAuth client (blank = Google button hidden) |
-| `CBANNOT_ORCID_CLIENT_ID` / `CBANNOT_ORCID_CLIENT_SECRET` | ORCID OAuth client (blank = ORCID button hidden) |
-| `CBANNOT_ORCID_ENV` | `production` (orcid.org) or `sandbox` (sandbox.orcid.org) |
+| `CBANNOT_PROVIDERS_CONF` | path to the sign-in provider conf file; default `/hive/data/inside/cells/cbAnnotServer/providers.conf` (see OAuth below) |
 
 ## Email (verification / password reset)
 
@@ -81,32 +81,117 @@ then restart gunicorn (on cells the otto watchdog re-launches it and re-sources
 the env file). Signup no longer 500s if the MTA hiccups — the account is still
 created and the user can use "resend verification".
 
-## OAuth sign-in (Google / ORCID)
+## OAuth sign-in (Google, ORCID, CILogon, anything else that speaks OIDC)
 
-Google and ORCID are OpenID Connect providers wired up in `oauth.py`. Each stays
-**dormant until both its client id and secret are set**, so this ships safely
-before the apps are registered — no button appears and the `/api/auth/oauth/...`
-routes 404. The PI registers the client apps (ticket #37492) and drops the
-credentials into the env file; no code change or release is needed to turn them on.
+Providers are **configured, not coded**. Every one is an OpenID Connect issuer,
+so none needs its own code path: drop a stanza into `providers.conf`, restart
+gunicorn, and the button appears in the sign-in dialog. No code change, no
+release, no frontend edit.
 
-Registered **redirect URIs** must match exactly:
-```
-https://cells-test.gi.ucsc.edu/api/auth/oauth/google/callback
-https://cells-test.gi.ucsc.edu/api/auth/oauth/orcid/callback
-https://cells.ucsc.edu/api/auth/oauth/google/callback     # prod, later
-https://cells.ucsc.edu/api/auth/oauth/orcid/callback       # prod, later
+Copy `deploy/providers.conf.sample` to
+`/hive/data/inside/cells/cbAnnotServer/providers.conf` (or set
+`CBANNOT_PROVIDERS_CONF`) and fill in credentials:
+
+```ini
+[provider:google]
+client_id     = ...
+client_secret = ...
+
+[provider:cilogon]
+client_id     = cilogon:/client_id/xxxxxxxx
+client_secret = ...
 ```
 
-Because OAuth users have no local password (and ORCID may not share an email),
-`users.email` and `users.password_hash` became nullable and two columns were
-added. **Existing databases must be migrated once** (create_all won't alter an
-existing table). With the service stopped:
+`google`, `orcid`, `orcid-sandbox`, `cilogon`, `globus` and `microsoft` are
+built-in presets (`providers.py`) supplying the discovery URL, scope and button
+label, so credentials are the whole stanza. Any other OIDC issuer works too —
+give it a `discovery` URL and a `label`. Full key list is in the sample file.
+
+**This file holds client secrets: keep it off the web tree and `chmod 600` it.**
+The service logs a warning at startup if it is group- or world-readable. It is
+*not* the frontend's `cb.conf`, which the browser fetches over HTTP.
+
+A stanza with no `client_id`/`client_secret` is skipped silently, so a provider
+can ship dormant: no button appears and `/api/auth/oauth/<slug>/...` 404s until
+the app is registered. `GET /api/auth/providers` reports what is live, and the
+frontend builds its buttons from that list — nothing in `cellBrowser.js` names
+an individual provider.
+
+Registered **redirect URIs** must match exactly, one per provider slug:
 ```
-CBANNOT_DATABASE_URI=sqlite:////hive/data/inside/cells/cbAnnotServer/cbAnnot.db \
-    ./venv/bin/python3 deploy/migrate_oauth.py     # backs up the DB, then rebuilds `users`
+https://cells-test.gi.ucsc.edu/api/auth/oauth/<slug>/callback
+https://cells.ucsc.edu/api/auth/oauth/<slug>/callback          # prod, later
 ```
-It's idempotent and preserves all rows. A fresh install (`db.create_all()` /
-`schema.sql`) already has the new shape and needs no migration.
+
+The legacy `CBANNOT_GOOGLE_*` / `CBANNOT_ORCID_*` environment variables still
+work and are folded in as if they were stanzas, so an existing deployment keeps
+running untouched. A stanza for the same slug wins. Prefer the conf file for
+anything new.
+
+### Institutional login (InCommon / eduGAIN)
+
+Use **CILogon**, not Shibboleth. CILogon is an OIDC broker in front of InCommon
+and eduGAIN — thousands of campus IdPs, plus ORCID, Google and Microsoft — so
+from this service's point of view it is one more OIDC provider. Becoming a SAML
+service provider directly would mean `mod_shib`, federation metadata,
+certificates, per-IdP attribute release negotiation, and a second authentication
+path in the app; the broker avoids all of it.
+
+Two settings matter when enabling it:
+
+- **`subject_claim`** (default `sub`). Some campus IdPs recycle
+  `eduPersonPrincipalName` when a person leaves, which would hand a departed
+  user's account to whoever inherits the username. Where the federation
+  guarantees a permanent identifier, name that claim instead.
+- **`trust_email` stays `no`.** CILogon relays whatever the upstream campus IdP
+  asserts, across thousands of institutions of varying rigour. See below.
+
+### How an external login maps to an account
+
+`oauth_identities` holds one row per `(provider, subject)`, and a user may have
+several. Resolution order in `oauth._find_or_create`:
+
+1. A known `(provider, subject)` is that account, always.
+2. Otherwise, if the provider is `trust_email = yes` **and** asserted
+   `email_verified` **and** the address matches an existing account, adopt that
+   account and attach this identity to it.
+3. Otherwise create a new account.
+
+Both conditions in step 2 matter. An issuer that hands out unverified addresses
+would otherwise let someone take over an existing account by signing up there
+with the victim's address — which is why `trust_email` defaults to off
+everywhere but Google, and why the `email_verified` claim is checked on top of
+it. When an account is created from an untrusted email it starts with no address
+of its own; the user can add and verify one, or link from a signed-in session.
+
+**Linking.** The same person arriving through Google directly and through
+CILogon presents two different subjects, and without linking the second becomes
+a second, empty account. Signing in while already signed in
+(`/api/auth/oauth/<slug>/login?link=1`, reachable from *Linked sign-ins…* in the
+account menu) attaches the new identity to the current account instead. The
+account menu dialog also unlinks; both it and the API refuse to remove the last
+remaining way in. `cbannot_admin.py identities` lists everything, and
+`cbannot_admin.py unlink <id>` does the same from the shell.
+
+An identity already bound to a *different* account is refused rather than moved:
+merging two accounts means merging their annotations and DE runs, which should
+not happen behind the user's back.
+
+### Database migrations
+
+Two one-off scripts, both idempotent, both backing the DB up first. Run with
+the service stopped, oldest first — each is a no-op if it does not apply:
+
+```
+export CBANNOT_DATABASE_URI=sqlite:////hive/data/inside/cells/cbAnnotServer/cbAnnot.db
+./venv/bin/python3 deploy/migrate_oauth.py       # pre-OAuth DBs: nullable email/password + oauth columns
+./venv/bin/python3 deploy/migrate_identities.py  # moves those columns into oauth_identities
+```
+
+`migrate_identities.py` copies every existing OAuth login into the new table and
+rebuilds `users` without `oauth_provider`/`oauth_sub` (SQLite cannot drop a
+column out of a UNIQUE constraint in place). A fresh install via
+`db.create_all()` or `schema.sql` already has the right shape.
 
 ## Keeping it running
 
@@ -196,7 +281,17 @@ curl -s http://127.0.0.1:5051/api/health          # -> {"ok": true}
 # 2. Apache forwards /api to it
 curl -s https://cells-test.gi.ucsc.edu/api/health # -> {"ok": true}
 
-# 3. In the browser: Sign in menu -> create account -> verify -> sign in.
+# 3. The provider list matches providers.conf (empty "providers" = none loaded;
+#    check the startup log line "OAuth sign-in enabled for: ...")
+curl -s https://cells-test.gi.ucsc.edu/api/auth/providers
+
+# 4. In the browser: Sign in menu -> create account -> verify -> sign in.
 #    With CBANNOT_MAIL_BACKEND=console the verification link is printed to the
 #    service log (journalctl -u cbAnnotServer, or the watchdog gunicorn log).
+
+# 5. Each configured provider: Sign in menu -> its button -> consent -> you land
+#    back in the app signed in. Then account menu -> "Linked sign-ins..." ->
+#    add a second provider -> confirm it attaches to the SAME account rather
+#    than creating a new one (cbannot_admin.py identities shows both on one
+#    user_id).
 ```
