@@ -1,0 +1,500 @@
+#!/usr/bin/env python3
+"""
+Ask the submitters of hidden Cell Browser datasets whether their paper has
+been published yet, so datasets do not sit hidden forever.
+
+Two steps, on purpose -- nothing reaches an author without a human looking
+at it first:
+
+  cbPingHidden scan     find datasets that are due for a reminder and write
+                        one draft per dataset into the queue directory
+  cbPingHidden send     show each queued draft and send it after you confirm
+
+A dataset is due when it is hidden, still live on cells.ucsc.edu, has an
+email address in the "submitter" field of its desc.conf, and has not been
+heard from in MIN_AGE_DAYS -- counted from the last reminder we sent, or
+from its submission date if we have never written.
+
+Delete a draft out of the queue directory to drop that dataset from the
+batch. Edit a draft in place to change what gets sent.
+
+Typical cron line (first Monday of the month), which only queues and mails
+you the report:
+
+  0 8 1-7 * 1 /cluster/home/mspeir/cellBrowser/ucsc/cbPingHidden scan --quiet
+"""
+import sys
+import os
+import re
+import argparse
+import subprocess
+import email.utils
+import textwrap
+from datetime import date, datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+
+import requests
+
+# ============================================================================
+# EDIT THESE VALUES
+# ============================================================================
+FROM_EMAIL = "Matt Speir <mspeir@ucsc.edu>"
+CC_EMAIL = "cells@ucsc.edu"
+
+# how long a dataset may stay quiet before we write again
+MIN_AGE_DAYS = 365
+
+SUBJECT_TEMPLATE = 'UCSC Cell Browser: is "{label}" ready to be made public?'
+
+EMAIL_TEMPLATE = """Dear {first_name},
+
+Some time ago you sent us the dataset "{label}" for the UCSC Cell Browser,
+and asked us to keep it hidden until your paper came out. It is still
+hidden, so nobody can find it from our dataset list, though it is there at
+{url} for anyone you send the link to.
+
+We are getting in touch to ask how the manuscript is going. If the paper is
+out, or is far enough along that you are happy for the data to be seen, just
+reply and we will make the dataset public and add it to the list. If you
+would rather we kept it hidden, that is no trouble at all -- say so and we
+will leave it as it is and check back in a year.
+
+You do not need to do anything else; a one-line answer either way is plenty.
+
+Best regards,
+{sender_name}
+UCSC Cell Browser Team
+"""
+# ============================================================================
+
+DATASET_DIR = "/hive/data/inside/cells/datasets"
+STATE_DIR = "/hive/data/inside/cells/pingHidden"
+QUEUE_DIR = os.path.join(STATE_DIR, "queue")
+PING_LOG = os.path.join(STATE_DIR, "pingLog.tsv")
+SKIP_DATASETS = os.path.join(STATE_DIR, "skipDatasets.txt")
+SKIP_EMAILS = os.path.join(STATE_DIR, "skipEmails.txt")
+
+PUBLIC_HOST = "https://cells.ucsc.edu"
+
+# subdirectories that hold old builds rather than a child dataset
+VERSION_DIR_RE = re.compile(r"^(v\d|\d{4}-\d{2}-\d{2}|orig|old|backup|bak)", re.I)
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
+TAG_RE = re.compile(r"<[^>]+>")
+WRAP_WIDTH = 74
+
+REPORT_TO = os.environ.get("USER", "") + "@ucsc.edu"
+
+
+# ---------------------------------------------------------------- conf files
+
+def readConf(path):
+    """ Read a cellbrowser.conf or desc.conf into a dict. These are python
+    snippets, so exec them; fall back to a regex for the ones that do not
+    parse (a handful have stray syntax). """
+    conf = {}
+    try:
+        src = open(path, encoding="utf8", errors="replace").read()
+    except IOError:
+        return conf
+    try:
+        exec(compile(src, path, "exec"), {}, conf)
+    except Exception:
+        for match in re.finditer(r"^(\w+)\s*=\s*(.+)$", src, re.M):
+            conf.setdefault(match.group(1), match.group(2).strip().strip("\"'"))
+    return conf
+
+
+def plainText(text):
+    """ A few shortLabels carry HTML markup, which has no business in a
+    plain-text email. """
+    return " ".join(TAG_RE.sub("", str(text or "")).split())
+
+
+def wrap(text, width=WRAP_WIDTH):
+    """ Rewrap the filled-in template so a long dataset name does not leave a
+    single very long line in the middle of the note. """
+    out = []
+    for para in text.split("\n\n"):
+        lines = para.split("\n")
+        if len(lines) > 1 and all(len(l) < 40 for l in lines):
+            out.append(para)          # a signature block, leave it be
+        else:
+            out.append(textwrap.fill(" ".join(para.split()), width=width))
+    return "\n\n".join(out)
+
+
+def isHidden(conf):
+    return str(conf.get("visibility", "")).strip().lower() == "hide"
+
+
+def findHidden(datasetDir=DATASET_DIR):
+    """ Return the names ("foo" or "foo/bar") of every dataset whose
+    cellbrowser.conf hides it. Looks one level into collections, and ignores
+    the version and backup directories sitting next to real datasets. """
+    names = []
+    for entry in sorted(os.scandir(datasetDir), key=lambda e: e.name):
+        if not entry.is_dir():
+            continue
+        confPath = os.path.join(entry.path, "cellbrowser.conf")
+        if not os.path.isfile(confPath):
+            continue
+        if isHidden(readConf(confPath)):
+            names.append(entry.name)
+        for child in sorted(os.scandir(entry.path), key=lambda e: e.name):
+            if not child.is_dir() or VERSION_DIR_RE.match(child.name):
+                continue
+            childConf = os.path.join(child.path, "cellbrowser.conf")
+            if os.path.isfile(childConf) and isHidden(readConf(childConf)):
+                names.append("%s/%s" % (entry.name, child.name))
+    return names
+
+
+def isLive(name):
+    """ True if the dataset is actually served from cells.ucsc.edu. Datasets
+    that only exist on hive, or only on cells-test, are still being wrangled
+    and are not ours to ask about. """
+    url = "%s/%s/dataset.json" % (PUBLIC_HOST, name)
+    try:
+        return requests.head(url, timeout=20, allow_redirects=True).status_code == 200
+    except requests.RequestException:
+        return False
+
+
+# ------------------------------------------------------------------ metadata
+
+def parseSubmitter(text):
+    """ Split a submitter field into (display name, [emails]). The field is
+    free text, usually 'Jane Doe (jane@example.edu)' but sometimes two people
+    or a bare name. """
+    emails = EMAIL_RE.findall(text or "")
+    name = EMAIL_RE.sub("", text or "")
+    name = re.sub(r"[(),]|\band\b", " ", name)
+    name = " ".join(name.split())
+    return name, emails
+
+
+def firstName(name):
+    parts = [p for p in name.split() if p and not p.endswith(".")]
+    return parts[0] if parts else "colleague"
+
+
+def parseDate(text):
+    """ submission_date is hand-typed, so accept the formats that turn up. """
+    text = str(text or "").strip()
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%m-%d-%Y", "%Y/%m/%d", "%Y-%m", "%Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def datasetUrl(name):
+    """ A single dataset gets a subdomain; a dataset inside a collection does
+    not, so it needs the ?ds= form. """
+    if "/" in name:
+        return "%s/?ds=%s" % (PUBLIC_HOST, name.replace("/", "+"))
+    return "https://%s.cells.ucsc.edu" % name
+
+
+def collect(name, datasetDir=DATASET_DIR):
+    path = os.path.join(datasetDir, name)
+    cb = readConf(os.path.join(path, "cellbrowser.conf"))
+    desc = readConf(os.path.join(path, "desc.conf"))
+    submitter, emails = parseSubmitter(str(desc.get("submitter", "")))
+    subDate = parseDate(desc.get("submission_date", ""))
+    dateSource = "submission_date"
+    if subDate is None:
+        # nothing to go on, so fall back to when the description was last
+        # touched -- flagged in the report so it can be sanity checked
+        try:
+            mtime = os.path.getmtime(os.path.join(path, "desc.conf"))
+            subDate = date.fromtimestamp(mtime)
+            dateSource = "desc.conf mtime"
+        except OSError:
+            dateSource = "unknown"
+    return {
+        "name": name,
+        "label": plainText(cb.get("shortLabel", "")) or name,
+        "submitter": submitter,
+        "emails": emails,
+        "date": subDate,
+        "dateSource": dateSource,
+        "url": datasetUrl(name),
+    }
+
+
+# --------------------------------------------------------------- state files
+
+def readList(path):
+    """ One value per line, '#' starts a comment. """
+    values = set()
+    if not os.path.isfile(path):
+        return values
+    for line in open(path):
+        line = line.split("#")[0].strip()
+        if line:
+            values.add(line.lower())
+    return values
+
+
+def readPingLog(path=PING_LOG):
+    """ Return {dataset: date of most recent reminder}. """
+    last = {}
+    if not os.path.isfile(path):
+        return last
+    for line in open(path):
+        fields = line.rstrip("\n").split("\t")
+        if len(fields) < 3 or fields[0] == "dataset":
+            continue
+        when = parseDate(fields[2])
+        if when and (fields[0] not in last or when > last[fields[0]]):
+            last[fields[0]] = when
+    return last
+
+
+def appendPingLog(name, emails, path=PING_LOG):
+    header = not os.path.exists(path)
+    with open(path, "a") as fh:
+        if header:
+            fh.write("dataset\temail\tdate\n")
+        for addr in emails:
+            fh.write("%s\t%s\t%s\n" % (name, addr, date.today().isoformat()))
+
+
+# ------------------------------------------------------------------- drafts
+
+def draftPath(name):
+    return os.path.join(QUEUE_DIR, name.replace("/", "+") + ".eml")
+
+
+def writeDraft(info, fromAddr, ccAddr):
+    senderName = email.utils.parseaddr(fromAddr)[0] or fromAddr
+    body = wrap(EMAIL_TEMPLATE.format(first_name=firstName(info["submitter"]),
+                                      label=info["label"], url=info["url"],
+                                      sender_name=senderName))
+    text = "To: %s\nCc: %s\nFrom: %s\nSubject: %s\nX-Cb-Dataset: %s\n\n%s" % (
+        ", ".join(info["emails"]), ccAddr, fromAddr,
+        SUBJECT_TEMPLATE.format(label=info["label"]), info["name"], body)
+    path = draftPath(info["name"])
+    with open(path, "w") as fh:
+        fh.write(text)
+    return path
+
+
+def readDraft(path):
+    """ Pull the headers back out of a draft, since it may have been edited
+    by hand between scan and send. """
+    raw = open(path).read()
+    head, _, body = raw.partition("\n\n")
+    headers = {}
+    for line in head.split("\n"):
+        key, _, value = line.partition(":")
+        if value:
+            headers[key.strip().lower()] = value.strip()
+    return headers, body, raw
+
+
+# --------------------------------------------------------------------- send
+
+def sendmail(raw):
+    try:
+        proc = subprocess.Popen(["/usr/sbin/sendmail", "-t"],
+                                stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        _, stderr = proc.communicate(raw.encode("utf-8"))
+        if proc.returncode != 0:
+            print("sendmail error: %s" % stderr.decode("utf-8"), file=sys.stderr)
+            return False
+        return True
+    except OSError as ex:
+        print("Could not run sendmail: %s" % ex, file=sys.stderr)
+        return False
+
+
+def mailReport(text, toAddr):
+    sendmail("To: %s\nFrom: %s\nSubject: Cell Browser: hidden datasets due for a reminder\n\n%s"
+             % (toAddr, FROM_EMAIL, text))
+
+
+# --------------------------------------------------------------------- scan
+
+def runScan(args):
+    os.makedirs(QUEUE_DIR, exist_ok=True)
+    skipDatasets = readList(SKIP_DATASETS)
+    skipEmails = readList(SKIP_EMAILS)
+    lastPing = readPingLog()
+    today = date.today()
+    cutoff = timedelta(days=args.min_age)
+
+    hidden = findHidden(args.dataset_dir)
+    infos = [collect(name, args.dataset_dir) for name in hidden
+             if name.lower() not in skipDatasets]
+
+    # the liveness check is the slow part, so run it wide
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for info, live in zip(infos, pool.map(lambda i: isLive(i["name"]), infos)):
+            info["live"] = live
+
+    due, noEmail, notLive, tooRecent = [], [], [], []
+    for info in infos:
+        if not info["live"]:
+            notLive.append(info)
+            continue
+        info["emails"] = [e for e in info["emails"] if e.lower() not in skipEmails]
+        if not info["emails"]:
+            noEmail.append(info)
+            continue
+        since = lastPing.get(info["name"]) or info["date"]
+        info["since"] = since
+        info["reason"] = "last reminder" if info["name"] in lastPing else info["dateSource"]
+        if since is None or today - since >= cutoff:
+            due.append(info)
+        else:
+            tooRecent.append(info)
+
+    due.sort(key=lambda i: i["since"] or date.min)
+
+    # if a whole collection is due, one note about the collection is enough --
+    # do not also write about each dataset inside it
+    dueNames = set(i["name"] for i in due)
+    due = [i for i in due if i["name"].split("/")[0] not in dueNames or "/" not in i["name"]]
+
+    lines = []
+    lines.append("Hidden datasets on cells.ucsc.edu, checked %s" % today.isoformat())
+    lines.append("")
+    lines.append("%d hidden and live, %d due for a reminder, %d with no address to write to."
+                 % (len(infos) - len(notLive), len(due), len(noEmail)))
+    lines.append("")
+
+    if due:
+        lines.append("Due -- a draft is waiting in %s" % QUEUE_DIR)
+        for info in due:
+            path = None if args.dry_run else writeDraft(info, args.sender, args.cc)
+            since = info["since"].isoformat() if info["since"] else "unknown"
+            lines.append("  %-32s %s since %s (%s)" %
+                         (info["name"], ", ".join(info["emails"]), since, info["reason"]))
+            if path and args.verbose:
+                lines.append("      %s" % path)
+        lines.append("")
+        lines.append("Review the drafts, delete any that should not go out, then run:")
+        lines.append("  cbPingHidden send")
+        lines.append("")
+
+    if noEmail:
+        lines.append("No address in desc.conf -- these need a human to track down")
+        for info in noEmail:
+            lines.append("  %-32s submitter: %s" % (info["name"], info["submitter"] or "(blank)"))
+        lines.append("")
+
+    if args.verbose:
+        if tooRecent:
+            lines.append("Heard from recently, leaving alone")
+            for info in tooRecent:
+                lines.append("  %-32s since %s" % (info["name"], info["since"]))
+            lines.append("")
+        if notLive:
+            lines.append("Hidden on hive but not served from cells.ucsc.edu, ignored")
+            for info in notLive:
+                lines.append("  %s" % info["name"])
+            lines.append("")
+
+    report = "\n".join(lines)
+    if not args.quiet:
+        print(report)
+    if args.mail_report and due:
+        mailReport(report, args.mail_report)
+    return 0
+
+
+# --------------------------------------------------------------------- send
+
+def runSend(args):
+    drafts = sorted(p for p in os.listdir(QUEUE_DIR) if p.endswith(".eml")) \
+        if os.path.isdir(QUEUE_DIR) else []
+    if not drafts:
+        print("Nothing queued in %s" % QUEUE_DIR)
+        return 0
+
+    for fileName in drafts:
+        path = os.path.join(QUEUE_DIR, fileName)
+        headers, body, raw = readDraft(path)
+        name = headers.get("x-cb-dataset", fileName[:-4].replace("+", "/"))
+        print("\n" + "=" * 70)
+        print("To:      %s" % headers.get("to", ""))
+        print("Cc:      %s" % headers.get("cc", ""))
+        print("Subject: %s" % headers.get("subject", ""))
+        print("-" * 70)
+        print(body.rstrip())
+        print("=" * 70)
+
+        if args.dry_run:
+            print("(dry run, not sent)")
+            continue
+        if not args.yes:
+            answer = input("Send this one? [y]es / [s]kip / [q]uit: ").strip().lower()
+            if answer.startswith("q"):
+                print("Stopping. The rest stay in the queue.")
+                return 0
+            if not answer.startswith("y"):
+                print("Skipped, left in the queue.")
+                continue
+
+        if sendmail(raw):
+            appendPingLog(name, EMAIL_RE.findall(headers.get("to", "")))
+            os.remove(path)
+            print("Sent, and recorded in %s" % PING_LOG)
+        else:
+            print("Failed to send %s, leaving it in the queue" % name, file=sys.stderr)
+    return 0
+
+
+# --------------------------------------------------------------------- list
+
+def runList(args):
+    drafts = sorted(p for p in os.listdir(QUEUE_DIR) if p.endswith(".eml")) \
+        if os.path.isdir(QUEUE_DIR) else []
+    if not drafts:
+        print("Queue is empty (%s)" % QUEUE_DIR)
+        return 0
+    print("%d draft(s) waiting in %s\n" % (len(drafts), QUEUE_DIR))
+    for fileName in drafts:
+        headers, _, _ = readDraft(os.path.join(QUEUE_DIR, fileName))
+        print("  %-32s %s" % (headers.get("x-cb-dataset", fileName), headers.get("to", "")))
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command")
+
+    scan = sub.add_parser("scan", help="find datasets due for a reminder and queue drafts")
+    scan.add_argument("--min-age", type=int, default=MIN_AGE_DAYS,
+                      help="days of silence before we write again (default %d)" % MIN_AGE_DAYS)
+    scan.add_argument("--dataset-dir", default=DATASET_DIR)
+    scan.add_argument("--sender", default=FROM_EMAIL)
+    scan.add_argument("--cc", default=CC_EMAIL)
+    scan.add_argument("--mail-report", nargs="?", const=REPORT_TO, default=None,
+                      metavar="ADDR", help="mail the report (default %s)" % REPORT_TO)
+    scan.add_argument("-n", "--dry-run", action="store_true", help="report only, write no drafts")
+    scan.add_argument("-v", "--verbose", action="store_true", help="also show what was left out")
+    scan.add_argument("-q", "--quiet", action="store_true", help="no output on stdout")
+    scan.set_defaults(func=runScan)
+
+    send = sub.add_parser("send", help="send the queued drafts, one confirmation each")
+    send.add_argument("-y", "--yes", action="store_true", help="send all without asking")
+    send.add_argument("-n", "--dry-run", action="store_true", help="show the drafts, send nothing")
+    send.set_defaults(func=runSend)
+
+    show = sub.add_parser("list", help="show what is waiting in the queue")
+    show.set_defaults(func=runList)
+
+    args = parser.parse_args()
+    if not args.command:
+        parser.print_help()
+        return 1
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
