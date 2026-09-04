@@ -13244,6 +13244,26 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         var headerRow = rows[0];
 
+        // A _geneCards column only appears in files written by older cbMarkerAnnotate runs.
+        // The link is built from the gene symbol below instead, gated on the dataset being
+        // human. Drop the column rather than render it: it carries no organism check of its
+        // own, so keeping it would put GeneCards on e.g. a macaque dataset, where the gate
+        // says it should not appear.
+        var geneCardsIdx = -1;
+        for (var ci = 0; ci < headerRow.length; ci++) {
+            if (headerRow[ci].split("|")[0] === "_geneCards") {
+                geneCardsIdx = ci;
+                break;
+            }
+        }
+        if (geneCardsIdx !== -1) {
+            for (var ri = 0; ri < rows.length; ri++) {
+                if (rows[ri].length > geneCardsIdx)
+                    rows[ri].splice(geneCardsIdx, 1);
+            }
+            headerRow = rows[0];
+        }
+
         var htmls = [];
 
         var markerListIdx = parseInt(divId.split("-")[1]);
@@ -13287,7 +13307,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var pValCol = null;
         var logFcCol = null;
         var doDescSort = false;
-        var hasGeneCardsCol = false;
         for (var i = 1; i < headerRow.length; i++) {
             var colLabel = headerRow[i];
             var isNumber = false;
@@ -13325,10 +13344,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             else if (colLabel==="_zfin") {
                 colLabel = "ZFIN";
             }
-            else if (colLabel==="_geneCards") {
-                colLabel = "GeneCards";
-                hasGeneCardsCol = true;
-            }
 
             if (logFcCol === null && /log.*fc/i.test(colLabel)) {
                 logFcCol = i;
@@ -13355,10 +13370,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         var hubUrl = makeHubUrl();
 
-        // GeneCards is keyed on the gene symbol alone, so the link can be made here rather than
-        // being written into the marker file by cbMarkerAnnotate. Datasets that were annotated do
-        // have a _geneCards column already, so skip the inline link for those to avoid showing it twice.
-        var showGeneCards = (getDatasetSpecies()==="human" && !hasGeneCardsCol);
+        // GeneCards is keyed on the gene symbol alone, so the link is made here rather than
+        // being written into the marker file by cbMarkerAnnotate.
+        var showGeneCards = (getDatasetSpecies()==="human");
 
         var MAX_UNFILTERED_ROWS = 200;
         var enrichedCount = 0;

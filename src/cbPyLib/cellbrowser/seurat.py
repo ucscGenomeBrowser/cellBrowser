@@ -389,7 +389,7 @@ def cbImportSeurat_parseArgs(showHelp=False):
             help="Instead of calculating cluster markers again, use this file. Format: cluster,gene,pVal + any other fields. Or alternatively the native Seurat cluster markers format, as created by write.table")
 
     parser.add_option("", "--annotMarkers", dest="annotMarkers", action="store_true",
-            help="annotate marker genes even if the gene symbols do not look human or mouse. "
+            help="annotate marker genes even if the gene symbols do not look human, mouse or zebrafish. "
             "Annotation is on by default when they do, so this is only needed when the guess fails")
 
     parser.add_option("", "--noAnnotMarkers", dest="noAnnotMarkers", action="store_true",

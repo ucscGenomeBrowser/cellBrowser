@@ -271,12 +271,12 @@ def markerGeneIds(inFname, limit=300):
     return ids
 
 def guessMarkerOrganism(inFname):
-    """ Return "human", "mouse" or None for a marker file, by looking at its gene identifiers.
-
-    Ensembl IDs answer it outright. Plain symbols are matched against the gencode human and
-    mouse symbol tables, which are small (under half a megabyte each) - much cheaper than the
-    27MB of HGNC and MGI that the annotation itself needs, so a fish or fly dataset is ruled
-    out without downloading any of that.
+    """ Return "human", "mouse", "zebrafish" or None for a marker file, by looking at its gene
+    identifiers. Ensembl IDs answer it outright. Plain symbols are matched against the gencode
+    human and mouse symbol tables, which are small (under half a megabyte each) - much cheaper
+    than the 27MB of HGNC and MGI that the annotation itself needs, so a fly dataset is ruled
+    out without downloading any of that. Only once human and mouse are ruled out is the 13MB
+    ZFIN file consulted for zebrafish.
     """
     from .cellbrowser import getStaticFile, getGeneSymPath, readGeneToSym
 
@@ -289,33 +289,43 @@ def guessMarkerOrganism(inFname):
         return "human"
     if any(g.startswith("ENSMUSG") for g in geneIds):
         return "mouse"
+    if any(g.startswith("ENSDARG") for g in geneIds):
+        return "zebrafish"
     if any(g.startswith("ENS") for g in geneIds):
         return None # an Ensembl ID from some other organism
 
-    scores = {}
+    def hitRate(syms):
+        return len([g for g in geneIds if g in syms]) / float(len(geneIds))
+
+    # Human and mouse first: their symbol tables are a few hundred kilobytes, while the ZFIN
+    # file is 13MB, so a human or mouse dataset never has to pull that down. Mouse symbols are
+    # the human ones in title case, so the two sets barely overlap and the winner is clear when
+    # it really is one of them. Anything below half is neither.
+    best, bestRate = None, 0.0
     for org, geneType in (("human", "gencode-human"), ("mouse", "gencode-mouse")):
         tabFname = getStaticFile(getGeneSymPath(geneType))
         if tabFname is None:
-            logging.warning("Cannot get the %s symbol table, skipping that half of the "
+            logging.warning("Cannot get the %s symbol table, skipping that part of the "
                     "organism guess for %s" % (geneType, inFname))
             continue
-        syms = set(readGeneToSym(tabFname).values())
-        scores[org] = len([g for g in geneIds if g in syms])
+        rate = hitRate(set(readGeneToSym(tabFname).values()))
+        logging.debug("%s: %d%% of gene identifiers are %s symbols" % (inFname, 100*rate, org))
+        if rate > bestRate:
+            best, bestRate = org, rate
 
-    if not scores:
-        return None
+    if bestRate >= 0.5:
+        return best
 
-    best = max(scores, key=scores.get)
-    hitRate = scores[best] / float(len(geneIds))
-    logging.debug("Organism guess for %s: %s, matches %s of %d gene identifiers" %
-            (inFname, best, scores, len(geneIds)))
-    # mouse symbols are the human ones in title case, so the two sets barely overlap and the
-    # winner is unambiguous when it is really one of them. Anything below half is neither.
-    if hitRate < 0.5:
-        logging.info("%s: only %d%% of gene identifiers look like %s symbols, treating the "
-                "dataset as neither human nor mouse" % (inFname, 100*hitRate, best))
-        return None
-    return best
+    # neither, so it is worth paying for the ZFIN file to see if it is zebrafish
+    symToZfin = parseZfin(ZFIN)
+    if symToZfin:
+        rate = hitRate(set(symToZfin.keys()))
+        logging.debug("%s: %d%% of gene identifiers are zebrafish symbols" % (inFname, 100*rate))
+        if rate >= 0.5:
+            return "zebrafish"
+
+    logging.info("%s: gene identifiers do not look human, mouse or zebrafish" % inFname)
+    return None
 
 def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmim, entrezToCosmic, entrezToHpo, entrezToLmd, entrezToEuroexpress, humanToMouseEntrezList, mouseEntrezToBrainspanMouseDev, symToZfin=None):
     " "
@@ -337,7 +347,9 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
             headers.append("_hprdClass")
             headers.append("_expr")
             headers.append("_zfin")
-            headers.append("_geneCards")
+            # no _geneCards column: cellBrowser.js builds that link from the gene symbol, which
+            # it already has, and gates it on the dataset being human. A column in the file
+            # cannot be gated that way, so it would show up on macaque datasets too.
             headers.append("_geneLists")
             yield headers
             continue
@@ -435,10 +447,6 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
         row.append(hprdClass)
         row.append(";".join(exprParts))
         row.append("ZFIN|" + zfinId if zfinId else "")
-        # GeneCards is keyed on the symbol. Use the converted one: when the marker file holds
-        # "ENSG00000141510|TP53" the pre-conversion identifier is the Ensembl ID, and linking
-        # to carddisp.pl?gene=ENSG00000141510 does not resolve.
-        row.append("GeneCards|" + sym if entrezId is not None and sym else "")
         row.append(";".join(geneLists))
 
         yield row
@@ -530,9 +538,9 @@ def cbMarkerAnnotate(
 def annotateMarkerFileInPlace(markerFname, force=False):
     """ Annotate a marker file in place, as the cbImport tools do after writing one.
 
-    By default this only runs when the gene identifiers look human or mouse, since that is all
-    the annotation sources cover. Pass force=True to annotate regardless, for the case where
-    the guess fails but the caller knows better.
+    By default this only runs when the gene identifiers look human, mouse or zebrafish, since
+    that is what the annotation sources cover. Pass force=True to annotate regardless, for the
+    case where the guess fails but the caller knows better.
 
     Returns the organism that was used, or None if nothing was done.
     """
@@ -545,8 +553,8 @@ def annotateMarkerFileInPlace(markerFname, force=False):
     else:
         organism = guessMarkerOrganism(markerFname)
         if organism is None:
-            logging.info("%s does not look human or mouse, so its markers are not annotated. "
-                    "Use --annotMarkers to do it anyway." % markerFname)
+            logging.info("%s does not look human, mouse or zebrafish, so its markers are not "
+                    "annotated. Use --annotMarkers to do it anyway." % markerFname)
             return None
 
     logging.info("Annotating %s (%s)" % (markerFname, organism))

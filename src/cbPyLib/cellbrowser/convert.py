@@ -715,7 +715,7 @@ def cbImportScanpy_parseArgs(showHelp=False):
             help="name of the marker genes field, default: %default", default="rank_genes_groups")
 
     parser.add_option("", "--annotMarkers", dest="annotMarkers", action="store_true",
-            help="annotate marker genes even if the gene symbols do not look human or mouse. "
+            help="annotate marker genes even if the gene symbols do not look human, mouse or zebrafish. "
             "Annotation is on by default when they do, so this is only needed when the guess fails")
 
     parser.add_option("", "--noAnnotMarkers", dest="noAnnotMarkers", action="store_true",
