@@ -178,6 +178,7 @@ var cellbrowser = function() {
         "COSMIC" : "http://cancer.sanger.ac.uk/cosmic/gene/analysis?ln=", // gene symbol
         "SFARI" : "https://gene.sfari.org/database/human-gene/", // gene symbol
         "GeneCards" : "https://www.genecards.org/cgi-bin/carddisp.pl?gene=", // gene symbol
+        "MGI" : "https://www.informatics.jax.org/marker/summary?nomen=", // mouse gene symbol
         "ZFIN" : "https://zfin.org/", // ZFIN ID
         "BrainSpLMD" : "http://www.brainspan.org/lcm/search?exact_match=true&search_type=gene&search_term=", // entrez
         "BrainSpMouseDev" : "http://developingmouse.brain-map.org/gene/show/", // internal Brainspan ID
@@ -13370,9 +13371,13 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         var hubUrl = makeHubUrl();
 
-        // GeneCards is keyed on the gene symbol alone, so the link is made here rather than
-        // being written into the marker file by cbMarkerAnnotate.
-        var showGeneCards = (getDatasetSpecies()==="human");
+        // GeneCards and MGI are keyed on the gene symbol alone, so these links are made here
+        // rather than being written into the marker file by cbMarkerAnnotate. That way they
+        // appear on every dataset, not only the ones that were annotated, and they can be
+        // gated on the organism, which a column in the file cannot be.
+        var dsSpecies = getDatasetSpecies();
+        var showGeneCards = (dsSpecies==="human");
+        var showMgi = (dsSpecies==="mouse");
 
         var MAX_UNFILTERED_ROWS = 200;
         var enrichedCount = 0;
@@ -13423,6 +13428,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                         if (showGeneCards) {
                             var geneCardsUrl = dbLinks.GeneCards+encodeURIComponent(geneSym);
                             h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to GeneCards' href='"+geneCardsUrl+"'>GeneCards</a>");
+                        }
+                        if (showMgi) {
+                            var mgiUrl = dbLinks.MGI+encodeURIComponent(geneSym);
+                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to Mouse Genome Informatics' href='"+mgiUrl+"'>MGI</a>");
                         }
                     } else {
                         if (val.startsWith("./")) {
