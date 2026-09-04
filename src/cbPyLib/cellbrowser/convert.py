@@ -715,7 +715,11 @@ def cbImportScanpy_parseArgs(showHelp=False):
             help="name of the marker genes field, default: %default", default="rank_genes_groups")
 
     parser.add_option("", "--annotMarkers", dest="annotMarkers", action="store_true",
-            help="annotate marker genes with disease info, etc. - same as cbMarkerAnnotate")
+            help="annotate marker genes even if the gene symbols do not look human or mouse. "
+            "Annotation is on by default when they do, so this is only needed when the guess fails")
+
+    parser.add_option("", "--noAnnotMarkers", dest="noAnnotMarkers", action="store_true",
+            help="do not annotate marker genes with disease info, etc. - see cbMarkerAnnotate")
 
     parser.add_option("", "--clusterField", dest="clusterField", action="store",
             help="if no marker genes are present, use this field to calculate them. Default is to try a list of common field names, like 'Cluster' or 'louvain' and a few others")
@@ -780,12 +784,8 @@ def cbImportScanpyCli():
     scanpyToCellbrowser(ad, outDir, datasetName, skipMatrix=options.skipMatrix, useRaw=(not options.useProc),
             markerField=markerField, clusterField=clusterField, skipMarkers=skipMarkers, matrixFormat=matrixFormat, atac=atac, layer=layer)
 
-    if not options.skipMarkers and options.annotMarkers:
-        gi.cbMarkerAnnotate(join(outDir, "markers.tsv"),\
-            join(outDir,"markers.annot.tmp"), gi.BRAINSPANMOUSEDEV, gi.HGNC,\
-            gi.MGIORTHO, gi.EUREXPRESS, gi.BRAINSPANLMD, gi.HPO, gi.COSMIC,\
-            gi.OMIM, gi.SFARI, gi.HPRD)
-        os.rename(join(outDir,"markers.annot.tmp"), join(outDir, "markers.tsv"))
+    if not options.skipMarkers and not options.noAnnotMarkers:
+        gi.annotateMarkerFileInPlace(join(outDir, "markers.tsv"), force=options.annotMarkers)
 
     copyFileIfDiffSize(inFname, join(outDir, basename(inFname)))
     generateDataDesc(datasetName, outDir, other={"supplFiles": [{"label":"Scanpy H5AD", "file":basename(inFname)}]})

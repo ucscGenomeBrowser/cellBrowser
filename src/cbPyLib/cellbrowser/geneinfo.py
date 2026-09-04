@@ -1,6 +1,6 @@
 # annotate a list of gene IDs with links to various external databases
 
-import logging, sys, optparse, re, unicodedata, string, csv
+import logging, sys, optparse, re, unicodedata, string, csv, os
 from collections import defaultdict, namedtuple
 from os.path import join, basename, dirname, isfile
 
@@ -241,27 +241,106 @@ def parseSimpleMap(inFname):
         ret[row[0]] = row[1]
     return ret
 
+def markerGeneIds(inFname, limit=300):
+    """ yield the gene identifier of the first `limit` rows of a marker file, using the same
+    column rules as tabGeneAnnotate: column 1, or column 7 for the Seurat layout where column 1
+    is a number. The "geneId|symbol" and version suffixes are stripped. """
+    ids = []
+    for row in lineFileNextRow(inFname):
+        if len(row) < 2:
+            continue
+        sym = row[1]
+        try:
+            float(sym)
+            sym = row[7] if len(row) > 7 else sym # seurat layout, symbol is in the 'gene' column
+        except ValueError:
+            pass
+        if "|" in sym:
+            parts = sym.split("|")
+            # for non-human/mouse Ensembl IDs the symbol half is the useful one
+            if parts[0].startswith("ENS") and not parts[0].startswith(("ENSG", "ENSMUSG")):
+                sym = parts[1] if len(parts) > 1 else parts[0]
+            else:
+                sym = parts[0]
+        if "." in sym:
+            sym = sym.split(".")[0]
+        if sym:
+            ids.append(sym)
+        if len(ids) >= limit:
+            break
+    return ids
+
+def guessMarkerOrganism(inFname):
+    """ Return "human", "mouse" or None for a marker file, by looking at its gene identifiers.
+
+    Ensembl IDs answer it outright. Plain symbols are matched against the gencode human and
+    mouse symbol tables, which are small (under half a megabyte each) - much cheaper than the
+    27MB of HGNC and MGI that the annotation itself needs, so a fish or fly dataset is ruled
+    out without downloading any of that.
+    """
+    from .cellbrowser import getStaticFile, getGeneSymPath, readGeneToSym
+
+    geneIds = markerGeneIds(inFname)
+    if not geneIds:
+        logging.warning("%s has no usable gene identifiers, cannot guess the organism" % inFname)
+        return None
+
+    if any(g.startswith("ENSG") for g in geneIds):
+        return "human"
+    if any(g.startswith("ENSMUSG") for g in geneIds):
+        return "mouse"
+    if any(g.startswith("ENS") for g in geneIds):
+        return None # an Ensembl ID from some other organism
+
+    scores = {}
+    for org, geneType in (("human", "gencode-human"), ("mouse", "gencode-mouse")):
+        tabFname = getStaticFile(getGeneSymPath(geneType))
+        if tabFname is None:
+            logging.warning("Cannot get the %s symbol table, skipping that half of the "
+                    "organism guess for %s" % (geneType, inFname))
+            continue
+        syms = set(readGeneToSym(tabFname).values())
+        scores[org] = len([g for g in geneIds if g in syms])
+
+    if not scores:
+        return None
+
+    best = max(scores, key=scores.get)
+    hitRate = scores[best] / float(len(geneIds))
+    logging.debug("Organism guess for %s: %s, matches %s of %d gene identifiers" %
+            (inFname, best, scores, len(geneIds)))
+    # mouse symbols are the human ones in title case, so the two sets barely overlap and the
+    # winner is unambiguous when it is really one of them. Anything below half is neither.
+    if hitRate < 0.5:
+        logging.info("%s: only %d%% of gene identifiers look like %s symbols, treating the "
+                "dataset as neither human nor mouse" % (inFname, 100*hitRate, best))
+        return None
+    return best
+
 def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmim, entrezToCosmic, entrezToHpo, entrezToLmd, entrezToEuroexpress, humanToMouseEntrezList, mouseEntrezToBrainspanMouseDev, symToZfin=None):
     " "
     headers = None
     geneToSym = -1
-    for row in lineFileNextRow(inFname):
+    # headerIsRow gives us the header line as it was written. The namedtuple-safe version that
+    # lineFileNextRow normally returns has had the punctuation replaced, which turns
+    # "z_score|float" into "z_score_float" - and the browser reads that "|float" suffix as the
+    # column type, so flattening it loses numeric sorting. Taking the original line also means
+    # the seurat headers no longer need undoing one by one.
+    for row in lineFileNextRow(inFname, headerIsRow=True):
         if headers is None:
-            headers = list(row._fields)
+            headers = list(row)
+            # sanitizeHeaders edits column 0 of the caller's list in place, so headerIsRow does
+            # not protect it: an unnamed first column, which is what R writes, comes back as
+            # "rowName". The other columns are rebuilt into a new list and do survive.
+            if headers and headers[0] == "rowName":
+                headers[0] = ''
             headers.append("_hprdClass")
             headers.append("_expr")
             headers.append("_zfin")
             headers.append("_geneCards")
             headers.append("_geneLists")
-
-            # lineFileNextRow makes some changes to seurat headers that we need to undo
-            if headers[0] == "rowName":
-                headers[0] = ''
-            if headers[3] == "pct_1":
-                headers[3] = "pct.1"
-            if headers[4] == "pct_2":
-                headers[4] = "pct.2"
             yield headers
+            continue
         sym = row[1]
         isSeurat = False
         try:
@@ -282,7 +361,7 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
         if "." in sym: # remove Ensembl version identifier
             sym = sym.split(".")[0]
 
-        origSym = sym  # save symbol before Entrez conversion for GeneCards link
+        origSym = sym  # the identifier as it appeared in the file, used for the ZFIN lookup
 
         # convert gene IDs to symbols
         if geneToSym == -1:
@@ -356,7 +435,10 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
         row.append(hprdClass)
         row.append(";".join(exprParts))
         row.append("ZFIN|" + zfinId if zfinId else "")
-        row.append("GeneCards|" + origSym if entrezId is not None and origSym else "")
+        # GeneCards is keyed on the symbol. Use the converted one: when the marker file holds
+        # "ENSG00000141510|TP53" the pre-conversion identifier is the Ensembl ID, and linking
+        # to carddisp.pl?gene=ENSG00000141510 does not resolve.
+        row.append("GeneCards|" + sym if entrezId is not None and sym else "")
         row.append(";".join(geneLists))
 
         yield row
@@ -444,6 +526,35 @@ def cbMarkerAnnotate(
         rowCount - 1,  # exclude header
         outFname,
     )
+
+def annotateMarkerFileInPlace(markerFname, force=False):
+    """ Annotate a marker file in place, as the cbImport tools do after writing one.
+
+    By default this only runs when the gene identifiers look human or mouse, since that is all
+    the annotation sources cover. Pass force=True to annotate regardless, for the case where
+    the guess fails but the caller knows better.
+
+    Returns the organism that was used, or None if nothing was done.
+    """
+    if not isfile(markerFname):
+        logging.debug("No %s, nothing to annotate" % markerFname)
+        return None
+
+    if force:
+        organism = "forced"
+    else:
+        organism = guessMarkerOrganism(markerFname)
+        if organism is None:
+            logging.info("%s does not look human or mouse, so its markers are not annotated. "
+                    "Use --annotMarkers to do it anyway." % markerFname)
+            return None
+
+    logging.info("Annotating %s (%s)" % (markerFname, organism))
+    tmpFname = markerFname + ".annot.tmp"
+    cbMarkerAnnotate(markerFname, tmpFname, BRAINSPANMOUSEDEV, HGNC, MGIORTHO, EUREXPRESS,
+            BRAINSPANLMD, HPO, COSMIC, OMIM, SFARI, HPRD, ZFIN)
+    os.rename(tmpFname, markerFname)
+    return organism
 
 def cbMarkerAnnotateFromArgs(args, options):
     filename = args[0]

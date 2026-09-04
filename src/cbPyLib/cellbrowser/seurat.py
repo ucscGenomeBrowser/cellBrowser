@@ -389,7 +389,11 @@ def cbImportSeurat_parseArgs(showHelp=False):
             help="Instead of calculating cluster markers again, use this file. Format: cluster,gene,pVal + any other fields. Or alternatively the native Seurat cluster markers format, as created by write.table")
 
     parser.add_option("", "--annotMarkers", dest="annotMarkers", action="store_true",
-            help="annotate marker genes with disease info, etc. - same as cbMarkerAnnotate")
+            help="annotate marker genes even if the gene symbols do not look human or mouse. "
+            "Annotation is on by default when they do, so this is only needed when the guess fails")
+
+    parser.add_option("", "--noAnnotMarkers", dest="noAnnotMarkers", action="store_true",
+            help="do not annotate marker genes with disease info, etc. - see cbMarkerAnnotate")
 
     parser.add_option("", "--useMtx", dest="useMtx", action="store_true",
             help="Write a .mtx.gz file, instead of a tsv.gz file. Necessary for big datasets.")
@@ -564,12 +568,8 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
     fh.write("\nquickGenesFile = 'quickGenes.tsv'\n")
     fh.close()
 
-    if not options.skipMarkers and options.annotMarkers and os.path.isfile(join(outDir, "markers.tsv")):
-        gi.cbMarkerAnnotate(join(outDir, "markers.tsv"),\
-            join(outDir,"markers.annot.tmp"), gi.BRAINSPANMOUSEDEV, gi.HGNC,\
-            gi.MGIORTHO, gi.EUREXPRESS, gi.BRAINSPANLMD, gi.HPO, gi.COSMIC,\
-            gi.OMIM, gi.SFARI, gi.HPRD)
-        os.rename(join(outDir,"markers.annot.tmp"), join(outDir, "markers.tsv"))
+    if not options.skipMarkers and not options.noAnnotMarkers:
+        gi.annotateMarkerFileInPlace(join(outDir, "markers.tsv"), force=options.annotMarkers)
 
     generateHtmls(datasetName, outDir, desc = descDict)
 
