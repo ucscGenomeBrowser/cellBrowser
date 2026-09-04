@@ -3408,12 +3408,18 @@ def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=No
         del summInfo["methodsFile"]
 
     if "imagesFile" in summInfo:
+        # 'imagesFile' is relative to the dataset's input directory, so resolve it against
+        # inDir. Reading it as a bare name only works while the process happens to be sitting
+        # in that directory, which cbBuild does but a batch rebuild of many collections does not.
         imgFname = summInfo["imagesFile"]
+        imgPath = join(inDir, imgFname)
         if imgFname.endswith(".json"):
             readFileIntoDict(summInfo, "imageSets", inDir, imgFname, mustExist=True)
         else:
-            summInfo["imageSets"] = parseImageTsv(imgFname)
-        outConf["fileVersions"]["supplImageConf"] = getFileVersion(imgFname)
+            summInfo["imageSets"] = parseImageTsv(imgPath)
+        fileVer = getFileVersion(imgPath)
+        fileVer["fname"] = imgFname # record it as written in desc.conf, not as a build path
+        outConf["fileVersions"]["supplImageConf"] = fileVer
     #else:
         #readFileIntoDict(summInfo, "imageSets", inDir, "images.json")
 
