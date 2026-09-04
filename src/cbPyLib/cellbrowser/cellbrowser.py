@@ -5968,7 +5968,41 @@ def fixupName(inConfFname, inConf):
 
     return dataRoot, relPath, inConf, dsName
 
-def addParents(inConfFname, dataRoot, dsName, outConf, todoConfigs):
+def getConfOrganisms(conf):
+    " return the 'organisms' list of a config, whether it sits at the top level or under 'facets' "
+    orgs = conf.get("organisms")
+    if not orgs:
+        orgs = (conf.get("facets") or {}).get("organisms")
+    return orgs
+
+def inheritOrganisms(parentFnames, inConf, outConf, dsName):
+    """ Datasets inside a collection usually do not declare 'organisms' themselves, only the
+    collection does. Copy it down from the nearest parent that declares exactly one organism.
+    A parent listing several organisms says nothing about this particular child, so skip those.
+    A dataset that declares its own organism always keeps it.
+    """
+    if getConfOrganisms(inConf):
+        return
+
+    # parentFnames is ordered nearest-first
+    for confFname in parentFnames:
+        parentConf = confCache.get(confFname)
+        if parentConf is None:
+            continue
+        orgs = getConfOrganisms(parentConf)
+        if not orgs:
+            continue
+        if len(orgs)==1:
+            logging.info("%s does not declare 'organisms', inheriting %s from %s" %
+                    (dsName, orgs[0], confFname))
+            outConf["organisms"] = list(orgs)
+        else:
+            logging.warning("%s does not declare 'organisms' and its parent %s lists %d of them, "
+                    "so it cannot be inherited. Add 'organisms' to this dataset's cellbrowser.conf." %
+                    (dsName, confFname, len(orgs)))
+        return
+
+def addParents(inConfFname, dataRoot, dsName, inConf, outConf, todoConfigs):
     # find all parent cellbrowser.conf-files and fixup the dataset's "name"
     # keep a list of parent config files in todoConfigs (they will need to be updated later)
     if dataRoot is None:
@@ -5982,6 +6016,7 @@ def addParents(inConfFname, dataRoot, dsName, outConf, todoConfigs):
         todoConfigs.update(parentFnames)
         outConf["parents"] = parentInfos
         outConf["name"] = fullPath
+        inheritOrganisms(parentFnames, inConf, outConf, dsName)
 
     return outConf
 
@@ -6131,7 +6166,7 @@ def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None
         outConf["fileVersions"] = dict()
 
         dataRoot, relPath, inConf, dsName = fixupName(inConfFname, inConf)
-        outConf = addParents(inConfFname, dataRoot, dsName, outConf, todoConfigs)
+        outConf = addParents(inConfFname, dataRoot, dsName, inConf, outConf, todoConfigs)
 
         checkDsCase(inConfFname, relPath, inConf)
 

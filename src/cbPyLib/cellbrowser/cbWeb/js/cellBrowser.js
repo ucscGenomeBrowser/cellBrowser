@@ -6958,7 +6958,10 @@ var cellbrowser = function() {
 
     function getDatasetSpecies() {
     /* Return "human", "mouse", etc. from db.conf.organisms, or null if unrecognized */
+        // newer datasets keep the organism under 'facets', older ones at the top level
         var orgs = db.conf.organisms;
+        if (!orgs && db.conf.facets)
+            orgs = db.conf.facets.organisms;
         if (!orgs || orgs.length === 0) return null;
         var s = orgs[0].toLowerCase();
         if (s.indexOf("sapiens") !== -1 || s.indexOf("human") !== -1) return "human";
@@ -13284,6 +13287,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var pValCol = null;
         var logFcCol = null;
         var doDescSort = false;
+        var hasGeneCardsCol = false;
         for (var i = 1; i < headerRow.length; i++) {
             var colLabel = headerRow[i];
             var isNumber = false;
@@ -13323,6 +13327,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             }
             else if (colLabel==="_geneCards") {
                 colLabel = "GeneCards";
+                hasGeneCardsCol = true;
             }
 
             if (logFcCol === null && /log.*fc/i.test(colLabel)) {
@@ -13349,6 +13354,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         htmls.push("</thead>");
 
         var hubUrl = makeHubUrl();
+
+        // GeneCards is keyed on the gene symbol alone, so the link can be made here rather than
+        // being written into the marker file by cbMarkerAnnotate. Datasets that were annotated do
+        // have a _geneCards column already, so skip the inline link for those to avoid showing it twice.
+        var showGeneCards = (getDatasetSpecies()==="human" && !hasGeneCardsCol);
 
         var MAX_UNFILTERED_ROWS = 200;
         var enrichedCount = 0;
@@ -13395,6 +13405,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                         if (hubUrl!==null) {
                             var fullHubUrl = hubUrl+"&position="+geneSym+"&singleSearch=knownCanonical";
                             h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to UCSC Genome Browser' href='"+fullHubUrl+"'>Genome</a>");
+                        }
+                        if (showGeneCards) {
+                            var geneCardsUrl = dbLinks.GeneCards+encodeURIComponent(geneSym);
+                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to GeneCards' href='"+geneCardsUrl+"'>GeneCards</a>");
                         }
                     } else {
                         if (val.startsWith("./")) {
