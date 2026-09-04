@@ -18,10 +18,10 @@ from its submission date if we have never written.
 Delete a draft out of the queue directory to drop that dataset from the
 batch. Edit a draft in place to change what gets sent.
 
-Typical cron line (first Monday of the month), which only queues and mails
-you the report:
+Runs monthly from the otto crontab, where it only queues drafts and mails
+the report to cells@ucsc.edu:
 
-  0 8 1-7 * 1 /cluster/home/mspeir/cellBrowser/ucsc/cbPingHidden scan --quiet
+  0 8 1 * * umask 002; ~mspeir/cellBrowser/ucsc/cbPingHidden scan -q --mail-report cells@ucsc.edu
 """
 import sys
 import os
