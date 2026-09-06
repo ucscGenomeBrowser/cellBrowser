@@ -166,28 +166,28 @@ def parseHpo(inFname):
     return ret
 
 def parseMgiOrtho(hgncIdToEntrez, inFname):
-    """ Parse the MGI marker file. Returns four dicts:
+    """ Parse the MGI marker file. Returns three dicts:
         mouse entrez -> human entrez
         human entrez -> list of mouse entrez
-        mouse symbol -> MGI accession ID, e.g. Trp53 -> MGI:98834
         mouse symbol -> human entrez
 
-    The last two exist so that a mouse marker file can be annotated at all. Every lookup in
+    The last exists so that a mouse marker file can be annotated at all. Every lookup in
     tabGeneAnnotate is keyed on a human entrez ID that comes from the HGNC symbol table, and no
-    mouse symbol is in there, so without these a mouse dataset gets nothing. This file already
-    carries the mouse symbol, its MGI ID and the HGNC ID of its human ortholog, so both the MGI
-    link and the route into the human annotations come out of a file we already read.
+    mouse symbol is in there, so without it a mouse dataset gets nothing. This file already
+    carries the mouse symbol and the HGNC ID of its human ortholog, so the route into the human
+    annotations comes out of a file we already read.
+
+    The same file also carries the MGI accession ID per symbol, which the browser uses to link
+    a mouse gene straight to its MGI and IMPC pages. That is not read here: the browser needs
+    the whole table at once rather than a row at a time, so cbWeb/genes/makeMgiIds.py writes it
+    out as a lookup the page fetches.
     """
     ret = {}
     # MGI Accession ID        Marker Symbol   Marker Name     Feature Type    EntrezGene ID   NCBI Gene chromosome    NCBI Gene start NCBI Gene end   NCBI Gene strand       Ensembl Gene ID Ensembl Gene chromosome Ensembl Gene start      Ensembl Gene end        Ensembl Gene strand     VEGA Gene ID    VEGA Gene chromosome  VEGA Gene start  VEGA Gene end   VEGA Gene strand        CCDS IDs        HGNC ID HomoloGene ID
     humanToMouse = defaultdict(list)
-    mouseSymToMgi = {}
     mouseSymToHumanEntrez = {}
     for row in staticFileNextRow(inFname):
         mouseSym = row.Marker_Symbol
-        mgiId = row.MGI_Accession_ID
-        if mouseSym and mgiId and mgiId.startswith("MGI:"):
-            mouseSymToMgi[mouseSym] = mgiId
 
         hgncIds = row.HGNC_ID
         if hgncIds=="null" or hgncIds=="":
@@ -200,7 +200,7 @@ def parseMgiOrtho(hgncIdToEntrez, inFname):
             humanToMouse[humanEntrez].append(mouseEntrez)
             if mouseSym:
                 mouseSymToHumanEntrez[mouseSym] = humanEntrez
-    return ret, humanToMouse, mouseSymToMgi, mouseSymToHumanEntrez
+    return ret, humanToMouse, mouseSymToHumanEntrez
 
 def parseDDD(fname):
     " parse DDD phenotype file "
@@ -489,7 +489,7 @@ def cbMarkerAnnotate(
 
     entrezToBrainspanMouseDev = parseSimpleMap(brainspanMouseDev)
     symToEntrez, hgncIdToEntrez = parseHgnc(hgnc)
-    mouseEntrezToHumanEntrez, humanToMouseEntrezList, mouseSymToMgi, mouseSymToHumanEntrez = \
+    mouseEntrezToHumanEntrez, humanToMouseEntrezList, mouseSymToHumanEntrez = \
         parseMgiOrtho(hgncIdToEntrez, mgiOrtho)
 
     # SFARI is looked up by symbol and the ortholog note names one, so we need the reverse of

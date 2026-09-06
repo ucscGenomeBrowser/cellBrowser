@@ -179,8 +179,10 @@ var cellbrowser = function() {
         "SFARI" : "https://gene.sfari.org/database/human-gene/", // gene symbol
         "GeneCards" : "https://www.genecards.org/cgi-bin/carddisp.pl?gene=", // gene symbol
         "MGI" : "https://www.informatics.jax.org/marker/summary?nomen=", // mouse gene symbol
+        "MGIGene" : "https://www.informatics.jax.org/marker/MGI:", // numeric MGI ID
         "AllenMouseISH" : "https://mouse.brain-map.org/search/show?exact_match=true&search_type=gene&search_term=", // mouse gene symbol
         "IMPC" : "https://www.mousephenotype.org/data/search?term=", // mouse gene symbol
+        "IMPCGene" : "https://www.mousephenotype.org/data/genes/MGI:", // numeric MGI ID
         "ZFIN" : "https://zfin.org/", // ZFIN ID
         "BrainSpLMD" : "http://www.brainspan.org/lcm/search?exact_match=true&search_type=gene&search_term=", // entrez
         "BrainSpMouseDev" : "http://developingmouse.brain-map.org/gene/show/", // internal Brainspan ID
@@ -192,6 +194,50 @@ var cellbrowser = function() {
     // rather than rendered as a bare word. Eurexpress: eurexpress.org no longer serves a valid
     // certificate, and its assay IDs mean nothing at any other site, so there is no replacement.
     var deadDbs = {"Eurexp" : true};
+
+    // Mouse gene symbol -> numeric MGI ID. With it, MGI and IMPC links go to the gene page;
+    // without it they go to a symbol search, which is where they went before this table
+    // existed. Built by cbWeb/genes/makeMgiIds.py out of the MGI file we already ship for
+    // ortholog mapping, and named after the version of that file so it can be cached forever.
+    var mgiIdsFile = "mgiIds-8Dec17.json";
+    var gMgiIds = null;        // the table, once it has arrived
+    var gMgiIdsLoading = null; // the promise for it while it is in flight
+
+    function loadMgiIds() {
+    /* fetch the symbol -> MGI ID table once, and hand back a promise for it. A failure
+     * resolves to an empty table rather than rejecting: every link has a symbol-search
+     * fallback, so a table that never arrives costs precision, not a working page. */
+        if (gMgiIds !== null)
+            return Promise.resolve(gMgiIds);
+        if (gMgiIdsLoading !== null)
+            return gMgiIdsLoading;
+
+        var url = cbUtil.dataUrl(["genes", mgiIdsFile]);
+        gMgiIdsLoading = new Promise(function(resolve) {
+            // silent: a missing table is a fallback, not something to alert the user about
+            cbUtil.loadJson(url, function(data) {
+                gMgiIds = data || {};
+                gMgiIdsLoading = null;
+                resolve(gMgiIds);
+            }, true);
+        });
+        return gMgiIdsLoading;
+    }
+
+    function mgiLinkUrls(sym) {
+    /* MGI and IMPC URLs for a mouse gene symbol: the gene page when the symbol is in the
+     * ID table, the symbol search when it is not. */
+        var mgiId = gMgiIds ? gMgiIds[sym] : undefined;
+        if (mgiId === undefined)
+            return {
+                mgi : dbLinks.MGI+encodeURIComponent(sym),
+                impc : dbLinks.IMPC+encodeURIComponent(sym)
+            };
+        return {
+            mgi : dbLinks.MGIGene+mgiId,
+            impc : dbLinks.IMPCGene+mgiId
+        };
+    }
 
     function _dump(o) {
     /* for debugging */
@@ -13167,6 +13213,13 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             htmls.push("</ul>");
         }
 
+        // The MGI ID table is only used by mouse datasets, so only they fetch it, and the
+        // fetch starts here rather than inside the row builder: it then runs alongside the
+        // marker TSV downloads instead of after them, so the first marker window a person
+        // opens waits for the slower of the two rather than for one and then the other.
+        // Every window after that finds the table already in memory and waits for nothing.
+        var mgiIdsReady = (getDatasetSpecies()==="mouse") ? loadMgiIds() : Promise.resolve(null);
+
         var allTabLabels = tabInfo.map(function(t) { return t.shortLabel; });
         var markerSetsStr = allTabLabels.length > 1
             ? allTabLabels.slice(0, -1).join(", ") + " and " + allTabLabels[allTabLabels.length-1]
@@ -13184,7 +13237,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
             var errorMsg = "No markers found for '"+clusterName+"' in '"+currentField+"'. "+
                 markerSetsStr+" are available for the '"+db.conf.labelField+"' field.";
-            loadClusterTsv(markerTsvUrl, loadMarkersFromTsv, divName, clusterName, errorMsg);
+            loadClusterTsv(markerTsvUrl, function(results, localFile, divId, cluster) {
+                mgiIdsReady.then(function() {
+                    loadMarkersFromTsv(results, localFile, divId, cluster);
+                });
+            }, divName, clusterName, errorMsg);
         }
 
         htmls.push("</div>"); // tabs
@@ -13442,12 +13499,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                             h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to GeneCards' href='"+geneCardsUrl+"'>GeneCards</a>");
                         }
                         if (showMgi) {
-                            var mgiUrl = dbLinks.MGI+encodeURIComponent(geneSym);
-                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to Mouse Genome Informatics' href='"+mgiUrl+"'>MGI</a>");
+                            var mouseUrls = mgiLinkUrls(geneSym);
+                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to Mouse Genome Informatics' href='"+mouseUrls.mgi+"'>MGI</a>");
                             var allenUrl = dbLinks.AllenMouseISH+encodeURIComponent(geneSym);
                             h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='in-situ hybridization images in the Allen Mouse Brain Atlas' href='"+allenUrl+"'>Allen ISH</a>");
-                            var impcUrl = dbLinks.IMPC+encodeURIComponent(geneSym);
-                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='knockout phenotypes at the International Mouse Phenotyping Consortium' href='"+impcUrl+"'>IMPC</a>");
+                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='knockout phenotypes at the International Mouse Phenotyping Consortium' href='"+mouseUrls.impc+"'>IMPC</a>");
                         }
                     } else {
                         if (val.startsWith("./")) {
