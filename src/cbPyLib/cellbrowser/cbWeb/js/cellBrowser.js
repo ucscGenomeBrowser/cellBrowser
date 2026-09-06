@@ -179,6 +179,8 @@ var cellbrowser = function() {
         "SFARI" : "https://gene.sfari.org/database/human-gene/", // gene symbol
         "GeneCards" : "https://www.genecards.org/cgi-bin/carddisp.pl?gene=", // gene symbol
         "MGI" : "https://www.informatics.jax.org/marker/summary?nomen=", // mouse gene symbol
+        "AllenMouseISH" : "https://mouse.brain-map.org/search/show?exact_match=true&search_type=gene&search_term=", // mouse gene symbol
+        "IMPC" : "https://www.mousephenotype.org/data/search?term=", // mouse gene symbol
         "ZFIN" : "https://zfin.org/", // ZFIN ID
         "BrainSpLMD" : "http://www.brainspan.org/lcm/search?exact_match=true&search_type=gene&search_term=", // entrez
         "BrainSpMouseDev" : "http://developingmouse.brain-map.org/gene/show/", // internal Brainspan ID
@@ -13442,6 +13444,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                         if (showMgi) {
                             var mgiUrl = dbLinks.MGI+encodeURIComponent(geneSym);
                             h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to Mouse Genome Informatics' href='"+mgiUrl+"'>MGI</a>");
+                            var allenUrl = dbLinks.AllenMouseISH+encodeURIComponent(geneSym);
+                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='in-situ hybridization images in the Allen Mouse Brain Atlas' href='"+allenUrl+"'>Allen ISH</a>");
+                            var impcUrl = dbLinks.IMPC+encodeURIComponent(geneSym);
+                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='knockout phenotypes at the International Mouse Phenotyping Consortium' href='"+impcUrl+"'>IMPC</a>");
                         }
                     } else {
                         if (val.startsWith("./")) {
