@@ -173,7 +173,7 @@ var cellbrowser = function() {
 
     // links to various external databases
     var dbLinks = {
-        "HPO" : "https://hpo.jax.org/app/browse/gene/", // entrez ID
+        "HPO" : "https://hpo.jax.org/browse/gene/NCBIGene:", // entrez ID
         "OMIM" : "https://omim.org/entry/", // OMIM ID
         "COSMIC" : "http://cancer.sanger.ac.uk/cosmic/gene/analysis?ln=", // gene symbol
         "SFARI" : "https://gene.sfari.org/database/human-gene/", // gene symbol
@@ -182,9 +182,14 @@ var cellbrowser = function() {
         "ZFIN" : "https://zfin.org/", // ZFIN ID
         "BrainSpLMD" : "http://www.brainspan.org/lcm/search?exact_match=true&search_type=gene&search_term=", // entrez
         "BrainSpMouseDev" : "http://developingmouse.brain-map.org/gene/show/", // internal Brainspan ID
-        "Eurexp" : "http://www.eurexpress.org/ee/databases/assay.jsp?assayID=", // internal ID
         "LMD" : "http://www.brainspan.org/lcm/search?exact_match=true&search_type=gene&search_term=" // entrez
     };
+
+    // Databases we used to link to that have gone away. Marker files annotated before the link
+    // was dropped still carry these tokens, so they are skipped when a marker table is drawn
+    // rather than rendered as a bare word. Eurexpress: eurexpress.org no longer serves a valid
+    // certificate, and its assay IDs mean nothing at any other site, so there is no replacement.
+    var deadDbs = {"Eurexp" : true};
 
     function _dump(o) {
     /* for debugging */
@@ -13208,6 +13213,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
     function geneListFormat(htmls, s, symbol) {
     /* transform a string in the format dbName|linkId|mouseOver;... to html and push these to the htmls array */
         var dbParts = s.split(";");
+        // drop entries for databases that no longer exist, before the separators are worked out,
+        // so a retired entry does not leave a stray comma behind
+        dbParts = dbParts.filter(function(dbPart) {
+            return !deadDbs[dbPart.split("|")[0]];
+        });
         for (var i = 0; i < dbParts.length; i++) {
             var dbPart = dbParts[i];
             var idParts = dbPart.split("|");

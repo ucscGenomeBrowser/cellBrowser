@@ -19,7 +19,6 @@ HPO = join(dataDir, "hpo_frequent_7Dec17.txt")
 BRAINSPANLMD = join(dataDir, "brainspan_genes.csv")
 BRAINSPANMOUSEDEV = join(dataDir, "brainspanMouse_9Dec17.txt")
 MGIORTHO = join(dataDir, "mgi_HGNC_homologene_8Dec17.txt")
-EUREXPRESS = join(dataDir, "eurexpress_7Dec17.txt")
 DDD = join(dataDir, "DDG2P_18_10_2018.csv.gz")
 ZFIN = join(dataDir, "zfin_genetic_markers.txt")
 
@@ -44,7 +43,6 @@ def parseArgs():
     parser.add_option("", "--hpo", dest="hpo", action="store", help="location of HPO gene/disease/phenotype file, default %default", default=HPO)
     parser.add_option("", "--lmd", dest="lmd", action="store", help="location of BrainSpan LMD file, default %default", default=BRAINSPANLMD)
     parser.add_option("", "--mgiOrtho", dest="mgiOrtho", action="store", help="location of MGI Homologene file, default %default", default=MGIORTHO)
-    parser.add_option("", "--eurexpress", dest="eurexpress", action="store", help="location of Eurexpress file, default %default", default=EUREXPRESS)
     parser.add_option("", "--brainspanMouseDev", dest="brainspanMouseDev", action="store", help="location of brainspan Mouse Development ISH file, default %default", default=BRAINSPANMOUSEDEV)
     parser.add_option("", "--zfin", dest="zfin", action="store", help="location of ZFIN genetic markers file, default %default", default=ZFIN)
     #parser.add_option("-f", "--file", dest="file", action="store", help="run on file") 
@@ -204,31 +202,6 @@ def parseMgiOrtho(hgncIdToEntrez, inFname):
                 mouseSymToHumanEntrez[mouseSym] = humanEntrez
     return ret, humanToMouse, mouseSymToMgi, mouseSymToHumanEntrez
 
-def parseEurexpress(mouseEntrezToHumanEntrez, inFname):
-    " return dict with human entrez -> (eurexpressId, annotationStr) "
-    # Template ID     Gene Symbol     Assay ID        EMAP Term       Entrez ID       Theiler Stage
-    entrezToTerms = defaultdict(set)
-    entrezToEuroexpress = dict()
-    skippedMouseIds = set()
-    for row in staticFileNextRow(inFname):
-        mouseEntrez = row.Entrez_ID
-        humanEntrez = mouseEntrezToHumanEntrez.get(mouseEntrez)
-        if humanEntrez==None:
-            skippedMouseIds.add(mouseEntrez)
-            continue
-        if row.EMAP_Term!="":
-            entrezToTerms[humanEntrez].add(row.EMAP_Term)
-        entrezToEuroexpress[humanEntrez] = row.Assay_ID
-
-    logging.info("Eurexpress mouse entrez IDs: %d mappable, %d not-mappable to human " % (len(entrezToEuroexpress),len(skippedMouseIds)))
-    logging.debug("Eurexpress mouse: mouse entrez IDs not mappable to human: %s" % ",".join(skippedMouseIds))
-    ret = {}
-    for entrezId, terms in iterItems(entrezToTerms):
-        eurexpId = entrezToEuroexpress[entrezId]
-        ret[entrezId] = (eurexpId, ", ".join(sorted(list(terms))))
-
-    return ret
-
 def parseDDD(fname):
     " parse DDD phenotype file "
     ret = {}
@@ -347,7 +320,7 @@ def guessMarkerOrganism(inFname):
     logging.info("%s: gene identifiers do not look human, mouse or zebrafish" % inFname)
     return None
 
-def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmim, entrezToCosmic, entrezToHpo, entrezToLmd, entrezToEuroexpress, humanToMouseEntrezList, mouseEntrezToBrainspanMouseDev, symToZfin=None, mouseSymToHumanEntrez=None, entrezToHumanSym=None):
+def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmim, entrezToCosmic, entrezToHpo, entrezToLmd, humanToMouseEntrezList, mouseEntrezToBrainspanMouseDev, symToZfin=None, mouseSymToHumanEntrez=None, entrezToHumanSym=None):
     " "
     headers = None
     geneToSym = -1
@@ -472,17 +445,12 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
         if entrezId is not None:
             if entrezId in entrezToLmd:
                 # BrainSpan LMD is human tissue, so on a mouse row it is the ortholog's data.
-                # Eurexpress and BrainSpan MouseDev below are mouse resources, directly about
-                # this gene, so they are deliberately not tagged.
+                # BrainSpan MouseDev below is a mouse resource, directly about this gene, so it
+                # is deliberately not tagged.
                 lmdPart = "BrainSpLMD|"+entrezId
                 if orthoTag is not None:
                     lmdPart += "|"+orthoTag
                 exprParts.append(lmdPart)
-
-            if entrezId in entrezToEuroexpress:
-                eurExpId, annotStr = entrezToEuroexpress[entrezId]
-                annotStr = annotStr.replace(";", ",")
-                exprParts.append("Eurexp|"+eurExpId+"|"+annotStr)
 
             mouseEntrezList = humanToMouseEntrezList[entrezId]
             for mouseEntrez in mouseEntrezList:
@@ -509,7 +477,6 @@ def cbMarkerAnnotate(
     brainspanMouseDev: str,
     hgnc: str,
     mgiOrtho: str,
-    eurexpress: str,
     lmd: str,
     hpo: str,
     cosmic: str,
@@ -531,7 +498,6 @@ def cbMarkerAnnotate(
     for humanSym, humanEntrez in iterItems(symToEntrez):
         entrezToHumanSym.setdefault(humanEntrez, humanSym)
 
-    entrezToEuroexpress = parseEurexpress(mouseEntrezToHumanEntrez, eurexpress)
     entrezToLmd = parseBrainspanLmd(lmd)
     entrezToHpo = parseHpo(hpo)
     entrezToCosmic = parseCosmic(cosmic)
@@ -550,7 +516,6 @@ def cbMarkerAnnotate(
         entrezToCosmic,
         entrezToHpo,
         entrezToLmd,
-        entrezToEuroexpress,
         humanToMouseEntrezList,
         entrezToBrainspanMouseDev,
         symToZfin,
@@ -618,7 +583,7 @@ def annotateMarkerFileInPlace(markerFname, force=False):
 
     logging.info("Annotating %s (%s)" % (markerFname, organism))
     tmpFname = markerFname + ".annot.tmp"
-    cbMarkerAnnotate(markerFname, tmpFname, BRAINSPANMOUSEDEV, HGNC, MGIORTHO, EUREXPRESS,
+    cbMarkerAnnotate(markerFname, tmpFname, BRAINSPANMOUSEDEV, HGNC, MGIORTHO,
             BRAINSPANLMD, HPO, COSMIC, OMIM, SFARI, HPRD, ZFIN)
     os.rename(tmpFname, markerFname)
     return organism
@@ -633,7 +598,6 @@ def cbMarkerAnnotateFromArgs(args, options):
         brainspanMouseDev=options.brainspanMouseDev,
         hgnc=options.hgnc,
         mgiOrtho=options.mgiOrtho,
-        eurexpress=options.eurexpress,
         lmd=options.lmd,
         hpo=options.hpo,
         cosmic=options.cosmic,
