@@ -224,6 +224,11 @@ var cellbrowser = function() {
         return gMgiIdsLoading;
     }
 
+    function extLink(url, label, title) {
+    /* one link in the Links column of a marker table */
+        return "<a target=_blank class='link' style='font-size:80%; color:#AAA' title='"+title+"' href='"+url+"'>"+label+"</a>";
+    }
+
     function mgiLinkUrls(sym) {
     /* MGI and IMPC URLs for a mouse gene symbol: the gene page when the symbol is in the
      * ID table, the symbol search when it is not. */
@@ -13334,12 +13339,38 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             headerRow = rows[0];
         }
 
+        // The links to outside databases that are keyed on the gene symbol alone are built
+        // here rather than read from the file, but they get a column of their own so they line
+        // up with the annotation columns cbMarkerAnnotate writes. One column holds all of them,
+        // the way _expr holds BrainSpan LMD and MouseDev together.
+        // The column is only added when this dataset will actually produce a link, so a dataset
+        // that produces none does not get an empty column. That is the rule cbMarkerAnnotate
+        // uses on its own columns.
+        var dsSpecies = getDatasetSpecies();
+        var hubUrl = makeHubUrl();
+        var showGeneCards = (dsSpecies==="human");
+        var showMgi = (dsSpecies==="mouse");
+        var linksInserted = (hubUrl!==null || showGeneCards || showMgi);
+        if (linksInserted) {
+            for (var li = 0; li < rows.length; li++) {
+                if (rows[li].length > 1)   // skip the trailing empty row papaparse leaves
+                    rows[li].splice(2, 0, li===0 ? "_links" : "");
+            }
+            headerRow = rows[0];
+        }
+
         var htmls = [];
 
         var markerListIdx = parseInt(divId.split("-")[1]);
         var markerInfo = db.conf.markers[markerListIdx];
         var selectOnClick = markerInfo.selectOnClick;
         var sortColumn = markerInfo.sortColumn || 1;
+        // sortColumn counts the columns as displayed, which do not include the leading id
+        // column, so inserting Links at displayed position 1 moves every column at or after it
+        // one to the right. Without this the default sort of 1 lands on Links, where sorting
+        // does nothing, instead of on the first real column.
+        if (linksInserted && sortColumn >= 1)
+            sortColumn += 1;
         var sortOrder = markerInfo.sortOrder || "asc";
         var sortOrderNum = 0;
         if (sortOrder==="desc")
@@ -13369,9 +13400,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         }
 
         //htmls.push("<table class='table' data-sortlist='[[1,1],[4,0]]' id='tpMarkerTable'>");
-        htmls.push("<table class='table' data-sortlist='[["+sortColumn+","+sortOrder+"]]' id='"+tableId+"'>");
+        htmls.push("<table class='table' data-sortlist='[["+sortColumn+","+sortOrderNum+"]]' id='"+tableId+"'>");
         htmls.push("<thead>");
         var hprdCol = null;
+        var linksCol = null;
         var geneListCol = null;
         var exprCol = null;
         var pValCol = null;
@@ -13414,6 +13446,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             else if (colLabel==="_zfin") {
                 colLabel = "ZFIN";
             }
+            else if (colLabel==="_links") {
+                colLabel = "Links";
+                linksCol = i;
+            }
 
             if (logFcCol === null && /log.*fc/i.test(colLabel)) {
                 logFcCol = i;
@@ -13437,16 +13473,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             htmls.push("</th>");
         }
         htmls.push("</thead>");
-
-        var hubUrl = makeHubUrl();
-
-        // GeneCards and MGI are keyed on the gene symbol alone, so these links are made here
-        // rather than being written into the marker file by cbMarkerAnnotate. That way they
-        // appear on every dataset, not only the ones that were annotated, and they can be
-        // gated on the organism, which a column in the file cannot be.
-        var dsSpecies = getDatasetSpecies();
-        var showGeneCards = (dsSpecies==="human");
-        var showMgi = (dsSpecies==="mouse");
 
         var MAX_UNFILTERED_ROWS = 200;
         var enrichedCount = 0;
@@ -13490,21 +13516,23 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                     h.push("<td>");
                     if (j === symColIdx) {
                         h.push("<a data-gene='"+geneId+"' class='link tpLoadGeneLink'>"+geneSym+"</a>");
+                    } else if (j === linksCol) {
+                        var extLinks = [];
                         if (hubUrl!==null) {
                             var fullHubUrl = hubUrl+"&position="+geneSym+"&singleSearch=knownCanonical";
-                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to UCSC Genome Browser' href='"+fullHubUrl+"'>Genome</a>");
+                            extLinks.push(extLink(fullHubUrl, "Genome", "link to UCSC Genome Browser"));
                         }
-                        if (showGeneCards) {
-                            var geneCardsUrl = dbLinks.GeneCards+encodeURIComponent(geneSym);
-                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to GeneCards' href='"+geneCardsUrl+"'>GeneCards</a>");
-                        }
+                        if (showGeneCards)
+                            extLinks.push(extLink(dbLinks.GeneCards+encodeURIComponent(geneSym), "GeneCards", "link to GeneCards"));
                         if (showMgi) {
                             var mouseUrls = mgiLinkUrls(geneSym);
-                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to Mouse Genome Informatics' href='"+mouseUrls.mgi+"'>MGI</a>");
-                            var allenUrl = dbLinks.AllenMouseISH+encodeURIComponent(geneSym);
-                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='in-situ hybridization images in the Allen Mouse Brain Atlas' href='"+allenUrl+"'>Allen ISH</a>");
-                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='knockout phenotypes at the International Mouse Phenotyping Consortium' href='"+mouseUrls.impc+"'>IMPC</a>");
+                            extLinks.push(extLink(mouseUrls.mgi, "MGI", "link to Mouse Genome Informatics"));
+                            extLinks.push(extLink(dbLinks.AllenMouseISH+encodeURIComponent(geneSym), "Allen ISH",
+                                "in-situ hybridization images in the Allen Mouse Brain Atlas"));
+                            extLinks.push(extLink(mouseUrls.impc, "IMPC",
+                                "knockout phenotypes at the International Mouse Phenotyping Consortium"));
                         }
+                        h.push(extLinks.join(", "));
                     } else {
                         if (val.startsWith("./")) {
                             var imgUrl = val.replace("./", db.url+"/");
@@ -13604,9 +13632,14 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         $table.tablesorter(tableOpt);
         //$('#tpMarkerTable').trigger('sorton', tableOpt.sortList); // does not work, though documented
         // this is a pretty bad hack, but I have no idea why the sortList option doesn't work above...
-        $("[data-column='1']").trigger("sort"); // this seems to work!
+        // It used to sort displayed column 1 no matter what. That was the first real column
+        // until the Links column was inserted in front of it, and sorting Links does nothing
+        // because every row of it is the same. sortColumn is that index, already shifted past
+        // Links where one was added, and it defaults to 1, so this is unchanged for a table
+        // without a Links column.
+        $("[data-column='"+sortColumn+"']").trigger("sort"); // this seems to work!
         if (doDescSort)
-            $("[data-column='1']").trigger("sort"); // second click...
+            $("[data-column='"+sortColumn+"']").trigger("sort"); // second click...
 
         // When there are more rows than MAX_UNFILTERED_ROWS, re-render from the full
         // dataset on filter changes so all rows are searchable, not just the first 200.
