@@ -564,8 +564,29 @@ def class_key(ct):
     return celltype_normkey(drop_cell_suffix(fix_celltype_spelling(ct or "").strip()))
 
 
+# Head words that classify a cell type on their own in celltype-class.tsv but say nothing
+# about lineage without a tissue or region qualifier. A track that takes its class from one
+# of these matched the table, so it never shows up in unclassified-celltypes.log -- it
+# quietly inherits whichever lineage the bare row happens to name.
+#
+# hg38's BrainVar is the live case: its cell type "Progenitors" lands on the bare
+# "Progenitor" row (class_key collapses the plural) and comes out Neural progenitor. That
+# is right for BrainVar, and would be wrong for a kidney, heart or blood dataset using the
+# same label. Nephron progenitors already needed that exception
+# (NON_NEURAL_PROGENITOR in build_celltype_crosswalks.py) and was caught by hand rather
+# than by any report -- generic-class-matches.log exists so the next one is not.
+#
+# A key here only does anything if the table actually carries such a bare row (today just
+# "progenitor"). The rest are listed so that adding one later starts getting reported
+# without anyone having to remember this set exists.
+GENERIC_CLASS_KEYS = {
+    "progenitor", "precursor", "stem", "cycling", "proliferating", "immature",
+    "intermediate",
+}
+
+
 def lookup_class(ct):
-    """(broad class, "R,G,B") for a cell type, or (None, None).
+    """(broad class, "R,G,B", matched table key) for a cell type, or (None, None, None).
 
     Falls back to progressively shorter prefixes when the full name is not in the table.
     The atlases qualify a common cell type with the tissue it came from -- 'Fibroblast
@@ -576,13 +597,13 @@ def lookup_class(ct):
     stale the moment a new atlas lands, whereas the head word is what the class actually
     depends on. Only ever shortens, so a specific entry still wins over its own prefix."""
     if not ct:
-        return None, None
+        return None, None, None
     words = ct.split()
     for n in range(len(words), 0, -1):
         k = class_key(" ".join(words[:n]))
         if k in CT_CLASS:
-            return CT_CLASS[k], CT_CLASS_COLOR.get(k)
-    return None, None
+            return CT_CLASS[k], CT_CLASS_COLOR.get(k), k
+    return None, None, None
 
 
 _ctc = os.path.join(XWALK_ROOT, "celltype-crosswalks", "celltype-class.tsv")
@@ -1539,6 +1560,7 @@ def main():
     orphan_ann = []                                    # annotation bigBeds with no stanza
     label_qualified = defaultdict(int)                # asm -> subtracks given a code
     unclassed = Counter()                             # celltype -> tracks with no class
+    generic_class = Counter()                         # class from a lineage-agnostic row
     coverage = defaultdict(lambda: defaultdict(int))  # asm -> facet -> known count
 
     # byte-identical allen-brain-science copies served from several grouping dirs
@@ -1792,9 +1814,13 @@ def main():
                                            track_labels(r, lf)[0])
             # color every track by the broad class of its final cell type, so the
             # same class is the same color on both assemblies
-            _cls, child_color = lookup_class(celltype)
+            _cls, child_color, _ckey = lookup_class(celltype)
             if celltype and _cls is None:
                 unclassed[celltype] += 1       # no broad class -> no facet value, no color
+            elif _ckey in GENERIC_CLASS_KEYS:
+                # classed, but off a row that carries no lineage -- report it, since a
+                # successful match is invisible everywhere else
+                generic_class[(r["collection"], celltype, _ckey, _cls)] += 1
             tchildren.append(render_child(tcomp + "_" + idval, tcomp, r, lf,
                                           color=child_color, long_override=long_label,
                                           short_override=short_label, default_off=True))
@@ -2134,6 +2160,18 @@ def main():
                  "tracks\tcell_type\n")
         for _ct, _n in sorted(unclassed.items(), key=lambda x: (-x[1], x[0])):
             fh.write("%d\t%s\n" % (_n, _ct))
+    with open(os.path.join(OUTDIR, "generic-class-matches.log"), "w") as fh:
+        fh.write("# cell types whose Cell_class came from a bare, lineage-agnostic row in\n"
+                 "# celltype-class.tsv (see GENERIC_CLASS_KEYS). These DID match the table,\n"
+                 "# so they are absent from unclassified-celltypes.log -- but the class is\n"
+                 "# only as right as the lineage that bare row happens to name.\n"
+                 "# Check each against the dataset's tissue. If it disagrees, add the\n"
+                 "# specific cell type to paper-decodes/ and rebuild the crosswalks: a\n"
+                 "# specific entry beats its own prefix in lookup_class(), which is how\n"
+                 "# 'Nephron progenitors' comes out Stromal while the bare row stays neural.\n"
+                 "tracks\tcollection\tcell_type\tmatched_key\tassigned_class\n")
+        for _g, _n in sorted(generic_class.items(), key=lambda x: (-x[1], x[0])):
+            fh.write("%d\t%s\t%s\t%s\t%s\n" % ((_n,) + _g))
     with open(os.path.join(OUTDIR, "orphan-annotations.log"), "w") as fh:
         fh.write("# annotation bigBeds with no hub stanza -- dropped, since their\n"
                  "# composite and label would be guesses from the filename\nassembly\tabs_path\n")
@@ -2171,6 +2209,8 @@ def main():
     out.append("Orphan annotation bigBeds dropped (no hub stanza): %d" % len(orphan_ann))
     out.append("Cell types with no broad class (Cell_class unknown): %d in %d tracks"
                % (len(unclassed), sum(unclassed.values())))
+    out.append("Cell types classed off a lineage-agnostic row: %d in %d tracks"
+               % (len(generic_class), sum(generic_class.values())))
     out.append("Subtracks label-qualified with a source cluster code: %d"
                % sum(label_qualified.values()))
     out.append("Parse warnings: %d" % len(warnings))
