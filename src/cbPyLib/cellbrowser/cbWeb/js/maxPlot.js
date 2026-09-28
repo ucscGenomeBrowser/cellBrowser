@@ -493,6 +493,10 @@ function MaxPlot(div, top, left, width, height, args) {
 
             if((u_FatID == -1.0 && u_AnySelected == 0.0) || !(u_Layer == 0.0 || u_Layer == -1.0)) {
                 v_Color = a_Color;
+            } else if(l_Layer == -1.0) {
+                // color index 0 (e.g. expression 0): fixed grey like the 2D path's greyImgIdx (#b2b2b2).
+                // The luminosity formula below would turn light colors like magma's 0-bin almost white.
+                v_Color = vec3(0.698, 0.698, 0.698);
             } else {
                 float l_Red = 0.08 + a_Color[0];
                 float l_Green = 0.08 + a_Color[1];
