@@ -45,6 +45,22 @@ with open(os.path.join(CONFDIR, "hub_config.json")) as _fh:
 # rewrite the host at stanza-build time via HUB_BASE_URL, e.g. for cells-test.)
 SERVED_BASE = CFG["served_base"]
 
+# Hand-curated per-file denylist: [regex, note] pairs, re.search-matched against the
+# DATASETS-relative path. The last resort for a file that no class-of-file rule catches
+# (see the _exclude_track_paths_doc in hub_config.json). Kept as (regex, note) so the
+# note can be reported alongside the path -- a manual exclusion is the one drop reason a
+# wrangler cannot re-derive from the tree, so it has to say why in the report.
+EXCLUDE_TRACK_PATH_RES = [(re.compile(pat), note)
+                          for pat, note in CFG.get("exclude_track_paths", [])]
+
+def manual_exclusion(abspath):
+    """Note for the first exclude_track_paths pattern matching abspath, else None."""
+    rel = os.path.relpath(abspath, DATASETS)
+    for rx, note in EXCLUDE_TRACK_PATH_RES:
+        if rx.search(rel):
+            return note
+    return None
+
 WIP_SEGMENTS = set(CFG["exclude_dirs_wip"])
 BAM_STORE_DIRS = set(CFG["exclude_dirs_bam"])
 BAM_STORE_RE = re.compile(r"^batch\d+$", re.I)
@@ -627,6 +643,10 @@ def main():
         # probe on files that won't ship anyway.
         excluded = 0
         reasons = []
+        _manual = manual_exclusion(abspath)
+        if _manual:
+            excluded = 1
+            reasons.append("manually_excluded")
         if is_wip(abspath):
             excluded = 1
             reasons.append("wip_test_path")
@@ -778,6 +798,8 @@ def main():
                         comp = "%s__beds" % coll
                     else:
                         comp = coll
+                    # extra_collections bypass the desc gate, but not the denylist
+                    ex_note = manual_exclusion(abspath)
                     rows.append(OrderedDict([
                         ("abs_path", abspath),
                         ("track_type", ttype),
@@ -792,13 +814,22 @@ def main():
                         ("master_track_name", ("%s__x__%s" % (slug(coll), slug(stem)))[:128]),
                         ("master_composite_name", comp),
                         ("cellbrowser_hidden", 0),
-                        ("excluded", 0),
-                        ("excluded_reason", ""),
+                        ("excluded", 1 if ex_note else 0),
+                        ("excluded_reason", "manually_excluded" if ex_note else ""),
                         ("needs_review", 0),
                     ]))
                     extra_n += 1
     if extra_n:
         sys.stderr.write("Added %d extra_collections track rows\n" % extra_n)
+
+    # A denylist pattern that matches nothing is almost always a typo or a file that
+    # moved, and it fails open: the track keeps shipping while the config says it does
+    # not. Cheap to check here, where every row is known.
+    _rels = [os.path.relpath(r["abs_path"], DATASETS) for r in rows]
+    for rx, note in EXCLUDE_TRACK_PATH_RES:
+        if not any(rx.search(rel) for rel in _rels):
+            sys.stderr.write("  WARN exclude_track_paths pattern matched no file: %s "
+                             "(%s)\n" % (rx.pattern, note))
 
     cols = list(rows[0].keys()) if rows else []
     mpath = os.path.join(OUTDIR, "manifest.tsv")
@@ -870,6 +901,16 @@ def write_report(rows, hubs, decoy_reals, unknown_count, broken_refs):
     for k, v in sorted(rc.items(), key=lambda kv: -kv[1]):
         out.append("- %s: %d" % (k, v))
     out.append("")
+
+    manual = [r for r in excl if "manually_excluded" in r["excluded_reason"]]
+    if manual:
+        out.append("## Manually excluded tracks\n")
+        out.append("Individual files denied by `exclude_track_paths` in hub_config.json "
+                   "(no other rule catches them -- see the note for why):\n")
+        for r in sorted(manual, key=lambda r: r["abs_path"]):
+            rel = os.path.relpath(r["abs_path"], DATASETS)
+            out.append("- `%s` -- %s" % (rel, manual_exclusion(r["abs_path"])))
+        out.append("")
 
     out.append("## Datasets gated for placeholder/missing desc\n")
     out.append("Excluded because their desc.conf/desc.json is still the cbBuild "

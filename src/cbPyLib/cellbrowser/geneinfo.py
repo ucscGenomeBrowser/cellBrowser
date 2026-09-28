@@ -1,6 +1,6 @@
 # annotate a list of gene IDs with links to various external databases
 
-import logging, sys, optparse, re, unicodedata, string, csv
+import logging, sys, optparse, re, unicodedata, string, csv, os
 from collections import defaultdict, namedtuple
 from os.path import join, basename, dirname, isfile
 
@@ -19,7 +19,6 @@ HPO = join(dataDir, "hpo_frequent_7Dec17.txt")
 BRAINSPANLMD = join(dataDir, "brainspan_genes.csv")
 BRAINSPANMOUSEDEV = join(dataDir, "brainspanMouse_9Dec17.txt")
 MGIORTHO = join(dataDir, "mgi_HGNC_homologene_8Dec17.txt")
-EUREXPRESS = join(dataDir, "eurexpress_7Dec17.txt")
 DDD = join(dataDir, "DDG2P_18_10_2018.csv.gz")
 ZFIN = join(dataDir, "zfin_genetic_markers.txt")
 
@@ -44,7 +43,6 @@ def parseArgs():
     parser.add_option("", "--hpo", dest="hpo", action="store", help="location of HPO gene/disease/phenotype file, default %default", default=HPO)
     parser.add_option("", "--lmd", dest="lmd", action="store", help="location of BrainSpan LMD file, default %default", default=BRAINSPANLMD)
     parser.add_option("", "--mgiOrtho", dest="mgiOrtho", action="store", help="location of MGI Homologene file, default %default", default=MGIORTHO)
-    parser.add_option("", "--eurexpress", dest="eurexpress", action="store", help="location of Eurexpress file, default %default", default=EUREXPRESS)
     parser.add_option("", "--brainspanMouseDev", dest="brainspanMouseDev", action="store", help="location of brainspan Mouse Development ISH file, default %default", default=BRAINSPANMOUSEDEV)
     parser.add_option("", "--zfin", dest="zfin", action="store", help="location of ZFIN genetic markers file, default %default", default=ZFIN)
     #parser.add_option("-f", "--file", dest="file", action="store", help="run on file") 
@@ -168,11 +166,29 @@ def parseHpo(inFname):
     return ret
 
 def parseMgiOrtho(hgncIdToEntrez, inFname):
-    " return dict with mouse entrezId -> human entrez "
+    """ Parse the MGI marker file. Returns three dicts:
+        mouse entrez -> human entrez
+        human entrez -> list of mouse entrez
+        mouse symbol -> human entrez
+
+    The last exists so that a mouse marker file can be annotated at all. Every lookup in
+    tabGeneAnnotate is keyed on a human entrez ID that comes from the HGNC symbol table, and no
+    mouse symbol is in there, so without it a mouse dataset gets nothing. This file already
+    carries the mouse symbol and the HGNC ID of its human ortholog, so the route into the human
+    annotations comes out of a file we already read.
+
+    The same file also carries the MGI accession ID per symbol, which the browser uses to link
+    a mouse gene straight to its MGI and IMPC pages. That is not read here: the browser needs
+    the whole table at once rather than a row at a time, so cbWeb/genes/makeMgiIds.py writes it
+    out as a lookup the page fetches.
+    """
     ret = {}
     # MGI Accession ID        Marker Symbol   Marker Name     Feature Type    EntrezGene ID   NCBI Gene chromosome    NCBI Gene start NCBI Gene end   NCBI Gene strand       Ensembl Gene ID Ensembl Gene chromosome Ensembl Gene start      Ensembl Gene end        Ensembl Gene strand     VEGA Gene ID    VEGA Gene chromosome  VEGA Gene start  VEGA Gene end   VEGA Gene strand        CCDS IDs        HGNC ID HomoloGene ID
     humanToMouse = defaultdict(list)
+    mouseSymToHumanEntrez = {}
     for row in staticFileNextRow(inFname):
+        mouseSym = row.Marker_Symbol
+
         hgncIds = row.HGNC_ID
         if hgncIds=="null" or hgncIds=="":
             continue
@@ -182,32 +198,9 @@ def parseMgiOrtho(hgncIdToEntrez, inFname):
             mouseEntrez = row.EntrezGene_ID
             ret[mouseEntrez] = humanEntrez
             humanToMouse[humanEntrez].append(mouseEntrez)
-    return ret, humanToMouse
-
-def parseEurexpress(mouseEntrezToHumanEntrez, inFname):
-    " return dict with human entrez -> (eurexpressId, annotationStr) "
-    # Template ID     Gene Symbol     Assay ID        EMAP Term       Entrez ID       Theiler Stage
-    entrezToTerms = defaultdict(set)
-    entrezToEuroexpress = dict()
-    skippedMouseIds = set()
-    for row in staticFileNextRow(inFname):
-        mouseEntrez = row.Entrez_ID
-        humanEntrez = mouseEntrezToHumanEntrez.get(mouseEntrez)
-        if humanEntrez==None:
-            skippedMouseIds.add(mouseEntrez)
-            continue
-        if row.EMAP_Term!="":
-            entrezToTerms[humanEntrez].add(row.EMAP_Term)
-        entrezToEuroexpress[humanEntrez] = row.Assay_ID
-
-    logging.info("Eurexpress mouse entrez IDs: %d mappable, %d not-mappable to human " % (len(entrezToEuroexpress),len(skippedMouseIds)))
-    logging.debug("Eurexpress mouse: mouse entrez IDs not mappable to human: %s" % ",".join(skippedMouseIds))
-    ret = {}
-    for entrezId, terms in iterItems(entrezToTerms):
-        eurexpId = entrezToEuroexpress[entrezId]
-        ret[entrezId] = (eurexpId, ", ".join(sorted(list(terms))))
-
-    return ret
+            if mouseSym:
+                mouseSymToHumanEntrez[mouseSym] = humanEntrez
+    return ret, humanToMouse, mouseSymToHumanEntrez
 
 def parseDDD(fname):
     " parse DDD phenotype file "
@@ -241,27 +234,118 @@ def parseSimpleMap(inFname):
         ret[row[0]] = row[1]
     return ret
 
-def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmim, entrezToCosmic, entrezToHpo, entrezToLmd, entrezToEuroexpress, humanToMouseEntrezList, mouseEntrezToBrainspanMouseDev, symToZfin=None):
+def markerGeneIds(inFname, limit=300):
+    """ yield the gene identifier of the first `limit` rows of a marker file, using the same
+    column rules as tabGeneAnnotate: column 1, or column 7 for the Seurat layout where column 1
+    is a number. The "geneId|symbol" and version suffixes are stripped. """
+    ids = []
+    for row in lineFileNextRow(inFname):
+        if len(row) < 2:
+            continue
+        sym = row[1]
+        try:
+            float(sym)
+            sym = row[7] if len(row) > 7 else sym # seurat layout, symbol is in the 'gene' column
+        except ValueError:
+            pass
+        if "|" in sym:
+            parts = sym.split("|")
+            # for non-human/mouse Ensembl IDs the symbol half is the useful one
+            if parts[0].startswith("ENS") and not parts[0].startswith(("ENSG", "ENSMUSG")):
+                sym = parts[1] if len(parts) > 1 else parts[0]
+            else:
+                sym = parts[0]
+        if "." in sym:
+            sym = sym.split(".")[0]
+        if sym:
+            ids.append(sym)
+        if len(ids) >= limit:
+            break
+    return ids
+
+def guessMarkerOrganism(inFname):
+    """ Return "human", "mouse", "zebrafish" or None for a marker file, by looking at its gene
+    identifiers. Ensembl IDs answer it outright. Plain symbols are matched against the gencode
+    human and mouse symbol tables, which are small (under half a megabyte each) - much cheaper
+    than the 27MB of HGNC and MGI that the annotation itself needs, so a fly dataset is ruled
+    out without downloading any of that. Only once human and mouse are ruled out is the 13MB
+    ZFIN file consulted for zebrafish.
+    """
+    from .cellbrowser import getStaticFile, getGeneSymPath, readGeneToSym
+
+    geneIds = markerGeneIds(inFname)
+    if not geneIds:
+        logging.warning("%s has no usable gene identifiers, cannot guess the organism" % inFname)
+        return None
+
+    if any(g.startswith("ENSG") for g in geneIds):
+        return "human"
+    if any(g.startswith("ENSMUSG") for g in geneIds):
+        return "mouse"
+    if any(g.startswith("ENSDARG") for g in geneIds):
+        return "zebrafish"
+    if any(g.startswith("ENS") for g in geneIds):
+        return None # an Ensembl ID from some other organism
+
+    def hitRate(syms):
+        return len([g for g in geneIds if g in syms]) / float(len(geneIds))
+
+    # Human and mouse first: their symbol tables are a few hundred kilobytes, while the ZFIN
+    # file is 13MB, so a human or mouse dataset never has to pull that down. Mouse symbols are
+    # the human ones in title case, so the two sets barely overlap and the winner is clear when
+    # it really is one of them. Anything below half is neither.
+    best, bestRate = None, 0.0
+    for org, geneType in (("human", "gencode-human"), ("mouse", "gencode-mouse")):
+        tabFname = getStaticFile(getGeneSymPath(geneType))
+        if tabFname is None:
+            logging.warning("Cannot get the %s symbol table, skipping that part of the "
+                    "organism guess for %s" % (geneType, inFname))
+            continue
+        rate = hitRate(set(readGeneToSym(tabFname).values()))
+        logging.debug("%s: %d%% of gene identifiers are %s symbols" % (inFname, 100*rate, org))
+        if rate > bestRate:
+            best, bestRate = org, rate
+
+    if bestRate >= 0.5:
+        return best
+
+    # neither, so it is worth paying for the ZFIN file to see if it is zebrafish
+    symToZfin = parseZfin(ZFIN)
+    if symToZfin:
+        rate = hitRate(set(symToZfin.keys()))
+        logging.debug("%s: %d%% of gene identifiers are zebrafish symbols" % (inFname, 100*rate))
+        if rate >= 0.5:
+            return "zebrafish"
+
+    logging.info("%s: gene identifiers do not look human, mouse or zebrafish" % inFname)
+    return None
+
+def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmim, entrezToCosmic, entrezToHpo, entrezToLmd, humanToMouseEntrezList, mouseEntrezToBrainspanMouseDev, symToZfin=None, mouseSymToHumanEntrez=None, entrezToHumanSym=None):
     " "
     headers = None
     geneToSym = -1
-    for row in lineFileNextRow(inFname):
+    # headerIsRow gives us the header line as it was written. The namedtuple-safe version that
+    # lineFileNextRow normally returns has had the punctuation replaced, which turns
+    # "z_score|float" into "z_score_float" - and the browser reads that "|float" suffix as the
+    # column type, so flattening it loses numeric sorting. Taking the original line also means
+    # the seurat headers no longer need undoing one by one.
+    for row in lineFileNextRow(inFname, headerIsRow=True):
         if headers is None:
-            headers = list(row._fields)
+            headers = list(row)
+            # sanitizeHeaders edits column 0 of the caller's list in place, so headerIsRow does
+            # not protect it: an unnamed first column, which is what R writes, comes back as
+            # "rowName". The other columns are rebuilt into a new list and do survive.
+            if headers and headers[0] == "rowName":
+                headers[0] = ''
             headers.append("_hprdClass")
             headers.append("_expr")
             headers.append("_zfin")
-            headers.append("_geneCards")
+            # no _geneCards column: cellBrowser.js builds that link from the gene symbol, which
+            # it already has, and gates it on the dataset being human. A column in the file
+            # cannot be gated that way, so it would show up on macaque datasets too.
             headers.append("_geneLists")
-
-            # lineFileNextRow makes some changes to seurat headers that we need to undo
-            if headers[0] == "rowName":
-                headers[0] = ''
-            if headers[3] == "pct_1":
-                headers[3] = "pct.1"
-            if headers[4] == "pct_2":
-                headers[4] = "pct.2"
             yield headers
+            continue
         sym = row[1]
         isSeurat = False
         try:
@@ -282,7 +366,7 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
         if "." in sym: # remove Ensembl version identifier
             sym = sym.split(".")[0]
 
-        origSym = sym  # save symbol before Entrez conversion for GeneCards link
+        origSym = sym  # the identifier as it appeared in the file, used for the ZFIN lookup
 
         # convert gene IDs to symbols
         if geneToSym == -1:
@@ -297,18 +381,42 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
         hprdClass = ""
         entrezId = symToEntrez.get(sym)
 
+        # Every lookup below is keyed on a human entrez ID. A mouse symbol is not in the HGNC
+        # table, so without this a mouse dataset comes back with every column empty. Fall back
+        # to the human ortholog, which the MGI file we already read gives us. What follows is
+        # then the ortholog's annotation, so say so in the mouse-over rather than letting it
+        # read as a fact about the mouse gene.
+        orthoTag = None
+        if entrezId is None and mouseSymToHumanEntrez:
+            orthoEntrez = mouseSymToHumanEntrez.get(sym)
+            if orthoEntrez is not None:
+                entrezId = orthoEntrez
+                humanSym = (entrezToHumanSym or {}).get(orthoEntrez)
+                orthoTag = "via human ortholog %s" % (humanSym if humanSym else orthoEntrez)
+
         if entrezId == None:
             logging.debug("Cannot find entrezId for symbol %s" % sym)
+
+        def withOrtho(desc):
+            " prefix a mouse-over so an ortholog-derived annotation is not read as a mouse fact "
+            if orthoTag is None:
+                return desc
+            return orthoTag + (": " + desc if desc else "")
 
         # now summarize the presence/absence of this gene in various specialized gene lists:
         # OMIM, COSMIC, SFARI
         hprdClass = entrezToClass.get(entrezId, "")
         geneLists = []
-        if sym!="":
+        # SFARI is keyed on the symbol, not the entrez ID, so a mouse row has to look it up
+        # under its ortholog's symbol
+        sfariSym = sym
+        if orthoTag is not None and entrezToHumanSym:
+            sfariSym = entrezToHumanSym.get(entrezId, sym)
+        if sfariSym!="":
             # SFARI
-            sfariInfo = symToSfari.get(sym)
+            sfariInfo = symToSfari.get(sfariSym)
             if sfariInfo is not None:
-                sfariInfo = "SFARI||"+sfariInfo
+                sfariInfo = "SFARI||"+withOrtho(sfariInfo)
                 geneLists.append(sfariInfo)
 
         if entrezId is not None:
@@ -316,30 +424,33 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
             omimId = entrezToOmim.get(entrezId)
             if omimId is not None:
                 omimInfo = "OMIM|"+omimId
+                if orthoTag is not None:
+                    omimInfo += "|"+orthoTag
                 geneLists.append(omimInfo)
 
             # COSMIC
             cosmicDesc = entrezToCosmic.get(entrezId)
             if cosmicDesc is not None:
-                cosmicDesc = "COSMIC||"+cosmicDesc
+                cosmicDesc = "COSMIC||"+withOrtho(cosmicDesc)
                 geneLists.append(cosmicDesc)
 
             # HPO
             hpoDesc = entrezToHpo.get(entrezId)
             if hpoDesc is not None:
-                hpoDesc = "HPO|"+entrezId+"|"+hpoDesc
+                hpoDesc = "HPO|"+entrezId+"|"+withOrtho(hpoDesc)
                 geneLists.append(hpoDesc)
 
         # links to gene expression databases
         exprParts = []
         if entrezId is not None:
             if entrezId in entrezToLmd:
-                exprParts.append("BrainSpLMD|"+entrezId)
-
-            if entrezId in entrezToEuroexpress:
-                eurExpId, annotStr = entrezToEuroexpress[entrezId]
-                annotStr = annotStr.replace(";", ",")
-                exprParts.append("Eurexp|"+eurExpId+"|"+annotStr)
+                # BrainSpan LMD is human tissue, so on a mouse row it is the ortholog's data.
+                # BrainSpan MouseDev below is a mouse resource, directly about this gene, so it
+                # is deliberately not tagged.
+                lmdPart = "BrainSpLMD|"+entrezId
+                if orthoTag is not None:
+                    lmdPart += "|"+orthoTag
+                exprParts.append(lmdPart)
 
             mouseEntrezList = humanToMouseEntrezList[entrezId]
             for mouseEntrez in mouseEntrezList:
@@ -356,7 +467,6 @@ def tabGeneAnnotate(inFname, symToEntrez, symToSfari, entrezToClass, entrezToOmi
         row.append(hprdClass)
         row.append(";".join(exprParts))
         row.append("ZFIN|" + zfinId if zfinId else "")
-        row.append("GeneCards|" + origSym if entrezId is not None and origSym else "")
         row.append(";".join(geneLists))
 
         yield row
@@ -367,7 +477,6 @@ def cbMarkerAnnotate(
     brainspanMouseDev: str,
     hgnc: str,
     mgiOrtho: str,
-    eurexpress: str,
     lmd: str,
     hpo: str,
     cosmic: str,
@@ -380,11 +489,15 @@ def cbMarkerAnnotate(
 
     entrezToBrainspanMouseDev = parseSimpleMap(brainspanMouseDev)
     symToEntrez, hgncIdToEntrez = parseHgnc(hgnc)
-    mouseEntrezToHumanEntrez, humanToMouseEntrezList = parseMgiOrtho(
-        hgncIdToEntrez, mgiOrtho
-    )
+    mouseEntrezToHumanEntrez, humanToMouseEntrezList, mouseSymToHumanEntrez = \
+        parseMgiOrtho(hgncIdToEntrez, mgiOrtho)
 
-    entrezToEuroexpress = parseEurexpress(mouseEntrezToHumanEntrez, eurexpress)
+    # SFARI is looked up by symbol and the ortholog note names one, so we need the reverse of
+    # the HGNC table. It is the same file, already read, so this costs nothing extra.
+    entrezToHumanSym = {}
+    for humanSym, humanEntrez in iterItems(symToEntrez):
+        entrezToHumanSym.setdefault(humanEntrez, humanSym)
+
     entrezToLmd = parseBrainspanLmd(lmd)
     entrezToHpo = parseHpo(hpo)
     entrezToCosmic = parseCosmic(cosmic)
@@ -403,10 +516,11 @@ def cbMarkerAnnotate(
         entrezToCosmic,
         entrezToHpo,
         entrezToLmd,
-        entrezToEuroexpress,
         humanToMouseEntrezList,
         entrezToBrainspanMouseDev,
         symToZfin,
+        mouseSymToHumanEntrez,
+        entrezToHumanSym,
     ))
 
     if not rows:
@@ -445,6 +559,35 @@ def cbMarkerAnnotate(
         outFname,
     )
 
+def annotateMarkerFileInPlace(markerFname, force=False):
+    """ Annotate a marker file in place, as the cbImport tools do after writing one.
+
+    By default this only runs when the gene identifiers look human, mouse or zebrafish, since
+    that is what the annotation sources cover. Pass force=True to annotate regardless, for the
+    case where the guess fails but the caller knows better.
+
+    Returns the organism that was used, or None if nothing was done.
+    """
+    if not isfile(markerFname):
+        logging.debug("No %s, nothing to annotate" % markerFname)
+        return None
+
+    if force:
+        organism = "forced"
+    else:
+        organism = guessMarkerOrganism(markerFname)
+        if organism is None:
+            logging.info("%s does not look human, mouse or zebrafish, so its markers are not "
+                    "annotated. Use --annotMarkers to do it anyway." % markerFname)
+            return None
+
+    logging.info("Annotating %s (%s)" % (markerFname, organism))
+    tmpFname = markerFname + ".annot.tmp"
+    cbMarkerAnnotate(markerFname, tmpFname, BRAINSPANMOUSEDEV, HGNC, MGIORTHO,
+            BRAINSPANLMD, HPO, COSMIC, OMIM, SFARI, HPRD, ZFIN)
+    os.rename(tmpFname, markerFname)
+    return organism
+
 def cbMarkerAnnotateFromArgs(args, options):
     filename = args[0]
     outFname = args[1]
@@ -455,7 +598,6 @@ def cbMarkerAnnotateFromArgs(args, options):
         brainspanMouseDev=options.brainspanMouseDev,
         hgnc=options.hgnc,
         mgiOrtho=options.mgiOrtho,
-        eurexpress=options.eurexpress,
         lmd=options.lmd,
         hpo=options.hpo,
         cosmic=options.cosmic,

@@ -36,8 +36,10 @@ var cellbrowser = function() {
     var gCbUser = null;
 
     // Which sign-in providers the backend offers, from GET /api/auth/providers:
-    // {password:true, google:bool, orcid:bool}. null = not yet fetched. Used to
-    // decide which OAuth buttons to show in the login dialog.
+    // {password:true, providers:[{slug,label}, ...]}. null = not yet fetched.
+    // The list is whatever the server's providers.conf configured, so a site
+    // that adds Microsoft or CILogon gets a button here with no code change --
+    // nothing in this file names an individual provider.
     var gAuthProviders = null;
 
     // Site config from the web root "cb.conf" file (see loadClientConf).
@@ -171,17 +173,76 @@ var cellbrowser = function() {
 
     // links to various external databases
     var dbLinks = {
-        "HPO" : "https://hpo.jax.org/app/browse/gene/", // entrez ID
+        "HPO" : "https://hpo.jax.org/browse/gene/NCBIGene:", // entrez ID
         "OMIM" : "https://omim.org/entry/", // OMIM ID
         "COSMIC" : "http://cancer.sanger.ac.uk/cosmic/gene/analysis?ln=", // gene symbol
         "SFARI" : "https://gene.sfari.org/database/human-gene/", // gene symbol
         "GeneCards" : "https://www.genecards.org/cgi-bin/carddisp.pl?gene=", // gene symbol
+        "MGI" : "https://www.informatics.jax.org/marker/summary?nomen=", // mouse gene symbol
+        "MGIGene" : "https://www.informatics.jax.org/marker/MGI:", // numeric MGI ID
+        "AllenMouseISH" : "https://mouse.brain-map.org/search/show?exact_match=true&search_type=gene&search_term=", // mouse gene symbol
+        "IMPC" : "https://www.mousephenotype.org/data/search?term=", // mouse gene symbol
+        "IMPCGene" : "https://www.mousephenotype.org/data/genes/MGI:", // numeric MGI ID
         "ZFIN" : "https://zfin.org/", // ZFIN ID
         "BrainSpLMD" : "http://www.brainspan.org/lcm/search?exact_match=true&search_type=gene&search_term=", // entrez
         "BrainSpMouseDev" : "http://developingmouse.brain-map.org/gene/show/", // internal Brainspan ID
-        "Eurexp" : "http://www.eurexpress.org/ee/databases/assay.jsp?assayID=", // internal ID
         "LMD" : "http://www.brainspan.org/lcm/search?exact_match=true&search_type=gene&search_term=" // entrez
     };
+
+    // Databases we used to link to that have gone away. Marker files annotated before the link
+    // was dropped still carry these tokens, so they are skipped when a marker table is drawn
+    // rather than rendered as a bare word. Eurexpress: eurexpress.org no longer serves a valid
+    // certificate, and its assay IDs mean nothing at any other site, so there is no replacement.
+    var deadDbs = {"Eurexp" : true};
+
+    // Mouse gene symbol -> numeric MGI ID. With it, MGI and IMPC links go to the gene page;
+    // without it they go to a symbol search, which is where they went before this table
+    // existed. Built by cbWeb/genes/makeMgiIds.py out of the MGI file we already ship for
+    // ortholog mapping, and named after the version of that file so it can be cached forever.
+    var mgiIdsFile = "mgiIds-8Dec17.json";
+    var gMgiIds = null;        // the table, once it has arrived
+    var gMgiIdsLoading = null; // the promise for it while it is in flight
+
+    function loadMgiIds() {
+    /* fetch the symbol -> MGI ID table once, and hand back a promise for it. A failure
+     * resolves to an empty table rather than rejecting: every link has a symbol-search
+     * fallback, so a table that never arrives costs precision, not a working page. */
+        if (gMgiIds !== null)
+            return Promise.resolve(gMgiIds);
+        if (gMgiIdsLoading !== null)
+            return gMgiIdsLoading;
+
+        var url = cbUtil.dataUrl(["genes", mgiIdsFile]);
+        gMgiIdsLoading = new Promise(function(resolve) {
+            // silent: a missing table is a fallback, not something to alert the user about
+            cbUtil.loadJson(url, function(data) {
+                gMgiIds = data || {};
+                gMgiIdsLoading = null;
+                resolve(gMgiIds);
+            }, true);
+        });
+        return gMgiIdsLoading;
+    }
+
+    function extLink(url, label, title) {
+    /* one link in the Links column of a marker table */
+        return "<a target=_blank class='link' style='font-size:80%; color:#AAA' title='"+title+"' href='"+url+"'>"+label+"</a>";
+    }
+
+    function mgiLinkUrls(sym) {
+    /* MGI and IMPC URLs for a mouse gene symbol: the gene page when the symbol is in the
+     * ID table, the symbol search when it is not. */
+        var mgiId = gMgiIds ? gMgiIds[sym] : undefined;
+        if (mgiId === undefined)
+            return {
+                mgi : dbLinks.MGI+encodeURIComponent(sym),
+                impc : dbLinks.IMPC+encodeURIComponent(sym)
+            };
+        return {
+            mgi : dbLinks.MGIGene+mgiId,
+            impc : dbLinks.IMPCGene+mgiId
+        };
+    }
 
     function _dump(o) {
     /* for debugging */
@@ -297,6 +358,14 @@ var cellbrowser = function() {
     // to the on-screen debug bar (and the console). Reset per dataset load. All
     // calls are no-ops unless debug mode is on (?debug=1), so the marks sprinkled
     // through the load path cost nothing in normal use.
+    //
+    // The bar can hold more than one timing run, separated by cbTimingGroup().
+    // The load phases are the first run; a differential expression job, which the
+    // user may start minutes later, is a second one, so its numbers are measured
+    // from the click and not from page load.
+    //
+    // rows entries are {label, delta, total} for a mark, or {group:name} for the
+    // start of a run.
     var gDebugTiming = { t0: null, last: null, rows: [], lastDraw: null };
 
     function initDebugMode() {
@@ -304,6 +373,10 @@ var cellbrowser = function() {
            startup, after the URL helpers' regexes are initialized. */
         var debugVar = getVar("debug");
         DEBUG = (debugVar==="1" || debugVar==="on");
+        // maxPlot.js and maxHeat.js are separate modules and cannot see the DEBUG
+        // above, which is private to this one. They read window.doDebug instead --
+        // maxPlot's debug() already did, it was just never set anywhere.
+        window.doDebug = DEBUG;
         if (DEBUG)
             console.log("cellBrowser: debug mode on (?debug=1)");
     }
@@ -311,6 +384,21 @@ var cellbrowser = function() {
     function cbTimingReset() {
         /* start a fresh timing run (called at the top of loadDataset) */
         gDebugTiming = { t0: null, last: null, rows: [], lastDraw: null };
+    }
+
+    function cbTimingGroup(name) {
+        /* start a new timing run on the same bar, keeping the runs already there.
+           Deltas and the total of the marks that follow are counted from here. A
+           second run under the same name replaces the first, so repeatedly running
+           the same thing does not make the bar grow without end. */
+        if (!DEBUG) return;
+        for (var i=0; i<gDebugTiming.rows.length; i++)
+            if (gDebugTiming.rows[i].group===name) { gDebugTiming.rows.length = i; break; }
+        var now = performance.now();
+        gDebugTiming.rows.push({group:name});
+        gDebugTiming.t0 = now;
+        gDebugTiming.last = now;
+        updateDebugBar();
     }
 
     function wrapDrawTiming(rend) {
@@ -338,14 +426,17 @@ var cellbrowser = function() {
         if (gDebugTiming.t0===null) { gDebugTiming.t0 = now; gDebugTiming.last = now; }
         var delta = now - gDebugTiming.last;
         var total = now - gDebugTiming.t0;
-        gDebugTiming.rows.push([label, delta, total]);
+        gDebugTiming.rows.push({label:label, delta:delta, total:total});
         console.log("cbTiming "+label+": +"+delta.toFixed(0)+" ms (total "+total.toFixed(0)+" ms)");
         gDebugTiming.last = now;
         updateDebugBar();
     }
 
     function updateDebugBar() {
-        /* draw/refresh the fixed timing bar along the bottom of the window */
+        /* draw/refresh the fixed timing bar along the bottom of the window. Each
+           timing run gets its own row and the bar grows upward, so the load
+           numbers keep the position they had before a DE run was added, and the
+           close box stays put instead of being buried under a long line. */
         if (!DEBUG) return;
         var el = document.getElementById("tpDebugBar");
         if (!el) {
@@ -353,19 +444,41 @@ var cellbrowser = function() {
             el.id = "tpDebugBar";
             document.body.appendChild(el);
         }
-        var htmls = ["<span class='tpDebugSeg tpDebugTag'>debug</span>"];
+        var rows = [];      // one finished row of html per timing run
+        var segs = null;    // segments of the row being built
         var total = 0;
+
+        function endRow(extra) {
+            if (segs===null) return;
+            segs.push("<span class='tpDebugSeg tpDebugTot'>total "+total.toFixed(0)+" ms</span>");
+            if (extra) segs.push(extra);
+            rows.push("<div class='tpDebugRow'>"+segs.join("")+"</div>");
+        }
+        function startRow(label, cls) {
+            endRow();
+            segs = ["<span class='tpDebugSeg "+cls+"'>"+label+"</span>"];
+            total = 0;
+        }
+
+        startRow("debug", "tpDebugTag");        // the dataset-load run leads the bar
         for (var i=0; i<gDebugTiming.rows.length; i++) {
             var r = gDebugTiming.rows[i];
-            total = r[2];
-            htmls.push("<span class='tpDebugSeg'><span class='tpDebugLbl'>"+r[0]+
-                "</span> <span class='tpDebugVal'>+"+r[1].toFixed(0)+" ms</span></span>");
+            if (r.group!==undefined) {          // a new run: give it a row of its own
+                startRow(r.group, "tpDebugGroup");
+                continue;
+            }
+            total = r.total;
+            segs.push("<span class='tpDebugSeg'><span class='tpDebugLbl'>"+r.label+
+                "</span> <span class='tpDebugVal'>+"+r.delta.toFixed(0)+" ms</span></span>");
         }
-        htmls.push("<span class='tpDebugSeg tpDebugTot'>total "+total.toFixed(0)+" ms</span>");
-        if (gDebugTiming.lastDraw!==null)
-            htmls.push("<span class='tpDebugSeg tpDebugDraw'>draw "+gDebugTiming.lastDraw.toFixed(1)+" ms</span>");
-        htmls.push("<span class='tpDebugClose' title='hide (reload without debug=1 to disable)'>&times;</span>");
-        el.innerHTML = htmls.join("");
+        // the last redraw is whatever the renderer did most recently, so it belongs
+        // to the run at the bottom -- after a DE recolor, that is the DE row
+        var drawSeg = (gDebugTiming.lastDraw===null) ? null :
+            "<span class='tpDebugSeg tpDebugDraw'>draw "+gDebugTiming.lastDraw.toFixed(1)+" ms</span>";
+        endRow(drawSeg);
+
+        el.innerHTML = rows.join("") +
+            "<span class='tpDebugClose' title='hide (reload without debug=1 to disable)'>&times;</span>";
         el.style.display = "block";
         el.querySelector(".tpDebugClose").onclick = function() { el.style.display = "none"; };
     }
@@ -3614,39 +3727,58 @@ var cellbrowser = function() {
             dataType: "json",
             xhrFields: { withCredentials: true }
         }).done(function(data) {
-            gAuthProviders = data || { password: true };
+            gAuthProviders = data || { password: true, providers: [] };
+            if (!gAuthProviders.providers)
+                gAuthProviders.providers = [];   // older backend: no OAuth at all
             if (onDone) onDone(gAuthProviders);
         }).fail(function() {
-            gAuthProviders = { password: true, google: false, orcid: false };
+            gAuthProviders = { password: true, providers: [] };
             if (onDone) onDone(gAuthProviders);
         });
     }
 
-    function oauthSignIn(provider) {
+    function oauthSignIn(provider, isLink) {
         /* Start the OAuth flow. This must be a top-level navigation (not an
          * AJAX call): the provider shows its own consent page and then redirects
          * back to our callback, which drops the user back into the app already
-         * signed in. */
-        window.location.href = cbApiUrl("/api/auth/oauth/" + provider + "/login");
+         * signed in.
+         * isLink adds ?link=1, which the backend reads as "add this as another
+         * way to sign in to the account I am already using" rather than "sign
+         * me in" -- see _link_identity() in oauth.py. */
+        var url = cbApiUrl("/api/auth/oauth/" + provider + "/login");
+        window.location.href = isLink ? (url + "?link=1") : url;
+    }
+
+    function oauthButton(prov, isLink) {
+        /* One provider button. The label comes from the server's conf file, so
+         * it is built with .text() rather than string concatenation -- a label
+         * is operator-supplied, not developer-supplied. */
+        return $("<button>")
+            .attr("type", "button")
+            .addClass("tpOAuthBtn ui-button ui-widget ui-corner-all")
+            .attr("data-provider", prov.slug)
+            .data("provider", prov.slug)
+            .text(prov.label || ("Sign in with " + prov.slug))
+            .click(function() { oauthSignIn(prov.slug, isLink); });
     }
 
     function renderOAuthButtons() {
-        /* Fill #tpOAuthRow with a button per live OAuth provider. Hidden
-         * entirely when no OAuth provider is configured, so a password-only
-         * backend shows the plain email/password dialog with nothing extra. */
+        /* Fill #tpOAuthRow with a button per configured provider, in the order
+         * the server listed them. Nothing here knows the name of any particular
+         * provider: adding one is a server-side conf change. Hidden entirely
+         * when no OAuth provider is configured, so a password-only backend shows
+         * the plain email/password dialog with nothing extra. */
         var row = $("#tpOAuthRow");
         if (row.length === 0)
             return;
         fetchAuthProviders(function(p) {
-            var btns = [];
-            if (p.google)
-                btns.push("<button type='button' class='tpOAuthBtn ui-button ui-widget ui-corner-all' data-provider='google'>Sign in with Google</button>");
-            if (p.orcid)
-                btns.push("<button type='button' class='tpOAuthBtn ui-button ui-widget ui-corner-all' data-provider='orcid'>Sign in with ORCID</button>");
-            if (btns.length === 0) { row.hide(); return; }
-            row.html(btns.join("")
-                + "<div class='tpOAuthOr'><span>or use an email and password</span></div>").show();
-            row.find(".tpOAuthBtn").click(function() { oauthSignIn($(this).data("provider")); });
+            var provs = p.providers || [];
+            if (provs.length === 0) { row.hide(); return; }
+            row.empty();
+            for (var i = 0; i < provs.length; i++)
+                row.append(oauthButton(provs[i], false));
+            row.append("<div class='tpOAuthOr'><span>or use an email and password</span></div>");
+            row.show();
         });
     }
 
@@ -3663,6 +3795,7 @@ var cellbrowser = function() {
             var items = [];
             items.push('<li class="dropdown-header" style="padding:3px 20px">Signed in as<br><span id="tpAccountEmail"></span></li>');
             items.push('<li role="separator" class="divider"></li>');
+            items.push('<li><a href="#" id="tpLinkedSignInsLink">Linked sign-ins&hellip;</a></li>');
             items.push('<li><a href="#" id="tpSignOutLink">Sign out</a></li>');
             menu.html(items.join(""));
             // set via .text() rather than HTML — email is user-controlled and the
@@ -3698,6 +3831,174 @@ var cellbrowser = function() {
         var el = $("#tpAuthMsg");
         el.text(text || "");
         if (isOk) el.addClass("tpAuthMsgOk"); else el.removeClass("tpAuthMsgOk");
+    }
+
+    function showLinkedSignInsDialog() {
+        /* Manage the ways this account can sign in: the password, plus each
+         * linked external provider.
+         *
+         * This exists because the same person can reach us through more than
+         * one issuer -- signing in with Google directly and through a broker
+         * like CILogon produces two different subjects. Without a way to link
+         * them, the second one silently becomes a second, empty account with
+         * none of the user's saved annotations. Linking from here attaches the
+         * new identity to the account they are already signed in to. */
+        if (!isLoggedIn()) { showLoginDialog("signin"); return; }
+
+        var htmls = [];
+        htmls.push("<style>"
+            + "#tpLinkedList{list-style:none;padding:0;margin:0 0 14px 0}"
+            + "#tpLinkedList li{padding:6px 0;border-bottom:1px solid #eee;display:flex;align-items:center}"
+            + "#tpLinkedList li .tpLinkedWho{flex:1}"
+            + "#tpLinkedList li .tpLinkedSub{color:#888;font-size:90%}"
+            + "#tpLinkedMsg{color:#b00;min-height:1.1em;margin:8px 0}"
+            + "#tpLinkedMsg.tpAuthMsgOk{color:#080}"
+            + "#tpLinkedAddRow button.tpOAuthBtn{display:block;width:100%;margin-bottom:8px;padding:8px}"
+            + "</style>");
+        htmls.push("<div id='tpLinkedMsg'></div>");
+        htmls.push("<ul id='tpLinkedList'><li>Loading&hellip;</li></ul>");
+        htmls.push("<div style='font-weight:bold;margin-bottom:6px'>Add another way to sign in</div>");
+        htmls.push("<div id='tpLinkedAddRow'></div>");
+
+        $("#tpLinkedDialog").remove();
+        $(document.body).append("<div id='tpLinkedDialog' style='display:none'>" + htmls.join("") + "</div>");
+        $("#tpLinkedDialog").dialog({
+            modal: true,
+            title: "Linked sign-ins",
+            width: 460,
+            closeOnEscape: true,
+            close: function() { $("#tpLinkedDialog").remove(); }
+        });
+
+        refreshLinkedSignIns();
+
+        // The "add" buttons start the same OAuth flow as the sign-in dialog,
+        // but with link=1 so the callback attaches rather than creates.
+        fetchAuthProviders(function(p) {
+            var row = $("#tpLinkedAddRow");
+            if (row.length === 0)
+                return;   // dialog closed while the request was in flight
+            var provs = p.providers || [];
+            row.empty();
+            if (provs.length === 0) {
+                row.text("This site has no external sign-in providers configured.");
+                return;
+            }
+            for (var i = 0; i < provs.length; i++)
+                row.append(oauthButton(provs[i], true));
+        });
+    }
+
+    function linkedMsg(text, isOk) {
+        var el = $("#tpLinkedMsg");
+        el.text(text || "");
+        if (isOk) el.addClass("tpAuthMsgOk"); else el.removeClass("tpAuthMsgOk");
+    }
+
+    function refreshLinkedSignIns() {
+        /* (Re)fill the list in the linked-sign-ins dialog from the server. */
+        $.ajax({
+            url: cbApiUrl("/api/auth/identities"),
+            dataType: "json",
+            xhrFields: { withCredentials: true }
+        }).done(function(data) {
+            var list = $("#tpLinkedList");
+            if (list.length === 0)
+                return;   // dialog closed while the request was in flight
+            list.empty();
+
+            if (data.hasPassword)
+                list.append($("<li>").append($("<span>").addClass("tpLinkedWho")
+                    .append($("<b>").text("Password"))
+                    .append($("<div>").addClass("tpLinkedSub")
+                        .text((gCbUser && gCbUser.email) || ""))));
+
+            var ids = data.identities || [];
+            // How many ways in are there in total? The server refuses to remove
+            // the last one, so disable the button rather than offer a click
+            // that can only fail.
+            var total = ids.length + (data.hasPassword ? 1 : 0);
+
+            for (var i = 0; i < ids.length; i++) {
+                var ident = ids[i];
+                // Provider slug, email and name all come from an external
+                // identity provider, so build with .text(), never HTML.
+                var who = $("<span>").addClass("tpLinkedWho")
+                    .append($("<b>").text(ident.provider))
+                    .append($("<div>").addClass("tpLinkedSub")
+                        .text(ident.email || ident.display_name || ""));
+                var btn = $("<button>").attr("type", "button")
+                    .addClass("ui-button ui-widget ui-corner-all")
+                    .text("Unlink")
+                    .data("identityId", ident.id);
+                if (total < 2)
+                    btn.prop("disabled", true)
+                       .attr("title", "This is the only way to sign in to this account");
+                else
+                    btn.click(onUnlinkClick);
+                list.append($("<li>").append(who).append(btn));
+            }
+
+            if (list.children().length === 0)
+                list.append($("<li>").text("No sign-in methods on record."));
+        }).fail(function() {
+            $("#tpLinkedList").empty().append($("<li>").text("Could not load your sign-in methods."));
+        });
+    }
+
+    function onUnlinkClick() {
+        var btn = $(this);
+        var id = btn.data("identityId");
+        if (!confirm("Remove this sign-in from your account? Your saved annotations are not affected."))
+            return;
+        btn.prop("disabled", true);
+        $.ajax({
+            url: cbApiUrl("/api/auth/identities/" + id),
+            method: "DELETE",
+            dataType: "json",
+            xhrFields: { withCredentials: true }
+        }).done(function() {
+            linkedMsg("Sign-in removed.", true);
+            checkLoginState(function() { refreshLinkedSignIns(); });
+        }).fail(function(xhr) {
+            btn.prop("disabled", false);
+            var msg = (xhr.responseJSON && xhr.responseJSON.error) || "could not remove this sign-in";
+            linkedMsg(msg, false);
+        });
+    }
+
+    function handleOAuthReturn() {
+        /* The OAuth callback redirects the browser back here with a cbAuth
+         * query parameter saying how it went (see _back_to_app in oauth.py).
+         * Report it, then strip our parameters from the URL so a reload or a
+         * bookmark does not carry them along. */
+        if (typeof URLSearchParams === "undefined")
+            return;
+        var params = new URLSearchParams(window.location.search);
+        var status = params.get("cbAuth");
+        if (!status)
+            return;
+        var provider = params.get("provider") || "that provider";
+        var reason = params.get("reason");
+
+        if (status === "linked")
+            alert("Sign-in method added: " + provider + ".");
+        else if (reason === "link-taken")
+            alert("That " + provider + " login is already attached to a different Cell Browser "
+                + "account. Sign in to that account instead, or contact us to have the two merged.");
+        else if (reason === "no-subject")
+            alert("That sign-in provider did not return enough information to identify you. "
+                + "Please try a different sign-in method.");
+        else
+            alert("Sign-in failed. Please try again.");
+
+        // Drop our own parameters, keep everything else the app put there.
+        params.delete("cbAuth");
+        params.delete("provider");
+        params.delete("reason");
+        var qs = params.toString();
+        window.history.replaceState({}, "",
+            window.location.pathname + (qs ? "?" + qs : "") + window.location.hash);
     }
 
     function showLoginDialog(initialTab) {
@@ -4306,6 +4607,7 @@ var cellbrowser = function() {
        if (cbLoginEnabled()) {
            $('#tpAccountMenu').on('click', '#tpSignInLink', function(ev) { ev.preventDefault(); showLoginDialog("signin"); });
            $('#tpAccountMenu').on('click', '#tpSignOutLink', function(ev) { ev.preventDefault(); cbSignOut(); });
+           $('#tpAccountMenu').on('click', '#tpLinkedSignInsLink', function(ev) { ev.preventDefault(); showLinkedSignInsDialog(); });
            refreshAuthUi();  // reflect whatever we already know; checkLoginState() refines it
        }
 
@@ -6715,7 +7017,10 @@ var cellbrowser = function() {
 
     function getDatasetSpecies() {
     /* Return "human", "mouse", etc. from db.conf.organisms, or null if unrecognized */
+        // newer datasets keep the organism under 'facets', older ones at the top level
         var orgs = db.conf.organisms;
+        if (!orgs && db.conf.facets)
+            orgs = db.conf.facets.organisms;
         if (!orgs || orgs.length === 0) return null;
         var s = orgs[0].toLowerCase();
         if (s.indexOf("sapiens") !== -1 || s.indexOf("human") !== -1) return "human";
@@ -12913,6 +13218,13 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             htmls.push("</ul>");
         }
 
+        // The MGI ID table is only used by mouse datasets, so only they fetch it, and the
+        // fetch starts here rather than inside the row builder: it then runs alongside the
+        // marker TSV downloads instead of after them, so the first marker window a person
+        // opens waits for the slower of the two rather than for one and then the other.
+        // Every window after that finds the table already in memory and waits for nothing.
+        var mgiIdsReady = (getDatasetSpecies()==="mouse") ? loadMgiIds() : Promise.resolve(null);
+
         var allTabLabels = tabInfo.map(function(t) { return t.shortLabel; });
         var markerSetsStr = allTabLabels.length > 1
             ? allTabLabels.slice(0, -1).join(", ") + " and " + allTabLabels[allTabLabels.length-1]
@@ -12930,7 +13242,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
             var errorMsg = "No markers found for '"+clusterName+"' in '"+currentField+"'. "+
                 markerSetsStr+" are available for the '"+db.conf.labelField+"' field.";
-            loadClusterTsv(markerTsvUrl, loadMarkersFromTsv, divName, clusterName, errorMsg);
+            loadClusterTsv(markerTsvUrl, function(results, localFile, divId, cluster) {
+                mgiIdsReady.then(function() {
+                    loadMarkersFromTsv(results, localFile, divId, cluster);
+                });
+            }, divName, clusterName, errorMsg);
         }
 
         htmls.push("</div>"); // tabs
@@ -12961,6 +13277,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
     function geneListFormat(htmls, s, symbol) {
     /* transform a string in the format dbName|linkId|mouseOver;... to html and push these to the htmls array */
         var dbParts = s.split(";");
+        // drop entries for databases that no longer exist, before the separators are worked out,
+        // so a retired entry does not leave a stray comma behind
+        dbParts = dbParts.filter(function(dbPart) {
+            return !deadDbs[dbPart.split("|")[0]];
+        });
         for (var i = 0; i < dbParts.length; i++) {
             var dbPart = dbParts[i];
             var idParts = dbPart.split("|");
@@ -12998,12 +13319,58 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         var headerRow = rows[0];
 
+        // A _geneCards column only appears in files written by older cbMarkerAnnotate runs.
+        // The link is built from the gene symbol below instead, gated on the dataset being
+        // human. Drop the column rather than render it: it carries no organism check of its
+        // own, so keeping it would put GeneCards on e.g. a macaque dataset, where the gate
+        // says it should not appear.
+        var geneCardsIdx = -1;
+        for (var ci = 0; ci < headerRow.length; ci++) {
+            if (headerRow[ci].split("|")[0] === "_geneCards") {
+                geneCardsIdx = ci;
+                break;
+            }
+        }
+        if (geneCardsIdx !== -1) {
+            for (var ri = 0; ri < rows.length; ri++) {
+                if (rows[ri].length > geneCardsIdx)
+                    rows[ri].splice(geneCardsIdx, 1);
+            }
+            headerRow = rows[0];
+        }
+
+        // The links to outside databases that are keyed on the gene symbol alone are built
+        // here rather than read from the file, but they get a column of their own so they line
+        // up with the annotation columns cbMarkerAnnotate writes. One column holds all of them,
+        // the way _expr holds BrainSpan LMD and MouseDev together.
+        // The column is only added when this dataset will actually produce a link, so a dataset
+        // that produces none does not get an empty column. That is the rule cbMarkerAnnotate
+        // uses on its own columns.
+        var dsSpecies = getDatasetSpecies();
+        var hubUrl = makeHubUrl();
+        var showGeneCards = (dsSpecies==="human");
+        var showMgi = (dsSpecies==="mouse");
+        var linksInserted = (hubUrl!==null || showGeneCards || showMgi);
+        if (linksInserted) {
+            for (var li = 0; li < rows.length; li++) {
+                if (rows[li].length > 1)   // skip the trailing empty row papaparse leaves
+                    rows[li].splice(2, 0, li===0 ? "_links" : "");
+            }
+            headerRow = rows[0];
+        }
+
         var htmls = [];
 
         var markerListIdx = parseInt(divId.split("-")[1]);
         var markerInfo = db.conf.markers[markerListIdx];
         var selectOnClick = markerInfo.selectOnClick;
         var sortColumn = markerInfo.sortColumn || 1;
+        // sortColumn counts the columns as displayed, which do not include the leading id
+        // column, so inserting Links at displayed position 1 moves every column at or after it
+        // one to the right. Without this the default sort of 1 lands on Links, where sorting
+        // does nothing, instead of on the first real column.
+        if (linksInserted && sortColumn >= 1)
+            sortColumn += 1;
         var sortOrder = markerInfo.sortOrder || "asc";
         var sortOrderNum = 0;
         if (sortOrder==="desc")
@@ -13033,9 +13400,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         }
 
         //htmls.push("<table class='table' data-sortlist='[[1,1],[4,0]]' id='tpMarkerTable'>");
-        htmls.push("<table class='table' data-sortlist='[["+sortColumn+","+sortOrder+"]]' id='"+tableId+"'>");
+        htmls.push("<table class='table' data-sortlist='[["+sortColumn+","+sortOrderNum+"]]' id='"+tableId+"'>");
         htmls.push("<thead>");
         var hprdCol = null;
+        var linksCol = null;
         var geneListCol = null;
         var exprCol = null;
         var pValCol = null;
@@ -13078,8 +13446,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             else if (colLabel==="_zfin") {
                 colLabel = "ZFIN";
             }
-            else if (colLabel==="_geneCards") {
-                colLabel = "GeneCards";
+            else if (colLabel==="_links") {
+                colLabel = "Links";
+                linksCol = i;
             }
 
             if (logFcCol === null && /log.*fc/i.test(colLabel)) {
@@ -13104,8 +13473,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             htmls.push("</th>");
         }
         htmls.push("</thead>");
-
-        var hubUrl = makeHubUrl();
 
         var MAX_UNFILTERED_ROWS = 200;
         var enrichedCount = 0;
@@ -13149,10 +13516,23 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                     h.push("<td>");
                     if (j === symColIdx) {
                         h.push("<a data-gene='"+geneId+"' class='link tpLoadGeneLink'>"+geneSym+"</a>");
+                    } else if (j === linksCol) {
+                        var extLinks = [];
                         if (hubUrl!==null) {
                             var fullHubUrl = hubUrl+"&position="+geneSym+"&singleSearch=knownCanonical";
-                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to UCSC Genome Browser' href='"+fullHubUrl+"'>Genome</a>");
+                            extLinks.push(extLink(fullHubUrl, "Genome", "link to UCSC Genome Browser"));
                         }
+                        if (showGeneCards)
+                            extLinks.push(extLink(dbLinks.GeneCards+encodeURIComponent(geneSym), "GeneCards", "link to GeneCards"));
+                        if (showMgi) {
+                            var mouseUrls = mgiLinkUrls(geneSym);
+                            extLinks.push(extLink(mouseUrls.mgi, "MGI", "link to Mouse Genome Informatics"));
+                            extLinks.push(extLink(dbLinks.AllenMouseISH+encodeURIComponent(geneSym), "Allen ISH",
+                                "in-situ hybridization images in the Allen Mouse Brain Atlas"));
+                            extLinks.push(extLink(mouseUrls.impc, "IMPC",
+                                "knockout phenotypes at the International Mouse Phenotyping Consortium"));
+                        }
+                        h.push(extLinks.join(", "));
                     } else {
                         if (val.startsWith("./")) {
                             var imgUrl = val.replace("./", db.url+"/");
@@ -13252,9 +13632,14 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         $table.tablesorter(tableOpt);
         //$('#tpMarkerTable').trigger('sorton', tableOpt.sortList); // does not work, though documented
         // this is a pretty bad hack, but I have no idea why the sortList option doesn't work above...
-        $("[data-column='1']").trigger("sort"); // this seems to work!
+        // It used to sort displayed column 1 no matter what. That was the first real column
+        // until the Links column was inserted in front of it, and sorting Links does nothing
+        // because every row of it is the same. sortColumn is that index, already shifted past
+        // Links where one was added, and it defaults to 1, so this is unchanged for a table
+        // without a Links column.
+        $("[data-column='"+sortColumn+"']").trigger("sort"); // this seems to work!
         if (doDescSort)
-            $("[data-column='1']").trigger("sort"); // second click...
+            $("[data-column='"+sortColumn+"']").trigger("sort"); // second click...
 
         // When there are more rows than MAX_UNFILTERED_ROWS, re-render from the full
         // dataset on filter changes so all rows are searchable, not just the first 200.
@@ -13540,6 +13925,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         setupKeyboard();
         buildMenuBar();
         checkLoginState();  // updates the account menu once /api/auth/me responds
+        // Report and clear the ?cbAuth=... an OAuth callback redirected us back
+        // with. Runs after buildMenuBar() so the account menu is already in place.
+        if (cbLoginEnabled())
+            handleOAuthReturn();
 
         var datasetName = getDatasetNameFromUrl()
         // pre-load dataset.json here?
@@ -14305,14 +14694,20 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
     function deRun() {
         if (deValidate() || gDe.running) return;
+        cbTimingGroup("de");               // a DE run is its own group on the debug bar
         deEnsureCellData(function(){       // custom fields: load barcodes first
+            cbTiming("de cellData");       // ~0 ms unless a custom field needed barcodes
             var spec=deBuildSpec();
             gDe.running=true; gDe.canceled=false;
             deRenderBody();       // reflect Running… + disabled button
             deShowRunning();
+            cbTiming("de submit");         // spec build + the Running… repaint
             deSubmitJob(spec,
                 function(p,label){ deUpdateProgress(p,label); },
-                function(result){ if (gDe.canceled) return; gDe.running=false; deHideRunning(); deOnResults(result, spec); deRenderBody(); },
+                function(result){ if (gDe.canceled) return; gDe.running=false;
+                    // result.elapsed is the backend's own runtime, when it reported one
+                    cbTiming("de job"+(result.elapsed!=null ? " (server "+result.elapsed+"s)" : ""));
+                    deHideRunning(); deOnResults(result, spec); deRenderBody(); },
                 function(err){ gDe.running=false; deHideRunning(); deRenderBody(); alert("Differential expression failed: "+err); }
             );
         });
@@ -14369,7 +14764,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                     fetch(url+"?jobId="+encodeURIComponent(sub.jobId))
                         .then(function(r){ return r.json(); })
                         .then(function(st){
-                            if (st.status==="done") { gDe.jobId=null; onDone({genes:st.result.genes, nA:st.result.n_pop1, nB:st.result.n_pop2, filters:st.result.filters}); }
+                            // elapsed is the worker's own runtime (runDeJob.py writes it
+                            // to status.json); the debug bar shows it next to the round trip
+                            if (st.status==="done") { gDe.jobId=null; onDone({genes:st.result.genes, nA:st.result.n_pop1, nB:st.result.n_pop2, filters:st.result.filters, elapsed:st.elapsed}); }
                             else if (st.status==="failed" || st.status==="canceled") { gDe.jobId=null; onErr(st.error||st.status); }
                             else {
                                 var label = st.stage || "running";
@@ -14471,7 +14868,13 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         deRenderResults();
         var r=deCanvasRect();
         var w=Math.min(1040, Math.max(820, r.width-40));
-        var ht=Math.min(640, Math.max(360, r.height-40));
+        // in debug mode a bar is pinned to the bottom of the window above everything
+        // else, so shrink and lift the dialog to keep its buttons clear. It carries a
+        // row per timing run and the DE row already exists by now, so measure it
+        // rather than assuming a height.
+        var barEl=DEBUG ? document.getElementById("tpDebugBar") : null;
+        var barHeight=(barEl && barEl.style.display!=="none") ? barEl.offsetHeight+2 : 0;
+        var ht=Math.min(640, Math.max(360, r.height-40-barHeight));
         // Save to account sits next to Download CSV. Shown to everyone so the
         // feature is discoverable, but greyed out when signed out — clicking it
         // then opens the sign-in dialog (deSaveComparison), and the tooltip says so.
@@ -14480,7 +14883,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         $("#tpDeResults").dialog({
             modal:false, closeOnEscape:true, resizable:true, draggable:true,
             width:w, height:ht, title:"Differential expression results",
-            position:{ my:"center", at:"center", of: renderer.canvas },
+            position:{ my:"center", of: renderer.canvas,
+                at:(barHeight ? "center center-"+Math.round(barHeight/2) : "center") },
             buttons:deButtons,
             close:function(){ deCloseResults(); }
         });
@@ -14505,6 +14909,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 deCloseResults();
             });
         }, 0);
+        cbTiming("de render");     // volcano plot + gene table + dialog
     }
     function deCloseResults() {
         $(document).off("mousedown.tpDeOutside");

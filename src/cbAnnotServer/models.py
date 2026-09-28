@@ -13,14 +13,10 @@ from extensions import db
 
 class User(UserMixin, db.Model):
     __tablename__ = "users"
-    # An account is identified either by email+password or by an external OAuth
-    # identity (Google / ORCID). Hence email and password_hash are both
-    # nullable: an ORCID login may carry no email at all, and any OAuth login
-    # has no local password. (oauth_provider, oauth_sub) uniquely names the
-    # external identity when present.
-    __table_args__ = (
-        db.UniqueConstraint("oauth_provider", "oauth_sub", name="uq_user_oauth"),
-    )
+    # An account is identified by email+password, by one or more external OAuth
+    # identities (see OAuthIdentity), or by both. Hence email and password_hash
+    # are both nullable: an ORCID login may carry no email at all, and an
+    # OAuth-only account has no local password.
 
     id              = db.Column(db.Integer, primary_key=True)
     email           = db.Column(db.String(255), unique=True)          # nullable: ORCID may not share one
@@ -30,16 +26,50 @@ class User(UserMixin, db.Model):
     verify_token    = db.Column(db.String(64), index=True)
     reset_token     = db.Column(db.String(64), index=True)
     reset_expires   = db.Column(db.DateTime)
-    # External identity provider, when the account was created via OAuth.
-    # oauth_provider is a short slug ("google" / "orcid"); oauth_sub is the
-    # provider's stable subject id (Google "sub" claim / the ORCID iD).
-    oauth_provider  = db.Column(db.String(32), index=True)
-    oauth_sub       = db.Column(db.String(255))
     created_at      = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     last_login      = db.Column(db.DateTime)
 
+    identities   = db.relationship("OAuthIdentity", backref="user", cascade="all, delete-orphan",
+                                   order_by="OAuthIdentity.id")
     annotations  = db.relationship("Annotation",  backref="user", cascade="all, delete-orphan")
     de_analyses  = db.relationship("DeAnalysis",  backref="user", cascade="all, delete-orphan")
+
+    def can_sign_in_without(self, identity):
+        """Would this account still have a way to sign in if `identity` were
+        unlinked? True if a usable password remains, or another identity does."""
+        if self.password_hash and self.email:
+            return True
+        return any(i.id != identity.id for i in self.identities)
+
+
+class OAuthIdentity(db.Model):
+    """One external sign-in bound to a local account.
+
+    A user may hold several: signing in through Google directly and through a
+    broker such as CILogon produces two different (provider, subject) pairs for
+    the same person, and without this table the second one would silently
+    become a second, empty account. The linking flow in oauth.py attaches an
+    extra identity to the account the user is already signed in to.
+
+    `subject` is whichever claim the provider's conf entry names as stable
+    (subject_claim, default "sub"): Google's "sub", the ORCID iD, or a
+    federation's permanent subject-id. `email` and `display_name` are what that
+    provider reported, kept per-identity because two providers may disagree.
+    """
+    __tablename__ = "oauth_identities"
+    __table_args__ = (
+        db.UniqueConstraint("provider", "subject", name="uq_identity_provider_subject"),
+    )
+
+    id           = db.Column(db.Integer, primary_key=True)
+    user_id      = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"),
+                             nullable=False, index=True)
+    provider     = db.Column(db.String(64), nullable=False)   # conf-file slug
+    subject      = db.Column(db.String(255), nullable=False)  # stable id at that provider
+    email        = db.Column(db.String(255))                  # as reported, may be unverified
+    display_name = db.Column(db.String(255))
+    created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    last_login   = db.Column(db.DateTime)
 
 
 class Annotation(db.Model):

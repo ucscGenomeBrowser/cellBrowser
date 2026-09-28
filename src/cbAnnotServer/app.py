@@ -79,9 +79,39 @@ def create_app(config_class=Config):
     with app.app_context():
         # SQLAlchemy creates tables for any model imported before this runs
         import models  # noqa: F401
-        db.create_all()
+        _create_all_once(app)
 
     return app
+
+
+def _create_all_once(app):
+    """db.create_all(), tolerating the startup race between gunicorn workers.
+
+    create_all's checkfirst is a check-then-create with no locking across
+    processes. Every worker runs this factory, so when N workers boot in the
+    same second they all see a table missing, all issue CREATE TABLE, and the
+    losers get "table ... already exists". That fails the worker, and gunicorn
+    shuts the entire master down when a worker fails to boot -- the service
+    only comes back because the watchdog restarts it a minute later.
+
+    It bites only on a release that actually adds a table, which is why it lay
+    dormant from the first deploy until oauth_identities.
+
+    Losing the race is harmless: the table exists either way, just created by
+    the other worker. So swallow the error and verify, instead of letting a
+    cosmetic collision take the service down.
+    """
+    from sqlalchemy import inspect
+    from sqlalchemy.exc import OperationalError, ProgrammingError
+    try:
+        db.create_all()
+    except (OperationalError, ProgrammingError) as e:
+        missing = set(db.metadata.tables) - set(inspect(db.engine).get_table_names())
+        if missing:
+            raise   # a real failure: something we need is still not there
+        app.logger.info(
+            "create_all lost the startup race with another worker (%s); "
+            "every table is present, continuing", e.orig)
 
 
 if __name__ == "__main__":

@@ -72,6 +72,14 @@ DROP_KEYS = {
     "view", "container", "priority", "visibility", "html", "_genome",
     "parentcontainer", "dragandrop", "centerlabelsdense", "configurable",
     "metadata", "subgroup1", "subgroup2", "subgroup3",
+    # Scaling is set once on the faceted composite parent as `autoScale group`, so every
+    # selected subtrack shares one scale and tracks at the same locus are directly
+    # comparable. A per-subtrack autoScale would override that inherited setting, and
+    # hubCheck errAborts outright on an individual bigWig that declares `autoScale group`
+    # (hubCheck.c: it belongs "in the parent composite stanza instead") -- 475 subtracks
+    # corpus-wide (402 hg38, 73 mm10) had inherited exactly that verbatim from their
+    # source hubs, and a further 677 carried `autoScale on`; all 1152 are dropped here.
+    "autoscale",
 }
 
 # stanza keys whose values are URLs relative to the hub dir and need absolutizing
@@ -361,6 +369,26 @@ CELLTYPE_TRAIL_RE = re.compile(_trail, re.I) if _trail else None
 _lead = CFG.get("celltype_leading_strip_regex", "")
 CELLTYPE_LEAD_RE = re.compile(_lead, re.I) if _lead else None
 
+# Collections whose source hub stanzas are NOT usable, so every track in them is built
+# as if it had no curated stanza at all: cellType from the manifest original_track_name
+# (the source FILENAME) and a generated stanza (bigWigInfo data range, autoScale on).
+# See the _doc in hub_config.json. Two independent things go wrong when these hubs'
+# stanzas are trusted: the labels are in a different naming scheme than the curation
+# written for the collection (so label_sub, the leading-token strip and the per-collection
+# crosswalk all miss, costing 72 hg38 + 89 mm10 tracks their cell class and colour), and
+# the stanzas declare a bare `type bigWig` with no data range (so 184 hg38 + 89 mm10
+# tracks lose the default viewLimits they would get from bigWigInfo).
+IGNORE_HUB_STANZAS = set(CFG.get("collection_ignore_hub_stanzas", []))
+
+
+def curated_ref(ref, row):
+    """The curated hub leaf for a manifest row, or None when the row's collection is in
+    IGNORE_HUB_STANZAS. Every lf lookup goes through this so a collection cannot be
+    opted out of the hub labels but still pick up the hub's stanza settings."""
+    if row["collection"] in IGNORE_HUB_STANZAS:
+        return None
+    return ref.get(os.path.realpath(row["abs_path"]))
+
 # whole collections routed out of the faceted composite into their own composite
 SEPARATE_COLLECTIONS = CFG.get("separate_collections", {})
 
@@ -536,8 +564,29 @@ def class_key(ct):
     return celltype_normkey(drop_cell_suffix(fix_celltype_spelling(ct or "").strip()))
 
 
+# Head words that classify a cell type on their own in celltype-class.tsv but say nothing
+# about lineage without a tissue or region qualifier. A track that takes its class from one
+# of these matched the table, so it never shows up in unclassified-celltypes.log -- it
+# quietly inherits whichever lineage the bare row happens to name.
+#
+# hg38's BrainVar is the live case: its cell type "Progenitors" lands on the bare
+# "Progenitor" row (class_key collapses the plural) and comes out Neural progenitor. That
+# is right for BrainVar, and would be wrong for a kidney, heart or blood dataset using the
+# same label. Nephron progenitors already needed that exception
+# (NON_NEURAL_PROGENITOR in build_celltype_crosswalks.py) and was caught by hand rather
+# than by any report -- generic-class-matches.log exists so the next one is not.
+#
+# A key here only does anything if the table actually carries such a bare row (today just
+# "progenitor"). The rest are listed so that adding one later starts getting reported
+# without anyone having to remember this set exists.
+GENERIC_CLASS_KEYS = {
+    "progenitor", "precursor", "stem", "cycling", "proliferating", "immature",
+    "intermediate",
+}
+
+
 def lookup_class(ct):
-    """(broad class, "R,G,B") for a cell type, or (None, None).
+    """(broad class, "R,G,B", matched table key) for a cell type, or (None, None, None).
 
     Falls back to progressively shorter prefixes when the full name is not in the table.
     The atlases qualify a common cell type with the tissue it came from -- 'Fibroblast
@@ -548,13 +597,13 @@ def lookup_class(ct):
     stale the moment a new atlas lands, whereas the head word is what the class actually
     depends on. Only ever shortens, so a specific entry still wins over its own prefix."""
     if not ct:
-        return None, None
+        return None, None, None
     words = ct.split()
     for n in range(len(words), 0, -1):
         k = class_key(" ".join(words[:n]))
         if k in CT_CLASS:
-            return CT_CLASS[k], CT_CLASS_COLOR.get(k)
-    return None, None
+            return CT_CLASS[k], CT_CLASS_COLOR.get(k), k
+    return None, None, None
 
 
 _ctc = os.path.join(XWALK_ROOT, "celltype-crosswalks", "celltype-class.tsv")
@@ -668,11 +717,14 @@ ALLEN_GROUPING = {
     "bg_merge_D1_D2_dorsal_ventral": ("D1/D2 + dorsal/ventral merge", "D1D2DV"),
 }
 
-# multiomic-human-heart splits its per-cell-type tracks into whole-dataset (hub/celltype/)
-# and per-cohort (hub/disease/{fetal,postnatal}/) copies; the cohort prefix is dropped
-# from the cell type, so the two collide.
-HEART_COHORT = {"fetal": ("fetal cohort", "fet"),
-                "postnatal": ("postnatal cohort", "postnat")}
+# Some collections serve a whole-dataset copy of each cell type AND per-cohort copies
+# (multiomic-human-heart: hub/celltype/ vs hub/disease/{fetal,postnatal}/; brainvar:
+# bw/ vs bw/{prenatal,postnatal}/). The cohort token is stripped from the cell type, so
+# without a descriptor the copies collide on one label. Keyed by collection in
+# hub_config.json as {segment: [longDescriptor, shortDescriptor]}; a segment matches
+# either a path directory or a leading filename token (Prenatal_ExN).
+COLLECTION_COHORTS = {coll: {k: tuple(v) for k, v in rules.items()}
+                      for coll, rules in CFG.get("collection_cohorts", {}).items()}
 
 # catlas mouse aging: a two-letter brain-region prefix on the filename (DH.Asc.03).
 # This is a Tissue refinement rather than a label suffix -- feeding it to the facet
@@ -757,12 +809,11 @@ def track_variant(r, lf, stem, dtype, modality=""):
                 add(lng, sht)
                 break
 
-    # multiomic heart cohort split (whole-dataset vs fetal/postnatal copies)
-    if coll == "multiomic-human-heart":
-        for key, (lng, sht) in HEART_COHORT.items():
-            if "/%s/" % key in path or re.match(r"(?i)^%s[_.]" % key, stem or ""):
-                add(lng, sht)
-                break
+    # cohort split: whole-dataset copy vs per-cohort copies of the same cell type
+    for key, (lng, sht) in COLLECTION_COHORTS.get(coll, {}).items():
+        if "/%s/" % key in path or re.match(r"(?i)^%s[_.]" % key, stem or ""):
+            add(lng, sht)
+            break
 
     return ", ".join(lng_parts), " ".join(sht_parts)
 
@@ -1421,13 +1472,19 @@ def render_child(child_name, composite, row, lf, color=None, long_override=None,
     label = row["original_track_name"] or stem
 
     emitted = set(["track", "parent"])
-    if lf:
-        type_full = lf.get("type_full") or row["track_type"]
-    elif row["track_type"] == "bigWig":
+    type_full = (lf or {}).get("type_full") or row["track_type"]
+    # A bigWig whose `type` line carries no data range leaves hgTracks with no default
+    # viewLimits, so it draws against the built-in 0:127. BrainVar's gene-activity tiles
+    # top out near 6 and rendered as a flat line that way. Fill the range in from
+    # bigWigInfo. This bites curated tracks too, not just orphans: a source hub commonly
+    # sets autoScale on the COMPOSITE PARENT, and this build flattens every subtrack into
+    # one native composite without copying the parent, so the child arrives with no
+    # scaling at all (232 subtracks corpus-wide have no range, no autoScale and no
+    # viewLimits). Only the default is supplied -- an explicit viewLimits still wins.
+    if type_full == "bigWig":
         mm = bigwig_minmax(row["abs_path"])
-        type_full = "bigWig " + mm if mm else "bigWig"
-    else:
-        type_full = row["track_type"]
+        if mm:
+            type_full = "bigWig " + mm
     lines.append("type " + type_full)
     lines.append("bigDataUrl " + track_url)
     emitted.update(["type", "bigdataurl"])
@@ -1445,11 +1502,17 @@ def render_child(child_name, composite, row, lf, color=None, long_override=None,
                 v = base + "/" + v.lstrip("./")
             lines.append("%s %s" % (k, v))
             emitted.add(kl)
+        # Give a curated bigWig the same height default the generated path uses when its
+        # stanza sets none. Scaling is NOT set here -- it is inherited from the parent
+        # composite's `autoScale group` (see DROP_KEYS).
+        if row["track_type"] == "bigWig" and "maxheightpixels" not in emitted:
+            lines.append("maxHeightPixels 100:30:8")
+            emitted.add("maxheightpixels")
     else:
         # generated defaults for orphan / hub-less tracks
         if row["track_type"] == "bigWig":
-            lines += ["autoScale on", "maxHeightPixels 100:30:8"]
-            emitted.update(["autoscale", "maxheightpixels"])
+            lines += ["maxHeightPixels 100:30:8"]   # scaling comes from the parent
+            emitted.add("maxheightpixels")
 
     if color and "color" not in emitted:
         lines.append("color " + color)
@@ -1497,6 +1560,7 @@ def main():
     orphan_ann = []                                    # annotation bigBeds with no stanza
     label_qualified = defaultdict(int)                # asm -> subtracks given a code
     unclassed = Counter()                             # celltype -> tracks with no class
+    generic_class = Counter()                         # class from a lineage-agnostic row
     coverage = defaultdict(lambda: defaultdict(int))  # asm -> facet -> known count
 
     # byte-identical allen-brain-science copies served from several grouping dirs
@@ -1515,7 +1579,7 @@ def main():
     _key_forms = defaultdict(Counter)
     for rows_ in by_asm.values():
         for r in rows_:
-            base = raw_celltype(r, ref.get(os.path.realpath(r["abs_path"])))
+            base = raw_celltype(r, curated_ref(ref, r))
             if base:
                 _key_forms[celltype_normkey(base)][base] += 1
     celltype_canon = {}
@@ -1556,8 +1620,7 @@ def main():
             if r["track_url"] in allen_skip:   # redundant byte-identical allen copy
                 allen_dupes.append("%s\t%s" % (asm, r["abs_path"]))
                 continue
-            rp = os.path.realpath(r["abs_path"])
-            lf = ref.get(rp)
+            lf = curated_ref(ref, r)
             idbase = shorten_id(r["master_track_name"])
             ttype = r["track_type"]
             stem = re.sub(r"\.(bw|bigwig|bb|bigbed)$", "",
@@ -1751,9 +1814,13 @@ def main():
                                            track_labels(r, lf)[0])
             # color every track by the broad class of its final cell type, so the
             # same class is the same color on both assemblies
-            _cls, child_color = lookup_class(celltype)
+            _cls, child_color, _ckey = lookup_class(celltype)
             if celltype and _cls is None:
                 unclassed[celltype] += 1       # no broad class -> no facet value, no color
+            elif _ckey in GENERIC_CLASS_KEYS:
+                # classed, but off a row that carries no lineage -- report it, since a
+                # successful match is invisible everywhere else
+                generic_class[(r["collection"], celltype, _ckey, _cls)] += 1
             tchildren.append(render_child(tcomp + "_" + idval, tcomp, r, lf,
                                           color=child_color, long_override=long_label,
                                           short_override=short_label, default_off=True))
@@ -1834,6 +1901,14 @@ def main():
             "defaultSortField Dataset",
             # NB: code (hgTrackUi.c) reads lowercase "maxCheckboxes"; doc's is a typo.
             "maxCheckboxes 200",
+            # One scale for every subtrack the user has selected, so two tracks drawn at
+            # the same locus are directly comparable -- with per-track autoScale, tracks
+            # whose values differ by orders of magnitude looked equally tall. Set HERE and
+            # not on the children: hgTracks groups by tdb->parent (wigTrack.c setMinMax),
+            # and hubCheck rejects `autoScale group` on an individual bigWig. Limits come
+            # from the data in the CURRENT WINDOW (preDrawAutoScale scans preDraw), not
+            # genome-wide, so one outlying region elsewhere cannot flatten the view.
+            "autoScale group",
             "html %s.html" % comp,
         ]
 
@@ -1869,6 +1944,7 @@ def main():
                 "subtrackUrls Dataset=%s/?ds=$$" % TARGET_BASE,
                 "defaultSortField Dataset",
                 "maxCheckboxes 200",
+                "autoScale group",       # see the main composite above
                 "html %s.html" % (hc),
             ]))
             blocks += histone_children
@@ -1940,7 +2016,9 @@ def main():
                 "track " + comp + sfx,
                 "compositeTrack on",
                 "type bigWig",
-                "autoScale on",
+                # group, not on: one scale across the composite so its tracks are
+                # comparable at a locus. Same reasoning as the main faceted composite.
+                "autoScale group",
                 "maxHeightPixels 128:36:16",
                 "visibility hide",
                 "shortLabel %s" % _ss,
@@ -1960,7 +2038,9 @@ def main():
                 "track " + comp + ecfg["suffix"],
                 "compositeTrack on",
                 "type bigWig",
-                "autoScale on",
+                # group, not on: one scale across the composite so its tracks are
+                # comparable at a locus. Same reasoning as the main faceted composite.
+                "autoScale group",
                 "maxHeightPixels 128:36:16",
                 "visibility hide",
                 "shortLabel %s" % _es,
@@ -1980,7 +2060,9 @@ def main():
                 "track " + comp + ccfg["suffix"],
                 "compositeTrack on",
                 "type bigWig",
-                "autoScale on",
+                # group, not on: one scale across the composite so its tracks are
+                # comparable at a locus. Same reasoning as the main faceted composite.
+                "autoScale group",
                 "maxHeightPixels 128:36:16",
                 "visibility hide",
                 "shortLabel %s" % _ps,
@@ -2078,6 +2160,18 @@ def main():
                  "tracks\tcell_type\n")
         for _ct, _n in sorted(unclassed.items(), key=lambda x: (-x[1], x[0])):
             fh.write("%d\t%s\n" % (_n, _ct))
+    with open(os.path.join(OUTDIR, "generic-class-matches.log"), "w") as fh:
+        fh.write("# cell types whose Cell_class came from a bare, lineage-agnostic row in\n"
+                 "# celltype-class.tsv (see GENERIC_CLASS_KEYS). These DID match the table,\n"
+                 "# so they are absent from unclassified-celltypes.log -- but the class is\n"
+                 "# only as right as the lineage that bare row happens to name.\n"
+                 "# Check each against the dataset's tissue. If it disagrees, add the\n"
+                 "# specific cell type to paper-decodes/ and rebuild the crosswalks: a\n"
+                 "# specific entry beats its own prefix in lookup_class(), which is how\n"
+                 "# 'Nephron progenitors' comes out Stromal while the bare row stays neural.\n"
+                 "tracks\tcollection\tcell_type\tmatched_key\tassigned_class\n")
+        for _g, _n in sorted(generic_class.items(), key=lambda x: (-x[1], x[0])):
+            fh.write("%d\t%s\t%s\t%s\t%s\n" % ((_n,) + _g))
     with open(os.path.join(OUTDIR, "orphan-annotations.log"), "w") as fh:
         fh.write("# annotation bigBeds with no hub stanza -- dropped, since their\n"
                  "# composite and label would be guesses from the filename\nassembly\tabs_path\n")
@@ -2115,6 +2209,8 @@ def main():
     out.append("Orphan annotation bigBeds dropped (no hub stanza): %d" % len(orphan_ann))
     out.append("Cell types with no broad class (Cell_class unknown): %d in %d tracks"
                % (len(unclassed), sum(unclassed.values())))
+    out.append("Cell types classed off a lineage-agnostic row: %d in %d tracks"
+               % (len(generic_class), sum(generic_class.values())))
     out.append("Subtracks label-qualified with a source cluster code: %d"
                % sum(label_qualified.values()))
     out.append("Parse warnings: %d" % len(warnings))
