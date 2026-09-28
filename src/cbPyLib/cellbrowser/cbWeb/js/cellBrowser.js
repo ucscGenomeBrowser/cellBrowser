@@ -2297,8 +2297,7 @@ var cellbrowser = function() {
 
     function onSelChange(selection) {
     /* called each time when the selection has been changed */
-        var cellIds = [];
-        selection.forEach(function(x) {cellIds.push(x)});
+        var cellIds = selection.toArray();
         $("#tpSetBackground").parent("li").removeClass("disabled");
 
         updateSelectionButtons();
@@ -11832,6 +11831,9 @@ var cellbrowser = function() {
         let els = document.getElementsByClassName("tpLegendCheckbox");
 
         let rows = gLegend.rows;
+        // for "invert" and "notNull": the colors to select and unselect, applied in one pass at the end
+        let selColIdxs = [];
+        let unselColIdxs = [];
         for (let i=0; i<els.length; i++) {
             let el = els[i];
             var valIdx = parseInt(el.getAttribute("data-value-index"));
@@ -11856,25 +11858,25 @@ var cellbrowser = function() {
             else if (status==="invert") {
                 if (!el.checked) {
                     el.checked = true;
-                    renderer.selectByColor(valIdx);
+                    selColIdxs.push(valIdx);
                     row.isChecked = true;
                 }
                 else {
                     el.checked = false;
                     row.isChecked = false;
-                    renderer.unselectByColor(valIdx);
+                    unselColIdxs.push(valIdx);
                 }
             }
             else if (status==="notNull") {
                 if ((i===0 && valStr===null) || (valStr!==null && likeEmptyString(valStr))) {
                     el.checked = false;
                     row.isChecked = false;
-                    renderer.unselectByColor(valIdx);
+                    unselColIdxs.push(valIdx);
                 }
                 else {
                     el.checked = true;
                     row.isChecked = true;
-                    renderer.selectByColor(valIdx);
+                    selColIdxs.push(valIdx);
                 }
             }
         }
@@ -11883,6 +11885,8 @@ var cellbrowser = function() {
             renderer.selectVisible();
         if (status==="none")
             renderer.selectClear();
+        if (status==="invert" || status==="notNull")
+            renderer.setByColors(selColIdxs, unselColIdxs);
 
         renderer.drawDots();
     }
@@ -12110,7 +12114,10 @@ var cellbrowser = function() {
         htmls.push("<small><button id='tpLegendAll'>All</button>");
         htmls.push("<button id='tpLegendNone'>None</button>");
         htmls.push("<button id='tpLegendInvert'>Invert</button>");
-        htmls.push("<button id='tpLegendNotNull'>&gt; 0</button></small>");
+        // "> 0" only makes sense for expression values
+        if (gLegend.type==="expr")
+            htmls.push("<button id='tpLegendNotNull'>&gt; 0</button>");
+        htmls.push("</small>");
 
         let buttonText = "Recolor checked values";
         if (gLegend.isColorOnlyChecked===true) {

@@ -45,6 +45,91 @@ function debug(msg) {
         console.log(msg);
 }
 
+class CellSelection {
+    /* The set of selected cell indices, as one byte per cell. Same interface as the Set() that
+     * was used before (size, has, add, delete, clear, forEach, values), but bulk operations on
+     * millions of cells are simple array loops, and in WebGL mode .flags is uploaded as-is
+     * as the a_Selected attribute. */
+    constructor(n) {
+        this.flags = new Uint8Array(n);
+        this.size = 0;
+    }
+
+    resize(n) {
+        /* keep the selection if the cell count is unchanged, otherwise start empty */
+        if (n === this.flags.length)
+            return;
+        this.flags = new Uint8Array(n);
+        this.size = 0;
+    }
+
+    has(i) {
+        return this.flags[i] === 1;
+    }
+
+    add(i) {
+        if (i < this.flags.length && this.flags[i] === 0) {
+            this.flags[i] = 1;
+            this.size++;
+        }
+        return this;
+    }
+
+    delete(i) {
+        if (this.flags[i] === 1) {
+            this.flags[i] = 0;
+            this.size--;
+            return true;
+        }
+        return false;
+    }
+
+    clear() {
+        this.flags.fill(0);
+        this.size = 0;
+    }
+
+    fill() {
+        /* select all cells */
+        this.flags.fill(1);
+        this.size = this.flags.length;
+    }
+
+    recount() {
+        /* recalculate size after the flags have been changed directly */
+        const flags = this.flags;
+        let n = 0;
+        for (let i = 0; i < flags.length; i++)
+            n += flags[i];
+        this.size = n;
+    }
+
+    forEach(func) {
+        const flags = this.flags;
+        for (let i = 0; i < flags.length; i++)
+            if (flags[i] === 1)
+                func(i);
+    }
+
+    *values() {
+        const flags = this.flags;
+        for (let i = 0; i < flags.length; i++)
+            if (flags[i] === 1)
+                yield i;
+    }
+
+    toArray() {
+        /* return the selected cell indices as an array of ints */
+        const flags = this.flags;
+        const arr = new Array(this.size);
+        let j = 0;
+        for (let i = 0; i < flags.length; i++)
+            if (flags[i] === 1)
+                arr[j++] = i;
+        return arr;
+    }
+}
+
 function MaxPlot(div, top, left, width, height, args) {
     // a class that draws circles onto a canvas, like a scatter plot
     // div is a div DOM element under which the canvas will be created
@@ -384,14 +469,13 @@ function MaxPlot(div, top, left, width, height, args) {
         self.coords.px   = null;   // coordinates of cells and labels as screen pixels or (HIDCOORD,HIDCOORD) if not shown
         self.coords.gl   = null;   // coordinates of cells in WebGL space
         self.coords.hidden = null; // Hidden coordinates (used by WebGL drawing)
-        self.coords.selected = null; // Per-cell selection flag for WebGL (0 or 1)
         self.coords.labelBbox = null;   // cluster label bounding boxes, array of [x1,x2,x2,y2]
 
         self.col = {};
         self.col.pal = null;        // list of six-digit hex codes
         self.col.arr = null;        // length is coords.px/2, one byte per cell = index into self.col.pal
 
-        self.selCells = new Set();  // IDs of cells that are selected (drawn in black)
+        self.selCells = new CellSelection(0);  // selected cells (drawn in black), sized in setCoords
 
         self.fatIdx = null;        // Index of value that is in "fat mode" (=cells bigger, all other cells in light-grey)
 
@@ -2093,7 +2177,7 @@ function MaxPlot(div, top, left, width, height, args) {
        var cData = canvasData.data;
 
        var rgbColors = null;
-       if (selCells.length===0)
+       if (selCells.size===0)
            rgbColors = hexToInt(colors);
        else
            rgbColors = makeAllGrey(colors.length);
@@ -2801,13 +2885,15 @@ function MaxPlot(div, top, left, width, height, args) {
 
        if (opts.lines)
            self._setLines(opts["lines"], opts);
-    
+
+        // the selection survives a layout change, but not a change of the cell count
+        self.selCells.resize(self.getCount());
+
         if(self.usesWebGL()) {
             self.setCoordsWebGL();
 
             // Initialize per-cell selection and hidden buffers
-            self.coords.selected = new Uint8Array(this.getCount());
-            self.bindBuffer(1, self.a_Selected, self.coords.selected, self.ctx.UNSIGNED_BYTE);
+            self._bindSelected();
 
             self.coords.hidden = new Uint8Array(this.getCount());
             self.bindBuffer(1, self.a_Hidden, self.coords.hidden, self.ctx.UNSIGNED_BYTE);
@@ -2906,10 +2992,8 @@ function MaxPlot(div, top, left, width, height, args) {
     // Upload the a_Selected buffer to GPU. Called whenever selCells changes.
     this._bindSelected = function() {
         if(!self.usesWebGL()) return;
-        if(!this.coords.selected) return;
-        const sel = this.selCells, buf = this.coords.selected;
-        for(let i = 0; i < buf.length; i++) buf[i] = sel.has(i) ? 1 : 0;
-        this.bindBuffer(1, this.a_Selected, buf, this.ctx.UNSIGNED_BYTE);
+        if(this.selCells.flags.length === 0) return; // no coords yet
+        this.bindBuffer(1, this.a_Selected, this.selCells.flags, this.ctx.UNSIGNED_BYTE);
     }
 
     this.calcRadius = function() {
@@ -3419,11 +3503,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
     this.selectAll = function(cellIdx) {
         /* add all cells to selection */
-        var selCells = self.selCells;
-        for (let i = 0; i < this.getCount(); i++) {
-            selCells.add(i);
-        }
-        self.selCells = selCells;
+        self.selCells.fill();
         self._selUpdate();
     };
 
@@ -3475,15 +3555,44 @@ function MaxPlot(div, top, left, width, height, args) {
         self._selUpdate();
     };
 
+    this.setByColors = function(selColIdxs, unselColIdxs) {
+        /* in one pass over all cells, select the cells with a color in selColIdxs and unselect
+         * those with a color in unselColIdxs. Cells with other colors keep their state.
+         * Much faster than calling selectByColor() for each color: the selection is only
+         * updated and reported once. */
+        const colArr = self.col.arr;
+        let maxIdx = 0;
+        for (const c of selColIdxs.concat(unselColIdxs))
+            maxIdx = Math.max(maxIdx, c);
+        // per color: 1 = select, 0 = unselect, -1 = leave as it is
+        const action = new Int8Array(maxIdx+1).fill(-1);
+        for (const c of selColIdxs)
+            action[c] = 1;
+        for (const c of unselColIdxs)
+            action[c] = 0;
+
+        const flags = self.selCells.flags;
+        const n = Math.min(colArr.length, flags.length);
+        for (let i = 0; i < n; i++) {
+            const col = colArr[i];
+            if (col > maxIdx)
+                continue;
+            const a = action[col];
+            if (a !== -1)
+                flags[i] = a;
+        }
+        self.selCells.recount();
+        self._selUpdate();
+    };
+
     this.selectByIndices = function(indices) {
         /* replace current selection with the given array of cell indices */
-        self.selCells = new Set(indices);
-        self._selUpdate();
+        self.selectSet(indices);
     };
 
     this.clearSelection = function() {
         /* clear all selected cells */
-        self.selCells = new Set();
+        self.selCells.clear();
         self._selUpdate();
     };
 
@@ -3571,28 +3680,20 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     this.hasAllSelected = function() {
-        return (self.selCells.length===self.getCount());
+        return (self.selCells.size===self.getCount());
     }
 
     this.getSelection = function() {
         /* return selected cells as a list of ints */
-        var cellIds = [];
-        self.selCells.forEach(function(x) {cellIds.push(x)});
-        return cellIds;
+        return self.selCells.toArray();
     };
 
     this.selectInvert = function() {
         /* invert selection */
-        var selCells = self.selCells;
-        var cellCount = self.getCount();
-        for (let i = 0; i < cellCount; i++) {
-            if (selCells.has(i)) {
-                selCells.delete(i);
-            } else {
-                selCells.add(i);
-            }
-        }
-        self.selCells = selCells;
+        const flags = self.selCells.flags;
+        for (let i = 0; i < flags.length; i++)
+            flags[i] ^= 1;
+        self.selCells.size = flags.length - self.selCells.size;
         self._selUpdate();
     };
 
