@@ -182,7 +182,7 @@ var cbUtil = (function () {
         });
     };
 
-    my.loadFile = function(url, arrType, onDone, onProgress, otherInfo, start, end) {
+    my.loadFile = function(url, arrType, onDone, onProgress, otherInfo, start, end, onError) {
         /* load text or binary file with HTTP GET into fileData variable and call function
          * onDone(fileData, otherInfo) when done.
          * convert the data to arrType. arrType can be either a class like
@@ -190,6 +190,8 @@ var cbUtil = (function () {
          * for gzip'ed string.  To switch off type casting, set arrType=null
          *
          * optional: byte range request for start-end (0-based, inclusive).
+         * optional: onError(message) is called if the file could not be loaded, e.g. when the
+         * network connection dropped. Without it, an alert is shown.
          * */
         var oReq = new XMLHttpRequest();
         oReq.open("GET", url, true);
@@ -201,10 +203,19 @@ var cbUtil = (function () {
 
         oReq.onload = cbUtil.onDoneBinaryData;
         oReq.onprogress = onProgress;
-        oReq.onerror = function(e) { 
+        oReq.onerror = function(e) {
+            if (onError) {
+                onError("the network connection failed while loading "+url);
+                return;
+            }
             // Github rejects accept-encoding: headers coming from Firefox at the moment.
-            alert("Could not load file "+url+". If this is Firefox and running on Github, please contact us."); 
+            alert("Could not load file "+url+". If this is Firefox and running on Github, please contact us.");
         };
+        oReq.onabort = function(e) {
+            if (onError)
+                onError("the download of "+url+" was interrupted");
+        };
+        oReq._onError = onError; // keep this for the callback
         oReq._onDone = onDone; // keep this for the callback
         oReq._otherInfo = otherInfo; // keep this for the callback
         oReq._arrType = arrType; // keep this for the callback casting
@@ -239,15 +250,21 @@ var cbUtil = (function () {
         var url = this._url;
         // 200 = OK, 206 = Partial Content OK
         if (this.status !== 200 && this.status !== 206) {
-            alert("Could not load "+url+", error " + oEvent.statusText);
+            if (this._onError)
+                this._onError("the web server returned error "+this.status+" "+this.statusText+" for "+url);
+            else
+                alert("Could not load "+url+", error " + oEvent.statusText);
             return;
         }
 
         var binData = this.response;
 
         if (!binData) {
-          alert("internal error when loading "+url+": no reponse from server?");
-          return;
+            if (this._onError)
+                this._onError("the web server sent no data for "+url);
+            else
+                alert("internal error when loading "+url+": no reponse from server?");
+            return;
         }
 
         // if the user wants only a byte range...
@@ -691,7 +708,7 @@ function CbDbFile(url) {
         return idx;
     };
 
-    this._startMetaLoad = function(metaInfo, arrType, onMetaDone, onProgress, extraInfo) {
+    this._startMetaLoad = function(metaInfo, arrType, onMetaDone, onProgress, extraInfo, onError) {
         /* start the loading of a meta data file and call onMetaDone when ready */
         var fieldName = metaInfo.name;
         var binUrl = cbUtil.joinPaths([self.url, "metaFields", fieldName+".bin.gz"]);
@@ -699,12 +716,13 @@ function CbDbFile(url) {
             binUrl += "?"+metaInfo.md5;
         cbUtil.loadFile(binUrl, arrType,
                 onMetaDone,
-                onProgress, metaInfo);
+                onProgress, metaInfo, undefined, undefined, onError);
     }
 
-    this.loadMetaVec = function(metaInfo, onDone, onProgress, otherInfo, strategy) {
+    this.loadMetaVec = function(metaInfo, onDone, onProgress, otherInfo, strategy, onError) {
     /* get an array of numbers, one per cell, that reflect the meta field contents
      * and an object with some info about the field. call onDone(arr, metaInfo) when done.
+     * optional: onError(message) is called if the file could not be loaded.
      * Keep all compressed arrays in metaCache;
      * Numerical meta data (int/float) is discretized, binning info is written to metaInfo.binInfo
      * and the original data is added to metaInfo.origVals
@@ -784,7 +802,7 @@ function CbDbFile(url) {
             return;
         }
         else {
-            self._startMetaLoad(metaInfo, null, onMetaDone, onProgress, metaInfo);
+            self._startMetaLoad(metaInfo, null, onMetaDone, onProgress, metaInfo, onError);
             return;
         }
     };
@@ -1076,7 +1094,8 @@ function CbDbFile(url) {
         return newArr;
     }
 
-    this.loadExprAndDiscretize = function(locusName, onDone, onProgress, strategy) {
+    this.loadExprAndDiscretize = function(locusName, onDone, onProgress, strategy, onError) {
+    /* optional: onError(message) is called if the data could not be loaded. */
     /* given a locus name, retrieve data from expression matrix
      * and call onDone with (array, discretizedArray, locusName, geneDesc (or ""),
      * binInfo).
@@ -1223,7 +1242,7 @@ function CbDbFile(url) {
             }
 
             cbUtil.loadFile(url+"?"+names.join("-"), Uint8Array, onChunkDone, onProgress, relRanges,
-                minStart, maxEnd);
+                minStart, maxEnd, onError);
         }
     };
 

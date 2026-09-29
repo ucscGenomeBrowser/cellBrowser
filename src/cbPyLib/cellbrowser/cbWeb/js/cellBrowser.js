@@ -9147,6 +9147,12 @@ var cellbrowser = function() {
             function gotGeneData(exprArr, decArr, locusStr, geneDesc, binInfo) {
                 /* called when the expression vector has been loaded and binning is done */
                 debug("Promise - Received expression vector, for "+locusStr+", desc: "+geneDesc);
+                exprStatusThen("progressBarExpr", "Calculating averages for "+locusStr+"...", function() {
+                    splitAndResolve(exprArr, locusStr, geneDesc);
+                }, reject);
+            }
+
+            function splitAndResolve(exprArr, locusStr, geneDesc) {
                 let res = cellMask ? splitExprByMetaMasked(metaArr, metaCount, exprArr, cellMask)
                                    : splitExprByMeta(metaArr, metaCount, exprArr);
 
@@ -9166,7 +9172,8 @@ var cellbrowser = function() {
                 resolve(geneData);
             }
 
-            db.loadExprAndDiscretize(locusStr, gotGeneData, onProgress, "none");
+            db.loadExprAndDiscretize(locusStr, gotGeneData, onProgress, "none",
+                function(msg) { reject(new Error(msg)); });
         });
     }
 
@@ -9187,7 +9194,8 @@ var cellbrowser = function() {
                 resolve(metaInfo);
             }
 
-            db.loadMetaVec(metaInfo, gotMetaArray, onProgress, {}, db.conf.binStrategy);
+            db.loadMetaVec(metaInfo, gotMetaArray, onProgress, {}, db.conf.binStrategy,
+                function(msg) { reject(new Error(msg)); });
         });
     }
 
@@ -9872,8 +9880,17 @@ var cellbrowser = function() {
         return { fieldNames: fieldNames, annotBins: annotBins, annotLabels: annotLabels, palettes: palettes };
     }
 
-    function exprDataLoadGenes(geneIds, exprData, onDone, cellMask) {
-        /* add a list of geneIds to the current exprData object and call onDone when done.*/
+    function exprLoadFailed(onError, err) {
+        /* a dot plot or heatmap load failed: tell the caller, or the user if the caller did not ask */
+        if (onError)
+            onError(err);
+        else
+            alert("Could not load the data: "+((err && err.message) ? err.message : err));
+    }
+
+    function exprDataLoadGenes(geneIds, exprData, onDone, cellMask, onError) {
+        /* add a list of geneIds to the current exprData object and call onDone when done.
+         * onError(err) is called if something could not be loaded. */
         let promises = [];
         let metaArr = exprData.metaData.arr;
         let metaCount = exprData.metaData.valCounts.length;
@@ -9943,7 +9960,7 @@ var cellbrowser = function() {
 
             exprDataUpdateMinMax(exprData);
             onDone(exprData);
-        });
+        }).catch( function(err) { exprLoadFailed(onError, err); });
     }
 
     function computeMetaMatrix(groupingMetaInfo, otherMetaInfos) {
@@ -9996,10 +10013,11 @@ var cellbrowser = function() {
         return { fieldNames: fieldNames, metaBins: metaBins, metaLabels: metaLabels, palettes: palettes };
     }
 
-    function loadGroupedExprData(exprData, geneIds, metaName, subsplitName, onGenesDone, perturbFilter) {
+    function loadGroupedExprData(exprData, geneIds, metaName, subsplitName, onGenesDone, perturbFilter, onError) {
         /* load geneIds into exprData object, load expr data and summarize (average) by meta field.
          * subsplitName: optional second meta field to cross with metaName (null = no subsplit).
-         * perturbFilter: optional {name, valueIdx} to restrict cells by perturbation value. */
+         * perturbFilter: optional {name, valueIdx} to restrict cells by perturbation value.
+         * onError(err): optional, called if something could not be loaded. Default is an alert. */
 
         if (exprData===null) {
             exprData = {};
@@ -10054,6 +10072,11 @@ var cellbrowser = function() {
         }
 
         Promise.all(metaPromises).then( function (resArr) {
+            exprStatusThen("progressBarMeta", "Summarizing annotations...", function() { onMetaLoaded(resArr); },
+                function(err) { exprLoadFailed(onError, err); });
+        }).catch( function(err) { exprLoadFailed(onError, err); });
+
+        function onMetaLoaded(resArr) {
             var primaryMetaInfo = resArr[0];
             exprData._primaryLabels = primaryMetaInfo.ui.shortLabels;
 
@@ -10113,8 +10136,9 @@ var cellbrowser = function() {
                 }
             }
 
-            exprDataLoadGenes(geneIds, exprData, onGenesDone, cellMask);
-        });
+            $("#progressBarMeta").children().first().text("Annotations summarized");
+            exprDataLoadGenes(geneIds, exprData, onGenesDone, cellMask, onError);
+        }
     }
 
     // Dot plot loading state. A load takes seconds on big datasets and the user can change the split,
@@ -10133,6 +10157,58 @@ var cellbrowser = function() {
         /* forget any running dot plot load, its result will not be drawn */
         gExprLoadId++;
         gExprLoading = false;
+    }
+
+    function exprSetBusy(isBusy) {
+        /* grey out the dot plot controls while a load is running, so the user cannot start another one */
+        let header = getById("tpExprViewHeader");
+        if (!header)
+            return;
+        header.inert = isBusy; // no clicks and no keyboard focus
+        header.classList.toggle("tpExprBusy", isBusy);
+    }
+
+    function exprStatusThen(barId, text, func, onError) {
+        /* show text on a dot plot progress bar, then run func. The calculations are synchronous and
+         * block the page, so give the browser one frame to draw the text before starting them.
+         * func runs outside of any promise chain, so its exceptions go to onError, if given. */
+        let barEl = $("#"+barId);
+        if (barEl.length!==0) {
+            barEl.progressbar("value", 100);
+            barEl.children().first().text(text);
+        }
+        requestAnimationFrame(function() { setTimeout(function() {
+            try {
+                func();
+            } catch (err) {
+                if (!onError)
+                    throw err;
+                onError(err);
+            }
+        }, 0); });
+    }
+
+    function showExprLoadError(err, onRetry) {
+        /* a dot plot load failed: say why, unlock the controls and offer to try again */
+        console.error("dot plot load failed:", err);
+        let msg = (err && err.message) ? err.message : String(err);
+        let plotEl = getById("tpExprViewPlot");
+        if (plotEl) {
+            let htmls = [];
+            htmls.push("<div id='tpExprLoadError' style='padding:10px; max-width:700px'>");
+            htmls.push("<p><b>The data for the dot plot could not be loaded.</b></p>");
+            htmls.push("<p>This usually means that the network connection was interrupted, for example when "+
+                "the computer switched to another Wi-Fi network, or that the web server had a temporary problem. "+
+                "Please check your connection and try again.</p>");
+            htmls.push("<p id='tpExprLoadErrorDetails'></p>");
+            htmls.push("<button id='tpExprLoadRetry'>Try again</button>");
+            htmls.push("</div>");
+            plotEl.innerHTML = htmls.join("");
+            $("#tpExprLoadErrorDetails").text("Details: "+msg);
+            $("#tpExprLoadRetry").click(onRetry);
+        }
+        gExprLoading = false;
+        exprSetBusy(false);
     }
 
     function buildGeneExprPlotsAddGenes(geneIds, metaName, plotType) {
@@ -10170,6 +10246,7 @@ var cellbrowser = function() {
         gExprLoadId++;
         let loadId = gExprLoadId;
         gExprLoading = true;
+        exprSetBusy(true);
 
         if (geneIds.length>0)
             selectizeSetValue("tpGeneExprGeneCombo", geneIds[0].split("|")[0]);
@@ -10215,6 +10292,22 @@ var cellbrowser = function() {
             /* done loading expression data, now do the plotting */
             if (loadId!==gExprLoadId) // the user changed something meanwhile, a newer load is running
                 return;
+            exprStatusThen("progressBarExpr", "Drawing the plot...", function() { drawExprData(exprData); },
+                onExprLoadError);
+        }
+
+        function onExprLoadError(err) {
+            if (loadId!==gExprLoadId) // an older load, already replaced or cancelled
+                return;
+            // the exprData object may be half-filled, so the next load starts from scratch
+            db.exprData = null;
+            // "try again" reloads the requested genes with the current split, subsplit and perturbation
+            showExprLoadError(err, function() { buildGeneExprPlotsAddGenes(null, null); });
+        }
+
+        function drawExprData(exprData) {
+            if (loadId!==gExprLoadId) // the view was closed meanwhile
+                return;
             gExprLoading = false;
             gExprGeneIds = exprData.geneIds.slice();
             // populate split filter panel
@@ -10244,9 +10337,10 @@ var cellbrowser = function() {
             let allGeneIdStr = exprData.geneIds.join(" ");
             let urlOpts = { "exprGene" : allGeneIdStr, "exprMeta" : metaName };
             changeUrl(urlOpts);
+            exprSetBusy(false);
         };
 
-        loadGroupedExprData(db.exprData, geneIds, metaName, subsplitName, onExprDataDone, perturbFilter);
+        loadGroupedExprData(db.exprData, geneIds, metaName, subsplitName, onExprDataDone, perturbFilter, onExprLoadError);
 
         //Promise.all([promiseGeneSplitByMeta(geneId, geneExprOnProgress), promiseMeta(metaName, geneExprOnProgress)]).then( function(resArr) {
         //    //if(DEBUG) console.log("promises are all loaded", resArr);

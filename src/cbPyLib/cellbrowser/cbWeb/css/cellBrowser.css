@@ -35,6 +35,12 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         padding-bottom: 6px;
 }
 
+/* dot plot controls while a load is running, see exprSetBusy() */
+#tpExprViewHeader.tpExprBusy {
+        opacity: 0.5;
+        pointer-events: none;
+}
+
 .hasTooltip {
         display: inline-flex;
         align-items: center;
