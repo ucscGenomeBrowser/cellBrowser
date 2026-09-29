@@ -1661,16 +1661,35 @@ var cellbrowser = function() {
         return '';
     }
 
+    // the dataset dialog's faceting filters: combobox id and URL variable
+    const cDatasetFilters = [
+        ["tpBodyCombo", "bp"], ["tpDisCombo", "dis"], ["tpOrgCombo", "org"], ["tpProjCombo", "proj"],
+        ["tpStageCombo", "stage"], ["tpDomCombo", "dom"], ["tpAssayCombo", "assay"], ["tpSourceCombo", "source"]
+    ];
+
+    function clearDatasetFilters() {
+        /* reset all dataset filters and show all datasets again */
+        var urlArgs = {};
+        for (var [comboId, urlVar] of cDatasetFilters) {
+            $("#"+comboId).val([]).trigger("chosen:updated");
+            urlArgs[urlVar] = null;
+        }
+        changeUrl(urlArgs);
+        filterDatasetsDom();
+    }
+
     function filterDatasetsDom() {
         /* keep only datasets that fulfill the filters */
 
         // read the current filter values of the dropboxes
         var categories = ["Body", "Dis", "Org", "Proj", "Stage", "Dom", "Assay", "Source"];
         var filtVals = {};
+        var activeFilterCount = 0;
         for (var category of categories) {
             var vals = $("#tp"+category+"Combo").val();
-            if (vals===undefined)
+            if (vals===undefined || vals===null)
                 vals = [];
+            activeFilterCount += vals.length;
 
             // strip special chars
             var cleanVals = [];
@@ -1724,6 +1743,20 @@ var cellbrowser = function() {
             $('#tpDatasetCount').text("(filters active, "+shownCount+" datasets shown)");
         else
             $('#tpDatasetCount').text("("+shownCount+" dataset collections)");
+
+        // note next to the "Filters" header, so active filters are visible when it is collapsed
+        var noteEl = $('#tpFilterNote');
+        if (activeFilterCount===0)
+            noteEl.empty();
+        else {
+            var filtWord = (activeFilterCount===1 ? " filter is" : " filters are");
+            noteEl.html(": "+activeFilterCount+filtWord+" active, "+
+                "<span id='tpFilterClear' class='link'>click here to clear filters and show all datasets</span>");
+            $('#tpFilterClear').click(function(ev) {
+                ev.preventDefault(); // a click inside <summary> would also open/close the filters
+                clearDatasetFilters();
+            });
+        }
     }
 
     function openDatasetDialog(openDsInfo, selName, openTab) {
@@ -1759,6 +1792,7 @@ var cellbrowser = function() {
             html.push("<div style='min-width:0'>");
             html.push("<div style='margin-bottom:2px; font-size:12px; color:#555'>"+filterLabel+"</div>");
             let selPar = getVar(urlVar);
+            let filtList = [];
             if (selPar && selPar!=="")
                 filtList = selPar.split(" ");
             buildComboBox(html, comboId, filterVals, filtList, comboLabel, 200, {multi:true});
@@ -1804,23 +1838,12 @@ var cellbrowser = function() {
 
         function onFilterChange(ev) {
             /* called when user changes a filter: updates list of datasets shown */
-            var filtNames = $(this).val();
+            var filtNames = $(this).val() || [];
 
             var param = null;
-            if (this.id==="tpBodyCombo")
-                param = "bp";
-            else if (this.id=="tpDisCombo")
-                param = "dis";
-            else if (this.id=="tpOrgCombo")
-                param = "org";
-            else if (this.id=="tpProjCombo")
-                param = "proj";
-            else if (this.id=="tpDomCombo")
-                param = "dom";
-            else if (this.id=="tpAssayCombo")
-                param = "assay";
-            else if (this.id=="tpStageCombo")
-                param = "stage";
+            for (var [comboId, urlVar] of cDatasetFilters)
+                if (this.id===comboId)
+                    param = urlVar;
 
             // change the URL
             var filtArg = filtNames.join(" "); // space encodes as + in URL
@@ -1973,7 +1996,6 @@ var cellbrowser = function() {
         }
 
         let doFilters = false;
-        let filtList = [];
         let bodyParts = null;
         let diseases = null;
         let organisms = null;
@@ -2006,7 +2028,7 @@ var cellbrowser = function() {
             if (doFilters) {
                 noteLines.push("<details id='tpFilterDetails' style='margin-bottom:6px'>" +
                     "<summary style='cursor:pointer; font-weight:bold; color:#444; padding:2px 0; list-style:none; display:flex; align-items:center'>" +
-                    "<span class='tpFilterArrow' style='display:inline-block; margin-right:5px; font-size:10px'>&#9654;</span>Filters</summary>" +
+                    "<span class='tpFilterArrow' style='display:inline-block; margin-right:5px; font-size:10px'>&#9654;</span>Filters<span id='tpFilterNote' style='font-weight:normal; white-space:pre-wrap'></span></summary>" +
                     "<div style='display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding-top:8px'>");
 
                 buildFilter(noteLines, bodyParts, "Organ", "bp", "tpBodyCombo", "select organs...");
@@ -2066,9 +2088,12 @@ var cellbrowser = function() {
             });
         }
 
-        var winWidth = window.innerWidth - 0.05*window.innerWidth;
-        var winHeight = window.innerHeight - 0.05*window.innerHeight;
-        var tabsWidth = winWidth - leftPaneWidth - 50;
+        // the full page, without scrollbars (window.innerWidth includes them)
+        var winWidth = document.documentElement.clientWidth;
+        var winHeight = document.documentElement.clientHeight;
+        // the info pane floats right of the list: if it does not fit next to it, it wraps below the
+        // list, out of view. So leave some room for the dialog's padding and the list's scrollbar.
+        var tabsWidth = winWidth - leftPaneWidth - 80;
         listGroupHeight = winHeight - 100;
 
         var htmls = ["<div style='line-height: 1.1em'>"];
@@ -2118,8 +2143,12 @@ var cellbrowser = function() {
 
         var selDatasetIdx = 0;
 
+        // at startup, only the root collection (or a collection from the URL) is loaded and there
+        // is nothing behind the dialog: the user has to pick a dataset, so it cannot be closed
+        var noDatasetLoaded = (db===null || !db.conf || !db.conf.metaFields);
+
         var buttons = [];
-        if (db!==null) {
+        if (!noDatasetLoaded) {
             var cancelLabel = "Cancel";
             if (onlyInfo)
                 cancelLabel = "Close";
@@ -2135,7 +2164,12 @@ var cellbrowser = function() {
 
         $(".ui-dialog-content").dialog("close"); // close the last dialog box
 
-        showDialogBox(htmls, title, {width: winWidth, height:winHeight, buttons: buttons});
+        showDialogBox(htmls, title, {width: winWidth, height:winHeight, buttons: buttons, noClose: noDatasetLoaded});
+
+        // the dialog's padding and border come on top of the width, remove them so it fits the window
+        var dlgWidthExtra = $("#tpDialog").closest(".ui-dialog").outerWidth() - winWidth;
+        if (dlgWidthExtra > 0)
+            $("#tpDialog").dialog("option", "width", winWidth - dlgWidthExtra);
 
         $("#tpOpenDialogTabs").tabs();
 
@@ -6658,7 +6692,9 @@ var cellbrowser = function() {
         htmlLines.push("</div>");
         $(document.body).append(htmlLines.join(""));
 
-        var dialogOpts = {modal:true, closeOnEscape:true};
+        // options.noClose: no X in the title bar, and Escape or a click outside do not close it
+        var noClose = (options.noClose===true);
+        var dialogOpts = {modal:true, closeOnEscape:!noClose};
         if (options.width!==undefined)
             dialogOpts["width"] = options.width;
         if (options.height!==undefined)
@@ -6678,9 +6714,12 @@ var cellbrowser = function() {
         //dialogOpts["width"] = "auto";
 
         dialogOpts["open"] = function() {
-            $(".ui-widget-overlay").on("click", function() {
-                $("#tpDialog").dialog("close");
-            });
+            if (noClose)
+                $(this).closest(".ui-dialog").find(".ui-dialog-titlebar-close").hide();
+            else
+                $(".ui-widget-overlay").on("click", function() {
+                    $("#tpDialog").dialog("close");
+                });
             $("#tpDialog").on("keydown", "input", function(e) {
                 if (e.which === 13)
                     $("#tpDialog").closest(".ui-dialog").find(".ui-dialog-buttonpane button:contains('OK')").click();
@@ -9029,7 +9068,7 @@ var cellbrowser = function() {
 
     function onGeneExprSubsplitComboChange(ev, choice) {
         /* gene expression viewer: called when user changes the subsplit meta field combo box */
-        var geneIds = db.exprData ? db.exprData.geneIds.slice() : [];
+        var geneIds = exprPlotGeneIds();
         db.exprData = null;
         if (geneIds.length > 0)
             buildGeneExprPlotsAddGenes(geneIds, null);
@@ -9093,7 +9132,7 @@ var cellbrowser = function() {
                 updatePerturbCount(idx, pvc, db.conf.sampleCount);
             }
         }
-        var geneIds = db.exprData ? db.exprData.geneIds.slice() : [];
+        var geneIds = exprPlotGeneIds();
         db.exprData = null; // force full reload so mask is rebuilt for all genes
         if (geneIds.length > 0)
             buildGeneExprPlotsAddGenes(geneIds, null);
@@ -9511,9 +9550,14 @@ var cellbrowser = function() {
     function exprDataRemoveGene(sym) {
         /* remove a gene from the dot plot expr data */
         let exprData = db.exprData;
+        if (!exprData || gExprLoading) // a reload is running, it will replace the plot anyway
+            return;
         let geneIdx = exprData.syms.indexOf(sym);
+        if (geneIdx===-1)
+            return;
         exprData.syms.splice(geneIdx, 1); // remove the symbol
         exprData.geneIds.splice(geneIdx, 1); // and the geneId
+        gExprGeneIds = exprData.geneIds.slice();
 
         // remove the gene data
         let rowCount = exprData.rows.length;
@@ -10073,6 +10117,24 @@ var cellbrowser = function() {
         });
     }
 
+    // Dot plot loading state. A load takes seconds on big datasets and the user can change the split,
+    // subsplit, perturbation or genes meanwhile, so db.exprData is not a reliable source for the gene
+    // list (it is null during a full reload), and an older load can finish after a newer one.
+    var gExprGeneIds = [];   // the genes the dot plot should show, as of the latest request
+    var gExprLoadId = 0;     // incremented for every load: only the result of the latest one is drawn
+    var gExprLoading = false;
+
+    function exprPlotGeneIds() {
+        /* return a copy of the gene IDs that the dot plot shows or is loading */
+        return gExprGeneIds.slice();
+    }
+
+    function exprLoadCancel() {
+        /* forget any running dot plot load, its result will not be drawn */
+        gExprLoadId++;
+        gExprLoading = false;
+    }
+
     function buildGeneExprPlotsAddGenes(geneIds, metaName, plotType) {
         /* build the plots for the gene expression viewer */
         // get meta field from function call or dropdown
@@ -10085,10 +10147,29 @@ var cellbrowser = function() {
         }
 
         if (geneIds===null) { // metaName was changed = re-calc the expr object
-            geneIds = db.exprData.geneIds;
+            geneIds = exprPlotGeneIds();
+            db.exprData = null;
+        } else if (gExprLoading) {
+            // genes added while another load is running: that load's exprData object will be
+            // discarded, so reload everything, with the new genes added to the requested ones
+            let allGeneIds = exprPlotGeneIds();
+            for (let geneId of geneIds)
+                if (allGeneIds.indexOf(geneId)===-1)
+                    allGeneIds.push(geneId);
+            geneIds = allGeneIds;
             db.exprData = null;
         }
-            //geneIds = db.exprData.geneIds.push(geneIds);
+
+        // remember which genes we want, and that only the result of this load counts
+        if (db.exprData===null)
+            gExprGeneIds = geneIds.slice();
+        else
+            for (let geneId of geneIds)
+                if (gExprGeneIds.indexOf(geneId)===-1)
+                    gExprGeneIds.push(geneId);
+        gExprLoadId++;
+        let loadId = gExprLoadId;
+        gExprLoading = true;
 
         if (geneIds.length>0)
             selectizeSetValue("tpGeneExprGeneCombo", geneIds[0].split("|")[0]);
@@ -10132,6 +10213,10 @@ var cellbrowser = function() {
 
         function onExprDataDone (exprData) {
             /* done loading expression data, now do the plotting */
+            if (loadId!==gExprLoadId) // the user changed something meanwhile, a newer load is running
+                return;
+            gExprLoading = false;
+            gExprGeneIds = exprData.geneIds.slice();
             // populate split filter panel
             var splitBtn = getById("tpExprSplitFilterBtn");
             var splitPanel = getById("tpExprSplitFilterPanel");
@@ -10208,6 +10293,8 @@ var cellbrowser = function() {
         window.violinCharts = [];
         window.removeEventListener("keyup", onEscapeCloseExprView);
         db.exprData = null;
+        exprLoadCancel(); // a load still running must not draw into the removed window
+        gExprGeneIds = [];
     }
 
     function onEscapeCloseExprView(e) {
@@ -10853,19 +10940,18 @@ var cellbrowser = function() {
     function onMultiGeneLoadClick (ev) {
     /* user clicked 'load genes below' on the multi gene input dialog box to color the UMAP plot */
         let inGenes = parseGenesFromTextBox("#tpMultiGeneText");
+        if (!inGenes) // some genes were not found, the text box now says which
+            return;
         colorByMultiGenes(inGenes.geneIds, inGenes.syms);
     }
 
     function onGeneExprAddGenesLoadClick (ev) {
     /* user clicked 'load genes below' on the multi gene input dialog box to update the dotplot */
         let inGenes = parseGenesFromTextBox("#tpMultiGeneText");
-
-        function onExprDataDone() {
-            buildExprDotplot("tpExprViewPlot", exprData); 
-        }
-
-        exprDataLoadGenes(inGenes.geneIds, exprData, onExprDataDone);
-
+        if (!inGenes) // some genes were not found, the text box now says which
+            return;
+        // same as adding one gene with the gene combobox
+        buildGeneExprPlotsAddGenes(inGenes.geneIds, null);
     }
 
     function buildMultiGeneBox (htmls) {
