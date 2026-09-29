@@ -4,8 +4,9 @@
 -- here for reference and for environments that prefer raw SQL bootstrap.
 
 -- email and password_hash are nullable: an account may instead be identified
--- by an external OAuth identity (oauth_provider, oauth_sub). An ORCID login in
--- particular may carry no email, and any OAuth login has no local password.
+-- by one or more external OAuth identities (see oauth_identities below). An
+-- ORCID login in particular may carry no email, and an OAuth-only account has
+-- no local password.
 CREATE TABLE IF NOT EXISTS users (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     email           TEXT UNIQUE,
@@ -15,15 +16,30 @@ CREATE TABLE IF NOT EXISTS users (
     verify_token    TEXT,
     reset_token     TEXT,
     reset_expires   TIMESTAMP,
-    oauth_provider  TEXT,
-    oauth_sub       TEXT,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_login      TIMESTAMP,
-    UNIQUE (oauth_provider, oauth_sub)
+    last_login      TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_users_verify_token ON users(verify_token);
 CREATE INDEX IF NOT EXISTS idx_users_reset_token  ON users(reset_token);
-CREATE INDEX IF NOT EXISTS idx_users_oauth        ON users(oauth_provider, oauth_sub);
+
+-- External sign-ins bound to an account. One row per (provider, subject); a
+-- user may hold several, because the same person arriving through Google
+-- directly and through a broker such as CILogon presents two different
+-- subjects and would otherwise end up with two accounts.
+-- provider is the providers.conf slug; subject is whichever claim that
+-- provider's stanza names as stable (subject_claim, default "sub").
+CREATE TABLE IF NOT EXISTS oauth_identities (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider        TEXT NOT NULL,
+    subject         TEXT NOT NULL,
+    email           TEXT,
+    display_name    TEXT,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_login      TIMESTAMP,
+    UNIQUE (provider, subject)
+);
+CREATE INDEX IF NOT EXISTS idx_identities_user ON oauth_identities(user_id);
 
 CREATE TABLE IF NOT EXISTS annotations (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

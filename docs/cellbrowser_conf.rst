@@ -200,6 +200,30 @@ useful when hosting multiple datasets on a single Cell Browser instance (e.g. ce
 
       visibility = "hide"
 
+``links``
+   Only for collections. Also show datasets that live elsewhere in the tree, without a
+   second copy on disk. Each entry is a dataset's name, which is its path relative to
+   the top-level collection. You can link a single dataset or a whole collection.
+
+   ::
+
+      links = ["sea-ad-mtg/cohort"]
+
+   Use a dictionary instead of a string to relabel the dataset or to place it somewhere
+   specific in the list. Any setting in the dictionary overrides the linked dataset's own
+   value, and ``priority`` sorts it together with the collection's real subdirectories.
+
+   ::
+
+      links = [
+          {"name" : "sea-ad-mtg/cohort", "shortLabel" : "Middle temporal gyrus", "priority" : 5},
+      ]
+
+   A link target has to be built before the collection that links to it, since the link is
+   resolved by reading the target's ``dataset.json``. A linked dataset still belongs to its
+   own collection, so its "Collection" dropdown leads back there and not to the collection
+   it was linked from. See :doc:`collections` for the full description.
+
 
 Gene and Expression Settings
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

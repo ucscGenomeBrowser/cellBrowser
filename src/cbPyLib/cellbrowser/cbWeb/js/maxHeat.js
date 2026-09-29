@@ -21,6 +21,14 @@ function MaxHeat(div, args) {
     if (!args)
         args = {};
 
+    // Timers and label dumps used to go to the console on every heatmap draw,
+    // whether anyone wanted them or not. They are now behind debug mode, which
+    // initDebugMode() in cellBrowser.js turns on from ?debug=1. maxHeat is its own
+    // module and cannot see cellBrowser's DEBUG, so it reads the global that
+    // initDebugMode sets. A MaxHeat is built long after startup, so the flag is
+    // already there.
+    var DEBUG = !!window.doDebug;
+
     //let labelFontSize = args.fontSize || 11; // height of row labels, will decrease with increasing row count
     let drawMode = 2; // 1 = stupid simple, 2 = 2x faster
     var colLabelAngle = 50; // column labels are slanted by 50 degrees
@@ -921,7 +929,7 @@ function MaxHeat(div, args) {
     this.draw = function() {
         /* draw the labels and expression rectangles */
 
-        console.log("colLabelHeight=", self.colLabelHeight, "colLabels=", self.colLabels);
+        if (DEBUG) console.log("colLabelHeight=", self.colLabelHeight, "colLabels=", self.colLabels);
 
         this.clear();
 
@@ -950,7 +958,7 @@ function MaxHeat(div, args) {
         if (rowHeight>4) {
             var rowFontSize = self.rowFontSize;
             let rowEndToTextBase = (rowHeight - rowFontSize)/2;
-            console.time("rowLabelsDraw");
+            if (DEBUG) console.time("rowLabelsDraw");
             var rowLabels = self.rowLabels;
             for (var labelI=0; labelI < rowCount; labelI++) {
                 var realLabelI = rowOrder[labelI];
@@ -962,14 +970,14 @@ function MaxHeat(div, args) {
                     ctx.font = rowFontSize + "px sans-serif";
                 ctx.fillText(label, 4, textY);
             }
-            console.timeEnd("rowLabelsDraw");
+            if (DEBUG) console.timeEnd("rowLabelsDraw");
         }
 
         // draw expression column labels
         if (self.colLabelHeight>5) {
             var colFontSize = self.colFontSize;
             ctx.font = colFontSize+"px sans-serif";
-            console.time("colLabelsDraw");
+            if (DEBUG) console.time("colLabelsDraw");
             let colLabels = self.colLabels;
             let colLabelRot = -colLabelAngle * Math.PI / 180;
             for (var labelI=0; labelI<colCount; labelI++) {
@@ -983,7 +991,7 @@ function MaxHeat(div, args) {
                 ctx.fillText(truncLabel(colLabels[realLabelI], LABEL_MAX_LEN), 0, 0);
                 ctx.restore();
             }
-            console.timeEnd("colLabelsDraw");
+            if (DEBUG) console.timeEnd("colLabelsDraw");
         }
 
         // draw metadata annotations (annotates groups axis)
@@ -1006,10 +1014,10 @@ function MaxHeat(div, args) {
         var rowStartsSizes = self.rowStartsSizes;
         var colStartsSizes = self.colStartsSizes;
 
-        console.time("draw rects");
+        if (DEBUG) console.time("draw rects");
         drawRectsOpt1(ctx, rowStartsSizes, colStartsSizes, rows, pal, self.maxVal,
                 self.rowOrder, self.colOrder);
-        console.timeEnd("draw rects");
+        if (DEBUG) console.timeEnd("draw rects");
 
         ctx.restore();
     };
@@ -1033,7 +1041,7 @@ function MaxHeat(div, args) {
 
     this.orderOptimalLeaf = function () {
         /* order rows and columns with the optimalLeaf algorithm */
-        console.time("heatmap optimal leaf ordering");
+        if (DEBUG) console.time("heatmap optimal leaf ordering");
          if (self.rows.length == 1) { // if there's just one row, fudge the ordering
         } else {
             let orderFunc = reorder.optimal_leaf_order();
@@ -1042,7 +1050,7 @@ function MaxHeat(div, args) {
             self.colOrder = orderFunc(cols);
         }
 
-        console.timeEnd("heatmap optimal leaf ordering");
+        if (DEBUG) console.timeEnd("heatmap optimal leaf ordering");
     };
 
     this.loadRandomData = function(rowCount, colCount, maxVal) {

@@ -41,7 +41,25 @@ annotApiBase=
 # absent) everywhere else so the unfinished login does not appear.
 #   on / true / 1 / yes       = show the login UI
 #   off / anything / absent   = hide it
+#
+# This flag is the only login setting that belongs here. WHICH sign-in providers
+# (Google, ORCID, CILogon, ...) a site offers is configured server-side, in the
+# backend's providers.conf, because those stanzas hold client secrets and this
+# file is fetched by the browser. The frontend asks the backend what is live
+# (GET /api/auth/providers) and builds its buttons from the answer, so adding a
+# provider needs no change here. See deploy/providers.conf.sample.
 showLogin=off
+
+# Show the on-the-fly differential expression feature (Redmine #24912): the
+# "Differential expression" item in the Tools menu and the Tools tab. Like
+# showLogin, this is a feature flag that defaults to OFF, so the still-in-
+# progress DE UI does not appear on installs that have not opted in. Turn it on
+# only where it is ready to be seen.
+#   on / true / 1 / yes       = show the DE feature
+#   off / anything / absent   = hide it
+# Note: even with the UI shown, the statistics are placeholder until deUrl below
+# points at a real compute backend.
+showDiffExp=off
 
 # Endpoint for the on-the-fly differential expression backend (Redmine #24912).
 # The frontend POSTs a DE job spec here and polls the same URL for status and

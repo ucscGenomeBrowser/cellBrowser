@@ -14,7 +14,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from extensions import db
 from email_utils import send_reset_email, send_verification_email
-from models import User
+from models import OAuthIdentity, User
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -120,7 +120,10 @@ def login():
     password = data.get("password") or ""
 
     user = db.session.query(User).filter_by(email=email).first()
-    if not user or not check_password_hash(user.password_hash, password):
+    # An OAuth-only account has password_hash NULL; check_password_hash would
+    # raise on that, so treat it as "no password login" and give the same
+    # answer as a wrong password rather than revealing how the account signs in.
+    if not user or not user.password_hash or not check_password_hash(user.password_hash, password):
         return _bad("invalid email or password", status=401)
 
     if not user.email_verified:
@@ -141,17 +144,66 @@ def logout():
 
 @auth_bp.get("/providers")
 def providers():
-    """Which sign-in providers the frontend should offer. "password" is always
-    on; the OAuth flags reflect whether Google / ORCID credentials are
-    configured (see oauth.py). Defaults to OAuth-off if Authlib isn't installed
-    or OAuth failed to initialise, so the frontend degrades to password-only."""
-    status = {"password": True, "google": False, "orcid": False}
+    """Which sign-in providers the frontend should offer.
+
+    {"password": true, "providers": [{"slug": ..., "label": ...}, ...]}
+
+    The list is whatever providers.conf configured, in file order, so a new
+    provider appears in the sign-in dialog with no frontend change. Degrades to
+    password-only if Authlib isn't installed or OAuth failed to initialise.
+    """
+    out = {"password": True, "providers": []}
     try:
-        from oauth import provider_status
-        status.update(provider_status())
+        from oauth import provider_list
+        out["providers"] = provider_list()
     except Exception:
-        pass
-    return jsonify(status)
+        current_app.logger.exception("could not list OAuth providers")
+    # Legacy per-provider booleans, for a frontend cached from before the
+    # provider list existed. Safe to drop once no old cellBrowser.js is around.
+    slugs = {p["slug"] for p in out["providers"]}
+    out["google"] = "google" in slugs
+    out["orcid"] = "orcid" in slugs
+    return jsonify(out)
+
+
+# ---------- linked sign-in methods ----------
+
+def _identity_json(identity):
+    return {
+        "id": identity.id,
+        "provider": identity.provider,
+        "email": identity.email,
+        "display_name": identity.display_name,
+        "created_at": identity.created_at.isoformat() if identity.created_at else None,
+    }
+
+
+@auth_bp.get("/identities")
+@login_required
+def list_identities():
+    """The external sign-ins linked to the current account, plus whether a
+    password is also set. The frontend uses this to show what is linked and to
+    decide whether unlinking would lock the user out."""
+    return jsonify({
+        "hasPassword": bool(current_user.password_hash and current_user.email),
+        "identities": [_identity_json(i) for i in current_user.identities],
+    })
+
+
+@auth_bp.delete("/identities/<int:identity_id>")
+@login_required
+def unlink_identity(identity_id):
+    """Unlink one external sign-in. Refuses to remove the last way in, which
+    would leave an account nobody -- including its owner -- can reach."""
+    identity = db.session.get(OAuthIdentity, identity_id)
+    if identity is None or identity.user_id != current_user.id:
+        return _bad("no such linked sign-in", status=404)
+    if not current_user.can_sign_in_without(identity):
+        return _bad("this is the only way to sign in to this account -- set a "
+                    "password or link another provider first", status=409)
+    db.session.delete(identity)
+    db.session.commit()
+    return _ok()
 
 
 @auth_bp.get("/me")
@@ -162,6 +214,8 @@ def me():
         "loggedIn": True,
         "email": current_user.email,
         "display_name": current_user.display_name,
+        "hasPassword": bool(current_user.password_hash and current_user.email),
+        "identities": [_identity_json(i) for i in current_user.identities],
     })
 
 
