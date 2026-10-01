@@ -1661,16 +1661,35 @@ var cellbrowser = function() {
         return '';
     }
 
+    // the dataset dialog's faceting filters: combobox id and URL variable
+    const cDatasetFilters = [
+        ["tpBodyCombo", "bp"], ["tpDisCombo", "dis"], ["tpOrgCombo", "org"], ["tpProjCombo", "proj"],
+        ["tpStageCombo", "stage"], ["tpDomCombo", "dom"], ["tpAssayCombo", "assay"], ["tpSourceCombo", "source"]
+    ];
+
+    function clearDatasetFilters() {
+        /* reset all dataset filters and show all datasets again */
+        var urlArgs = {};
+        for (var [comboId, urlVar] of cDatasetFilters) {
+            $("#"+comboId).val([]).trigger("chosen:updated");
+            urlArgs[urlVar] = null;
+        }
+        changeUrl(urlArgs);
+        filterDatasetsDom();
+    }
+
     function filterDatasetsDom() {
         /* keep only datasets that fulfill the filters */
 
         // read the current filter values of the dropboxes
         var categories = ["Body", "Dis", "Org", "Proj", "Stage", "Dom", "Assay", "Source"];
         var filtVals = {};
+        var activeFilterCount = 0;
         for (var category of categories) {
             var vals = $("#tp"+category+"Combo").val();
-            if (vals===undefined)
+            if (vals===undefined || vals===null)
                 vals = [];
+            activeFilterCount += vals.length;
 
             // strip special chars
             var cleanVals = [];
@@ -1724,6 +1743,20 @@ var cellbrowser = function() {
             $('#tpDatasetCount').text("(filters active, "+shownCount+" datasets shown)");
         else
             $('#tpDatasetCount').text("("+shownCount+" dataset collections)");
+
+        // note next to the "Filters" header, so active filters are visible when it is collapsed
+        var noteEl = $('#tpFilterNote');
+        if (activeFilterCount===0)
+            noteEl.empty();
+        else {
+            var filtWord = (activeFilterCount===1 ? " filter is" : " filters are");
+            noteEl.html(": "+activeFilterCount+filtWord+" active, "+
+                "<span id='tpFilterClear' class='link'>click here to clear filters and show all datasets</span>");
+            $('#tpFilterClear').click(function(ev) {
+                ev.preventDefault(); // a click inside <summary> would also open/close the filters
+                clearDatasetFilters();
+            });
+        }
     }
 
     function openDatasetDialog(openDsInfo, selName, openTab) {
@@ -1759,6 +1792,7 @@ var cellbrowser = function() {
             html.push("<div style='min-width:0'>");
             html.push("<div style='margin-bottom:2px; font-size:12px; color:#555'>"+filterLabel+"</div>");
             let selPar = getVar(urlVar);
+            let filtList = [];
             if (selPar && selPar!=="")
                 filtList = selPar.split(" ");
             buildComboBox(html, comboId, filterVals, filtList, comboLabel, 200, {multi:true});
@@ -1804,23 +1838,12 @@ var cellbrowser = function() {
 
         function onFilterChange(ev) {
             /* called when user changes a filter: updates list of datasets shown */
-            var filtNames = $(this).val();
+            var filtNames = $(this).val() || [];
 
             var param = null;
-            if (this.id==="tpBodyCombo")
-                param = "bp";
-            else if (this.id=="tpDisCombo")
-                param = "dis";
-            else if (this.id=="tpOrgCombo")
-                param = "org";
-            else if (this.id=="tpProjCombo")
-                param = "proj";
-            else if (this.id=="tpDomCombo")
-                param = "dom";
-            else if (this.id=="tpAssayCombo")
-                param = "assay";
-            else if (this.id=="tpStageCombo")
-                param = "stage";
+            for (var [comboId, urlVar] of cDatasetFilters)
+                if (this.id===comboId)
+                    param = urlVar;
 
             // change the URL
             var filtArg = filtNames.join(" "); // space encodes as + in URL
@@ -1973,7 +1996,6 @@ var cellbrowser = function() {
         }
 
         let doFilters = false;
-        let filtList = [];
         let bodyParts = null;
         let diseases = null;
         let organisms = null;
@@ -2006,7 +2028,7 @@ var cellbrowser = function() {
             if (doFilters) {
                 noteLines.push("<details id='tpFilterDetails' style='margin-bottom:6px'>" +
                     "<summary style='cursor:pointer; font-weight:bold; color:#444; padding:2px 0; list-style:none; display:flex; align-items:center'>" +
-                    "<span class='tpFilterArrow' style='display:inline-block; margin-right:5px; font-size:10px'>&#9654;</span>Filters</summary>" +
+                    "<span class='tpFilterArrow' style='display:inline-block; margin-right:5px; font-size:10px'>&#9654;</span>Filters<span id='tpFilterNote' style='font-weight:normal; white-space:pre-wrap'></span></summary>" +
                     "<div style='display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding-top:8px'>");
 
                 buildFilter(noteLines, bodyParts, "Organ", "bp", "tpBodyCombo", "select organs...");
@@ -2066,9 +2088,12 @@ var cellbrowser = function() {
             });
         }
 
-        var winWidth = window.innerWidth - 0.05*window.innerWidth;
-        var winHeight = window.innerHeight - 0.05*window.innerHeight;
-        var tabsWidth = winWidth - leftPaneWidth - 50;
+        // the full page, without scrollbars (window.innerWidth includes them)
+        var winWidth = document.documentElement.clientWidth;
+        var winHeight = document.documentElement.clientHeight;
+        // the info pane floats right of the list: if it does not fit next to it, it wraps below the
+        // list, out of view. So leave some room for the dialog's padding and the list's scrollbar.
+        var tabsWidth = winWidth - leftPaneWidth - 80;
         listGroupHeight = winHeight - 100;
 
         var htmls = ["<div style='line-height: 1.1em'>"];
@@ -2118,8 +2143,12 @@ var cellbrowser = function() {
 
         var selDatasetIdx = 0;
 
+        // at startup, only the root collection (or a collection from the URL) is loaded and there
+        // is nothing behind the dialog: the user has to pick a dataset, so it cannot be closed
+        var noDatasetLoaded = (db===null || !db.conf || !db.conf.metaFields);
+
         var buttons = [];
-        if (db!==null) {
+        if (!noDatasetLoaded) {
             var cancelLabel = "Cancel";
             if (onlyInfo)
                 cancelLabel = "Close";
@@ -2135,7 +2164,12 @@ var cellbrowser = function() {
 
         $(".ui-dialog-content").dialog("close"); // close the last dialog box
 
-        showDialogBox(htmls, title, {width: winWidth, height:winHeight, buttons: buttons});
+        showDialogBox(htmls, title, {width: winWidth, height:winHeight, buttons: buttons, noClose: noDatasetLoaded});
+
+        // the dialog's padding and border come on top of the width, remove them so it fits the window
+        var dlgWidthExtra = $("#tpDialog").closest(".ui-dialog").outerWidth() - winWidth;
+        if (dlgWidthExtra > 0)
+            $("#tpDialog").dialog("option", "width", winWidth - dlgWidthExtra);
 
         $("#tpOpenDialogTabs").tabs();
 
@@ -2297,8 +2331,7 @@ var cellbrowser = function() {
 
     function onSelChange(selection) {
     /* called each time when the selection has been changed */
-        var cellIds = [];
-        selection.forEach(function(x) {cellIds.push(x)});
+        var cellIds = selection.toArray();
         $("#tpSetBackground").parent("li").removeClass("disabled");
 
         updateSelectionButtons();
@@ -6659,7 +6692,9 @@ var cellbrowser = function() {
         htmlLines.push("</div>");
         $(document.body).append(htmlLines.join(""));
 
-        var dialogOpts = {modal:true, closeOnEscape:true};
+        // options.noClose: no X in the title bar, and Escape or a click outside do not close it
+        var noClose = (options.noClose===true);
+        var dialogOpts = {modal:true, closeOnEscape:!noClose};
         if (options.width!==undefined)
             dialogOpts["width"] = options.width;
         if (options.height!==undefined)
@@ -6679,9 +6714,12 @@ var cellbrowser = function() {
         //dialogOpts["width"] = "auto";
 
         dialogOpts["open"] = function() {
-            $(".ui-widget-overlay").on("click", function() {
-                $("#tpDialog").dialog("close");
-            });
+            if (noClose)
+                $(this).closest(".ui-dialog").find(".ui-dialog-titlebar-close").hide();
+            else
+                $(".ui-widget-overlay").on("click", function() {
+                    $("#tpDialog").dialog("close");
+                });
             $("#tpDialog").on("keydown", "input", function(e) {
                 if (e.which === 13)
                     $("#tpDialog").closest(".ui-dialog").find(".ui-dialog-buttonpane button:contains('OK')").click();
@@ -9030,7 +9068,7 @@ var cellbrowser = function() {
 
     function onGeneExprSubsplitComboChange(ev, choice) {
         /* gene expression viewer: called when user changes the subsplit meta field combo box */
-        var geneIds = db.exprData ? db.exprData.geneIds.slice() : [];
+        var geneIds = exprPlotGeneIds();
         db.exprData = null;
         if (geneIds.length > 0)
             buildGeneExprPlotsAddGenes(geneIds, null);
@@ -9094,7 +9132,7 @@ var cellbrowser = function() {
                 updatePerturbCount(idx, pvc, db.conf.sampleCount);
             }
         }
-        var geneIds = db.exprData ? db.exprData.geneIds.slice() : [];
+        var geneIds = exprPlotGeneIds();
         db.exprData = null; // force full reload so mask is rebuilt for all genes
         if (geneIds.length > 0)
             buildGeneExprPlotsAddGenes(geneIds, null);
@@ -9109,6 +9147,12 @@ var cellbrowser = function() {
             function gotGeneData(exprArr, decArr, locusStr, geneDesc, binInfo) {
                 /* called when the expression vector has been loaded and binning is done */
                 debug("Promise - Received expression vector, for "+locusStr+", desc: "+geneDesc);
+                exprStatusThen("progressBarExpr", "Calculating averages for "+locusStr+"...", function() {
+                    splitAndResolve(exprArr, locusStr, geneDesc);
+                }, reject);
+            }
+
+            function splitAndResolve(exprArr, locusStr, geneDesc) {
                 let res = cellMask ? splitExprByMetaMasked(metaArr, metaCount, exprArr, cellMask)
                                    : splitExprByMeta(metaArr, metaCount, exprArr);
 
@@ -9128,7 +9172,8 @@ var cellbrowser = function() {
                 resolve(geneData);
             }
 
-            db.loadExprAndDiscretize(locusStr, gotGeneData, onProgress, "none");
+            db.loadExprAndDiscretize(locusStr, gotGeneData, onProgress, "none",
+                function(msg) { reject(new Error(msg)); });
         });
     }
 
@@ -9149,7 +9194,8 @@ var cellbrowser = function() {
                 resolve(metaInfo);
             }
 
-            db.loadMetaVec(metaInfo, gotMetaArray, onProgress, {}, db.conf.binStrategy);
+            db.loadMetaVec(metaInfo, gotMetaArray, onProgress, {}, db.conf.binStrategy,
+                function(msg) { reject(new Error(msg)); });
         });
     }
 
@@ -9512,9 +9558,14 @@ var cellbrowser = function() {
     function exprDataRemoveGene(sym) {
         /* remove a gene from the dot plot expr data */
         let exprData = db.exprData;
+        if (!exprData || gExprLoading) // a reload is running, it will replace the plot anyway
+            return;
         let geneIdx = exprData.syms.indexOf(sym);
+        if (geneIdx===-1)
+            return;
         exprData.syms.splice(geneIdx, 1); // remove the symbol
         exprData.geneIds.splice(geneIdx, 1); // and the geneId
+        gExprGeneIds = exprData.geneIds.slice();
 
         // remove the gene data
         let rowCount = exprData.rows.length;
@@ -9829,8 +9880,17 @@ var cellbrowser = function() {
         return { fieldNames: fieldNames, annotBins: annotBins, annotLabels: annotLabels, palettes: palettes };
     }
 
-    function exprDataLoadGenes(geneIds, exprData, onDone, cellMask) {
-        /* add a list of geneIds to the current exprData object and call onDone when done.*/
+    function exprLoadFailed(onError, err) {
+        /* a dot plot or heatmap load failed: tell the caller, or the user if the caller did not ask */
+        if (onError)
+            onError(err);
+        else
+            alert("Could not load the data: "+((err && err.message) ? err.message : err));
+    }
+
+    function exprDataLoadGenes(geneIds, exprData, onDone, cellMask, onError) {
+        /* add a list of geneIds to the current exprData object and call onDone when done.
+         * onError(err) is called if something could not be loaded. */
         let promises = [];
         let metaArr = exprData.metaData.arr;
         let metaCount = exprData.metaData.valCounts.length;
@@ -9900,7 +9960,7 @@ var cellbrowser = function() {
 
             exprDataUpdateMinMax(exprData);
             onDone(exprData);
-        });
+        }).catch( function(err) { exprLoadFailed(onError, err); });
     }
 
     function computeMetaMatrix(groupingMetaInfo, otherMetaInfos) {
@@ -9953,10 +10013,11 @@ var cellbrowser = function() {
         return { fieldNames: fieldNames, metaBins: metaBins, metaLabels: metaLabels, palettes: palettes };
     }
 
-    function loadGroupedExprData(exprData, geneIds, metaName, subsplitName, onGenesDone, perturbFilter) {
+    function loadGroupedExprData(exprData, geneIds, metaName, subsplitName, onGenesDone, perturbFilter, onError) {
         /* load geneIds into exprData object, load expr data and summarize (average) by meta field.
          * subsplitName: optional second meta field to cross with metaName (null = no subsplit).
-         * perturbFilter: optional {name, valueIdx} to restrict cells by perturbation value. */
+         * perturbFilter: optional {name, valueIdx} to restrict cells by perturbation value.
+         * onError(err): optional, called if something could not be loaded. Default is an alert. */
 
         if (exprData===null) {
             exprData = {};
@@ -10011,6 +10072,11 @@ var cellbrowser = function() {
         }
 
         Promise.all(metaPromises).then( function (resArr) {
+            exprStatusThen("progressBarMeta", "Summarizing annotations...", function() { onMetaLoaded(resArr); },
+                function(err) { exprLoadFailed(onError, err); });
+        }).catch( function(err) { exprLoadFailed(onError, err); });
+
+        function onMetaLoaded(resArr) {
             var primaryMetaInfo = resArr[0];
             exprData._primaryLabels = primaryMetaInfo.ui.shortLabels;
 
@@ -10070,8 +10136,79 @@ var cellbrowser = function() {
                 }
             }
 
-            exprDataLoadGenes(geneIds, exprData, onGenesDone, cellMask);
-        });
+            $("#progressBarMeta").children().first().text("Annotations summarized");
+            exprDataLoadGenes(geneIds, exprData, onGenesDone, cellMask, onError);
+        }
+    }
+
+    // Dot plot loading state. A load takes seconds on big datasets and the user can change the split,
+    // subsplit, perturbation or genes meanwhile, so db.exprData is not a reliable source for the gene
+    // list (it is null during a full reload), and an older load can finish after a newer one.
+    var gExprGeneIds = [];   // the genes the dot plot should show, as of the latest request
+    var gExprLoadId = 0;     // incremented for every load: only the result of the latest one is drawn
+    var gExprLoading = false;
+
+    function exprPlotGeneIds() {
+        /* return a copy of the gene IDs that the dot plot shows or is loading */
+        return gExprGeneIds.slice();
+    }
+
+    function exprLoadCancel() {
+        /* forget any running dot plot load, its result will not be drawn */
+        gExprLoadId++;
+        gExprLoading = false;
+    }
+
+    function exprSetBusy(isBusy) {
+        /* grey out the dot plot controls while a load is running, so the user cannot start another one */
+        let header = getById("tpExprViewHeader");
+        if (!header)
+            return;
+        header.inert = isBusy; // no clicks and no keyboard focus
+        header.classList.toggle("tpExprBusy", isBusy);
+    }
+
+    function exprStatusThen(barId, text, func, onError) {
+        /* show text on a dot plot progress bar, then run func. The calculations are synchronous and
+         * block the page, so give the browser one frame to draw the text before starting them.
+         * func runs outside of any promise chain, so its exceptions go to onError, if given. */
+        let barEl = $("#"+barId);
+        if (barEl.length!==0) {
+            barEl.progressbar("value", 100);
+            barEl.children().first().text(text);
+        }
+        requestAnimationFrame(function() { setTimeout(function() {
+            try {
+                func();
+            } catch (err) {
+                if (!onError)
+                    throw err;
+                onError(err);
+            }
+        }, 0); });
+    }
+
+    function showExprLoadError(err, onRetry) {
+        /* a dot plot load failed: say why, unlock the controls and offer to try again */
+        console.error("dot plot load failed:", err);
+        let msg = (err && err.message) ? err.message : String(err);
+        let plotEl = getById("tpExprViewPlot");
+        if (plotEl) {
+            let htmls = [];
+            htmls.push("<div id='tpExprLoadError' style='padding:10px; max-width:700px'>");
+            htmls.push("<p><b>The data for the dot plot could not be loaded.</b></p>");
+            htmls.push("<p>This usually means that the network connection was interrupted, for example when "+
+                "the computer switched to another Wi-Fi network, or that the web server had a temporary problem. "+
+                "Please check your connection and try again.</p>");
+            htmls.push("<p id='tpExprLoadErrorDetails'></p>");
+            htmls.push("<button id='tpExprLoadRetry'>Try again</button>");
+            htmls.push("</div>");
+            plotEl.innerHTML = htmls.join("");
+            $("#tpExprLoadErrorDetails").text("Details: "+msg);
+            $("#tpExprLoadRetry").click(onRetry);
+        }
+        gExprLoading = false;
+        exprSetBusy(false);
     }
 
     function buildGeneExprPlotsAddGenes(geneIds, metaName, plotType) {
@@ -10086,10 +10223,30 @@ var cellbrowser = function() {
         }
 
         if (geneIds===null) { // metaName was changed = re-calc the expr object
-            geneIds = db.exprData.geneIds;
+            geneIds = exprPlotGeneIds();
+            db.exprData = null;
+        } else if (gExprLoading) {
+            // genes added while another load is running: that load's exprData object will be
+            // discarded, so reload everything, with the new genes added to the requested ones
+            let allGeneIds = exprPlotGeneIds();
+            for (let geneId of geneIds)
+                if (allGeneIds.indexOf(geneId)===-1)
+                    allGeneIds.push(geneId);
+            geneIds = allGeneIds;
             db.exprData = null;
         }
-            //geneIds = db.exprData.geneIds.push(geneIds);
+
+        // remember which genes we want, and that only the result of this load counts
+        if (db.exprData===null)
+            gExprGeneIds = geneIds.slice();
+        else
+            for (let geneId of geneIds)
+                if (gExprGeneIds.indexOf(geneId)===-1)
+                    gExprGeneIds.push(geneId);
+        gExprLoadId++;
+        let loadId = gExprLoadId;
+        gExprLoading = true;
+        exprSetBusy(true);
 
         if (geneIds.length>0)
             selectizeSetValue("tpGeneExprGeneCombo", geneIds[0].split("|")[0]);
@@ -10133,6 +10290,26 @@ var cellbrowser = function() {
 
         function onExprDataDone (exprData) {
             /* done loading expression data, now do the plotting */
+            if (loadId!==gExprLoadId) // the user changed something meanwhile, a newer load is running
+                return;
+            exprStatusThen("progressBarExpr", "Drawing the plot...", function() { drawExprData(exprData); },
+                onExprLoadError);
+        }
+
+        function onExprLoadError(err) {
+            if (loadId!==gExprLoadId) // an older load, already replaced or cancelled
+                return;
+            // the exprData object may be half-filled, so the next load starts from scratch
+            db.exprData = null;
+            // "try again" reloads the requested genes with the current split, subsplit and perturbation
+            showExprLoadError(err, function() { buildGeneExprPlotsAddGenes(null, null); });
+        }
+
+        function drawExprData(exprData) {
+            if (loadId!==gExprLoadId) // the view was closed meanwhile
+                return;
+            gExprLoading = false;
+            gExprGeneIds = exprData.geneIds.slice();
             // populate split filter panel
             var splitBtn = getById("tpExprSplitFilterBtn");
             var splitPanel = getById("tpExprSplitFilterPanel");
@@ -10160,9 +10337,10 @@ var cellbrowser = function() {
             let allGeneIdStr = exprData.geneIds.join(" ");
             let urlOpts = { "exprGene" : allGeneIdStr, "exprMeta" : metaName };
             changeUrl(urlOpts);
+            exprSetBusy(false);
         };
 
-        loadGroupedExprData(db.exprData, geneIds, metaName, subsplitName, onExprDataDone, perturbFilter);
+        loadGroupedExprData(db.exprData, geneIds, metaName, subsplitName, onExprDataDone, perturbFilter, onExprLoadError);
 
         //Promise.all([promiseGeneSplitByMeta(geneId, geneExprOnProgress), promiseMeta(metaName, geneExprOnProgress)]).then( function(resArr) {
         //    //if(DEBUG) console.log("promises are all loaded", resArr);
@@ -10209,6 +10387,8 @@ var cellbrowser = function() {
         window.violinCharts = [];
         window.removeEventListener("keyup", onEscapeCloseExprView);
         db.exprData = null;
+        exprLoadCancel(); // a load still running must not draw into the removed window
+        gExprGeneIds = [];
     }
 
     function onEscapeCloseExprView(e) {
@@ -10854,19 +11034,18 @@ var cellbrowser = function() {
     function onMultiGeneLoadClick (ev) {
     /* user clicked 'load genes below' on the multi gene input dialog box to color the UMAP plot */
         let inGenes = parseGenesFromTextBox("#tpMultiGeneText");
+        if (!inGenes) // some genes were not found, the text box now says which
+            return;
         colorByMultiGenes(inGenes.geneIds, inGenes.syms);
     }
 
     function onGeneExprAddGenesLoadClick (ev) {
     /* user clicked 'load genes below' on the multi gene input dialog box to update the dotplot */
         let inGenes = parseGenesFromTextBox("#tpMultiGeneText");
-
-        function onExprDataDone() {
-            buildExprDotplot("tpExprViewPlot", exprData); 
-        }
-
-        exprDataLoadGenes(inGenes.geneIds, exprData, onExprDataDone);
-
+        if (!inGenes) // some genes were not found, the text box now says which
+            return;
+        // same as adding one gene with the gene combobox
+        buildGeneExprPlotsAddGenes(inGenes.geneIds, null);
     }
 
     function buildMultiGeneBox (htmls) {
@@ -11832,6 +12011,9 @@ var cellbrowser = function() {
         let els = document.getElementsByClassName("tpLegendCheckbox");
 
         let rows = gLegend.rows;
+        // for "invert" and "notNull": the colors to select and unselect, applied in one pass at the end
+        let selColIdxs = [];
+        let unselColIdxs = [];
         for (let i=0; i<els.length; i++) {
             let el = els[i];
             var valIdx = parseInt(el.getAttribute("data-value-index"));
@@ -11856,25 +12038,25 @@ var cellbrowser = function() {
             else if (status==="invert") {
                 if (!el.checked) {
                     el.checked = true;
-                    renderer.selectByColor(valIdx);
+                    selColIdxs.push(valIdx);
                     row.isChecked = true;
                 }
                 else {
                     el.checked = false;
                     row.isChecked = false;
-                    renderer.unselectByColor(valIdx);
+                    unselColIdxs.push(valIdx);
                 }
             }
             else if (status==="notNull") {
                 if ((i===0 && valStr===null) || (valStr!==null && likeEmptyString(valStr))) {
                     el.checked = false;
                     row.isChecked = false;
-                    renderer.unselectByColor(valIdx);
+                    unselColIdxs.push(valIdx);
                 }
                 else {
                     el.checked = true;
                     row.isChecked = true;
-                    renderer.selectByColor(valIdx);
+                    selColIdxs.push(valIdx);
                 }
             }
         }
@@ -11883,6 +12065,8 @@ var cellbrowser = function() {
             renderer.selectVisible();
         if (status==="none")
             renderer.selectClear();
+        if (status==="invert" || status==="notNull")
+            renderer.setByColors(selColIdxs, unselColIdxs);
 
         renderer.drawDots();
     }
@@ -12110,7 +12294,10 @@ var cellbrowser = function() {
         htmls.push("<small><button id='tpLegendAll'>All</button>");
         htmls.push("<button id='tpLegendNone'>None</button>");
         htmls.push("<button id='tpLegendInvert'>Invert</button>");
-        htmls.push("<button id='tpLegendNotNull'>&gt; 0</button></small>");
+        // "> 0" only makes sense for expression values
+        if (gLegend.type==="expr")
+            htmls.push("<button id='tpLegendNotNull'>&gt; 0</button>");
+        htmls.push("</small>");
 
         let buttonText = "Recolor checked values";
         if (gLegend.isColorOnlyChecked===true) {
