@@ -328,6 +328,35 @@ function MaxPlot(div, top, left, width, height, args) {
         [self.ctx, self.canvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, self.usesWebGL(), 'mpCanvas', self.mode);
         if(self.usesWebGL()) [self.labelCtx, self.labelCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, true, 'mpLabelCanvas', 1);
 
+        // webgl2FailReason() checked a test canvas, but the real context or the shaders can still
+        // fail (too many contexts, GPU reset, driver bugs). Then rebuild the plot with canvas 2D.
+        if (self.usesWebGL()) {
+            let failReason = null;
+            if (!self.ctx)
+                failReason = "webgl2-context-failed";
+            else {
+                let programOk = false;
+                try {
+                    programOk = self.initWebGLProgram();
+                } catch (err) {
+                    console.error("maxPlot: WebGL setup failed:", err);
+                }
+                if (!programOk)
+                    failReason = "webgl2-shader-failed";
+            }
+            if (failReason!==null) {
+                console.warn("maxPlot: "+failReason+", drawing with canvas 2D");
+                self.webglFailReason = failReason;
+                self.mode = 1;
+                for (let canv of [self.bgCanvas, self.canvas, self.labelCanvas])
+                    if (canv)
+                        canv.remove();
+                self.bgCtx = self.bgCanvas = self.labelCtx = self.labelCanvas = undefined;
+                self.program = undefined;
+                [self.ctx, self.canvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, false, 'mpCanvas', self.mode);
+            }
+        }
+
         /* Transparent overlay div used to show the active-screen border in
          * split screen mode. Sits above all canvases via z-index so the
          * border is never painted over. pointer-events:none so it doesn't
@@ -571,11 +600,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self._labelCache = null;
 
         self.activateMode(getAttr(args, "mode", "move"));
-
-        // If WebGL is being used to draw, initialize its program
-        if(self.usesWebGL()) {
-            this.initWebGLProgram();
-        }
+        // the WebGL program was already set up above, right after creating the canvases
     };
 
     this.initWebGLProgram = function() {
@@ -709,6 +734,7 @@ function MaxPlot(div, top, left, width, height, args) {
             const shader = self.ctx.createShader(type);
             if (!shader) {
                 console.error(`Unable to create ${shaderType} shader`);
+                return null;
             }
 
             // Set the program
@@ -718,6 +744,7 @@ function MaxPlot(div, top, left, width, height, args) {
             self.ctx.compileShader(shader);
             if (!self.ctx.getShaderParameter(shader, self.ctx.COMPILE_STATUS)) {
                 console.error(`Failed to compile ${shaderType} shader. Error: ${self.ctx.getShaderInfoLog(shader)}`);
+                return null;
             }
 
             // Return the shader
@@ -725,17 +752,21 @@ function MaxPlot(div, top, left, width, height, args) {
         }
         const vertexShader = loadShader(VERTEX_SHADER_SRC, ctx.VERTEX_SHADER);
         const fragmentShader = loadShader(FRAGMENT_SHADER_SRC, ctx.FRAGMENT_SHADER);
+        if (!vertexShader || !fragmentShader)
+            return false;
 
         // Create the GLSL program
         self.program = ctx.createProgram();
         if (!self.program) {
             console.error("Error: Unable to create program");
+            return false;
         }
         ctx.attachShader(self.program, vertexShader);
         ctx.attachShader(self.program, fragmentShader);
         ctx.linkProgram(self.program);
         if (!ctx.getProgramParameter(self.program, ctx.LINK_STATUS)) {
-            console.error(`Failed to link shaders. Error: ${ctx.getProgramInfoLog(glProgram)}`);
+            console.error(`Failed to link shaders. Error: ${ctx.getProgramInfoLog(self.program)}`);
+            return false;
         }
         ctx.useProgram(self.program);
 
@@ -795,6 +826,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.u_CanvWidth = getUniform('u_CanvWidth');
         self.u_CanvHeight = getUniform('u_CanvHeight');
         self.u_LightMode = getUniform('u_LightMode');
+        return true;
     }
 
     this.clear = function() {
@@ -1350,7 +1382,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
                 if(!ctx) {
                     console.error("WebGL 2 not supported");
-                    return;
+                    return [null, canv]; // initCanvas removes the canvas and falls back to 2D
                 }
                 break;
             default:
