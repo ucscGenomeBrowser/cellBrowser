@@ -130,6 +130,27 @@ class CellSelection {
     }
 }
 
+function webgl2FailReason() {
+    /* return null if this browser can draw with WebGL2, otherwise a short reason why not.
+     * The usual causes: WebGL switched off in the browser, a blocklisted GPU or driver,
+     * hardware acceleration disabled, or a remote desktop / VM without a GPU. */
+    if (!window.WebGL2RenderingContext)
+        return "no-webgl2-support";
+    try {
+        const canv = document.createElement("canvas");
+        const gl = canv.getContext("webgl2");
+        if (!gl)
+            return "no-webgl2-context";
+        // free the test context right away, browsers allow only a few at a time
+        const loseExt = gl.getExtension("WEBGL_lose_context");
+        if (loseExt)
+            loseExt.loseContext();
+    } catch (err) {
+        return "webgl2-error";
+    }
+    return null;
+}
+
 function MaxPlot(div, top, left, width, height, args) {
     // a class that draws circles onto a canvas, like a scatter plot
     // div is a div DOM element under which the canvas will be created
@@ -260,12 +281,22 @@ function MaxPlot(div, top, left, width, height, args) {
         this.drawDots();
     }
 
-    // Drawing mode
-    const defaultDrawMode = 1;
+    // Drawing mode: 2 = WebGL2, 0 and 1 = canvas 2D
+    const defaultDrawMode = 2;
     if(args !== undefined && args !== null) {
         self.mode = getAttr(args, "drawMode", defaultDrawMode);
     } else {
         self.mode = defaultDrawMode;
+    }
+
+    // fall back to canvas 2D if this browser cannot do WebGL2. webglFailReason stays null otherwise.
+    self.webglFailReason = null;
+    if (self.mode === 2) {
+        self.webglFailReason = webgl2FailReason();
+        if (self.webglFailReason !== null) {
+            console.warn("maxPlot: WebGL2 is not available ("+self.webglFailReason+"), drawing with canvas 2D");
+            self.mode = 1;
+        }
     }
 
     this.isLight = function() {return this.lightMode === 1;}
@@ -430,6 +461,44 @@ function MaxPlot(div, top, left, width, height, args) {
         }
         return greyArray;
     }
+
+    this.getImageCanvas = function() {
+        /* return a 2D canvas with the plot as it is shown, for saving as PNG.
+         * In 2D mode, that is the drawing canvas itself. In WebGL mode the plot is three canvases on top
+         * of each other: the background (image or plain color), the WebGL dots, whose colors are
+         * inverted with a CSS filter (see addCanvasToDiv), and the labels. They are combined here. */
+        if (!self.usesWebGL())
+            return self.canvas;
+
+        const width = self.canvas.width;
+        const height = self.canvas.height;
+        const out = document.createElement("canvas");
+        out.width = width;
+        out.height = height;
+        const outCtx = out.getContext("2d");
+        outCtx.drawImage(self.bgCanvas, 0, 0);
+
+        // WebGL clears its buffer after showing a frame, so draw again and copy it in the same task
+        self.drawDots();
+        const dots = document.createElement("canvas");
+        dots.width = width;
+        dots.height = height;
+        const dotsCtx = dots.getContext("2d");
+        dotsCtx.drawImage(self.canvas, 0, 0);
+        // apply the CSS invert(1) by hand, ctx.filter is not supported by all browsers
+        const img = dotsCtx.getImageData(0, 0, width, height);
+        const px = img.data;
+        for (let i = 0; i < px.length; i += 4) {
+            px[i]   = 255 - px[i];
+            px[i+1] = 255 - px[i+1];
+            px[i+2] = 255 - px[i+2];
+        }
+        dotsCtx.putImageData(img, 0, 0);
+        outCtx.drawImage(dots, 0, 0);
+
+        outCtx.drawImage(self.labelCanvas, 0, 0);
+        return out;
+    };
 
     this.usesWebGL = function() {
         return !(self.mode === 0 || self.mode === 1)
