@@ -48,6 +48,10 @@ import requests
 # ============================================================================
 FROM_EMAIL = "Matt Speir <mspeir@ucsc.edu>"
 CC_EMAIL = "cells@ucsc.edu"
+# where an author's reply should land. The note goes out over one person's
+# name, but the answer is the team's business, so point replies at the list
+# rather than at whoever happened to send it.
+REPLY_TO_EMAIL = "cells@ucsc.edu"
 
 # how long a dataset may stay quiet before we write again
 MIN_AGE_DAYS = 365
@@ -408,14 +412,14 @@ def draftPath(name):
     return os.path.join(QUEUE_DIR, name.replace("/", "+") + ".eml")
 
 
-def writeDraft(info, fromAddr, ccAddr):
+def writeDraft(info, fromAddr, ccAddr, replyTo):
     senderName = email.utils.parseaddr(fromAddr)[0] or fromAddr
     body = wrap(EMAIL_TEMPLATE.format(first_name=firstName(info["submitter"]),
                                       label=info["label"], url=info["url"],
                                       sender_name=senderName))
-    text = ("To: %s\nCc: %s\nFrom: %s\nSubject: %s\n"
+    text = ("To: %s\nCc: %s\nFrom: %s\nReply-To: %s\nSubject: %s\n"
             "X-Cb-Dataset: %s\nX-Cb-Email-Source: %s\n\n%s") % (
-        ", ".join(info["emails"]), ccAddr, fromAddr,
+        ", ".join(info["emails"]), ccAddr, fromAddr, replyTo,
         SUBJECT_TEMPLATE.format(label=info["label"]), info["name"],
         info.get("emailSource", "") or "unknown", body)
     path = draftPath(info["name"])
@@ -516,7 +520,8 @@ def runScan(args):
     if due:
         lines.append("Due -- a draft is waiting in %s" % QUEUE_DIR)
         for info in due:
-            path = None if args.dry_run else writeDraft(info, args.sender, args.cc)
+            path = None if args.dry_run else writeDraft(info, args.sender, args.cc,
+                                                        args.reply_to)
             since = info["since"].isoformat() if info["since"] else "unknown"
             where = ""
             if info["emailSource"] not in ("submitter", ""):
@@ -582,6 +587,7 @@ def runSend(args):
         print("\n" + "=" * 70)
         print("To:      %s" % headers.get("to", ""))
         print("Cc:      %s" % headers.get("cc", ""))
+        print("Reply-To: %s" % headers.get("reply-to", ""))
         print("Subject: %s" % headers.get("subject", ""))
         source = headers.get("x-cb-email-source", "")
         if source and source != "submitter":
@@ -637,6 +643,8 @@ def main():
     scan.add_argument("--dataset-dir", default=DATASET_DIR)
     scan.add_argument("--sender", default=FROM_EMAIL)
     scan.add_argument("--cc", default=CC_EMAIL)
+    scan.add_argument("--reply-to", default=REPLY_TO_EMAIL,
+                      help="where replies should go (default %s)" % REPLY_TO_EMAIL)
     scan.add_argument("--mail-report", nargs="?", const=REPORT_TO, default=None,
                       metavar="ADDR", help="mail the report (default %s)" % REPORT_TO)
     scan.add_argument("-n", "--dry-run", action="store_true", help="report only, write no drafts")
