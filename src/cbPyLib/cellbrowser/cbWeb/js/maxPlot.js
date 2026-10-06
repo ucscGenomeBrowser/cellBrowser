@@ -289,6 +289,9 @@ function MaxPlot(div, top, left, width, height, args) {
         self.mode = defaultDrawMode;
     }
 
+    // called with an event name when the WebGL context is lost, restored, or cannot be restored
+    self.onWebglEvent = null;
+
     // fall back to canvas 2D if this browser cannot do WebGL2. webglFailReason stays null otherwise.
     self.webglFailReason = null;
     if (self.mode === 2) {
@@ -355,6 +358,14 @@ function MaxPlot(div, top, left, width, height, args) {
                 self.program = undefined;
                 [self.ctx, self.canvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, false, 'mpCanvas', self.mode);
             }
+        }
+
+        if (self.usesWebGL()) {
+            // the browser can take the WebGL context away at any time: GPU driver reset or update,
+            // GPU process crash, sleep/resume, a phone putting the tab into the background
+            self.glContextLost = false;
+            self.canvas.addEventListener("webglcontextlost", onWebglContextLost, false);
+            self.canvas.addEventListener("webglcontextrestored", onWebglContextRestored, false);
         }
 
         /* Transparent overlay div used to show the active-screen border in
@@ -527,6 +538,102 @@ function MaxPlot(div, top, left, width, height, args) {
 
         outCtx.drawImage(self.labelCanvas, 0, 0);
         return out;
+    };
+
+    // ---- WebGL context loss and restore ----
+    const GL_RESTORE_TIMEOUT_MS = 10000; // after this, tell the user to reload
+
+    function webglEvent(eventName) {
+        /* tell the page about a WebGL problem, e.g. so it can be counted */
+        if (self.onWebglEvent)
+            self.onWebglEvent(eventName);
+    }
+
+    function showGlMessage(text, withReload) {
+        /* show a message over the plot, or remove it if text is null.
+         * Keep a reference, not an id: the split view's canvases have the same ids. */
+        let el = self.glMsgEl;
+        if (text===null) {
+            if (el)
+                el.remove();
+            self.glMsgEl = null;
+            return;
+        }
+        if (!el) {
+            el = document.createElement("div");
+            self.glMsgEl = el;
+            el.style.cssText = "position:absolute; top:40%; left:0; right:0; margin:auto; width:420px; z-index:60;"+
+                "padding:12px; background:white; color:black; border:1px solid #888; text-align:center";
+            self.canvDiv.appendChild(el);
+        }
+        el.textContent = text;
+        if (withReload) {
+            let btn = document.createElement("button");
+            btn.textContent = "Reload the page";
+            btn.style.marginTop = "8px";
+            btn.style.display = "block";
+            btn.style.marginLeft = "auto";
+            btn.style.marginRight = "auto";
+            btn.addEventListener("click", function() { location.reload(); });
+            el.appendChild(btn);
+        }
+    }
+
+    function onWebglContextLost(ev) {
+        /* the GPU state is gone. preventDefault() asks the browser to restore the context later. */
+        ev.preventDefault();
+        self.glContextLost = true;
+        console.warn("maxPlot: WebGL context lost, waiting for the browser to restore it");
+        showGlMessage("The graphics card was reset. Restoring the plot...", false);
+        webglEvent("webgl_context_lost");
+        clearTimeout(self.glRestoreTimer);
+        self.glRestoreTimer = setTimeout(function() {
+            if (!self.glContextLost)
+                return;
+            showGlMessage("The graphics card was reset and the browser did not restore the plot.", true);
+            webglEvent("webgl_restore_timeout");
+        }, GL_RESTORE_TIMEOUT_MS);
+    }
+
+    function onWebglContextRestored(ev) {
+        /* the browser gave us a new, empty context: rebuild everything on the GPU from the data kept in JS */
+        clearTimeout(self.glRestoreTimer);
+        if (self.restoreWebGL()) {
+            showGlMessage(null);
+            webglEvent("webgl_context_restored");
+        } else {
+            showGlMessage("The graphics card was reset and the plot could not be restored.", true);
+            webglEvent("webgl_restore_failed");
+        }
+    }
+
+    this.stopWebglWatch = function() {
+        /* the plot is being removed: no more timeout message or events for it */
+        clearTimeout(self.glRestoreTimer);
+        self.onWebglEvent = null;
+    };
+
+    this.restoreWebGL = function() {
+        /* re-create the WebGL program and upload all buffers again, then redraw. Returns false on failure. */
+        let ok = false;
+        try {
+            ok = self.initWebGLProgram();
+        } catch (err) {
+            console.error("maxPlot: WebGL restore failed:", err);
+        }
+        if (!ok)
+            return false;
+        self.glContextLost = false;
+        self.ctx.viewport(0, 0, self.canvas.width, self.canvas.height);
+        if (self.coords.gl)
+            self.bindBuffer(2, self.a_Position, self.coords.gl, self.ctx.FLOAT);
+        self.bindColors();     // no-op if no colors are set yet
+        self._bindSelected();  // no-op if no coords yet
+        if (self.coords.hidden)
+            self.bindBuffer(1, self.a_Hidden, self.coords.hidden, self.ctx.UNSIGNED_BYTE);
+        if (self.coords.orig)
+            self.drawDots();
+        return true;
     };
 
     this.usesWebGL = function() {
@@ -3152,6 +3259,8 @@ function MaxPlot(div, top, left, width, height, args) {
         var width = plotWidth+self.svgLabelWidth;
         var height = 1500; // enough space for 100 lines in the legend
         self.svgLines.push("<svg  xmlns='http://www.w3.org/2000/svg' height='"+height+"' width='"+width+"'>\n");
+        if (self.usesWebGL())
+            coords = glCoordsToPx(coords, plotWidth, plotHeight);
         drawCirclesSvg(self.svgLines, coords, colArr, pal, radius, alpha, self.selCells);
         if (self.doDrawLabels===true && self.plotLabels!==null && self.plotLabels!==undefined)
             drawLabelsSvg(self.svgLines, self.plotPxLabels, plotWidth, plotHeight, self.port.zoomFact);
@@ -3173,6 +3282,8 @@ function MaxPlot(div, top, left, width, height, args) {
     this.drawDots = function(doSvg) {
         /* draw coordinates to canvas with current colors */
         if (self._suppressDraw) return;
+        // nothing can be drawn with WebGL until the browser restores the context. SVG export does not need it.
+        if (self.glContextLost && doSvg===undefined) return;
         if(DEBUG) console.time("draw");
 
         self.clear();
@@ -4387,14 +4498,36 @@ function MaxPlot(div, top, left, width, height, args) {
        self.drawDots();
     };
 
+    function glCoordsToPx(glCoords, plotWidth, plotHeight) {
+        /* convert WebGL coordinates to canvas pixels with the current zoom and pan, like the vertex
+         * shader does. Hidden and off-screen cells get HIDCOORD. */
+        const projection = self.port.projection;
+        const hidden = self.coords.hidden;
+        const count = glCoords.length/2;
+        const px = new Float32Array(glCoords.length);
+        for (let i = 0; i < count; i++) {
+            const x = glCoords[2*i];
+            const y = glCoords[2*i+1];
+            if (isHidden(x, y, i)) {
+                px[2*i] = HIDCOORD;
+                px[2*i+1] = HIDCOORD;
+                continue;
+            }
+            const [clipX, clipY] = projection.multiply(x, y);
+            px[2*i]   = (clipX + 1) / 2 * plotWidth;
+            px[2*i+1] = (1 - clipY) / 2 * plotHeight; // clip space y points up, pixels go down
+        }
+        return px;
+    }
+
     function drawCirclesSvg(svgLines, pxCoords, coordColors, colors, radius, alpha, selCells) {
-    /* add SVG text to the array svgLines */
+    /* add SVG text to the array svgLines. pxCoords are canvas pixels, HIDCOORD = not shown. */
        debug("Drawing "+coordColors.length+" circles with SVG renderer");
        var count = 0;
        for (var i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
            var pxY = pxCoords[2*i+1];
-           if (isHidden(pxX, pxY, i))
+           if (pxX===HIDCOORD && pxY===HIDCOORD)
                continue;
            var col = colors[coordColors[i]];
 
@@ -4664,6 +4797,7 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.onLabelHover = self.onLabelHover;
         plot2.onNoLabelHover = self.onNoLabelHover;
         plot2.onActiveChange = self.onActiveChange;
+        plot2.onWebglEvent = self.onWebglEvent;
 
         if(self.usesWebGL()) {
             // Initialiaze WebGL buffers on child plot
@@ -4738,6 +4872,7 @@ function MaxPlot(div, top, left, width, height, args) {
         }
         self.setSize(self.width*2, self.height, false);
 
+        otherRend.stopWebglWatch();
         otherRend.div.remove();
         self.activeBorderDiv.style.border = "none";
         return;
@@ -4752,6 +4887,7 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     this.destroy = function() {
+        self.stopWebglWatch();
         self.div.remove(); // remove all DOM objects
         self.initPlot(); // free memory
     }

@@ -582,14 +582,17 @@ var cellbrowser = function() {
         gtag('event', eventName, {"dataset_name": eventLabel});
     }
 
-    function reportNoWebgl(reason) {
-        /* the browser cannot draw with WebGL2 and the plot uses canvas 2D. Count this in two ways:
-         * a Google Analytics event, and a request for a file that does not exist, which shows up
-         * in the Apache access log (with the user agent) even when an ad blocker stops Google
-         * Analytics. Silent: it must never bother the user. */
+    function reportWebglProblem(eventName, reason) {
+        /* count a WebGL problem in two ways: a Google Analytics event, and a request for a file
+         * that does not exist, which shows up in the Apache access log (with the user agent) even
+         * when an ad blocker stops Google Analytics. Silent: it must never bother the user.
+         * eventName: "webgl_unavailable" (plot uses canvas 2D, reason says why), or from maxPlot:
+         * "webgl_context_lost", "webgl_context_restored", "webgl_restore_timeout", "webgl_restore_failed" */
+        if (!reason)
+            reason = eventName;
         let dsName = (db && db.name) ? db.name : "";
         if (typeof gtag === 'function')
-            gtag('event', 'webgl_unavailable', {"reason": reason, "dataset_name": dsName});
+            gtag('event', eventName, {"reason": reason, "dataset_name": dsName});
         try {
             fetch("noWebgl.html?reason="+encodeURIComponent(reason), {cache: "no-store"}).catch(function() {});
         } catch (err) {
@@ -8129,7 +8132,8 @@ var cellbrowser = function() {
             renderer = new MaxPlot(rendDiv, canvTop, canvLeft, canvWidth, canvHeight, {lightMode: lightMode, drawMode: drawMode});
             window.renderer = renderer;
             if (renderer.webglFailReason)
-                reportNoWebgl(renderer.webglFailReason);
+                reportWebglProblem("webgl_unavailable", renderer.webglFailReason);
+            renderer.onWebglEvent = function(eventName) { reportWebglProblem(eventName); };
             if (DEBUG) wrapDrawTiming(renderer); // time each WebGL draw in the debug bar
 
             document.body.appendChild(rendDiv);
