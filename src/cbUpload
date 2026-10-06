@@ -8,9 +8,9 @@
 # 'requests'. It is written to run on most older Python 3 versions (no f-strings,
 # no walrus operator, only stdlib modules).
 #
-# Unlike the genome browser uploader, the only two metadata attributes sent for
-# each file are "dataset" and "passcode" - there is no apiKey and nothing about
-# assemblies, file types, parent directories, etc.
+# Unlike the genome browser uploader, the only metadata attributes sent for each
+# file are "dataset", "passcode" and "filename" - there is no apiKey and nothing
+# about assemblies, file types, parent directories, etc.
 
 import argparse
 import base64
@@ -281,10 +281,13 @@ def uploadFiles(passcode, dataset, filePaths, baseUrl, cacheFname, force):
             logging.info("%s: unchanged since last upload, skipping" % localPath)
             continue
 
-        # the only two metadata attributes for the cell browser tusd server
+        # metadata for the cell browser tusd server. "filename" is what the
+        # Associate Files page shows, so it must be sent or the upload appears
+        # there as "Unknown file".
         metadata = {
             "dataset": dataset,
             "passcode": passcode,
+            "filename": os.path.basename(localPath),
         }
 
         logging.info("Uploading %s (%d bytes)" % (localPath, size))
@@ -352,7 +355,7 @@ The tusd server URL defaults to:
   %s
 It can be overridden with --url or a line 'tusdUrl=...' in %s.
 
-Only two metadata attributes are sent per file: "dataset" and "passcode".
+Three metadata attributes are sent per file: "dataset", "passcode" and "filename".
 Files whose modification time is unchanged since the last successful upload
 are skipped (mtime cache in %s); use -f/--force to re-upload them anyway.
 
