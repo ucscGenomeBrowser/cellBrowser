@@ -3089,7 +3089,8 @@ def parseMarkerTable(filename, geneToSym):
 
     return data, newHeaders
 
-def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac):
+def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac,
+        geneToSymFromMatrix=None):
     """ split .tsv on first field and create many files in outDir with columns 2-end.
         Returns the names of the clusters and a dict topMarkers with clusterName -> list of five top marker genes.
     """
@@ -3097,6 +3098,20 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac):
 
     if filename is None:
         return
+
+    # Marker files are often written with gene symbols while the matrix is keyed
+    # by accession (CELLxGENE h5ads index genes by Ensembl ID, for instance).
+    # Every row then fails the matrixGeneIds test and the cluster marker tables
+    # come out empty, with only a warning. Build symbol -> matrix-id so we can
+    # recover those rows instead of dropping them.
+    symToMatrixId = {}
+    if not isAtac:
+        for idToSym in (geneToSymFromMatrix, geneToSym):
+            if not idToSym:
+                continue
+            for gId, sym in iterItems(idToSym):
+                if sym and gId in matrixGeneIds and sym not in symToMatrixId:
+                    symToMatrixId[sym] = gId
 
     data, newHeaders = parseMarkerTable(filename, geneToSym)
 
@@ -3122,6 +3137,7 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac):
         ofh.write("\t".join(newHeaders))
         ofh.write("\n")
         missGeneIds = set()
+        symFixed = set()
         for row in rows:
             row[2] = "%0.5E" % row[2] # limit score to 5 digits
             geneId = row[0]
@@ -3137,13 +3153,40 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac):
                 row[1] = "%s:%d-%d" % (chrom, start, end) # nicer for the display
             else:
                 if geneId not in matrixGeneIds:
-                    missGeneIds.add(geneId)
-                    continue
+                    # the marker file may be using symbols against an
+                    # accession-keyed matrix -- translate rather than drop
+                    altId = symToMatrixId.get(geneId)
+                    if altId is None:
+                        missGeneIds.add(geneId)
+                        continue
+                    row[0] = altId
+                    if not row[1]:
+                        row[1] = geneId
+                    symFixed.add(geneId)
 
             ofh.write("\t".join(row))
             ofh.write("\n")
 
+        if len(symFixed)!=0:
+            logging.warn("%s, cluster '%s': %d marker genes were given as symbols but the "
+                "matrix is keyed by accession. They were matched up automatically. "
+                "Consider rewriting the marker file to use the matrix identifiers." %
+                (filename, clusterName, len(symFixed)))
+
         if len(missGeneIds)!=0:
+            # Losing EVERY gene is never a data quirk, it means the marker file
+            # and the matrix are keyed differently and the symbol fallback above
+            # could not rescue it either. The old code only warned, so the build
+            # succeeded and the Cluster Markers tab came up silently empty.
+            if len(rows)!=0 and len(missGeneIds)==len(rows):
+                someMiss = list(missGeneIds)[:3]
+                someMat = list(matrixGeneIds)[:3]
+                errAbort("None of the %d marker genes for cluster '%s' in %s are in the "
+                    "expression matrix, so the marker table would be empty. This almost "
+                    "always means the two use different gene identifiers. Marker genes "
+                    "look like: %s. Matrix genes look like: %s. Rewrite the marker file "
+                    "to use the same identifiers as the matrix." %
+                    (len(rows), clusterName, filename, someMiss, someMat))
             logging.error("Marker table contains these genes, they were skipped, they are not in the matrix: %s" % (",".join(missGeneIds)))
             #logging.error("Use --force to accept this.")
 
@@ -4161,7 +4204,8 @@ def checkClusterNames(markerFname, clusterNames, clusterLabels, doAbort):
                 "Users may not notice the problem, but it may indicate an erroneous meta data file.") % \
                 (markerFname, notInLabels))
 
-def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, outDir):
+def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, outDir,
+        geneToSymFromMatrix=None):
     """ split the marker tables into one file per cluster and add filenames as 'markers' in outConf
     also add the 'topMarkers' to outConf, the top five markers for every cluster.
     """
@@ -4184,10 +4228,21 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, out
 
         clusterName = "markers_%d" % markerIdx # use sha1 of input file ?
         markerDir = join(outDir, "markers", clusterName)
+        # markers_N is positional, so adding/removing/reordering marker tabs
+        # changes what N means. makeDir() does not clear the directory, so files
+        # from the tab that used to live here survive and get served under the
+        # new tab's name -- wrong columns, wrong numbers, no warning. Wipe it.
+        if isdir(markerDir):
+            old = glob.glob(join(markerDir, "*.tsv.gz")) + glob.glob(join(markerDir, "*.tsv"))
+            if old:
+                logging.info("Clearing %d stale file(s) from %s" % (len(old), markerDir))
+                for fn in old:
+                    os.remove(fn)
         makeDir(markerDir)
 
         isAtac = inConf.get("atacSearch")
-        clusterNames, topMarkers = splitMarkerTable(markerFname, geneToSym, matrixGeneIds, markerDir, isAtac)
+        clusterNames, topMarkers = splitMarkerTable(markerFname, geneToSym, matrixGeneIds, markerDir, isAtac,
+            geneToSymFromMatrix=geneToSymFromMatrix)
         if markerIdx == primaryIdx:
             outConf["topMarkers"] = topMarkers
 
@@ -4201,9 +4256,20 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, out
             newDict["columnOrder"] = markerInfo["columnOrder"]
         if "columnLabels" in markerInfo:
             newDict["columnLabels"] = markerInfo["columnLabels"]
+        # the JS reads these two to set the table's initial sort; without copying
+        # them here they can never be set from cellbrowser.conf
+        if "sortColumn" in markerInfo:
+            newDict["sortColumn"] = markerInfo["sortColumn"]
+        if "sortOrder" in markerInfo:
+            newDict["sortOrder"] = markerInfo["sortOrder"]
         newMarkers.append( newDict )
 
     outConf["markers"] = newMarkers
+    # The toolbar button falls back to markers[0].shortLabel, so adding or
+    # reordering marker tabs silently renames the button. clusterMarkersLabel
+    # pins it; the JS already reads it, it just was never copied out here.
+    copyConf(inConf, outConf, "clusterMarkersLabel")
+    copyConf(inConf, outConf, "dotPlotMaxGenes")
 
 def areProbablyGeneIds(ids):
     " if 80% of 'ids' start with the same letter, they are probably gene IDs, not symbols "
@@ -4869,7 +4935,8 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
 
     matrixSyms, matrixGeneIds, geneToSymFromMatrix = readValidGenes(datasetDir, inConf)
 
-    convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, datasetDir)
+    convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, datasetDir,
+        geneToSymFromMatrix=geneToSymFromMatrix)
 
     readQuickGenes(inConf, geneToSym, matrixSyms, matrixGeneIds, geneToSymFromMatrix, datasetDir, outConf)
 
@@ -5270,7 +5337,7 @@ def saveMarkers(adata, markerField, nb_marker, fname):
                 gene = gene.decode("utf8")
             if symToId:
                 sym = symToId.get(gene)
-                if sym!=None:
+                if isinstance(sym, str):
                     gene = sym+"|"+gene
             ofh.write( sep.join( (cluster, gene, str(score)) ) )
             ofh.write("\n")
@@ -6999,8 +7066,7 @@ def cbUpgrade(outDir, doData=True, doCode=False, devMode=False, port=None):
     if doCode or devMode:
         copyStatic(webDir, outDir)
 
-    if not devMode:
-        makeIndexHtml(webDir, outDir, devMode=devMode)
+    makeIndexHtml(webDir, outDir, devMode=devMode)
 
     if port:
         print("Interrupt this process, e.g. with Ctrl-C, to stop the webserver")

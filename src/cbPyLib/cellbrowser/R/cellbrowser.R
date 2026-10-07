@@ -582,7 +582,7 @@ ExportToCellbrowser <- function(
   }
   if (!is.null(file)) {
     markers.string <- sprintf(
-      'markers = [{"file": "%s", "shortLabel": "Seurat Cluster Markers"}]',
+      'markers = [{"file": "%s", "shortLabel": "Cluster Markers"}]',
       file
     )
   }
