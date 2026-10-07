@@ -619,6 +619,60 @@ var cellbrowser = function() {
         return outArr;
     }
 
+    function slugify(str) {
+        /* "Human Breast Cell Atlas" -> "human-breast-cell-atlas", for URLs */
+        return String(str).toLowerCase().replace(/[^a-z0-9]+/g, "-")
+                          .replace(/^-+|-+$/g, "");
+    }
+
+    function resolveFilterVals(selPar, filterVals) {
+        /* Turn a facet URL parameter into real facet values.
+         * Accepts, in order of preference:
+         *   ?proj=human-breast-cell-atlas     slug of the value (canonical)
+         *   ?proj=slug-one,slug-two           comma-separated for multi-select
+         *   ?proj=Human Breast Cell Atlas     the literal value
+         *   ?proj=SFARI GTEx                  legacy space-separated values
+         * Space used to be the multi-select separator, which silently broke any
+         * value containing a space -- "Human Breast Cell Atlas" was parsed as
+         * four filters and over-matched. Resolving against the known values
+         * first means multi-word values now work. */
+        // filterVals comes from getDatasetAttrs(), which returns [value, label]
+        // pairs like ["Human Cell Atlas", "Human Cell Atlas (28)"] -- plain
+        // strings are also accepted. Key off the value, as buildComboBox does,
+        // otherwise the whole pair gets slugified and nothing ever matches.
+        var bySlug = {};
+        for (var i = 0; i < filterVals.length; i++) {
+            var fv = filterVals[i];
+            var val = Array.isArray(fv) ? fv[0] : fv;
+            bySlug[slugify(val)] = val;
+        }
+
+        var toks = (selPar.indexOf(",") !== -1) ? selPar.split(",") : [selPar];
+        var out = [];
+        for (var t = 0; t < toks.length; t++) {
+            var tok = toks[t].trim();
+            if (tok === "")
+                continue;
+            var hit = bySlug[slugify(tok)];
+            if (hit !== undefined) {
+                out.push(hit);
+                continue;
+            }
+            // legacy space-separated list: resolve each word on its own
+            if (tok.indexOf(" ") !== -1) {
+                var parts = tok.split(" "), anyHit = false;
+                for (var p = 0; p < parts.length; p++) {
+                    var h2 = bySlug[slugify(parts[p])];
+                    if (h2 !== undefined) { out.push(h2); anyHit = true; }
+                }
+                if (anyHit)
+                    continue;
+            }
+            out.push(tok); // unknown value, pass through
+        }
+        return out;
+    }
+
     function findMetaValIndex(metaInfo, value) {
         /* return the index of the value of an enum meta field */
         var valCounts = metaInfo.valCounts;
@@ -1794,7 +1848,7 @@ var cellbrowser = function() {
             let selPar = getVar(urlVar);
             let filtList = [];
             if (selPar && selPar!=="")
-                filtList = selPar.split(" ");
+                filtList = resolveFilterVals(selPar, filterVals);
             buildComboBox(html, comboId, filterVals, filtList, comboLabel, 200, {multi:true});
             html.push("</div>");
             return true;
@@ -1846,7 +1900,9 @@ var cellbrowser = function() {
                     param = urlVar;
 
             // change the URL
-            var filtArg = filtNames.join(" "); // space encodes as + in URL
+            // slugs joined by comma: a space separator breaks any value that
+            // contains a space (see resolveFilterVals)
+            var filtArg = filtNames.map(slugify).join(",");
             var urlArgs = {}
             urlArgs[param] = filtArg;
             changeUrl(urlArgs);
@@ -14218,9 +14274,22 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         return zoomRange;
     }
 
+    // subdomains that map to a "projects" facet filter on the homepage
+    // dataset-picker dialog, instead of a single dataset/collection name.
+    // e.g. sfari.cells.ucsc.edu -> cells.ucsc.edu?proj=SFARI, showing a
+    // live, auto-updating list of every dataset tagged projects=["SFARI"].
+    var PROJECT_SUBDOMAINS = {
+        "sfari": "SFARI",
+        // several subdomains may point at the same project term
+        "hbca": "Human Breast Cell Atlas",
+        "human-breast-cell-atlas": "Human Breast Cell Atlas",
+    };
+
     function redirectIfSubdomain() {
         /* rewrite the URL if at ucsc and subdomain is specified
-         * e.g. autism.cells.ucsc.edu -> cells.ucsc.edu?ds=autism */
+         * e.g. autism.cells.ucsc.edu -> cells.ucsc.edu?ds=autism
+         * or, for a known project subdomain, e.g.
+         * sfari.cells.ucsc.edu -> cells.ucsc.edu?proj=SFARI */
         /* we cannot run in the subdomain, as otherwise localStorage and
          * cookies are not shared */
 
@@ -14236,7 +14305,13 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 var datasetName = hostParts[0];
                 hostParts.shift();
                 myUrl.hostname = hostParts.join(".");
-                myUrl.search = "ds="+datasetName;
+                // hostnames are case-insensitive, so HBCA and hbca must agree
+                var subKey = datasetName.toLowerCase();
+                if (PROJECT_SUBDOMAINS.hasOwnProperty(subKey)) {
+                    myUrl.search = "proj="+slugify(PROJECT_SUBDOMAINS[subKey]);
+                } else {
+                    myUrl.search = "ds="+datasetName;
+                }
                 window.location.replace(myUrl.href);
                 return true;
             }
