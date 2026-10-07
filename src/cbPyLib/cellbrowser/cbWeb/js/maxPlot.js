@@ -130,6 +130,27 @@ class CellSelection {
     }
 }
 
+function webgl2FailReason() {
+    /* return null if this browser can draw with WebGL2, otherwise a short reason why not.
+     * The usual causes: WebGL switched off in the browser, a blocklisted GPU or driver,
+     * hardware acceleration disabled, or a remote desktop / VM without a GPU. */
+    if (!window.WebGL2RenderingContext)
+        return "no-webgl2-support";
+    try {
+        const canv = document.createElement("canvas");
+        const gl = canv.getContext("webgl2");
+        if (!gl)
+            return "no-webgl2-context";
+        // free the test context right away, browsers allow only a few at a time
+        const loseExt = gl.getExtension("WEBGL_lose_context");
+        if (loseExt)
+            loseExt.loseContext();
+    } catch (err) {
+        return "webgl2-error";
+    }
+    return null;
+}
+
 function MaxPlot(div, top, left, width, height, args) {
     // a class that draws circles onto a canvas, like a scatter plot
     // div is a div DOM element under which the canvas will be created
@@ -260,12 +281,25 @@ function MaxPlot(div, top, left, width, height, args) {
         this.drawDots();
     }
 
-    // Drawing mode
-    const defaultDrawMode = 1;
+    // Drawing mode: 2 = WebGL2, 0 and 1 = canvas 2D
+    const defaultDrawMode = 2;
     if(args !== undefined && args !== null) {
         self.mode = getAttr(args, "drawMode", defaultDrawMode);
     } else {
         self.mode = defaultDrawMode;
+    }
+
+    // called with an event name when the WebGL context is lost, restored, or cannot be restored
+    self.onWebglEvent = null;
+
+    // fall back to canvas 2D if this browser cannot do WebGL2. webglFailReason stays null otherwise.
+    self.webglFailReason = null;
+    if (self.mode === 2) {
+        self.webglFailReason = webgl2FailReason();
+        if (self.webglFailReason !== null) {
+            console.warn("maxPlot: WebGL2 is not available ("+self.webglFailReason+"), drawing with canvas 2D");
+            self.mode = 1;
+        }
     }
 
     this.isLight = function() {return this.lightMode === 1;}
@@ -296,6 +330,43 @@ function MaxPlot(div, top, left, width, height, args) {
         if(self.usesWebGL()) [self.bgCtx, self.bgCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, false, 'mpBackgroundCanvas', 1);
         [self.ctx, self.canvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, self.usesWebGL(), 'mpCanvas', self.mode);
         if(self.usesWebGL()) [self.labelCtx, self.labelCanvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, true, 'mpLabelCanvas', 1);
+
+        // webgl2FailReason() checked a test canvas, but the real context or the shaders can still
+        // fail (too many contexts, GPU reset, driver bugs). Then rebuild the plot with canvas 2D.
+        if (self.usesWebGL()) {
+            let failReason = null;
+            if (!self.ctx)
+                failReason = "webgl2-context-failed";
+            else {
+                let programOk = false;
+                try {
+                    programOk = self.initWebGLProgram();
+                } catch (err) {
+                    console.error("maxPlot: WebGL setup failed:", err);
+                }
+                if (!programOk)
+                    failReason = "webgl2-shader-failed";
+            }
+            if (failReason!==null) {
+                console.warn("maxPlot: "+failReason+", drawing with canvas 2D");
+                self.webglFailReason = failReason;
+                self.mode = 1;
+                for (let canv of [self.bgCanvas, self.canvas, self.labelCanvas])
+                    if (canv)
+                        canv.remove();
+                self.bgCtx = self.bgCanvas = self.labelCtx = self.labelCanvas = undefined;
+                self.program = undefined;
+                [self.ctx, self.canvas] = addCanvasToDiv(canvDiv, top, left, width, height-gStatusHeight, false, 'mpCanvas', self.mode);
+            }
+        }
+
+        if (self.usesWebGL()) {
+            // the browser can take the WebGL context away at any time: GPU driver reset or update,
+            // GPU process crash, sleep/resume, a phone putting the tab into the background
+            self.glContextLost = false;
+            self.canvas.addEventListener("webglcontextlost", onWebglContextLost, false);
+            self.canvas.addEventListener("webglcontextrestored", onWebglContextRestored, false);
+        }
 
         /* Transparent overlay div used to show the active-screen border in
          * split screen mode. Sits above all canvases via z-index so the
@@ -431,6 +502,140 @@ function MaxPlot(div, top, left, width, height, args) {
         return greyArray;
     }
 
+    this.getImageCanvas = function() {
+        /* return a 2D canvas with the plot as it is shown, for saving as PNG.
+         * In 2D mode, that is the drawing canvas itself. In WebGL mode the plot is three canvases on top
+         * of each other: the background (image or plain color), the WebGL dots, whose colors are
+         * inverted with a CSS filter (see addCanvasToDiv), and the labels. They are combined here. */
+        if (!self.usesWebGL())
+            return self.canvas;
+
+        const width = self.canvas.width;
+        const height = self.canvas.height;
+        const out = document.createElement("canvas");
+        out.width = width;
+        out.height = height;
+        const outCtx = out.getContext("2d");
+        outCtx.drawImage(self.bgCanvas, 0, 0);
+
+        // WebGL clears its buffer after showing a frame, so draw again and copy it in the same task
+        self.drawDots();
+        const dots = document.createElement("canvas");
+        dots.width = width;
+        dots.height = height;
+        const dotsCtx = dots.getContext("2d");
+        dotsCtx.drawImage(self.canvas, 0, 0);
+        // apply the CSS invert(1) by hand, ctx.filter is not supported by all browsers
+        const img = dotsCtx.getImageData(0, 0, width, height);
+        const px = img.data;
+        for (let i = 0; i < px.length; i += 4) {
+            px[i]   = 255 - px[i];
+            px[i+1] = 255 - px[i+1];
+            px[i+2] = 255 - px[i+2];
+        }
+        dotsCtx.putImageData(img, 0, 0);
+        outCtx.drawImage(dots, 0, 0);
+
+        outCtx.drawImage(self.labelCanvas, 0, 0);
+        return out;
+    };
+
+    // ---- WebGL context loss and restore ----
+    const GL_RESTORE_TIMEOUT_MS = 10000; // after this, tell the user to reload
+
+    function webglEvent(eventName) {
+        /* tell the page about a WebGL problem, e.g. so it can be counted */
+        if (self.onWebglEvent)
+            self.onWebglEvent(eventName);
+    }
+
+    function showGlMessage(text, withReload) {
+        /* show a message over the plot, or remove it if text is null.
+         * Keep a reference, not an id: the split view's canvases have the same ids. */
+        let el = self.glMsgEl;
+        if (text===null) {
+            if (el)
+                el.remove();
+            self.glMsgEl = null;
+            return;
+        }
+        if (!el) {
+            el = document.createElement("div");
+            self.glMsgEl = el;
+            el.style.cssText = "position:absolute; top:40%; left:0; right:0; margin:auto; width:420px; z-index:60;"+
+                "padding:12px; background:white; color:black; border:1px solid #888; text-align:center";
+            self.canvDiv.appendChild(el);
+        }
+        el.textContent = text;
+        if (withReload) {
+            let btn = document.createElement("button");
+            btn.textContent = "Reload the page";
+            btn.style.marginTop = "8px";
+            btn.style.display = "block";
+            btn.style.marginLeft = "auto";
+            btn.style.marginRight = "auto";
+            btn.addEventListener("click", function() { location.reload(); });
+            el.appendChild(btn);
+        }
+    }
+
+    function onWebglContextLost(ev) {
+        /* the GPU state is gone. preventDefault() asks the browser to restore the context later. */
+        ev.preventDefault();
+        self.glContextLost = true;
+        console.warn("maxPlot: WebGL context lost, waiting for the browser to restore it");
+        showGlMessage("The graphics card was reset. Restoring the plot...", false);
+        webglEvent("webgl_context_lost");
+        clearTimeout(self.glRestoreTimer);
+        self.glRestoreTimer = setTimeout(function() {
+            if (!self.glContextLost)
+                return;
+            showGlMessage("The graphics card was reset and the browser did not restore the plot.", true);
+            webglEvent("webgl_restore_timeout");
+        }, GL_RESTORE_TIMEOUT_MS);
+    }
+
+    function onWebglContextRestored(ev) {
+        /* the browser gave us a new, empty context: rebuild everything on the GPU from the data kept in JS */
+        clearTimeout(self.glRestoreTimer);
+        if (self.restoreWebGL()) {
+            showGlMessage(null);
+            webglEvent("webgl_context_restored");
+        } else {
+            showGlMessage("The graphics card was reset and the plot could not be restored.", true);
+            webglEvent("webgl_restore_failed");
+        }
+    }
+
+    this.stopWebglWatch = function() {
+        /* the plot is being removed: no more timeout message or events for it */
+        clearTimeout(self.glRestoreTimer);
+        self.onWebglEvent = null;
+    };
+
+    this.restoreWebGL = function() {
+        /* re-create the WebGL program and upload all buffers again, then redraw. Returns false on failure. */
+        let ok = false;
+        try {
+            ok = self.initWebGLProgram();
+        } catch (err) {
+            console.error("maxPlot: WebGL restore failed:", err);
+        }
+        if (!ok)
+            return false;
+        self.glContextLost = false;
+        self.ctx.viewport(0, 0, self.canvas.width, self.canvas.height);
+        if (self.coords.gl)
+            self.bindBuffer(2, self.a_Position, self.coords.gl, self.ctx.FLOAT);
+        self.bindColors();     // no-op if no colors are set yet
+        self._bindSelected();  // no-op if no coords yet
+        if (self.coords.hidden)
+            self.bindBuffer(1, self.a_Hidden, self.coords.hidden, self.ctx.UNSIGNED_BYTE);
+        if (self.coords.orig)
+            self.drawDots();
+        return true;
+    };
+
     this.usesWebGL = function() {
         return !(self.mode === 0 || self.mode === 1)
     };
@@ -502,11 +707,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self._labelCache = null;
 
         self.activateMode(getAttr(args, "mode", "move"));
-
-        // If WebGL is being used to draw, initialize its program
-        if(self.usesWebGL()) {
-            this.initWebGLProgram();
-        }
+        // the WebGL program was already set up above, right after creating the canvases
     };
 
     this.initWebGLProgram = function() {
@@ -640,6 +841,7 @@ function MaxPlot(div, top, left, width, height, args) {
             const shader = self.ctx.createShader(type);
             if (!shader) {
                 console.error(`Unable to create ${shaderType} shader`);
+                return null;
             }
 
             // Set the program
@@ -649,6 +851,7 @@ function MaxPlot(div, top, left, width, height, args) {
             self.ctx.compileShader(shader);
             if (!self.ctx.getShaderParameter(shader, self.ctx.COMPILE_STATUS)) {
                 console.error(`Failed to compile ${shaderType} shader. Error: ${self.ctx.getShaderInfoLog(shader)}`);
+                return null;
             }
 
             // Return the shader
@@ -656,17 +859,21 @@ function MaxPlot(div, top, left, width, height, args) {
         }
         const vertexShader = loadShader(VERTEX_SHADER_SRC, ctx.VERTEX_SHADER);
         const fragmentShader = loadShader(FRAGMENT_SHADER_SRC, ctx.FRAGMENT_SHADER);
+        if (!vertexShader || !fragmentShader)
+            return false;
 
         // Create the GLSL program
         self.program = ctx.createProgram();
         if (!self.program) {
             console.error("Error: Unable to create program");
+            return false;
         }
         ctx.attachShader(self.program, vertexShader);
         ctx.attachShader(self.program, fragmentShader);
         ctx.linkProgram(self.program);
         if (!ctx.getProgramParameter(self.program, ctx.LINK_STATUS)) {
-            console.error(`Failed to link shaders. Error: ${ctx.getProgramInfoLog(glProgram)}`);
+            console.error(`Failed to link shaders. Error: ${ctx.getProgramInfoLog(self.program)}`);
+            return false;
         }
         ctx.useProgram(self.program);
 
@@ -726,6 +933,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.u_CanvWidth = getUniform('u_CanvWidth');
         self.u_CanvHeight = getUniform('u_CanvHeight');
         self.u_LightMode = getUniform('u_LightMode');
+        return true;
     }
 
     this.clear = function() {
@@ -1281,7 +1489,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
                 if(!ctx) {
                     console.error("WebGL 2 not supported");
-                    return;
+                    return [null, canv]; // initCanvas removes the canvas and falls back to 2D
                 }
                 break;
             default:
@@ -3051,6 +3259,8 @@ function MaxPlot(div, top, left, width, height, args) {
         var width = plotWidth+self.svgLabelWidth;
         var height = 1500; // enough space for 100 lines in the legend
         self.svgLines.push("<svg  xmlns='http://www.w3.org/2000/svg' height='"+height+"' width='"+width+"'>\n");
+        if (self.usesWebGL())
+            coords = glCoordsToPx(coords, plotWidth, plotHeight);
         drawCirclesSvg(self.svgLines, coords, colArr, pal, radius, alpha, self.selCells);
         if (self.doDrawLabels===true && self.plotLabels!==null && self.plotLabels!==undefined)
             drawLabelsSvg(self.svgLines, self.plotPxLabels, plotWidth, plotHeight, self.port.zoomFact);
@@ -3072,6 +3282,8 @@ function MaxPlot(div, top, left, width, height, args) {
     this.drawDots = function(doSvg) {
         /* draw coordinates to canvas with current colors */
         if (self._suppressDraw) return;
+        // nothing can be drawn with WebGL until the browser restores the context. SVG export does not need it.
+        if (self.glContextLost && doSvg===undefined) return;
         if(DEBUG) console.time("draw");
 
         self.clear();
@@ -4286,14 +4498,36 @@ function MaxPlot(div, top, left, width, height, args) {
        self.drawDots();
     };
 
+    function glCoordsToPx(glCoords, plotWidth, plotHeight) {
+        /* convert WebGL coordinates to canvas pixels with the current zoom and pan, like the vertex
+         * shader does. Hidden and off-screen cells get HIDCOORD. */
+        const projection = self.port.projection;
+        const hidden = self.coords.hidden;
+        const count = glCoords.length/2;
+        const px = new Float32Array(glCoords.length);
+        for (let i = 0; i < count; i++) {
+            const x = glCoords[2*i];
+            const y = glCoords[2*i+1];
+            if (isHidden(x, y, i)) {
+                px[2*i] = HIDCOORD;
+                px[2*i+1] = HIDCOORD;
+                continue;
+            }
+            const [clipX, clipY] = projection.multiply(x, y);
+            px[2*i]   = (clipX + 1) / 2 * plotWidth;
+            px[2*i+1] = (1 - clipY) / 2 * plotHeight; // clip space y points up, pixels go down
+        }
+        return px;
+    }
+
     function drawCirclesSvg(svgLines, pxCoords, coordColors, colors, radius, alpha, selCells) {
-    /* add SVG text to the array svgLines */
+    /* add SVG text to the array svgLines. pxCoords are canvas pixels, HIDCOORD = not shown. */
        debug("Drawing "+coordColors.length+" circles with SVG renderer");
        var count = 0;
        for (var i = 0; i < pxCoords.length/2; i++) {
            var pxX = pxCoords[2*i];
            var pxY = pxCoords[2*i+1];
-           if (isHidden(pxX, pxY, i))
+           if (pxX===HIDCOORD && pxY===HIDCOORD)
                continue;
            var col = colors[coordColors[i]];
 
@@ -4563,6 +4797,7 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.onLabelHover = self.onLabelHover;
         plot2.onNoLabelHover = self.onNoLabelHover;
         plot2.onActiveChange = self.onActiveChange;
+        plot2.onWebglEvent = self.onWebglEvent;
 
         if(self.usesWebGL()) {
             // Initialiaze WebGL buffers on child plot
@@ -4637,6 +4872,7 @@ function MaxPlot(div, top, left, width, height, args) {
         }
         self.setSize(self.width*2, self.height, false);
 
+        otherRend.stopWebglWatch();
         otherRend.div.remove();
         self.activeBorderDiv.style.border = "none";
         return;
@@ -4651,6 +4887,7 @@ function MaxPlot(div, top, left, width, height, args) {
     }
 
     this.destroy = function() {
+        self.stopWebglWatch();
         self.div.remove(); // remove all DOM objects
         self.initPlot(); // free memory
     }

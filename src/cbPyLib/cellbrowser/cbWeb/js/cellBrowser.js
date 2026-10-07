@@ -582,11 +582,29 @@ var cellbrowser = function() {
         gtag('event', eventName, {"dataset_name": eventLabel});
     }
 
+    function reportWebglProblem(eventName, reason) {
+        /* count a WebGL problem in two ways: a Google Analytics event, and a request for a file
+         * that does not exist, which shows up in the Apache access log (with the user agent) even
+         * when an ad blocker stops Google Analytics. Silent: it must never bother the user.
+         * eventName: "webgl_unavailable" (plot uses canvas 2D, reason says why), or from maxPlot:
+         * "webgl_context_lost", "webgl_context_restored", "webgl_restore_timeout", "webgl_restore_failed" */
+        if (!reason)
+            reason = eventName;
+        let dsName = (db && db.name) ? db.name : "";
+        if (typeof gtag === 'function')
+            gtag('event', eventName, {"reason": reason, "dataset_name": dsName});
+        try {
+            fetch("noWebgl.html?reason="+encodeURIComponent(reason), {cache: "no-store"}).catch(function() {});
+        } catch (err) {
+            // old browser without fetch, ignore
+        }
+    }
+
     function trackEventObj(eventName, obj) {
-    /* send an event obj to google analytics */
+    /* send an event with parameters obj to google analytics */
         if (typeof gtag !== 'function')
             return;
-        gtag('event', obj);
+        gtag('event', eventName, obj);
     }
 
     function classAddListener(className, type, listener) {
@@ -2463,7 +2481,7 @@ var cellbrowser = function() {
 
     function onSaveAsClick() {
     /* File - Save Image as ... */
-        var canvas = $("canvas")[0];
+        var canvas = renderer.getImageCanvas();
         canvas.toBlob(function(blob) { saveAs( blob , "cellBrowser.png"); } , "image/png");
     }
 
@@ -8164,11 +8182,14 @@ var cellbrowser = function() {
             var rendDiv = document.createElement('div');
             rendDiv.id = "tpMaxPlot";
 
+            // WebGL by default (maxPlot falls back to canvas 2D if WebGL2 does not work), URL drawMode=1 forces 2D
             const drawModeUrl = parseInt(getVar("drawMode"));
-            const drawMode = Number.isInteger(drawModeUrl) ? drawModeUrl :
-                (db.conf.sampleCount > 200000 ? 2 : undefined);
+            const drawMode = Number.isInteger(drawModeUrl) ? drawModeUrl : undefined;
             renderer = new MaxPlot(rendDiv, canvTop, canvLeft, canvWidth, canvHeight, {lightMode: lightMode, drawMode: drawMode});
             window.renderer = renderer;
+            if (renderer.webglFailReason)
+                reportWebglProblem("webgl_unavailable", renderer.webglFailReason);
+            renderer.onWebglEvent = function(eventName) { reportWebglProblem(eventName); };
             if (DEBUG) wrapDrawTiming(renderer); // time each WebGL draw in the debug bar
 
             document.body.appendChild(rendDiv);
