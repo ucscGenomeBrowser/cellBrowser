@@ -637,6 +637,60 @@ var cellbrowser = function() {
         return outArr;
     }
 
+    function slugify(str) {
+        /* "Human Breast Cell Atlas" -> "human-breast-cell-atlas", for URLs */
+        return String(str).toLowerCase().replace(/[^a-z0-9]+/g, "-")
+                          .replace(/^-+|-+$/g, "");
+    }
+
+    function resolveFilterVals(selPar, filterVals) {
+        /* Turn a facet URL parameter into real facet values.
+         * Accepts, in order of preference:
+         *   ?proj=human-breast-cell-atlas     slug of the value (canonical)
+         *   ?proj=slug-one,slug-two           comma-separated for multi-select
+         *   ?proj=Human Breast Cell Atlas     the literal value
+         *   ?proj=SFARI GTEx                  legacy space-separated values
+         * Space used to be the multi-select separator, which silently broke any
+         * value containing a space -- "Human Breast Cell Atlas" was parsed as
+         * four filters and over-matched. Resolving against the known values
+         * first means multi-word values now work. */
+        // filterVals comes from getDatasetAttrs(), which returns [value, label]
+        // pairs like ["Human Cell Atlas", "Human Cell Atlas (28)"] -- plain
+        // strings are also accepted. Key off the value, as buildComboBox does,
+        // otherwise the whole pair gets slugified and nothing ever matches.
+        var bySlug = {};
+        for (var i = 0; i < filterVals.length; i++) {
+            var fv = filterVals[i];
+            var val = Array.isArray(fv) ? fv[0] : fv;
+            bySlug[slugify(val)] = val;
+        }
+
+        var toks = (selPar.indexOf(",") !== -1) ? selPar.split(",") : [selPar];
+        var out = [];
+        for (var t = 0; t < toks.length; t++) {
+            var tok = toks[t].trim();
+            if (tok === "")
+                continue;
+            var hit = bySlug[slugify(tok)];
+            if (hit !== undefined) {
+                out.push(hit);
+                continue;
+            }
+            // legacy space-separated list: resolve each word on its own
+            if (tok.indexOf(" ") !== -1) {
+                var parts = tok.split(" "), anyHit = false;
+                for (var p = 0; p < parts.length; p++) {
+                    var h2 = bySlug[slugify(parts[p])];
+                    if (h2 !== undefined) { out.push(h2); anyHit = true; }
+                }
+                if (anyHit)
+                    continue;
+            }
+            out.push(tok); // unknown value, pass through
+        }
+        return out;
+    }
+
     function findMetaValIndex(metaInfo, value) {
         /* return the index of the value of an enum meta field */
         var valCounts = metaInfo.valCounts;
@@ -1812,7 +1866,7 @@ var cellbrowser = function() {
             let selPar = getVar(urlVar);
             let filtList = [];
             if (selPar && selPar!=="")
-                filtList = selPar.split(" ");
+                filtList = resolveFilterVals(selPar, filterVals);
             buildComboBox(html, comboId, filterVals, filtList, comboLabel, 200, {multi:true});
             html.push("</div>");
             return true;
@@ -1864,7 +1918,9 @@ var cellbrowser = function() {
                     param = urlVar;
 
             // change the URL
-            var filtArg = filtNames.join(" "); // space encodes as + in URL
+            // slugs joined by comma: a space separator breaks any value that
+            // contains a space (see resolveFilterVals)
+            var filtArg = filtNames.map(slugify).join(",");
             var urlArgs = {}
             urlArgs[param] = filtArg;
             changeUrl(urlArgs);
@@ -8147,7 +8203,12 @@ var cellbrowser = function() {
             self.tooltipDiv = makeTooltipCont();
             document.body.appendChild(self.tooltipDiv);
 
-            buildEmptyLegendBar(metaBarWidth + metaBarMargin + renderer.width, toolBarHeight);
+            // The legend is a full-height right-hand column, so its top is
+            // menuBarHeight -- the same as #tpLeftSidebar, which it mirrors.
+            // Not canvTop: the canvas starts below the toolbar, the side columns
+            // do not. Passing toolBarHeight here overlapped the grey menu bar.
+            buildEmptyLegendBar(metaBarWidth + metaBarMargin + renderer.width,
+                                menuBarHeight);
 
             // Set buttons/inputs to not inherit color from bootstrap by default
             let bootstrapSheetRules = [...[...document.styleSheets].find((sheet) => sheet.href && sheet.href.includes("bootstrap.min.css")).cssRules];
@@ -8447,6 +8508,15 @@ var cellbrowser = function() {
         /* load dataset sibling labels into collection combobox from json */
         var htmls = [];
         var datasets = collData.datasets;
+        // A collection that has been reduced to a single visible dataset has
+        // nowhere to jump to, so the dropdown is just a confusing no-op. Hide it
+        // rather than offering a one-item menu whose only entry is the current
+        // dataset. The combo is still built, so it repopulates if siblings
+        // are ever unhidden.
+        if (!datasets || datasets.length <= 1) {
+            $('#'+id).closest('.tpToolBarItem').hide();
+            return;
+        }
         for (var i = 0; i < datasets.length; i++) {
             var ds = datasets[i];
             var selStr =  "";
@@ -10334,22 +10404,30 @@ var cellbrowser = function() {
             // populate split filter panel
             var splitBtn = getById("tpExprSplitFilterBtn");
             var splitPanel = getById("tpExprSplitFilterPanel");
+            var splitLabel = getById("tpExprSplitFilterLabel");
             if (splitBtn && splitPanel) {
                 splitPanel.style.display = 'none'; // ensure closed before populating
                 populateExprFilterPanel("tpExprSplitFilterPanel", "tpExprSplitFilterBtn", exprData._primaryLabels || exprData.metaLabels);
                 splitBtn.style.display = '';
+                if (splitLabel)
+                    splitLabel.style.display = '';
             }
             // populate subsplit filter panel
             var ssBtn = getById("tpExprSubsplitFilterBtn");
             var ssPanel = getById("tpExprSubsplitFilterPanel");
+            var ssLabel = getById("tpExprSubsplitFilterLabel");
             if (ssBtn && ssPanel) {
                 if (exprData._subsplitLabels) {
                     ssPanel.style.display = 'none';
                     populateExprFilterPanel("tpExprSubsplitFilterPanel", "tpExprSubsplitFilterBtn", exprData._subsplitLabels);
                     ssBtn.style.display = '';
+                    if (ssLabel)
+                        ssLabel.style.display = '';
                 } else {
                     ssBtn.style.display = 'none';
                     ssPanel.innerHTML = '';
+                    if (ssLabel)
+                        ssLabel.style.display = 'none';
                 }
             }
             buildExprDotplotFiltered("tpExprViewPlot", exprData);
@@ -10583,6 +10661,7 @@ var cellbrowser = function() {
         htmls.push('<label id="tpGeneExprMetaLabel" for="tpGeneExprMetaCombo">Split by cell annotation</label>');
         buildMetaFieldCombo(htmls, "tpGeneExprMetaComboBox", "tpGeneExprMetaCombo", 0, metaName, "noNums");
         htmlAddInfoIcon(htmls, "Expression data can only be split by categorical fields. Numerical fields are not shown here.");
+        htmls.push("<label class='tpExprFilterLabel' id='tpExprSplitFilterLabel' for='tpExprSplitFilterBtn' style='display:none'>Filter by</label>");
         htmls.push("<div class='tpExprFilterWrap'>");
         htmls.push("<button class='tpExprFilterBtn' id='tpExprSplitFilterBtn' style='display:none'>All &#9662;</button>");
         htmls.push("<div class='tpExprFilterPanel' id='tpExprSplitFilterPanel' style='display:none'></div>");
@@ -10593,6 +10672,7 @@ var cellbrowser = function() {
         htmls.push("<div class='tpExprHeaderRow'>");
         htmls.push('<label id="tpGeneExprSubsplitLabel">Subsplit by</label>');
         buildMetaFieldComboWithNone(htmls, "tpGeneExprSubsplitComboBox", "tpGeneExprSubsplitCombo", "noNums");
+        htmls.push("<label class='tpExprFilterLabel' id='tpExprSubsplitFilterLabel' for='tpExprSubsplitFilterBtn' style='display:none'>Filter by</label>");
         htmls.push("<div class='tpExprFilterWrap'>");
         htmls.push("<button class='tpExprFilterBtn' id='tpExprSubsplitFilterBtn' style='display:none'>All &#9662;</button>");
         htmls.push("<div class='tpExprFilterPanel' id='tpExprSubsplitFilterPanel' style='display:none'></div>");
@@ -10710,7 +10790,14 @@ var cellbrowser = function() {
         if (getVar("exprGene", null) !== null) {
             geneIds = getVar("exprGene", null).split(" ");
         } else if (db.conf.quickGenes && db.conf.quickGenes.length > 0) {
-            if (db.conf.sampleCount > 200000)
+            // Big datasets default to a single gene because dot-plot averages
+            // over millions of cells are slow. dotPlotMaxGenes lets a dataset
+            // opt into more when its quick genes are a curated per-cell-type
+            // panel that is worth the wait. 0 or unset keeps the old behaviour.
+            var maxDot = parseInt(db.conf.dotPlotMaxGenes);
+            if (!isNaN(maxDot) && maxDot > 0)
+                geneIds = db.conf.quickGenes.slice(0, maxDot).map(function(qg) { return qg[0]; });
+            else if (db.conf.sampleCount > 200000)
                 geneIds = [db.conf.quickGenes[0][0]];
             else
                 geneIds = db.conf.quickGenes.map(function(qg) { return qg[0]; });
@@ -10746,7 +10833,7 @@ var cellbrowser = function() {
             var labelMetaInfo = db.findMetaInfo(db.conf.labelField);
             var clusterLabels = (labelMetaInfo && labelMetaInfo.ui && labelMetaInfo.ui.shortLabels) ? labelMetaInfo.ui.shortLabels :
                 (db.conf.markers[0].clusterList || []);
-            var clusterMarkersLabel = db.conf.clusterMarkersLabel || db.conf.markers[0].shortLabel || "Cluster Markers";
+            var clusterMarkersLabel = markerSetLabel(db.conf.clusterMarkersLabel || db.conf.markers[0].shortLabel || "Cluster Markers");
             htmls.push('<button id="tpClusterMarkersBtn" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Cluster Markers for a cell type">'+clusterMarkersLabel+'</button>');
             // dropdown list is appended to body and positioned via JS to avoid wrapper div affecting button alignment
             var listHtmls = ['<div id="tpClusterMarkersList" style="display:none;position:fixed;z-index:9999;background:white;border:1px solid #ccc;border-radius:3px;max-height:300px;overflow-y:auto;min-width:150px;box-shadow:2px 2px 5px rgba(0,0,0,0.2)">'];
@@ -11139,8 +11226,8 @@ var cellbrowser = function() {
                 "fields or fields with several hundred values cannot be selected here, as the labels would fill the screen.", "bottom");
         buildMetaFieldCombo(htmls, "tpLabelComboBox", "tpLabelCombo", 0, db.conf.labelField, "doLabels");
 
-        htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px" id="tpHoverHint" class="tpHint">Hover over a '+gSampleDesc+' to update data below</div>');
-        htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px; display: none" id="tpSelectHint" class="tpHint">Cells are selected. No update on hover.</div>');
+        htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px; padding-right:8px" id="tpHoverHint" class="tpHint">Hover over a '+gSampleDesc+' to update data below</div>');
+        htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px; padding-right:8px; display: none" id="tpSelectHint" class="tpHint">Cells are selected. No update on hover.</div>');
 
         htmls.push("<div id='tpMetaPanel'>");
         buildMetaPanel(htmls);
@@ -13023,6 +13110,24 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             }
         }
 
+        // how many cells this cluster holds, and what share of the dataset that is.
+        // Same source and precision rule as the legend's frequency column, so the
+        // two always agree.
+        if (gLegend && gLegend.rows) {
+            let total = 0, myCount = null;
+            for (let r = 0; r < gLegend.rows.length; r++) {
+                total += gLegend.rows[r].count;
+                if (gLegend.rows[r].label === clusterName)
+                    myCount = gLegend.rows[r].count;
+            }
+            if (myCount !== null && total > 0) {
+                let pct = (myCount / total) * 100;
+                let prec = (pct < 1) ? 1 + countLeadingZerosAfterDecimal(pct) : 1;
+                labelLines.push(prettyNumber(myCount) + " " + gSampleDesc + "s (" +
+                                pct.toFixed(prec) + "%)");
+            }
+        }
+
         if (labelField === db.conf.labelField) {
             if (db.conf.topMarkers!==undefined && db.conf.topMarkers[clusterName]!==undefined) {
                 labelLines.push("Top enriched markers: "+db.conf.topMarkers[clusterName].join(", "));
@@ -13062,6 +13167,102 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var newName = name.replace(/\+/g, "Plus").replace(/-/g, "Minus").replace(/%/g, "Perc");
         var newName = newName.replace(/[^a-zA-Z_0-9+]/g, "");
         return newName;
+    }
+
+    function markerSetLabel(str) {
+        /* cbImportSeurat writes shortLabel "Seurat Cluster Markers" (see
+         * cellbrowser.R). The "Seurat " part says nothing to a user and makes the
+         * toolbar button and the dialog tabs needlessly wide, so drop it at
+         * display time -- that way already-built datasets are fixed without a
+         * rebuild. */
+        return String(str || "").replace(/^Seurat /, "");
+    }
+
+    function toFileNamePart(str) {
+        /* turn a label like "DEG (Wilcoxon)" or a cluster name like
+         * "151 TH Prkcd Grin2c Glut" into a filename-safe underscore form */
+        return String(str).replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+    }
+
+    function canonMarkerLabel(str) {
+        /* Downloads should not inherit each dataset's private wording for what is
+         * the same thing. "Cluster Markers", "Cluster-specific markers", "Cluster
+         * Marker Genes" and the "Seurat " variants all name their file
+         * Cluster_Markers_<cluster>.tsv. Labels that mean something different
+         * ("DEG (Wilcoxon)", "Curated Cluster Markers", "markers experimental
+         * condition") keep their own wording, because there the label is the only
+         * thing telling two downloads apart. Display labels are untouched. */
+        var s = markerSetLabel(str).trim();
+        // the tool that computed them is not part of what the file is
+        s = s.replace(/^(Seurat|Scanpy)\s+/i, "");
+        if (/^cluster[\s_-]*(specific)?[\s_-]*markers?(\s+genes)?$/i.test(s))
+            return "Cluster Markers";
+        return s;
+    }
+
+    function makeMarkerFileName(tabLabel, clusterName) {
+        /* e.g. "Cluster_Markers_151_TH_Prkcd_Grin2c_Glut.tsv" */
+        var parts = [];
+        var canon = canonMarkerLabel(tabLabel);
+        if (canon)
+            parts.push(toFileNamePart(canon));
+        parts.push(toFileNamePart(clusterName));
+        return parts.join("_")+".tsv";
+    }
+
+    function addConstantColumns(text, extraCols) {
+        /* Prepend constant (cluster, cellCount, ...) columns to a TSV string.
+         * These are deliberately not stored per-row in the marker files -- they
+         * are identical down the whole table and only clutter the dialog -- but
+         * a downloaded file needs them to say what it is. */
+        if (!extraCols || extraCols.length===0)
+            return text;
+        var nl = (text.indexOf("\r\n")!==-1) ? "\r\n" : "\n";
+        var lines = text.split(nl);
+        var heads = extraCols.map(function(c) { return c[0]; }).join("\t");
+        var vals  = extraCols.map(function(c) { return c[1]; }).join("\t");
+        var out = [];
+        for (var i=0; i<lines.length; i++) {
+            if (lines[i]==="") { out.push(lines[i]); continue; }
+            out.push((i===0 ? heads : vals) + "\t" + lines[i]);
+        }
+        return out.join(nl);
+    }
+
+    function downloadMarkerTsv(url, fileName, extraCols) {
+        /* Marker files are served gzipped without Content-Encoding, so following
+         * the plain link hands the user a .gz named after the sanitized cluster.
+         * Fetch, gunzip and save it under a descriptive .tsv name instead.
+         * extraCols is an optional list of [header, value] constant columns. */
+        var req = new XMLHttpRequest();
+        req.responseType = "arraybuffer";
+        req.addEventListener("load", function(res) {
+            if (res.target.status !== 200) {
+                alert("Could not download "+url);
+                return;
+            }
+            var data = res.target.response;
+            if (url.endsWith(".gz"))
+                data = pako.ungzip(data);
+            else
+                data = new Uint8Array(data);
+            if (extraCols && extraCols.length) {
+                var txt = new TextDecoder("utf-8").decode(data);
+                data = new TextEncoder().encode(addConstantColumns(txt, extraCols));
+            }
+            var blobUrl = URL.createObjectURL(
+                new Blob([data], {type:"text/tab-separated-values"}));
+            var a = document.createElement("a");
+            a.href = blobUrl;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 1000);
+        });
+        req.addEventListener("error", function() { alert("Could not download "+url); });
+        req.open("GET", url, true);
+        req.send();
     }
 
     function onlyAlphaNum(name) {
@@ -13392,6 +13593,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         htmls.push("<div id='tpPaneHeader' style='padding: 0.4em 0'>");
 
         var buttons = [];
+        var tabDownloads = []; // per-tab {url, fileName}, filled in the tab loop below
 
         if (tabInfo===undefined || tabInfo.length===0) {
             tabInfo = [];
@@ -13408,7 +13610,17 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             buttons.push({
                 text:"Download as file",
                 click: function() {
-                    document.location.href = markerTsvUrl;
+                    // download the tab the user is looking at, not the last one built
+                    var actIdx = 0;
+                    if (tabDownloads.length > 1) {
+                        var uiIdx = $("#tabs").tabs("option", "active");
+                        if (typeof uiIdx === "number" && uiIdx >= 0)
+                            actIdx = uiIdx;
+                    }
+                    var dl = tabDownloads[actIdx];
+                    if (dl===undefined)
+                        return;
+                    downloadMarkerTsv(dl.url, dl.fileName, dl.extraCols);
                 }
             });
         }
@@ -13420,7 +13632,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             htmls.push("<div id='tabs'>");
             htmls.push("<ul>");
             for (var tabIdx = 0; tabIdx < tabInfo.length; tabIdx++) {
-                var tabLabel = tabInfo[tabIdx].shortLabel;
+                var tabLabel = markerSetLabel(tabInfo[tabIdx].shortLabel);
                 htmls.push("<li><a href='#tabs-"+tabIdx+"'>"+tabLabel+"</a>");
             }
             htmls.push("</ul>");
@@ -13433,7 +13645,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         // Every window after that finds the table already in memory and waits for nothing.
         var mgiIdsReady = (getDatasetSpecies()==="mouse") ? loadMgiIds() : Promise.resolve(null);
 
-        var allTabLabels = tabInfo.map(function(t) { return t.shortLabel; });
+        var allTabLabels = tabInfo.map(function(t) { return markerSetLabel(t.shortLabel); });
         var markerSetsStr = allTabLabels.length > 1
             ? allTabLabels.slice(0, -1).join(", ") + " and " + allTabLabels[allTabLabels.length-1]
             : allTabLabels[0];
@@ -13444,12 +13656,33 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             var tabDir = tabInfo[tabIdx].name;
             var sanName = sanitizeName(clusterName);
             var markerTsvUrl = cbUtil.joinPaths([db.url, "markers", tabDir, sanName+".tsv.gz"]);
+            var dlExtra = [["Cell type", clusterName]];
+            if (gLegend && gLegend.rows) {
+                for (var gr = 0; gr < gLegend.rows.length; gr++)
+                    if (gLegend.rows[gr].label === clusterName) {
+                        dlExtra.push(["n cells", gLegend.rows[gr].count]);
+                        break;
+                    }
+            }
+            tabDownloads[tabIdx] = {
+                url : markerTsvUrl,
+                fileName : makeMarkerFileName(markerSetLabel(tabInfo[tabIdx].shortLabel), clusterName),
+                extraCols : dlExtra
+            };
             htmls.push("<div id='"+divName+"'>");
             htmls.push("Loading...");
             htmls.push("</div>");
 
-            var errorMsg = "No markers found for '"+clusterName+"' in '"+currentField+"'. "+
-                markerSetsStr+" are available for the '"+db.conf.labelField+"' field.";
+            // Name the tab that is empty, not every tab. The old wording listed
+            // all tab labels, so an empty tab read as if the cluster had no data
+            // anywhere -- misleading when the other tabs do have it.
+            var thisTabLabel = markerSetLabel(tabInfo[tabIdx].shortLabel);
+            var otherTabs = allTabLabels.filter(function(l) { return l !== thisTabLabel; });
+            var errorMsg = "No \u201C"+thisTabLabel+"\u201D for \u201C"+clusterName+"\u201D. "+
+                "This cell type is not in that analysis.";
+            if (otherTabs.length)
+                errorMsg += " Try the other tab"+(otherTabs.length>1?"s":"")+": "+
+                            otherTabs.join(", ")+".";
             loadClusterTsv(markerTsvUrl, function(results, localFile, divId, cluster) {
                 mgiIdsReady.then(function() {
                     loadMarkersFromTsv(results, localFile, divId, cluster);
@@ -13463,6 +13696,17 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var winWidth = window.innerWidth - 0.10*window.innerWidth;
         var winHeight = window.innerHeight - 0.10*window.innerHeight;
         var title = "Cluster markers for &quot;"+clusterName+"&quot;";
+
+        // Cell count belongs at the top of the dialog, not repeated down an
+        // n_cells column -- it is identical for every row of a cluster.
+        if (gLegend && gLegend.rows) {
+            for (var cc = 0; cc < gLegend.rows.length; cc++)
+                if (gLegend.rows[cc].label === clusterName) {
+                    title += " - " + prettyNumber(gLegend.rows[cc].count) +
+                             " " + gSampleDesc + "s";
+                    break;
+                }
+        }
 
         var metaInfo = getClusterFieldInfo();
         if (metaInfo && metaInfo.ui && metaInfo.ui.longLabels) {
@@ -13608,6 +13852,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         }
 
         //htmls.push("<table class='table' data-sortlist='[[1,1],[4,0]]' id='tpMarkerTable'>");
+        // tablesorter wants 0/1 here, not the "asc"/"desc" string, otherwise the
+        // sortlist is invalid and the configured sortOrder is silently ignored
         htmls.push("<table class='table' data-sortlist='[["+sortColumn+","+sortOrderNum+"]]' id='"+tableId+"'>");
         htmls.push("<thead>");
         var hprdCol = null;
@@ -14049,9 +14295,22 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         return zoomRange;
     }
 
+    // subdomains that map to a "projects" facet filter on the homepage
+    // dataset-picker dialog, instead of a single dataset/collection name.
+    // e.g. sfari.cells.ucsc.edu -> cells.ucsc.edu?proj=SFARI, showing a
+    // live, auto-updating list of every dataset tagged projects=["SFARI"].
+    var PROJECT_SUBDOMAINS = {
+        "sfari": "SFARI",
+        // several subdomains may point at the same project term
+        "hbca": "Human Breast Cell Atlas",
+        "human-breast-cell-atlas": "Human Breast Cell Atlas",
+    };
+
     function redirectIfSubdomain() {
         /* rewrite the URL if at ucsc and subdomain is specified
-         * e.g. autism.cells.ucsc.edu -> cells.ucsc.edu?ds=autism */
+         * e.g. autism.cells.ucsc.edu -> cells.ucsc.edu?ds=autism
+         * or, for a known project subdomain, e.g.
+         * sfari.cells.ucsc.edu -> cells.ucsc.edu?proj=SFARI */
         /* we cannot run in the subdomain, as otherwise localStorage and
          * cookies are not shared */
 
@@ -14067,7 +14326,13 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 var datasetName = hostParts[0];
                 hostParts.shift();
                 myUrl.hostname = hostParts.join(".");
-                myUrl.search = "ds="+datasetName;
+                // hostnames are case-insensitive, so HBCA and hbca must agree
+                var subKey = datasetName.toLowerCase();
+                if (PROJECT_SUBDOMAINS.hasOwnProperty(subKey)) {
+                    myUrl.search = "proj="+slugify(PROJECT_SUBDOMAINS[subKey]);
+                } else {
+                    myUrl.search = "ds="+datasetName;
+                }
                 window.location.replace(myUrl.href);
                 return true;
             }

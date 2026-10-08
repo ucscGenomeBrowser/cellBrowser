@@ -116,6 +116,9 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 
 .tpExprHeaderRow { display: flex; align-items: center; gap: 8px; flex-basis: 100%; }
 .tpExprFilterWrap { position: relative; display: inline-block; }
+/* sits immediately left of the "All" button on the split/subsplit rows, so the
+ * button reads as a filter rather than an unlabelled dropdown */
+.tpExprFilterLabel { margin-bottom: 0; margin-left: 6px; }
 .tpExprFilterBtn { height: 25px; font-size: 13px; border: 1px solid #ccc; background: white; cursor: pointer; padding: 0 8px; border-radius: 3px; }
 .tpExprFilterPanel { position: absolute; top: 27px; left: 0; background: white; border: 1px solid #ccc; border-radius: 3px; z-index: 10001; padding: 4px 8px; max-height: 220px; overflow-y: auto; min-width: 150px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); }
 .tpExprFilterItem label { display: block; padding: 1px 0; cursor: pointer; white-space: nowrap; font-size: 13px; }
