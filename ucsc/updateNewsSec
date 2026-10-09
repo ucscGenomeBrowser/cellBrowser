@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 
-import json, sys, argparse, os, time, glob
+import json, sys, argparse, os, time, glob, subprocess, socket, getpass
 from datetime import timedelta, date
 
 parser = argparse.ArgumentParser(
@@ -22,7 +22,16 @@ parser.add_argument("-s","--sitemap", action='store', default="/hive/data/inside
     help='directory where to output sitemap file')
 parser.add_argument("-j","--dateJson", action='store', default="/hive/data/inside/cells/news/",
     help='directory where to output releaseDate.json file')
+parser.add_argument("-m","--mailTo", action='store', default=getpass.getuser() + "@ucsc.edu",
+    help='address to mail the list of skipped datasets to (default: %(default)s)')
+parser.add_argument("--noMail", action='store_true',
+    help='do not mail skipped datasets, only print them to stderr')
 args = parser.parse_args()
+
+FROM_EMAIL = getpass.getuser() + "@ucsc.edu"
+
+# datasets that had to be skipped this run, mailed out by reportProblems()
+problems = []
 
 
 def mondayBefore(aDate):
@@ -53,14 +62,44 @@ def dumpToJson(data, outputFile):
     with open(outputFile, "w") as f:
         f.write(jsonOut)
 
-def processDataset(dataset, rootDir):
-    """Processes a single dataset and returns the shortname and a list of info about that dataset."""
+def noteProblem(msg):
+    """Records a dataset we had to skip, for the report at the end of the run."""
+    problems.append(msg)
+    print("skipping " + msg, file=sys.stderr)
+
+def buildDate(dataset, rootDir):
+    """Returns a dataset's build date as a YYYY-MM-DD string, or None if we can't work it out.
+
+       'firstBuildTime' only ever gets written to a dataset's own dataset.json, never to the
+       summary entry that its parent collection carries, so it has to be read out of the
+       dataset directory. Max added it in early 2022, so anything built before that still
+       needs the mtime of exprMatrix.bin."""
     name = dataset["name"]
-    # 'firstBuildTime' was added by Max in early 2022, so not all datasets have it
     try:
-        lastmtime = dataset["firstBuildTime"]
-    except KeyError:
-        lastmtime = time.strftime('%Y-%m-%d', time.localtime(os.path.getmtime(os.path.join(rootDir, name, "exprMatrix.bin"))))
+        with open(os.path.join(rootDir, name, "dataset.json"), "r") as f:
+            firstBuild = json.load(f).get("firstBuildTime")
+        if firstBuild:
+            # looks like 2026-05-22T15:36:01.728267, and date.fromisoformat() on python3.8
+            # takes the date half only
+            return firstBuild.split("T")[0]
+    except (OSError, ValueError):
+        pass
+
+    matrixFname = os.path.join(rootDir, name, "exprMatrix.bin")
+    try:
+        return time.strftime('%Y-%m-%d', time.localtime(os.path.getmtime(matrixFname)))
+    except OSError as ex:
+        noteProblem("%s: no firstBuildTime in dataset.json and no %s (%s), it looks like "
+                    "the dataset was never fully pushed to beta" % (name, matrixFname, ex.strerror))
+        return None
+
+def processDataset(dataset, rootDir):
+    """Processes a single dataset and returns the shortname and a list of info about that dataset,
+       or (None, None) if the dataset is incomplete and has to be skipped."""
+    name = dataset["name"]
+    lastmtime = buildDate(dataset, rootDir)
+    if lastmtime is None:
+        return None, None
     monday = mondayBefore(lastmtime)
     short = dataset["shortLabel"]
     count = str(dataset["sampleCount"])
@@ -71,13 +110,21 @@ def processCollection(collection, rootDir):
        If it runs into a nested collection, will also process that."""
     collInfo = []
     name = collection["name"]
-    with open(os.path.join(rootDir, name, "dataset.json"), "r") as f:
-        cjson = json.load(f)
+    collFname = os.path.join(rootDir, name, "dataset.json")
+    try:
+        with open(collFname, "r") as f:
+            cjson = json.load(f)
+    except (OSError, ValueError) as ex:
+        noteProblem("%s: cannot read %s (%s), it looks like the collection was never fully "
+                    "pushed to beta" % (name, collFname, ex))
+        return collInfo
     for sub in cjson["datasets"]:
         if 'isCollection' in sub:
             collInfo += processCollection(sub, rootDir)
         else:
             subName, subList = processDataset(sub, rootDir)
+            if subName is None:
+                continue
             collInfo.append({subName: subList})
     return collInfo
 
@@ -89,7 +136,16 @@ def parseBetaDatasets():
         cellsBeta = json.load(f)
     for dataset in cellsBeta["datasets"]:
         if "isCollection" in dataset:
+            # a collection's cell count is the sum over its datasets, so if any one of them
+            # was skipped the count would be wrong, and rr.datasets.txt never revisits a
+            # dataset once it is in there. Leave the whole collection for the next run.
+            skippedBefore = len(problems)
             collectionInfo = processCollection(dataset, bdir)
+            if len(problems) > skippedBefore:
+                if collectionInfo:
+                    noteProblem("%s: leaving out the whole collection, its cell count would be "
+                                "wrong without the datasets above" % dataset["name"])
+                continue
             cname = dataset["name"]
             cshort = dataset["shortLabel"]
             oldDate = date.today()
@@ -104,6 +160,8 @@ def parseBetaDatasets():
             betaInfo[cname] = [cshort, str(collCellCount), oldDate]
         else:
             dname, bList = processDataset(dataset, bdir)
+            if dname is None:
+                continue
             betaInfo[dname] = bList
     return betaInfo
 
@@ -128,6 +186,37 @@ def writeNewsHtml(toPrint, dateDir):
             for line in toPrint[day]:
                 htmlOut.write(line)
             htmlOut.write("</ul>\n")
+
+def sendmail(raw):
+    """Pipes a raw mail message into sendmail. Returns True if it went out."""
+    try:
+        proc = subprocess.Popen(["/usr/sbin/sendmail", "-t"],
+                                stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        _, stderr = proc.communicate(raw.encode("utf-8"))
+        if proc.returncode != 0:
+            print("sendmail error: %s" % stderr.decode("utf-8"), file=sys.stderr)
+            return False
+        return True
+    except OSError as ex:
+        print("Could not run sendmail: %s" % ex, file=sys.stderr)
+        return False
+
+def reportProblems():
+    """Mails out the datasets that were skipped this run, if there were any."""
+    if not problems:
+        return
+    print("%d dataset(s) skipped, see above" % len(problems), file=sys.stderr)
+    if args.noMail or not args.mailTo:
+        return
+
+    subject = "updateNewsSec: %d dataset(s) skipped" % len(problems)
+    body = ("updateNewsSec on %s skipped %d dataset(s). They are listed in a dataset.json on\n"
+            "cells-beta but their files are missing, so there is no way to work out a release\n"
+            "date for them. They are not in the news, the sitemap or rr.datasets.txt.\n"
+            "Re-push them with cbPush and run updateNewsSec again.\n\n%s\n"
+            % (socket.gethostname(), len(problems), "\n".join("  " + p for p in problems)))
+    if sendmail("To: %s\nFrom: %s\nSubject: %s\n\n%s" % (args.mailTo, FROM_EMAIL, subject, body)):
+        print("mailed the list of skipped datasets to %s" % args.mailTo, file=sys.stderr)
 
 def main():
     if not args.run:
@@ -203,6 +292,7 @@ def main():
     dumpToJson(dateDict, dateJsonFile)
     writeNewsHtml(toPrint, args.perDateDir)
     combineNews()
+    reportProblems()
 
 if __name__ == "__main__":
     main()
