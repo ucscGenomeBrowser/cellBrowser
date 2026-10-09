@@ -22,10 +22,9 @@ parser.add_argument("-s","--sitemap", action='store', default="/hive/data/inside
     help='directory where to output sitemap file')
 parser.add_argument("-j","--dateJson", action='store', default="/hive/data/inside/cells/news/",
     help='directory where to output releaseDate.json file')
-parser.add_argument("-m","--mailTo", action='store', default=getpass.getuser() + "@ucsc.edu",
-    help='address to mail the list of skipped datasets to (default: %(default)s)')
-parser.add_argument("--noMail", action='store_true',
-    help='do not mail skipped datasets, only print them to stderr')
+parser.add_argument("-m","--mailTo", action='store', default=None,
+    help='also mail the list of skipped datasets to this address. Not needed under cron, '
+         'where MAILTO already mails stderr to cells@ucsc.edu.')
 args = parser.parse_args()
 
 FROM_EMAIL = getpass.getuser() + "@ucsc.edu"
@@ -202,19 +201,23 @@ def sendmail(raw):
         return False
 
 def reportProblems():
-    """Mails out the datasets that were skipped this run, if there were any."""
+    """Prints the datasets that were skipped this run, and mails them if asked to."""
     if not problems:
         return
-    print("%d dataset(s) skipped, see above" % len(problems), file=sys.stderr)
-    if args.noMail or not args.mailTo:
+
+    summary = ("%d dataset(s) skipped. They are listed in a dataset.json on cells-beta but\n"
+               "their files are missing, so there is no way to work out a release date for\n"
+               "them. They are not in the news, the sitemap or rr.datasets.txt. Re-push them\n"
+               "with cbPush and run updateNewsSec again." % len(problems))
+    print(summary, file=sys.stderr)
+
+    # under cron there is nothing more to do: MAILTO already mails the above to cells@ucsc.edu
+    if not args.mailTo:
         return
 
     subject = "updateNewsSec: %d dataset(s) skipped" % len(problems)
-    body = ("updateNewsSec on %s skipped %d dataset(s). They are listed in a dataset.json on\n"
-            "cells-beta but their files are missing, so there is no way to work out a release\n"
-            "date for them. They are not in the news, the sitemap or rr.datasets.txt.\n"
-            "Re-push them with cbPush and run updateNewsSec again.\n\n%s\n"
-            % (socket.gethostname(), len(problems), "\n".join("  " + p for p in problems)))
+    body = ("updateNewsSec on %s:\n\n%s\n\n%s\n"
+            % (socket.gethostname(), summary, "\n".join("  " + p for p in problems)))
     if sendmail("To: %s\nFrom: %s\nSubject: %s\n\n%s" % (args.mailTo, FROM_EMAIL, subject, body)):
         print("mailed the list of skipped datasets to %s" % args.mailTo, file=sys.stderr)
 
