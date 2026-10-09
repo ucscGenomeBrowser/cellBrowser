@@ -32,6 +32,7 @@ FROM_EMAIL = getpass.getuser() + "@ucsc.edu"
 
 # a dataset is news when a reader can actually open it, which means the RR, not beta
 PUBLIC_HOST = "https://cells.ucsc.edu"
+BETA_DIR = "/usr/local/apache/htdocs-cells-beta/"
 
 # datasets that had to be skipped this run, mailed out by reportProblems()
 problems = []
@@ -69,6 +70,27 @@ def noteProblem(msg):
     """Records a dataset we had to skip, for the report at the end of the run."""
     problems.append(msg)
     print("skipping " + msg, file=sys.stderr)
+
+def isPublic(name, rootDir):
+    """False if the dataset's own dataset.json marks it visibility=hide, or cannot be read.
+
+       cbUpgrade already leaves hidden datasets out of the top-level index, so this should
+       never fire. Check anyway: sitemap.cells.txt is symlinked straight into the web root,
+       and a dataset name cannot be un-published. Unreadable counts as not public - a delayed
+       announcement is cheap, a leaked name is not."""
+    dsJson = os.path.join(rootDir, name, "dataset.json")
+    try:
+        with open(dsJson, "r") as f:
+            visibility = str(json.load(f).get("visibility", "")).strip().lower()
+    except (OSError, ValueError) as ex:
+        noteProblem("%s: cannot read %s (%s), holding it back rather than announcing it"
+                    % (name, dsJson, ex))
+        return False
+    if visibility == "hide":
+        noteProblem("%s: marked visibility=hide but present in the top-level index on beta. "
+                    "Holding it back - check why cbUpgrade indexed it" % name)
+        return False
+    return True
 
 def isLive(name):
     """True if cells.ucsc.edu is really serving this dataset. Something that only exists on
@@ -119,7 +141,7 @@ def processCollection(collection, rootDir):
 def parseBetaDatasets():
     """Parses dataset.json for cells-beta to get a current list of datasets."""
     betaInfo = {}
-    bdir = "/usr/local/apache/htdocs-cells-beta/"
+    bdir = BETA_DIR
     with open(os.path.join(bdir, "dataset.json"), "r") as f:
         cellsBeta = json.load(f)
     for dataset in cellsBeta["datasets"]:
@@ -254,7 +276,8 @@ def main():
     # anything either ledger already knows keeps the date it was first given, so the only
     # datasets worth asking the RR about are the ones neither has seen. releaseDate.json holds
     # top-level datasets only, so collection members have to be looked up in rr.datasets.txt.
-    liveNow = findLive([e for e in betaInfo if e not in nameToDate and e not in oldNames])
+    unseen = [e for e in betaInfo if e not in nameToDate and e not in oldNames]
+    liveNow = findLive([e for e in unseen if isPublic(e, BETA_DIR)])
 
     with open(rrDatasetsPath, "a") as rrDatasets:
         for entry, info in betaInfo.items():
