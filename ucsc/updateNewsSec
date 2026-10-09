@@ -1,6 +1,7 @@
 #! /usr/bin/env python3
 
-import json, sys, argparse, os, time, glob, subprocess, socket, getpass
+import json, sys, argparse, os, time, glob, subprocess, socket, getpass, requests
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta, date
 
 parser = argparse.ArgumentParser(
@@ -28,6 +29,9 @@ parser.add_argument("-m","--mailTo", action='store', default=None,
 args = parser.parse_args()
 
 FROM_EMAIL = getpass.getuser() + "@ucsc.edu"
+
+# a dataset is news when a reader can actually open it, which means the RR, not beta
+PUBLIC_HOST = "https://cells.ucsc.edu"
 
 # datasets that had to be skipped this run, mailed out by reportProblems()
 problems = []
@@ -66,43 +70,30 @@ def noteProblem(msg):
     problems.append(msg)
     print("skipping " + msg, file=sys.stderr)
 
-def buildDate(dataset, rootDir):
-    """Returns a dataset's build date as a YYYY-MM-DD string, or None if we can't work it out.
-
-       'firstBuildTime' only ever gets written to a dataset's own dataset.json, never to the
-       summary entry that its parent collection carries, so it has to be read out of the
-       dataset directory. Max added it in early 2022, so anything built before that still
-       needs the mtime of exprMatrix.bin."""
-    name = dataset["name"]
+def isLive(name):
+    """True if cells.ucsc.edu is really serving this dataset. Something that only exists on
+       beta is not news yet - announcing it links the reader at a 404."""
     try:
-        with open(os.path.join(rootDir, name, "dataset.json"), "r") as f:
-            firstBuild = json.load(f).get("firstBuildTime")
-        if firstBuild:
-            # looks like 2026-05-22T15:36:01.728267, and date.fromisoformat() on python3.8
-            # takes the date half only
-            return firstBuild.split("T")[0]
-    except (OSError, ValueError):
-        pass
+        resp = requests.head("%s/%s/dataset.json" % (PUBLIC_HOST, name),
+                             timeout=20, allow_redirects=True)
+        return resp.status_code == 200
+    except requests.RequestException:
+        return False
 
-    matrixFname = os.path.join(rootDir, name, "exprMatrix.bin")
-    try:
-        return time.strftime('%Y-%m-%d', time.localtime(os.path.getmtime(matrixFname)))
-    except OSError as ex:
-        noteProblem("%s: no firstBuildTime in dataset.json and no %s (%s), it looks like "
-                    "the dataset was never fully pushed to beta" % (name, matrixFname, ex.strerror))
-        return None
+def findLive(names):
+    """Returns the subset of names that are live on the RR. Only ever called with datasets we
+       have not dated yet, so on a normal night this is a handful of requests or none at all."""
+    if not names:
+        return set()
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return {n for n, live in zip(names, pool.map(isLive, names)) if live}
 
 def processDataset(dataset, rootDir):
-    """Processes a single dataset and returns the shortname and a list of info about that dataset,
-       or (None, None) if the dataset is incomplete and has to be skipped."""
+    """Processes a single dataset and returns the shortname and a list of info about that dataset."""
     name = dataset["name"]
-    lastmtime = buildDate(dataset, rootDir)
-    if lastmtime is None:
-        return None, None
-    monday = mondayBefore(lastmtime)
     short = dataset["shortLabel"]
     count = str(dataset["sampleCount"])
-    return name, [short, count, monday]
+    return name, [short, count]
 
 def processCollection(collection, rootDir):
     """Processes a collection and returns a list of info about that collection.
@@ -122,8 +113,6 @@ def processCollection(collection, rootDir):
             collInfo += processCollection(sub, rootDir)
         else:
             subName, subList = processDataset(sub, rootDir)
-            if subName is None:
-                continue
             collInfo.append({subName: subList})
     return collInfo
 
@@ -147,20 +136,15 @@ def parseBetaDatasets():
                 continue
             cname = dataset["name"]
             cshort = dataset["shortLabel"]
-            oldDate = date.today()
             collCellCount = 0
             for d in collectionInfo:
                 dname = list(d.keys())[0]
                 info = d[dname]
                 betaInfo[dname] = info
                 collCellCount += int(info[1])
-                if info[2] < oldDate:
-                    oldDate = info[2]
-            betaInfo[cname] = [cshort, str(collCellCount), oldDate]
+            betaInfo[cname] = [cshort, str(collCellCount)]
         else:
             dname, bList = processDataset(dataset, bdir)
-            if dname is None:
-                continue
             betaInfo[dname] = bList
     return betaInfo
 
@@ -232,10 +216,15 @@ def main():
 
     # Load or initialize rr.datasets.txt
     if os.path.exists(rrDatasetsPath):
+        oldNames = {}
         with open(rrDatasetsPath) as f:
-            oldNames = {line.strip().split("\t")[1] for line in f if not line.startswith("#")}
+            for line in f:
+                if line.startswith("#"):
+                    continue
+                fields = line.rstrip("\n").split("\t")
+                oldNames[fields[1]] = fields[0]
     else:
-        oldNames = set()
+        oldNames = {}
         with open(rrDatasetsPath, "w") as f:
             f.write("#release_date\tdataset_shortname\tdataset_label\tcell_count\n")
 
@@ -260,19 +249,31 @@ def main():
     toPrint = {}
     newSitemapUrls = []
     currentDataset = os.path.basename(os.getcwd())
+    thisMonday = mondayBefore(date.today())
+
+    # anything either ledger already knows keeps the date it was first given, so the only
+    # datasets worth asking the RR about are the ones neither has seen. releaseDate.json holds
+    # top-level datasets only, so collection members have to be looked up in rr.datasets.txt.
+    liveNow = findLive([e for e in betaInfo if e not in nameToDate and e not in oldNames])
 
     with open(rrDatasetsPath, "a") as rrDatasets:
         for entry, info in betaInfo.items():
-            label, count, buildDate = info
+            label, count = info
 
             if entry == currentDataset and args.now:
-                day = mondayBefore(date.today())
+                day = thisMonday
                 if entry in nameToDate:
                     dateDict[nameToDate[entry]].discard(entry)
             elif entry in nameToDate:
                 day = date.fromisoformat(nameToDate[entry])
+            elif entry in oldNames:
+                day = date.fromisoformat(oldNames[entry])
+            elif entry in liveNow:
+                # first time we have seen it on the RR: this week is when it became news
+                day = thisMonday
             else:
-                day = buildDate
+                # built and public on beta, but not pushed to the RR yet. Not news until it is.
+                continue
 
             if not args.newsOnly and entry not in oldNames:
                 rrDatasets.write(f"{day}\t{entry}\t{label}\t{count}\n")
