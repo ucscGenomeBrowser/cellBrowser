@@ -2,6 +2,8 @@
 
 import json, sys, argparse, os, time, glob, subprocess, socket, getpass, requests
 from concurrent.futures import ThreadPoolExecutor
+from html import escape
+import ast
 from datetime import timedelta, date
 
 parser = argparse.ArgumentParser(
@@ -111,11 +113,13 @@ def findLive(names):
         return {n for n, live in zip(names, pool.map(isLive, names)) if live}
 
 def processDataset(dataset, rootDir):
-    """Processes a single dataset and returns the shortname and a list of info about that dataset."""
-    name = dataset["name"]
-    short = dataset["shortLabel"]
-    count = str(dataset["sampleCount"])
-    return name, [short, count]
+    """Processes a single dataset and returns its shortname and the facts the outputs need."""
+    return dataset["name"], {
+        "label": dataset["shortLabel"],
+        "count": str(dataset["sampleCount"]),
+        "organisms": dataset.get("organisms") or [],
+        "bodyParts": dataset.get("body_parts") or [],
+    }
 
 def processCollection(collection, rootDir):
     """Processes a collection and returns a list of info about that collection.
@@ -163,8 +167,13 @@ def parseBetaDatasets():
                 dname = list(d.keys())[0]
                 info = d[dname]
                 betaInfo[dname] = info
-                collCellCount += int(info[1])
-            betaInfo[cname] = [cshort, str(collCellCount)]
+                collCellCount += int(info["count"])
+            betaInfo[cname] = {
+                "label": cshort,
+                "count": str(collCellCount),
+                "organisms": dataset.get("organisms") or [],
+                "bodyParts": dataset.get("body_parts") or [],
+            }
         else:
             dname, bList = processDataset(dataset, bdir)
             betaInfo[dname] = bList
@@ -179,6 +188,167 @@ def combineNews():
         for fname in [basicNews] + newsFiles:
             with open(fname) as infile:
                 outfile.write(infile.read())
+
+def assignDates(betaInfo, nameToDate, oldNames, currentDataset):
+    """Works out which datasets are news and what date each one carries. This is the whole
+       decision - every output written below is just a rendering of what comes back from here.
+
+       Returns {name: (day, info)}, leaving out anything that is not news yet."""
+    thisMonday = mondayBefore(date.today())
+
+    # anything either ledger already knows keeps the date it was first given, so the only
+    # datasets worth asking the RR about are the ones neither has seen. releaseDate.json holds
+    # top-level datasets only, so collection members have to be looked up in rr.datasets.txt.
+    unseen = [e for e in betaInfo if e not in nameToDate and e not in oldNames]
+    liveNow = findLive([e for e in unseen if isPublic(e, BETA_DIR)])
+
+    dated = {}
+    for entry, info in betaInfo.items():
+        if entry == currentDataset and args.now:
+            day = thisMonday
+        elif entry in nameToDate:
+            day = date.fromisoformat(nameToDate[entry])
+        elif entry in oldNames:
+            day = date.fromisoformat(oldNames[entry])
+        elif entry in liveNow:
+            # first time we have seen it on the RR: this week is when it became news
+            day = thisMonday
+        else:
+            # built and public on beta, but not pushed to the RR yet. Not news until it is.
+            continue
+        dated[entry] = (day, info)
+    return dated
+
+def writeRrDatasets(rrPath, dated, oldNames):
+    """Appends the datasets this ledger has not recorded before. A dataset keeps the first date
+       it was ever given, so an existing row is never rewritten."""
+    with open(rrPath, "a") as f:
+        for entry, (day, info) in dated.items():
+            if entry not in oldNames:
+                f.write("%s\t%s\t%s\t%s\n" % (day, entry, info["label"], info["count"]))
+
+def updateSitemap(sitemapPath, dated, sitemapSet):
+    """Adds a url for every top-level dataset not listed yet. Collection members have no url of
+       their own, so they never appear here."""
+    newUrls = []
+    for entry in dated:
+        if "/" in entry:
+            continue
+        urlline = "https://%s.cells.ucsc.edu\n" % entry
+        if urlline not in sitemapSet:
+            newUrls.append(urlline)
+            sitemapSet.add(urlline)
+    if newUrls:
+        with open(sitemapPath, "a") as f:
+            f.writelines(newUrls)
+
+def updateDateDict(dateDict, dated):
+    """Records which datasets belong to which release date, for releaseDate.json."""
+    for entry, (day, info) in dated.items():
+        if "/" not in entry:
+            dateDict.setdefault(str(day), set()).add(entry)
+
+def readDesc(name):
+    """Loads a dataset's desc.json off beta, or {} when there isn't one."""
+    try:
+        with open(os.path.join(BETA_DIR, name, "desc.json"), "r") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+def firstOf(value):
+    """desc.conf fields are free text and a couple of datasets store these as a python list,
+       "['33290721', '32066951']". Returns the first entry of such a list, or the value as it
+       stands."""
+    value = str(value or "").strip()
+    if value.startswith("["):
+        try:
+            items = ast.literal_eval(value)
+        except (ValueError, SyntaxError):
+            return ""
+        return str(items[0]).strip() if items else ""
+    return value
+
+def splitCitation(value):
+    """Every one of these fields can carry the identifier followed by a free-text citation -
+       "10.1016/j.cell.2017.10.044 Puram et al, Cell 2018" - so take the first whitespace
+       separated token as the identifier and whatever follows as the link text."""
+    parts = value.split(None, 1)
+    return parts[0], (parts[1].strip() if len(parts) > 1 else "paper")
+
+def paperLink(desc):
+    """Returns (url, linkText) for a dataset's paper, or None when desc.conf named one.
+
+       The fields are not all the same shape. paper_url and biorxiv_url hold the url followed
+       by a free-text citation, so the url is the first whitespace-separated token and whatever
+       follows it is the citation. doi and pmid are bare identifiers. other_url is not a paper
+       - it is github and suchlike - so it is not used here."""
+    for key in ("paper_url", "biorxiv_url"):
+        value = firstOf(desc.get(key))
+        if value.startswith("http"):
+            return splitCitation(value)
+
+    doi = firstOf(desc.get("doi"))
+    if doi:
+        ident, citation = splitCitation(doi)
+        return "https://doi.org/" + ident.split("doi.org/")[-1].lstrip("/"), citation
+
+    pmid = firstOf(desc.get("pmid"))
+    if pmid:
+        ident, citation = splitCitation(pmid)
+        if ident.isdigit():
+            return "https://pubmed.ncbi.nlm.nih.gov/%s/" % ident, citation
+
+    return None
+
+def trimList(items, limit=3):
+    """An atlas can carry twenty body parts or seven organisms, which is not a one-line summary.
+       Keeps the first few and counts the rest."""
+    items = [str(i).strip() for i in items if str(i).strip()]
+    # trimming one item off to say "+1 more" buys nothing, so only trim when it saves something
+    if len(items) <= limit + 1:
+        return items
+    return items[:limit] + ["+%d more" % (len(items) - limit)]
+
+def newsEntry(name, info):
+    """One <li> of news: the dataset's label as the link, the paper title under it, then a line
+       of facts and the paper, so a reader can tell what a dataset is without opening it -
+       which for a dataset that is not a collection drops them straight into the viz.
+
+       Uses only tags that carry their own meaning, since this html is pasted into a page whose
+       stylesheet we do not control."""
+    desc = readDesc(name)
+    out = "  <li><a href='?ds=%s' target='_blank'>%s</a>" % (name, escape(info["label"], False))
+
+    title = str(desc.get("title") or "").strip()
+    if title and title.lower() != info["label"].strip().lower():
+        out += "<br>\n    %s" % escape(title, False)
+
+    facts = [escape(f, False) for f in trimList(info.get("organisms") or [])
+                                    + trimList(info.get("bodyParts") or [])]
+    try:
+        facts.append("{:,} cells".format(int(info["count"])))
+    except (TypeError, ValueError):
+        pass
+
+    paper = paperLink(desc)
+    if paper:
+        url, linkText = paper
+        facts.append("<a href='%s' target='_blank'>%s</a>"
+                     % (escape(url, quote=True), escape(linkText, False)))
+
+    if facts:
+        out += "<br>\n    <small>%s</small>" % " &middot; ".join(facts)
+    return out + "\n"
+
+def newsLines(dated):
+    """Returns {day: [html, ...]} for the per-date news files. Collection members are left out:
+       the collection is the thing we announce, not its parts."""
+    toPrint = {}
+    for entry, (day, info) in dated.items():
+        if "/" not in entry:
+            toPrint.setdefault(day, []).append(newsEntry(entry, info))
+    return toPrint
 
 def writeNewsHtml(toPrint, dateDir):
     """Writes one HTML file per release date listing all datasets released that day."""
@@ -267,57 +437,20 @@ def main():
         sitemapSet = set()
         open(sitemapPath, "w").close()
 
-    betaInfo = parseBetaDatasets()
-    toPrint = {}
-    newSitemapUrls = []
     currentDataset = os.path.basename(os.getcwd())
-    thisMonday = mondayBefore(date.today())
+    dated = assignDates(parseBetaDatasets(), nameToDate, oldNames, currentDataset)
 
-    # anything either ledger already knows keeps the date it was first given, so the only
-    # datasets worth asking the RR about are the ones neither has seen. releaseDate.json holds
-    # top-level datasets only, so collection members have to be looked up in rr.datasets.txt.
-    unseen = [e for e in betaInfo if e not in nameToDate and e not in oldNames]
-    liveNow = findLive([e for e in unseen if isPublic(e, BETA_DIR)])
+    # --now moves the current dataset to this week, so drop the date it used to carry
+    if args.now and currentDataset in nameToDate:
+        dateDict[nameToDate[currentDataset]].discard(currentDataset)
 
-    with open(rrDatasetsPath, "a") as rrDatasets:
-        for entry, info in betaInfo.items():
-            label, count = info
+    if not args.newsOnly:
+        writeRrDatasets(rrDatasetsPath, dated, oldNames)
+        updateSitemap(sitemapPath, dated, sitemapSet)
 
-            if entry == currentDataset and args.now:
-                day = thisMonday
-                if entry in nameToDate:
-                    dateDict[nameToDate[entry]].discard(entry)
-            elif entry in nameToDate:
-                day = date.fromisoformat(nameToDate[entry])
-            elif entry in oldNames:
-                day = date.fromisoformat(oldNames[entry])
-            elif entry in liveNow:
-                # first time we have seen it on the RR: this week is when it became news
-                day = thisMonday
-            else:
-                # built and public on beta, but not pushed to the RR yet. Not news until it is.
-                continue
-
-            if not args.newsOnly and entry not in oldNames:
-                rrDatasets.write(f"{day}\t{entry}\t{label}\t{count}\n")
-
-            # Skip collection members (contain '/') for sitemap and news
-            if "/" not in entry:
-                dateDict.setdefault(str(day), set()).add(entry)
-                if not args.newsOnly:
-                    urlline = f"https://{entry}.cells.ucsc.edu\n"
-                    if urlline not in sitemapSet:
-                        newSitemapUrls.append(urlline)
-                        sitemapSet.add(urlline)
-                outLine = f"  <li><a href='?ds={entry}' target='_blank'>{label}</a>\n"
-                toPrint.setdefault(day, []).append(outLine)
-
-    if not args.newsOnly and newSitemapUrls:
-        with open(sitemapPath, "a") as f:
-            f.writelines(newSitemapUrls)
-
+    updateDateDict(dateDict, dated)
     dumpToJson(dateDict, dateJsonFile)
-    writeNewsHtml(toPrint, args.perDateDir)
+    writeNewsHtml(newsLines(dated), args.perDateDir)
     combineNews()
     reportProblems()
 
