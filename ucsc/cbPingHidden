@@ -29,7 +29,7 @@ batch. Edit a draft in place to change what gets sent.
 Runs monthly from the otto crontab, where it only queues drafts and mails
 the report to cells@ucsc.edu:
 
-  0 8 1 * * umask 002; ~mspeir/cellBrowser/ucsc/cbPingHidden scan -q --mail-report cells@ucsc.edu
+  0 8 1 * * umask 002; /hive/data/inside/cells/scripts/env/bin/python3 /hive/data/inside/cells/scripts/cbPingHidden scan -q --mail-report cells@ucsc.edu
 """
 import sys
 import os
