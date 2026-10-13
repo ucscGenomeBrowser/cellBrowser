@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""
+Check that the Cell Browser scripts otto runs match the cellBrowser develop
+branch on GitHub. (RM #38523)
+
+otto's crontab runs installed copies out of /hive/data/inside/cells/scripts,
+put there by "make -C ucsc install". The install is a separate step from the
+push, so a fix can reach develop and never reach cron. This catches that, and
+also catches anyone editing an installed copy in place.
+
+The list of scripts and the commit they came from are read from INSTALLED.txt,
+which "make install" writes. Each installed script is compared with:
+
+  - the md5sum recorded in INSTALLED.txt  (was it edited after install?)
+  - the same file on develop on GitHub    (has develop moved past the install?)
+
+GitHub is the reference, rather than a checkout, so the answer does not depend
+on the state of anyone's working tree.
+
+Prints nothing when everything matches. Otherwise prints a report, which cron
+mails to MAILTO. Runs weekdays from the otto crontab:
+
+  30 1 * * 1-5 /hive/data/inside/cells/scripts/env/bin/python3 /hive/data/inside/cells/scripts/cbCheckInstalled
+"""
+import sys
+import os
+import argparse
+import hashlib
+
+import requests
+
+REPO = "ucscGenomeBrowser/cellBrowser"
+BRANCH = "develop"
+INSTALL_DIR = "/hive/data/inside/cells/scripts"
+
+def md5(data):
+    return hashlib.md5(data).hexdigest()
+
+def readInstalled(installDir):
+    """Parse INSTALLED.txt: return (commit, {script name: md5sum at install})."""
+    commit = None
+    md5s = {}
+    with open(os.path.join(installDir, "INSTALLED.txt")) as f:
+        for line in f:
+            words = line.split()
+            if len(words) == 2 and words[0] == "commit":
+                commit = words[1]
+            elif len(words) == 2 and len(words[0]) == 32:
+                md5s[words[1]] = words[0]
+    return commit, md5s
+
+def developHead():
+    """Return the commit develop points at now. Files are then fetched at that
+    commit, so a push landing mid-check cannot mix two versions."""
+    url = "https://api.github.com/repos/%s/commits/%s" % (REPO, BRANCH)
+    r = requests.get(url, timeout=60)
+    r.raise_for_status()
+    return r.json()["sha"]
+
+def developFile(commit, name):
+    """Return the contents of ucsc/<name> at commit, or None if it is not there."""
+    url = "https://raw.githubusercontent.com/%s/%s/ucsc/%s" % (REPO, commit, name)
+    r = requests.get(url, timeout=60)
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    return r.content
+
+def check(installDir):
+    """Return a list of problems, empty when all is in sync."""
+    try:
+        installedCommit, installedMd5s = readInstalled(installDir)
+    except OSError as e:
+        return ["cannot read INSTALLED.txt: %s" % e]
+    if not installedMd5s:
+        return ["INSTALLED.txt in %s lists no scripts" % installDir]
+
+    headCommit = developHead()
+    problems = []
+    behind = []
+    for name in sorted(installedMd5s):
+        path = os.path.join(installDir, name)
+        try:
+            with open(path, "rb") as f:
+                current = md5(f.read())
+        except OSError as e:
+            problems.append("%s: cannot read installed copy: %s" % (name, e))
+            continue
+        if current != installedMd5s[name]:
+            problems.append("%s: edited in place since install. Copy the change into git, then reinstall." % name)
+
+        # compare what was installed, not what is there now, so an edit in
+        # place is reported once above rather than again as drift
+        onDevelop = developFile(headCommit, name)
+        if onDevelop is None:
+            problems.append("%s: installed, but no longer on %s" % (name, BRANCH))
+        elif md5(onDevelop) != installedMd5s[name]:
+            behind.append(name)
+
+    if behind:
+        problems.append("%s on %s differs from the installed copy: %s" % (
+            "this script" if len(behind) == 1 else "these scripts", BRANCH, ", ".join(behind)))
+        problems.append("  installed: %s" % installedCommit)
+        problems.append("  %s:   %s" % (BRANCH, headCommit))
+        problems.append("  changes:   https://github.com/%s/compare/%s...%s" % (REPO, installedCommit, headCommit))
+        problems.append("If develop is right, run: make -C <your cellBrowser>/ucsc install")
+    return problems
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Report Cell Browser cron scripts that differ from develop on GitHub. Silent when in sync.")
+    parser.add_argument("-d", "--installDir", default=INSTALL_DIR,
+        help="directory holding the installed scripts and INSTALLED.txt, default %(default)s")
+    args = parser.parse_args()
+
+    problems = check(args.installDir)
+    if problems:
+        print("The Cell Browser scripts that otto runs from %s are out of sync.\n" % args.installDir)
+        for p in problems:
+            print(p)
+
+if __name__ == "__main__":
+    main()

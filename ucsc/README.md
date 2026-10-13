@@ -15,5 +15,9 @@ origin/develop, and writes the installed commit to INSTALLED.txt in that
 directory. `make validate` lists any installed script that differs from your
 checkout. Never edit the installed copies in place.
 
+cbCheckInstalled, also installed there, runs weekdays from otto's crontab and
+mails cells@ when an installed script differs from develop on GitHub or was
+edited in place.
+
 That directory is for otto only. Keep running these scripts from your own
 checkout, and do not put the shared directory on your PATH.

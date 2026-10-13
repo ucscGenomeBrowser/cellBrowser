@@ -13,7 +13,7 @@
 # alone does not change what cron runs.
 
 PREFIX = /hive/data/inside/cells/scripts
-SCRIPTS = updateNewsSec cbPingHidden tabulate_facets.pl
+SCRIPTS = updateNewsSec cbPingHidden tabulate_facets.pl cbCheckInstalled
 GROUP = genecats
 # the venv is built from the system python, never from whatever conda is on PATH
 SYSPYTHON = /usr/bin/python3
