@@ -4,9 +4,9 @@ Check that the Cell Browser scripts otto runs match the cellBrowser develop
 branch on GitHub. (RM #38523)
 
 otto's crontab runs installed copies out of /hive/data/inside/cells/scripts,
-put there by "make -C ucsc install". The install is a separate step from the
-push, so a fix can reach develop and never reach cron. This catches that, and
-also catches anyone editing an installed copy in place.
+put there by "make install" in a checkout's ucsc/ directory. The install is a
+separate step from the push, so a fix can reach develop and never reach cron.
+This catches that, and also catches anyone editing an installed copy in place.
 
 The list of scripts and the commit they came from are read from INSTALLED.txt,
 which "make install" writes. Each installed script is compared with:
