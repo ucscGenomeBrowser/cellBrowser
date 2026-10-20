@@ -9749,6 +9749,10 @@ var cellbrowser = function() {
 
         let colLabelHeight = plotDotColumnLabelsAutoSize(parentEl, htmls, leftPad+rowLabelWidth, topPad, colWidth, syms)+10;
         let textColor = (lightMode === 1) ? "black" : "white";
+        if (exprData.metaFieldLabel)
+            htmls.push("<text font-family='sans-serif' font-weight='bold' font-size='"+fontSize+"' fill='"+textColor+
+                "' alignment-baseline='bottom' text-anchor='start' x='"+leftPad+"' y='"+(topPad+colLabelHeight-6)+
+                "'>"+exprData.metaFieldLabel.replace(/_/g, " ")+"</text>");
         plotDotRowLabels(htmls, leftPad, colLabelHeight, rowHeight, rowLabels, cellCounts, textColor, fontSize);
 
         let colorPal = makeColorPalette(cDefGradPalette, 20);
@@ -10170,6 +10174,9 @@ var cellbrowser = function() {
         function onMetaLoaded(resArr) {
             var primaryMetaInfo = resArr[0];
             exprData._primaryLabels = primaryMetaInfo.ui.shortLabels;
+            // header for the row-label column, e.g. "Cell Type" -- the gene columns are
+            // labeled with their symbol, but nothing said what the rows are
+            exprData.metaFieldLabel = primaryMetaInfo.label || metaName;
 
             if (subsplitName) {
                 var subsplitMetaInfo = resArr[1];
@@ -10599,6 +10606,48 @@ var cellbrowser = function() {
         buildExprDotplot(parentDomId, filteredData);
     }
 
+    function onExprExportSvgClick() {
+        /* save the currently drawn dot plot as a standalone SVG file */
+        let svgEl = document.getElementById("tpExprDotPlot");
+        if (!svgEl) {
+            alert("No dot plot to export yet.");
+            return;
+        }
+        let svgText = new XMLSerializer().serializeToString(svgEl);
+        if (svgText.indexOf("xmlns=")===-1)
+            svgText = svgText.replace("<svg", "<svg xmlns='http://www.w3.org/2000/svg'");
+        let blob = new Blob([svgText], {type: "image/svg+xml"});
+        let dsName = (db.conf.shortLabel || db.name || "dataset").replace(/[^A-Za-z0-9._-]+/g, "_");
+        window.saveAs(blob, "dotplot_"+dsName+".svg");
+    }
+
+    function onExprExportTsvClick() {
+        /* save the average-expression and percent-expressed values behind the dot plot as a TSV,
+         * one row per (cluster, gene) pair. Same numbers the circles are drawn from. */
+        let exprData = db.exprData;
+        if (!exprData || !exprData.rows || exprData.rows.length===0) {
+            alert("No dot plot data to export yet.");
+            return;
+        }
+        let rowLabel = (exprData.metaFieldLabel || "Cluster").replace(/_/g, " ");
+        let lines = [[rowLabel, "Cell count", "Gene", "Percent expressed", "Avg expression"].join("\t")];
+        for (let rowIdx=0; rowIdx < exprData.rows.length; rowIdx++) {
+            let label = exprData.metaLabels[rowIdx];
+            let cellCount = exprData.cellCounts[rowIdx];
+            let row = exprData.rows[rowIdx];
+            for (let colIdx=0; colIdx < row.length; colIdx++) {
+                let sym = exprData.syms[colIdx];
+                let nonZeroCount = row[colIdx][0];
+                let avg = row[colIdx][1];
+                let pct = (cellCount!==0) ? (100*nonZeroCount/cellCount) : 0;
+                lines.push([label, cellCount, sym, pct.toFixed(2), avg.toFixed(4)].join("\t"));
+            }
+        }
+        let blob = new Blob([lines.join("\n")], {type: "text/tab-separated-values"});
+        let dsName = (db.conf.shortLabel || db.name || "dataset").replace(/[^A-Za-z0-9._-]+/g, "_");
+        window.saveAs(blob, "dotplot_"+dsName+".tsv");
+    }
+
     function buildExprViewWindow() {
         /* build the expression viewer dialog box */
         if (db.conf.atacSearch) {
@@ -10681,6 +10730,11 @@ var cellbrowser = function() {
 
         htmls.push("</div>"); //tpExprViewHeader
 
+        htmls.push("<div id='tpExprExportRow' style='padding: 2px 0 6px 6px'>");
+        htmls.push("<button id='tpExprExportSvg' title='Save the dot plot as a vector image'>Export SVG</button>");
+        htmls.push("<button id='tpExprExportTsv' title='Save the average expression and percent-expressed values behind the dot plot' style='margin-left:6px'>Export TSV</button>");
+        htmls.push("</div>"); // tpExprExportRow
+
         htmls.push('<div id="tpExprViewPlot"></div>'); // empty div, will be filled later
 
         htmls.push("</div>"); //tpExprViewContent
@@ -10740,6 +10794,8 @@ var cellbrowser = function() {
         $("#tpBackToCb").click( closeExprView );
         $('#tpCloseButton').click( closeExprView );
         $('#tpGeneExprAddMulti').click( onGeneExprAddGenesClick  );
+        $('#tpExprExportSvg').click( onExprExportSvgClick );
+        $('#tpExprExportTsv').click( onExprExportTsvClick );
 
         // toggle filter panels on button click; close on outside click
         $(document.body).on('click', '.tpExprFilterBtn', function(ev) {
