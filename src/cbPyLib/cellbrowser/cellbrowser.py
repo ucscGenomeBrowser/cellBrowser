@@ -4270,6 +4270,7 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, out
     # pins it; the JS already reads it, it just was never copied out here.
     copyConf(inConf, outConf, "clusterMarkersLabel")
     copyConf(inConf, outConf, "dotPlotMaxGenes")
+    copyConf(inConf, outConf, "markerDownloadCols")
 
 def areProbablyGeneIds(ids):
     " if 80% of 'ids' start with the same letter, they are probably gene IDs, not symbols "

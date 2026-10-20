@@ -13210,6 +13210,69 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         return parts.join("_")+".tsv";
     }
 
+    // Constant columns a dataset can ask to have prepended to downloaded marker
+    // files, keyed by the names allowed in cellbrowser.conf's markerDownloadCols.
+    // The header text lives here rather than in each conf so the wording stays
+    // the same across datasets.
+    var markerDownloadColMakers = {
+        "cluster"   : function(ctx) { return ["Cell type", ctx.clusterName]; },
+        "cellCount" : function(ctx) {
+            return (ctx.cellCount===null) ? null : ["n cells", ctx.cellCount];
+        },
+        // the three below are provenance: the file name carries them, but that is lost
+        // as soon as someone concatenates downloads from several clusters or tabs
+        "clusterField" : function(ctx) {
+            return ctx.clusterField ? ["Annotation field", ctx.clusterField] : null;
+        },
+        "markerSet" : function(ctx) {
+            return ctx.markerSet ? ["Marker set", ctx.markerSet] : null;
+        },
+        "dataset"   : function(ctx) {
+            return ctx.dataset ? ["Dataset", ctx.dataset] : null;
+        }
+    };
+
+    function markerDownloadExtraCols(clusterName, clusterField, markerSet) {
+        /* Build the constant [header, value] columns for a marker download, from
+         * the dataset's markerDownloadCols setting. Unset means none: the
+         * downloaded file then matches the table on screen, which is the default
+         * because these columns repeat one value down every row. */
+        var want = db.conf.markerDownloadCols;
+        if (!want || !want.length)
+            return [];
+
+        var cellCount = null;
+        if (gLegend && gLegend.rows)
+            for (var gr = 0; gr < gLegend.rows.length; gr++)
+                if (gLegend.rows[gr].label === clusterName) {
+                    cellCount = gLegend.rows[gr].count;
+                    break;
+                }
+
+        var ctx = {
+            clusterName  : clusterName,
+            cellCount    : cellCount,
+            clusterField : clusterField || null,
+            markerSet    : markerSet || null,
+            dataset      : db.conf.shortLabel || db.name || null
+        };
+
+        var cols = [];
+        for (var i = 0; i < want.length; i++) {
+            var maker = markerDownloadColMakers[want[i]];
+            if (!maker) {
+                console.log("cellbrowser.conf: unknown markerDownloadCols value '"+
+                            want[i]+"', expected one of: "+
+                            Object.keys(markerDownloadColMakers).join(", "));
+                continue;
+            }
+            var col = maker(ctx);
+            if (col)
+                cols.push(col);
+        }
+        return cols;
+    }
+
     function addConstantColumns(text, extraCols) {
         /* Prepend constant (cluster, cellCount, ...) columns to a TSV string.
          * These are deliberately not stored per-row in the marker files -- they
@@ -13656,14 +13719,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             var tabDir = tabInfo[tabIdx].name;
             var sanName = sanitizeName(clusterName);
             var markerTsvUrl = cbUtil.joinPaths([db.url, "markers", tabDir, sanName+".tsv.gz"]);
-            var dlExtra = [["Cell type", clusterName]];
-            if (gLegend && gLegend.rows) {
-                for (var gr = 0; gr < gLegend.rows.length; gr++)
-                    if (gLegend.rows[gr].label === clusterName) {
-                        dlExtra.push(["n cells", gLegend.rows[gr].count]);
-                        break;
-                    }
-            }
+            var dlExtra = markerDownloadExtraCols(clusterName, currentField,
+                                                  markerSetLabel(tabInfo[tabIdx].shortLabel));
             tabDownloads[tabIdx] = {
                 url : markerTsvUrl,
                 fileName : makeMarkerFileName(markerSetLabel(tabInfo[tabIdx].shortLabel), clusterName),
@@ -14299,12 +14356,39 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
     // dataset-picker dialog, instead of a single dataset/collection name.
     // e.g. sfari.cells.ucsc.edu -> cells.ucsc.edu?proj=SFARI, showing a
     // live, auto-updating list of every dataset tagged projects=["SFARI"].
+    // One subdomain per project: adding a second key for the same project
+    // just gives readers two URLs to remember for the same page. Additional
+    // subdomains, including ones added after this code ships, belong in
+    // projects.tsv (see loadProjectSubdomains below), not here.
     var PROJECT_SUBDOMAINS = {
         "sfari": "SFARI",
-        // several subdomains may point at the same project term
         "hbca": "Human Breast Cell Atlas",
-        "human-breast-cell-atlas": "Human Breast Cell Atlas",
     };
+
+    function loadProjectSubdomains(onDone) {
+        /* Read "projects.tsv" from the web root, if present, and add its
+         * subdomain -> project pairs to PROJECT_SUBDOMAINS (entries in the file
+         * win over the built-in ones above). Two tab-separated columns, lines
+         * starting with # are ignored. Like cb.conf, a missing file is normal and
+         * the built-in list is used. It always calls back, so startup is never
+         * blocked. */
+        $.ajax({ url: "projects.tsv", dataType: "text", cache: false })
+            .done(function(text) {
+                var lines = text.split("\n");
+                for (var i = 0; i < lines.length; i++) {
+                    var line = lines[i].replace(/\r$/, "");
+                    if (line.trim()==="" || line.charAt(0)==="#")
+                        continue;
+                    var parts = line.split("\t");
+                    if (parts.length < 2 || parts[0].trim()==="" || parts[1].trim()==="")
+                        continue;
+                    PROJECT_SUBDOMAINS[parts[0].trim().toLowerCase()] = parts[1].trim();
+                }
+            })
+            .always(function() {
+                onDone();
+            });
+    }
 
     function redirectIfSubdomain() {
         /* rewrite the URL if at ucsc and subdomain is specified
@@ -14383,7 +14467,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             // datasets. Drop it and let loadConfig() fall back to a random buster.
             if (cbUtil.dataRoot !== "")
                 rootMd5 = null;
-            mainInit(rootMd5);
+            loadProjectSubdomains(function() {
+                mainInit(rootMd5);
+            });
         });
     }
 
