@@ -2075,6 +2075,18 @@ def isMtx(path):
         logging.debug("%s is not an MTX file" % path)
         return False
 
+def exprDecode(geneCompr, matType):
+    """ inverse of exprEncode: given the compressed bytes for one gene (as stored at the
+    [offset, length] recorded in exprMatrix.json), return (geneDesc, exprArr) where exprArr
+    is a numpy array in cell order. """
+    geneStr = zlib.decompress(geneCompr)
+    geneIdLen = struct.unpack("<H", geneStr[:2])[0]
+    geneDesc = geneStr[2:2+geneIdLen].decode("ascii")
+    arrBytes = geneStr[2+geneIdLen:]
+    dtype = "<f4" if matType=="float" else "<u4"
+    exprArr = np.frombuffer(arrBytes, dtype=dtype)
+    return geneDesc, exprArr
+
 def exprEncode(geneDesc, exprArr, matType):
     """ convert an array of numbers of type matType (int or float) to a compressed string of
     float32s
@@ -3953,6 +3965,94 @@ def parseLineInfo(inFname, limits):
 
     return lines, endPoints
 
+def computeDotplotCache(datasetDir, inConf, outConf, sampleNames):
+    """ Precompute, for each quick gene, the average expression and percent-expressed per value
+    of clusterField. The dot plot otherwise downloads and aggregates the full per-cell expression
+    vector for every gene on every page load, which is fine for a small dataset but means
+    megabytes per gene on a multi-million-cell one. Reads directly from the already-written
+    exprMatrix.bin/.json (the same bytes the browser would otherwise download), so this works
+    the same way regardless of what format the dataset was originally uploaded in.
+    Writes dotplotCache.json and registers it in outConf. A silent no-op for ATAC datasets (the
+    dot plot is disabled there), or if there is no clusterField/defColorField or no quickGenes. """
+    if inConf.get("atacSearch"):
+        return
+    # same fallback cbData.js's getDefaultColorField() uses: clusterField is old-dataset
+    # backwards-compat, most datasets only set defColorField
+    clusterField = outConf.get("clusterField") or outConf.get("defColorField")
+    quickGenes = outConf.get("quickGenes")
+    if not clusterField or not quickGenes:
+        return
+    if not numpyLoaded:
+        logging.warn("numpy is not available, skipping the dot plot cache")
+        return
+
+    jsonFname = join(datasetDir, "exprMatrix.json")
+    binFname = join(datasetDir, "exprMatrix.bin")
+    if not isfile(jsonFname) or not isfile(binFname):
+        return
+
+    geneOffsets = readJson(jsonFname)
+    matType = "float" if outConf.get("matrixArrType")=="Float32" else "int"
+
+    metaFname = join(datasetDir, "meta.tsv")
+    with open(metaFname) as f:
+        header = f.readline().rstrip("\n\r").split("\t")
+    idField = header[0]
+    if clusterField not in header:
+        logging.warn("Dot plot cache: clusterField '%s' not found in meta.tsv, skipping" % clusterField)
+        return
+
+    import pandas as pd
+    metaDf = pd.read_csv(metaFname, sep="\t", usecols=[idField, clusterField], dtype=str, index_col=idField)
+    clusterSeries = metaDf.loc[sampleNames, clusterField]
+    codes, uniqueLabels = pd.factorize(clusterSeries.values)
+    codes = np.asarray(codes)
+    nClusters = len(uniqueLabels)
+
+    cache = {}
+    skipCount = 0
+    with open(binFname, "rb") as bf:
+        for quickGeneRow in quickGenes:
+            geneId = quickGeneRow[0]
+            offsLen = geneOffsets.get(geneId)
+            if offsLen is None:
+                skipCount += 1
+                continue
+            offset, length = offsLen
+            bf.seek(offset)
+            data = bf.read(length)
+            geneDesc, exprArr = exprDecode(data, matType)
+            # geneDesc is a JSON array ["symbol", annot1, ...] when gene annotations were added at
+            # import time (see convertExprMatrix/geneAnnots); the display symbol is just the first
+            # element. The JS does the same unwrapping for the live-computed path.
+            if geneDesc.startswith("["):
+                geneDesc = json.loads(geneDesc)[0]
+            exprArr = exprArr.astype("float64")
+
+            cellCounts = np.bincount(codes, minlength=nClusters)
+            nonZeroCounts = np.bincount(codes, weights=(exprArr!=0).astype("float64"), minlength=nClusters)
+            sums = np.bincount(codes, weights=exprArr, minlength=nClusters)
+            avgs = np.divide(sums, cellCounts, out=np.zeros_like(sums), where=cellCounts!=0)
+
+            geneRows = {}
+            for i, label in enumerate(uniqueLabels):
+                geneRows[str(label)] = [int(cellCounts[i]), int(round(nonZeroCounts[i])), float(avgs[i])]
+            cache[geneId] = {"desc": geneDesc, "rows": geneRows}
+
+    if skipCount:
+        logging.warn("Dot plot cache: %d of %d quick genes could not be found in the expression matrix, skipped" %
+            (skipCount, len(quickGenes)))
+
+    if len(cache)==0:
+        logging.warn("Dot plot cache: no genes could be cached, not writing a cache file")
+        return
+
+    outFname = join(datasetDir, "dotplotCache.json")
+    with open(outFname, "w") as ofh:
+        json.dump({"clusterField": clusterField, "genes": cache}, ofh)
+    outConf["dotplotCache"] = "dotplotCache.json"
+    logging.info("Wrote dot plot cache for %d genes to %s" % (len(cache), outFname))
+
 def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSym, outDir, needFilterMatrix):
     """ trim a copy of the expression matrix for downloads, also create an indexed
     and compressed version
@@ -4957,6 +5057,10 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         "facets", "multiModal", "showHeatmap", "perturbationField",
         ]:
         copyConf(inConf, outConf, tag)
+
+    # must run after the copyConf loop above: outConf["clusterField"]/["defColorField"] are not
+    # reliably set yet any earlier in this function.
+    computeDotplotCache(datasetDir, inConf, outConf, sampleNames)
 
     if "name" not in outConf:
         copyConf(inConf, outConf, "name")

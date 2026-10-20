@@ -9983,6 +9983,41 @@ var cellbrowser = function() {
             alert("Could not load the data: "+((err && err.message) ? err.message : err));
     }
 
+    function tryGeneDataFromCache(geneId, exprData, cellMask) {
+        /* Return a geneData object built from db.dotplotCache, in the exact shape
+         * promiseGeneSplitByMeta resolves with -- or null if the cache cannot be used for this
+         * request. The cache only covers the plain split field over all cells, computed once at
+         * cbBuild time, so it is never used when: the cache hasn't loaded (yet), the field being
+         * split on does not match what was cached, a perturbation filter is restricting the cells
+         * (cellMask set -- the cached counts are for all cells), or the gene is not in the quick
+         * genes panel that was cached. A subsplit needs no separate check: its row labels are
+         * "primary :: subsplit" combinations that never appear as plain keys in the cache, so the
+         * per-row lookup below naturally misses and falls back. */
+        let cache = db.dotplotCache;
+        if (!cache || !cache.genes || cellMask)
+            return null;
+        if (exprData.metaFieldName!==cache.clusterField)
+            return null;
+        let geneCache = cache.genes[geneId];
+        if (!geneCache)
+            return null;
+
+        let dotRows = [];
+        for (let i = 0; i < exprData.metaLabels.length; i++) {
+            let row = geneCache.rows[exprData.metaLabels[i]];
+            if (row===undefined)
+                return null; // a current row has no cached value, do not risk a partial/wrong plot
+            dotRows.push(row); // [cellCount, nonZeroCount, avg], same shape as a live-computed row
+        }
+
+        return {
+            dotRows: dotRows,
+            exprMin: 0, exprMax: 0, avgMin: 0, avgMax: 0, // set but never read downstream either way
+            geneId: geneId,
+            geneDesc: geneCache.desc
+        };
+    }
+
     function exprDataLoadGenes(geneIds, exprData, onDone, cellMask, onError) {
         /* add a list of geneIds to the current exprData object and call onDone when done.
          * onError(err) is called if something could not be loaded. */
@@ -9992,9 +10027,13 @@ var cellbrowser = function() {
 
         for (let geneId of geneIds) {
             geneId = geneId.split("|")[0]; // internal genes sometimes can be in format ENSG-ID|geneSymbol
-            if (exprData.geneIds.indexOf(geneId)===-1)
-                promises.push( promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount, cellMask));
-            else
+            if (exprData.geneIds.indexOf(geneId)===-1) {
+                let cached = tryGeneDataFromCache(geneId, exprData, cellMask);
+                if (cached)
+                    promises.push( Promise.resolve(cached) );
+                else
+                    promises.push( promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount, cellMask));
+            } else
                 alert("This gene is already on the plot");
         }
 
@@ -10177,6 +10216,8 @@ var cellbrowser = function() {
             // header for the row-label column, e.g. "Cell Type" -- the gene columns are
             // labeled with their symbol, but nothing said what the rows are
             exprData.metaFieldLabel = primaryMetaInfo.label || metaName;
+            // raw field name (not the display label), to match against db.dotplotCache.clusterField
+            exprData.metaFieldName = metaName;
 
             if (subsplitName) {
                 var subsplitMetaInfo = resArr[1];
@@ -10660,6 +10701,18 @@ var cellbrowser = function() {
 
         if (db.exprData===undefined)
             db.exprData = null; // mark the object to be initialized on first start
+
+        // kick off the dot plot cache fetch now, in parallel with everything else below. It is tiny
+        // (KBs, not the multi-MB per-gene downloads it replaces) so by the time genes are actually
+        // requested it has usually already arrived. If it hasn't, db.dotplotCache is still undefined
+        // and every gene just falls back to the live per-cell computation, same as a dataset with no
+        // cache at all -- there is no race condition to worry about here.
+        if (db.conf.dotplotCache && db.dotplotCache===undefined) {
+            db.dotplotCache = null; // mark "fetch in progress", so we only ever fetch once
+            $.ajax({url: cbUtil.joinPaths([db.url, db.conf.dotplotCache]), dataType: "json", cache: true})
+                .done(function(data) { db.dotplotCache = data; })
+                .fail(function() { debug("Could not load dot plot cache "+db.conf.dotplotCache); });
+        }
 
         var htmls = [];
         htmls.push("<div id='tpExprView'>");
