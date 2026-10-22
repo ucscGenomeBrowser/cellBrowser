@@ -9229,6 +9229,31 @@ var cellbrowser = function() {
             buildGeneExprPlotsAddGenes(geneIds, null);
     }
 
+    function buildDotGeneData(exprArr, locusStr, geneDesc, metaArr, metaCount, cellMask) {
+        /* Aggregate a full-precision (or dequantized) per-cell expression vector into a geneData
+           object with gene-related attributes, exprMin, exprMax and dotRows. Shared by the live
+           full-precision path (promiseGeneSplitByMeta) and the quantized plot-matrix path
+           (promiseGeneFromPlotMatrix), so both feed the dot/violin plot through the same aggregation
+           code. geneData.dotRows is an array of [cellCount, zeroPerc, avg]. */
+        let res = cellMask ? splitExprByMetaMasked(metaArr, metaCount, exprArr, cellMask)
+                           : splitExprByMeta(metaArr, metaCount, exprArr);
+
+        let metaToExpr = res[0];
+        let exprMin = res[1];
+        let exprMax = res[2];
+        let dotData = calcDotData(metaToExpr, false);
+
+        let geneData = {};
+        geneData.dotRows = dotData.rows;
+        geneData.exprMin = exprMin;
+        geneData.exprMax = exprMax;
+        geneData.avgMin = dotData.avgMin;
+        geneData.avgMax = dotData.avgMax;
+        geneData.geneId = locusStr;
+        geneData.geneDesc = geneDesc;
+        return geneData;
+    }
+
     function promiseGeneSplitByMeta(locusStr, onProgress, metaArr, metaCount, cellMask) {
         /* A promise for loading the gene data and calculation average expression per meta data value.
            Resolves with a geneData object with gene-related attributes, exprMin, exprMax and dotRows.  */
@@ -9239,32 +9264,102 @@ var cellbrowser = function() {
                 /* called when the expression vector has been loaded and binning is done */
                 debug("Promise - Received expression vector, for "+locusStr+", desc: "+geneDesc);
                 exprStatusThen("progressBarExpr", "Calculating averages for "+locusStr+"...", function() {
-                    splitAndResolve(exprArr, locusStr, geneDesc);
+                    resolve(buildDotGeneData(exprArr, locusStr, geneDesc, metaArr, metaCount, cellMask));
                 }, reject);
-            }
-
-            function splitAndResolve(exprArr, locusStr, geneDesc) {
-                let res = cellMask ? splitExprByMetaMasked(metaArr, metaCount, exprArr, cellMask)
-                                   : splitExprByMeta(metaArr, metaCount, exprArr);
-
-                let metaToExpr = res[0];
-                let exprMin = res[1];
-                let exprMax = res[2];
-                let dotData = calcDotData(metaToExpr, false);
-
-                let geneData = {};
-                geneData.dotRows = dotData.rows;
-                geneData.exprMin = exprMin;
-                geneData.exprMax = exprMax;
-                geneData.avgMin = dotData.avgMin;
-                geneData.avgMax = dotData.avgMax;
-                geneData.geneId = locusStr;
-                geneData.geneDesc = geneDesc;
-                resolve(geneData);
             }
 
             db.loadExprAndDiscretize(locusStr, gotGeneData, onProgress, "none",
                 function(msg) { reject(new Error(msg)); });
+        });
+    }
+
+    var gPlotMatrixIndex = null; // lazily loaded index into exprMatrix.plot.bin, {geneId: [byteOffset, byteLength]}
+
+    function loadPlotMatrixIndex(onDone) {
+        /* Lazily fetch the index for the quantized plot-only matrix (exprMatrix.plot.json), once per
+           dataset. Calls onDone(index) where index is null if the dataset has no plot matrix or the
+           index hasn't loaded yet. */
+        if (!db.conf.hasPlotMatrix) {
+            onDone(null);
+            return;
+        }
+        if (gPlotMatrixIndex !== null) {
+            onDone(gPlotMatrixIndex);
+            return;
+        }
+        var url = cbUtil.joinPaths([db.url, "exprMatrix.plot.json"]);
+        $.getJSON(url)
+            .done(function(index) {
+                gPlotMatrixIndex = index;
+                onDone(gPlotMatrixIndex);
+            })
+            .fail(function() {
+                warn("Could not load exprMatrix.plot.json, falling back to full-precision matrix");
+                gPlotMatrixIndex = {}; // don't retry the failed fetch on every gene
+                onDone(null);
+            });
+    }
+
+    function gunzipAndConvertQuantized(comprData, sampleCount) {
+        /* Inflate one record from the quantized plot matrix and dequantize it back to a Float32Array.
+           Mirrors gunzipAndConvert() in cbData.js, but the record carries a min/max float32 header
+           after the desc instead of a type byte, and the payload is 1 byte/cell (uint8) instead of
+           4 bytes/cell -- see exprEncodeQuantized() in cellbrowser.py for the exact format. Uses
+           .slice() (not offset views into the shared inflate buffer) so the Float32Array read of
+           min/max is always 4-byte aligned, regardless of descLen's parity. */
+        let buf = pako.inflate(comprData);
+
+        let descLen = cbUtil.baReadUint16(buf, 0);
+        let descArr = buf.slice(2, 2+descLen);
+        let geneDesc = String.fromCharCode.apply(null, descArr);
+
+        let headerEnd = 2 + descLen;
+        let minMaxBytes = buf.slice(headerEnd, headerEnd+8);
+        let minMax = new Float32Array(minMaxBytes.buffer);
+        let minVal = minMax[0];
+        let maxVal = minMax[1];
+
+        let qArr = buf.slice(headerEnd+8, headerEnd+8+sampleCount);
+
+        let exprArr = new Float32Array(sampleCount);
+        if (maxVal > minVal) {
+            let scale = (maxVal - minVal) / 255.0;
+            for (let i = 0; i < sampleCount; i++)
+                exprArr[i] = minVal + qArr[i] * scale;
+        } else {
+            exprArr.fill(minVal);
+        }
+        return [exprArr, geneDesc];
+    }
+
+    function promiseGeneFromPlotMatrix(locusStr, onProgress, metaArr, metaCount, cellMask, plotIndex) {
+        /* A promise for loading one gene's expression from the reduced-precision plot-only matrix and
+           aggregating it the same way as promiseGeneSplitByMeta. Used only for the dot/violin plot on
+           very large datasets, for cases the dotplot cache doesn't cover (custom split field, subsplit,
+           perturbation filter, or a gene outside quickGenes) -- never for coloring or hover, which keep
+           using the full-precision matrix via promiseGeneSplitByMeta. */
+        return new Promise(function(resolve, reject) {
+            let geneInfo = plotIndex[locusStr];
+            if (!geneInfo) {
+                reject(new Error("gene "+locusStr+" not found in exprMatrix.plot.json"));
+                return;
+            }
+            let start = geneInfo[0];
+            let end = geneInfo[0] + geneInfo[1];
+            let url = cbUtil.joinPaths([db.url, "exprMatrix.plot.bin"]);
+
+            function onDone(comprData) {
+                exprStatusThen("progressBarExpr", "Calculating averages for "+locusStr+"...", function() {
+                    let decoded = gunzipAndConvertQuantized(comprData, metaArr.length);
+                    let exprArr = decoded[0];
+                    let geneDesc = decoded[1];
+                    resolve(buildDotGeneData(exprArr, locusStr, geneDesc, metaArr, metaCount, cellMask));
+                }, reject);
+            }
+
+            function onError(msg) { reject(new Error(msg)); }
+
+            cbUtil.loadFile(url+"?"+locusStr, Uint8Array, onDone, onProgress, locusStr, start, end, onError);
         });
     }
 
@@ -10018,6 +10113,31 @@ var cellbrowser = function() {
         };
     }
 
+    function promiseGeneData(geneId, exprData, cellMask, metaArr, metaCount) {
+        /* A promise for one gene's dot-plot geneData, trying the fastest source that applies: the
+         * dotplotCache (quickGenes, no filter, plain split field), then the quantized plot matrix
+         * (any gene, but only on datasets big enough that cbBuild wrote one, and only once its index
+         * has loaded), falling back to the live full-precision computation otherwise. */
+        let cached = tryGeneDataFromCache(geneId, exprData, cellMask);
+        if (cached)
+            return Promise.resolve(cached);
+
+        if (!db.conf.hasPlotMatrix)
+            return promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount, cellMask);
+
+        return new Promise(function(resolve, reject) {
+            loadPlotMatrixIndex(function(plotIndex) {
+                if (plotIndex && plotIndex[geneId]) {
+                    promiseGeneFromPlotMatrix(geneId, geneExprOnProgress, metaArr, metaCount, cellMask, plotIndex)
+                        .then(resolve, reject);
+                } else {
+                    promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount, cellMask)
+                        .then(resolve, reject);
+                }
+            });
+        });
+    }
+
     function exprDataLoadGenes(geneIds, exprData, onDone, cellMask, onError) {
         /* add a list of geneIds to the current exprData object and call onDone when done.
          * onError(err) is called if something could not be loaded. */
@@ -10028,11 +10148,7 @@ var cellbrowser = function() {
         for (let geneId of geneIds) {
             geneId = geneId.split("|")[0]; // internal genes sometimes can be in format ENSG-ID|geneSymbol
             if (exprData.geneIds.indexOf(geneId)===-1) {
-                let cached = tryGeneDataFromCache(geneId, exprData, cellMask);
-                if (cached)
-                    promises.push( Promise.resolve(cached) );
-                else
-                    promises.push( promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount, cellMask));
+                promises.push( promiseGeneData(geneId, exprData, cellMask, metaArr, metaCount) );
             } else
                 alert("This gene is already on the plot");
         }

@@ -2087,6 +2087,53 @@ def exprDecode(geneCompr, matType):
     exprArr = np.frombuffer(arrBytes, dtype=dtype)
     return geneDesc, exprArr
 
+def exprEncodeQuantized(geneDesc, exprArr):
+    """ Encode one gene's expression as 8-bit linearly-quantized values, for the reduced "plot"
+    matrix used only by the dot plot and violin plot on very large datasets -- not for coloring
+    or per-cell hover, which keep using the full-precision matrix. Chosen over a floating-point
+    8-bit format (e.g. FP8) because our values are log-normalized and sit in a narrow, known
+    range per gene, so a plain linear mapping uses the 256 available levels fully; it also needs
+    no custom bit-packing, since Uint8Array/numpy.uint8 already exist natively on both ends.
+
+    Format of a record, before zlib compression:
+    - 2 bytes: length of geneDesc
+    - len(geneDesc) bytes: geneDesc
+    - 4 bytes: min value (float32)
+    - 4 bytes: max value (float32)
+    - array of n 1-byte uint8s (n = number of cells), linearly mapped from [min, max] to [0, 255]
+    A gene with no variation (max==min, e.g. all-zero) stores min==max and an all-zero byte
+    array; decoders must treat max==min as "every cell has this exact value" to avoid a divide
+    by zero when mapping back to a float. """
+    geneDesc = str(geneDesc)
+    header = struct.pack("<H", len(geneDesc))
+    if isPy3:
+        header += bytes(geneDesc, encoding="ascii")
+    else:
+        header += geneDesc
+
+    arr = np.asarray(exprArr, dtype="float32")
+    minVal = float(np.amin(arr))
+    maxVal = float(np.amax(arr))
+    if maxVal > minVal:
+        qArr = np.round((arr - minVal) / (maxVal - minVal) * 255.0).astype("uint8")
+    else:
+        qArr = np.zeros(len(arr), dtype="uint8")
+
+    header += struct.pack("<ff", minVal, maxVal)
+    return zlib.compress(header + qArr.tobytes())
+
+def exprDecodeQuantized(geneCompr):
+    """ inverse of exprEncodeQuantized: return (geneDesc, minVal, maxVal, qArr) where qArr is a
+    uint8 numpy array. Dequantize with minVal + qArr/255.0*(maxVal-minVal), or just minVal
+    everywhere if maxVal==minVal. """
+    geneStr = zlib.decompress(geneCompr)
+    geneIdLen = struct.unpack("<H", geneStr[:2])[0]
+    geneDesc = geneStr[2:2+geneIdLen].decode("ascii")
+    pos = 2+geneIdLen
+    minVal, maxVal = struct.unpack("<ff", geneStr[pos:pos+8])
+    qArr = np.frombuffer(geneStr[pos+8:], dtype="uint8")
+    return geneDesc, minVal, maxVal, qArr
+
 def exprEncode(geneDesc, exprArr, matType):
     """ convert an array of numbers of type matType (int or float) to a compressed string of
     float32s
@@ -2183,9 +2230,15 @@ def indexAtacOffsetsByChrom(exprIndex):
     return dict(byChrom)
 
 def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJsonFname, \
-        metaSampleNames, matType=None, genesAreRanges=False, geneAnnots=None):
+        metaSampleNames, matType=None, genesAreRanges=False, geneAnnots=None,
+        plotBinFname=None, plotJsonFname=None, plotMinCells=200000):
     """ convert gene expression vectors to vectors of deciles
         and make json gene symbol -> (file offset, line length)
+
+    If plotBinFname/plotJsonFname are given and there are at least plotMinCells cells (and this
+    is not an ATAC dataset), also write a second, 8-bit-quantized copy of the matrix in the same
+    pass, for the dot plot and violin plot to use on very large datasets instead of downloading
+    the full-precision column for every gene. Returns (matType, wrotePlotMatrix).
     """
     logging.info("converting %s to %s and writing index to %s, type %s" % (fname, binFname, jsonFname, matType))
     logging.info("Compressing gene expression vectors...")
@@ -2198,6 +2251,16 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     discretIndex = {}
     exprIndex = {}
+
+    wrotePlotMatrix = (plotBinFname is not None and not genesAreRanges and numpyLoaded and
+        len(metaSampleNames) >= plotMinCells)
+    plotOfh = None
+    plotIndex = {}
+    if wrotePlotMatrix:
+        plotTmpFname = plotBinFname + ".tmp"
+        plotOfh = open(plotTmpFname, "wb")
+        logging.info("%d cells >= %d, also writing a quantized plot-only matrix to %s" %
+            (len(metaSampleNames), plotMinCells, plotBinFname))
 
     skipIds = 0
     highCount = 0
@@ -2290,6 +2353,11 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
         exprIndex[key] = (ofh.tell(), len(exprStr))
         ofh.write(exprStr)
 
+        if wrotePlotMatrix:
+            plotStr = exprEncodeQuantized(geneDesc, exprArr)
+            plotIndex[key] = (plotOfh.tell(), len(plotStr))
+            plotOfh.write(plotStr)
+
         if geneCount % 1000 == 0:
             logging.info("Wrote compressed expression values for %d %s" % (geneCount, dataType))
 
@@ -2297,6 +2365,8 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     discretOfh.close()
     ofh.close()
+    if wrotePlotMatrix:
+        plotOfh.close()
 
     if noSymFound!=0:
         logging.warn("No symbol found for %d genes" % noSymFound)
@@ -2342,7 +2412,14 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
     renameFile(tmpFname, binFname)
     renameFile(discretTmp, discretBinFname)
 
-    return matType
+    if wrotePlotMatrix:
+        plotJsonOfh = open(plotJsonFname, "w")
+        json.dump(plotIndex, plotJsonOfh)
+        plotJsonOfh.close()
+        renameFile(plotTmpFname, plotBinFname)
+        logging.info("Wrote quantized plot matrix to %s" % plotBinFname)
+
+    return matType, wrotePlotMatrix
 
 def sepForFile(fname):
     if fname.endswith(".csv") or fname.endswith(".csv.gz") or fname.endswith(".csv.Z"):
@@ -4003,7 +4080,11 @@ def computeDotplotCache(datasetDir, inConf, outConf, sampleNames):
         return
 
     import pandas as pd
-    metaDf = pd.read_csv(metaFname, sep="\t", usecols=[idField, clusterField], dtype=str, index_col=idField)
+    # keep_default_na/na_filter=False: an empty cell in meta.tsv is a literal "" category elsewhere in
+    # the build pipeline (e.g. a cell with no annotation), not a missing value. Without this, pandas'
+    # default NaN-sniffing turns "" into NaN, pd.factorize codes it -1, and np.bincount rejects that.
+    metaDf = pd.read_csv(metaFname, sep="\t", usecols=[idField, clusterField], dtype=str, index_col=idField,
+            keep_default_na=False, na_filter=False)
     clusterSeries = metaDf.loc[sampleNames, clusterField]
     codes, uniqueLabels = pd.factorize(clusterSeries.values)
     codes = np.asarray(codes)
@@ -4084,6 +4165,8 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
     binMatIndex = join(outDir, "exprMatrix.json")
     discretBinMat = join(outDir, "discretMat.bin")
     discretMatrixIndex = join(outDir, "discretMat.json")
+    plotBinMat = join(outDir, "exprMatrix.plot.bin")
+    plotMatrixIndex = join(outDir, "exprMatrix.plot.json")
 
     genesAreRanges = (inConf.get("atacSearch")!=None)
 
@@ -4095,10 +4178,12 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
         outConf["geneAnnotFields"] = geneAnnotHeaders
         outConf["fileVersions"]["geneAnnots"] = getFileVersion(annotFname)
 
-    matType = matrixToBin(outMatrixFname, geneToSym, binMat, binMatIndex, discretBinMat, \
+    matType, hasPlotMatrix = matrixToBin(outMatrixFname, geneToSym, binMat, binMatIndex, discretBinMat, \
             discretMatrixIndex, metaSampleNames, matType=matType, genesAreRanges=genesAreRanges,
-            geneAnnots=geneAnnots)
+            geneAnnots=geneAnnots, plotBinFname=plotBinMat, plotJsonFname=plotMatrixIndex)
     outConf["fileVersions"]["exprMatrix"] = getFileVersion(binMatIndex)
+    if hasPlotMatrix:
+        outConf["hasPlotMatrix"] = True
 
     # these are the Javascript type names, not the python ones (they are also better to read than the Python ones)
     if matType=="int" or matType=="forceInt":
@@ -5024,6 +5109,12 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         writeConfig(inConf, outConf, datasetDir)
     else:
         logging.info("Matrix and meta sample names have not changed, not indexing matrix again")
+        # convertExprMatrix (and the hasPlotMatrix flag it sets) didn't run above, so check the
+        # filesystem directly rather than trust in-memory state carried from an earlier build --
+        # outConf is not reliably repopulated from the previous dataset.json on every code path
+        # that can reach here.
+        if isfile(join(datasetDir, "exprMatrix.plot.bin")):
+            outConf["hasPlotMatrix"] = True
 
     convertTraces(inConf, sampleNames, datasetDir, outConf)
 
