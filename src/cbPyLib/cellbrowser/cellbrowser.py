@@ -6331,6 +6331,10 @@ def _descFieldAsStr(val):
 def _collectSearchDocs(conf, outDir, docs):
     " recursively collect searchable dataset fields from dataset.json + desc.json files "
     for ds in conf.get("datasets", []):
+        if ds["name"] == "":
+            continue # "" is the reserved sentinel for "whole site root" (see e.g. the "parents" field);
+                      # an entry using it is a link back to the top-level collection, not a real child,
+                      # and recursing into it reprocesses the same dataset.json forever
         dsDir = join(outDir, ds["name"])
         confPath = join(dsDir, "dataset.json")
         descPath = join(dsDir, "desc.json")
