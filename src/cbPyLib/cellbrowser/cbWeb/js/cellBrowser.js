@@ -10842,18 +10842,18 @@ var cellbrowser = function() {
 
         htmls.push("<div id='tpExprViewTitle'>");
         htmls.push("<b>Dot Plots</b>");
-        // float:right stacks right-to-left in DOM order, so the close button goes first (rightmost)
-        // and the export buttons after it, ending up to its left: "[SVG] [TSV] [X]"
         htmls.push("<span id='tpCloseButton' class='ui-button-icon ui-icon ui-icon-closethick' style='float:right'></span>");
-        htmls.push("<button id='tpExprExportTsv' title='Save the average expression and percent-expressed values behind the dot plot' "+
-            "style='float:right; margin-right:10px; font-size:11px; padding:2px 8px'>Export TSV</button>");
-        htmls.push("<button id='tpExprExportSvg' title='Save the dot plot as a vector image' "+
-            "style='float:right; margin-right:6px; font-size:11px; padding:2px 8px'>Export SVG</button>");
         htmls.push("</div>"); //tpExprViewTitle
 
         htmls.push('<div id="tpExprViewContent">');
 
-        htmls.push('<div class="link" style="padding-bottom: 6px; padding-left: 6px" id="tpBackToCb">&#8592; Back to Cell Browser</div>');
+        htmls.push("<div style='display:flex; justify-content:space-between; align-items:center; padding: 6px 10px 6px 6px'>");
+        htmls.push('<div class="link" id="tpBackToCb">&#8592; Back to Cell Browser</div>');
+        htmls.push("<div id='tpExprExportRow'>");
+        htmls.push("<button id='tpExprExportSvg' title='Save the dot plot as a vector image'>Export SVG</button>");
+        htmls.push("<button id='tpExprExportTsv' title='Save the average expression and percent-expressed values behind the dot plot' style='margin-left:6px'>Export TSV</button>");
+        htmls.push("</div>"); // tpExprExportRow
+        htmls.push("</div>"); // back-to-cb + export row
 
         htmls.push("<div id='tpExprViewHeader'>");
 
