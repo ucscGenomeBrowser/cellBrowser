@@ -10341,6 +10341,9 @@ var cellbrowser = function() {
 
             if (subsplitName) {
                 var subsplitMetaInfo = resArr[1];
+                // row labels below combine "primary :: subsplit" (see combinedLabels below), so the
+                // header over them needs to say the same, or it only describes half of each row
+                exprData.metaFieldLabel = exprData.metaFieldLabel + " :: " + (subsplitMetaInfo.label || subsplitName);
                 var primaryCount = primaryMetaInfo.valCounts.length;
                 var subsplitCount = subsplitMetaInfo.valCounts.length;
                 var numCells = primaryMetaInfo.arr.length;
