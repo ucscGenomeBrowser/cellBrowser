@@ -9845,8 +9845,12 @@ var cellbrowser = function() {
         let colLabelHeight = plotDotColumnLabelsAutoSize(parentEl, htmls, leftPad+rowLabelWidth, topPad, colWidth, syms)+10;
         let textColor = (lightMode === 1) ? "black" : "white";
         if (exprData.metaFieldLabel)
+            // y offset -14 (not -6): the row labels right below this start at exactly colLabelHeight,
+            // so -6 left only a 14px baseline-to-baseline gap (equal to fontSize itself) -- the two
+            // lines of text visually touched/overlapped. -14 gives ~22px, breathing room for two
+            // consecutive 14px text lines, using the open space above rather than crowding below.
             htmls.push("<text font-family='sans-serif' font-weight='bold' font-size='"+fontSize+"' fill='"+textColor+
-                "' alignment-baseline='bottom' text-anchor='start' x='"+leftPad+"' y='"+(topPad+colLabelHeight-6)+
+                "' alignment-baseline='bottom' text-anchor='start' x='"+leftPad+"' y='"+(topPad+colLabelHeight-14)+
                 "'>"+exprData.metaFieldLabel.replace(/_/g, " ")+"</text>");
         plotDotRowLabels(htmls, leftPad, colLabelHeight, rowHeight, rowLabels, cellCounts, textColor, fontSize);
 
