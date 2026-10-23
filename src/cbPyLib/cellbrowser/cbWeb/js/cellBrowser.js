@@ -10665,8 +10665,14 @@ var cellbrowser = function() {
         if(e.keyCode == 27) closeExprView(); 
     }
 
+    var SUBSPLIT_MAX_VALUES = 20; // fields with more distinct values than this are hidden from the
+        // subsplit dropdown: the dot plot shows one row per (primary field value x subsplit value)
+        // pair, so a high-cardinality subsplit field (e.g. per-sample/per-mouse IDs) multiplies out
+        // into an unusable, often mostly-empty wall of rows
+
     function buildMetaFieldComboWithNone(htmls, idOuter, id, optStr) {
-        /* like buildMetaFieldCombo but adds a "Show all" (no subsplit) option at top */
+        /* like buildMetaFieldCombo but adds a "Show all" (no subsplit) option at top. Fields with
+         * more than SUBSPLIT_MAX_VALUES distinct values are left out -- see its comment. */
         var metaFieldInfo = db.getMetaFields();
         htmls.push('<div id="'+idOuter+'" style="padding-left:2px; display:inline">');
         var entries = [["tpMetaVal_none", "Show all"]];
@@ -10674,6 +10680,7 @@ var cellbrowser = function() {
             var field = metaFieldInfo[i];
             var isNumeric = (field.type==="int" || field.type==="float");
             if (optStr==="noNums" && isNumeric) continue;
+            if (field.valCounts && field.valCounts.length > SUBSPLIT_MAX_VALUES) continue;
             entries.push(["tpMetaVal_"+i, field.label]);
         }
         buildComboBox(htmls, id, entries, 0, "Show all", 50);
@@ -10903,6 +10910,9 @@ var cellbrowser = function() {
         htmls.push("<div class='tpExprHeaderRow'>");
         htmls.push('<label id="tpGeneExprSubsplitLabel">Subsplit by</label>');
         buildMetaFieldComboWithNone(htmls, "tpGeneExprSubsplitComboBox", "tpGeneExprSubsplitCombo", "noNums");
+        htmlAddInfoIcon(htmls, "Fields with more than "+SUBSPLIT_MAX_VALUES+" values are not shown here: each row "+
+            "in the plot is one combination of the split field and the subsplit field, so a high-value-count "+
+            "field like a per-sample or per-mouse ID would multiply into an unusably long list of mostly-empty rows.");
         htmls.push("<label class='tpExprFilterLabel' id='tpExprSubsplitFilterLabel' for='tpExprSubsplitFilterBtn' style='display:none'>Filter by</label>");
         htmls.push("<div class='tpExprFilterWrap'>");
         htmls.push("<button class='tpExprFilterBtn' id='tpExprSubsplitFilterBtn' style='display:none'>All &#9662;</button>");
