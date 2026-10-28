@@ -13371,7 +13371,14 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             }
         }
 
-        if (labelField === db.conf.labelField) {
+        // The markers belong to db.conf.labelField. A legend hover is about the field the legend
+        // shows, which can differ from the plot's label field, and two fields can share values
+        // like "3", so check the legend's field there, not the label field.
+        var hoverField = labelField;
+        if (isLegend)
+            hoverField = (gLegend && gLegend.type==="meta" && gLegend.metaInfo) ? gLegend.metaInfo.name : null;
+
+        if (hoverField === db.conf.labelField) {
             if (db.conf.topMarkers!==undefined && db.conf.topMarkers[clusterName]!==undefined) {
                 labelLines.push("Top enriched markers: "+db.conf.topMarkers[clusterName].join(", "));
             }
