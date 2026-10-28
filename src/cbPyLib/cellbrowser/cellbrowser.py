@@ -6968,6 +6968,9 @@ def copyStatic(baseDir, outDir):
     copyAllFiles(baseDir, "js", outDir)
     copyAllFiles(baseDir, "css", outDir)
     copyAllFiles(baseDir, "genes", outDir, ext=".json.gz")
+    # mouse symbol -> MGI ID table for the marker table links, plain .json so the filter above skips it
+    for fname in glob.glob(join(baseDir, "genes", "mgiIds-*.json")):
+        shutil.copyfile(fname, join(outDir, "genes", basename(fname)))
 
     copyAndReplace(join(baseDir, "js", "cellBrowser.js"), join(outDir, "js"))
     copyMarkers(outDir)
