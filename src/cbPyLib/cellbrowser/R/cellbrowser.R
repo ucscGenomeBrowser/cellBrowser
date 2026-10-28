@@ -602,15 +602,19 @@ ExportToCellbrowser <- function(
   matrixLabels <- matrixNames
   matrixLabels[matrixLabels=="counts"] <- "read counts"
   matrixLabels[matrixLabels=="scale.data"] <- "scaled"
-  matrices.conf <- sprintf(" {'label':'%s','fileName':'%s_exprMatrix.tsv.gz'}", 
-                           names(slotMatrices), names(slotMatrices))
+  # saveMatrix() writes <prefix>matrix.mtx.gz in MTX mode, <prefix>exprMatrix.tsv.gz otherwise.
+  # use.mtx may also have been switched on above for big matrices, so both file names follow it.
+  matrixFileEnd <- "exprMatrix.tsv.gz"
+  if (use.mtx) {
+    matrixFileEnd <- "matrix.mtx.gz"
+  }
+
+  matrices.conf <- sprintf(" {'label':'%s','fileName':'%s_%s'}",
+                           names(slotMatrices), names(slotMatrices), matrixFileEnd)
 
   matrices.string <- paste0("matrices=[", paste(matrices.conf, collapse = ",\n"), "]" )
 
-  matrixOutPath <- sprintf("%s%sexprMatrix.tsv.gz", firstPrefix, matSep)
-  if (use.mtx) {
-    matrixOutPath <- sprintf("%s%smatrix.mtx.gz", firstPrefix, matSep)
-  }
+  matrixOutPath <- sprintf("%s%s%s", firstPrefix, matSep, matrixFileEnd)
 
   embeddings.conf <- exportImages(object, dir, embeddings.conf)
 
