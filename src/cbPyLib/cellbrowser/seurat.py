@@ -383,7 +383,7 @@ def cbImportSeurat_parseArgs(showHelp=False):
         "this option if the dataset includes markers in obj@misc and you do not want to use them.")
 
     parser.add_option("-c", "--clusterField", dest="clusterField", action="store",
-        help="Cluster field to color on, by default this is the @ident slot of the Seurat object but it can also be any other meta data field of the @meta.data slot")
+        help="Cluster field to color on, any meta data field of the @meta.data slot. If not given, everything else is exported, no markers are computed, and the cluster lines in cellbrowser.conf are left commented out with the possible fields listed")
 
     parser.add_option("", "--markerFile", dest="markerFile", action="store",
             help="Instead of calculating cluster markers again, use this file. Format: cluster,gene,pVal + any other fields. Or alternatively the native Seurat cluster markers format, as created by write.table")
@@ -562,16 +562,26 @@ def cbImportSeurat(inFname, outDir, datasetName, options):
 
     generateQuickGenes(outDir)
 
-    # append one single line to cellbrowser.conf
+    # append one single line to cellbrowser.conf, but only if there is a file for it to name:
+    # without markers there are no quick genes, and cbBuild would look for the missing file
     cbConfPath = join(outDir, "cellbrowser.conf")
-    fh = open(cbConfPath, "a")
-    fh.write("\nquickGenesFile = 'quickGenes.tsv'\n")
-    fh.close()
+    if isfile(join(outDir, "quickGenes.tsv")):
+        fh = open(cbConfPath, "a")
+        fh.write("\nquickGenesFile = 'quickGenes.tsv'\n")
+        fh.close()
 
     if not options.skipMarkers and not options.noAnnotMarkers:
         gi.annotateMarkerFileInPlace(join(outDir, "markers.tsv"), force=options.annotMarkers)
 
     generateHtmls(datasetName, outDir, desc = descDict)
+
+    # repeated here because the warning from the R script has long scrolled away by now
+    if clusterField is None:
+        logging.warning("No cluster field was given, so no cluster markers were computed. To finish this "
+            "dataset, either set clusterField and labelField in %s and run cbBuild, or, to get "
+            "markers too, rerun this command with -c <field> -x (-x skips the matrix export). "
+            "Note that a rerun rewrites cellbrowser.conf, so make any other edits afterwards. "
+            "The possible fields are listed in %s." % (cbConfPath, cbConfPath))
 
 def cbImportSeuratCli():
     " convert .rds to directory "

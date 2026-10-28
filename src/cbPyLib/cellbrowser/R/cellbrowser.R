@@ -386,7 +386,14 @@ ExportToCellbrowser <- function(
         #}
     #}
   if (is.null(x = cluster.field)) {
-        message("No cluster field specified: Using the value of Idents()")
+        # Do not stop here: loading the object is often the slowest step. Export everything
+        # that does not need a cluster field, skip the markers, and leave the cluster lines in
+        # cellbrowser.conf commented out with the possible fields listed, for the user to fill in.
+        warning("No cluster field was given (cluster.field='xxx' from R or -c xxx with cbImportSeurat). ",
+            "Exporting everything else, but no cluster markers will be computed. Possible meta annotation fields are: ",
+            toString(colnames(x = meta)), immediate. = TRUE)
+        if (is.null(markers.file))
+            skip.markers <- TRUE
         # create a new meta data field named "Cluster"
         #newDf <- cbind(object@meta.data, Idents(object))
         # default name is "Idents(object)", not good, let's rename that to "Cluster"
@@ -399,10 +406,6 @@ ExportToCellbrowser <- function(
       # another, convoluted way to set the Idents field, if the command above makes trouble again
       #Idents(object) <- as.factor([object[[cluster.field]], cluster.field])
   }
-
-  # make sure that we have a cluster field
-  #if (is.null(x = cluster.field))
-      #stop("There was no cluster field provided and the auto-detection to find one based on Idents() did not work. Please provide a cluster field with cluster.field='xxx' from R or --clusterField=xxx if using cbImportSeurat. Possible meta annotation fields are: ", toString(colnames(x = meta)))
 
   if (is.null(x = meta.fields)) {
     meta.fields <- colnames(x = meta)
@@ -632,8 +635,7 @@ meta="meta.tsv"
 geneIdType="auto"
 # file with gene,description (one per line) with highlighted genes, called "Dataset Genes" in the user interface
 # quickGenesFile="quickGenes.csv"
-clusterField="%s"
-labelField="%s"
+%s
 enumFields=%s
 %s
 coords=%s
@@ -645,13 +647,22 @@ coords=%s
 
   coords.string <- paste0( "[", paste(embeddings.conf, collapse = ",\n"), "]" )
 
+  # a NULL cluster.field passed to sprintf() would make the whole config come out empty
+  if (is.null(x = cluster.field)) {
+    cluster.string <- paste0(
+      "# No cluster field was given to cbImportSeurat. Uncomment these two lines and set them to one of:\n# ",
+      toString(colnames(x = meta)), "\n",
+      '#clusterField="CHANGE_ME"\n#labelField="CHANGE_ME"')
+  } else {
+    cluster.string <- sprintf('clusterField="%s"\nlabelField="%s"', cluster.field, cluster.field)
+  }
+
   config <- sprintf(
     config,
     dataset.name,
     matrixOutPath,
     matrices.string,
-    cluster.field,
-    cluster.field,
+    cluster.string,
     enum.string,
     markers.string,
     coords.string
