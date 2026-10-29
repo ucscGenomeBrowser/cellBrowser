@@ -2103,7 +2103,17 @@ def exprEncodeQuantized(geneDesc, exprArr):
     - array of n 1-byte uint8s (n = number of cells), linearly mapped from [min, max] to [0, 255]
     A gene with no variation (max==min, e.g. all-zero) stores min==max and an all-zero byte
     array; decoders must treat max==min as "every cell has this exact value" to avoid a divide
-    by zero when mapping back to a float. """
+    by zero when mapping back to a float.
+
+    The dot plot counts a cell as expressing when its value is not 0, so min is always stored as
+    0: byte 0 decodes to exactly 0, and a non-zero value never rounds down to byte 0 (on raw
+    counts with a max of 2000, a count of 1-3 would otherwise become 0). A gene with negative or
+    non-finite values (scaled data, -inf) cannot be stored this way: return None for it, and the
+    browser uses the full-precision matrix for that gene. """
+    arr = np.asarray(exprArr, dtype="float32")
+    if not np.all(np.isfinite(arr)) or float(np.amin(arr)) < 0:
+        return None
+
     geneDesc = str(geneDesc)
     header = struct.pack("<H", len(geneDesc))
     if isPy3:
@@ -2111,11 +2121,11 @@ def exprEncodeQuantized(geneDesc, exprArr):
     else:
         header += geneDesc
 
-    arr = np.asarray(exprArr, dtype="float32")
-    minVal = float(np.amin(arr))
+    minVal = 0.0
     maxVal = float(np.amax(arr))
     if maxVal > minVal:
-        qArr = np.round((arr - minVal) / (maxVal - minVal) * 255.0).astype("uint8")
+        qArr = np.round(arr / maxVal * 255.0).astype("uint8")
+        qArr[(arr > 0) & (qArr == 0)] = 1
     else:
         qArr = np.zeros(len(arr), dtype="uint8")
 
@@ -2355,8 +2365,9 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
         if wrotePlotMatrix:
             plotStr = exprEncodeQuantized(geneDesc, exprArr)
-            plotIndex[key] = (plotOfh.tell(), len(plotStr))
-            plotOfh.write(plotStr)
+            if plotStr is not None: # else not in the index, the browser uses the full matrix for it
+                plotIndex[key] = (plotOfh.tell(), len(plotStr))
+                plotOfh.write(plotStr)
 
         if geneCount % 1000 == 0:
             logging.info("Wrote compressed expression values for %d %s" % (geneCount, dataType))

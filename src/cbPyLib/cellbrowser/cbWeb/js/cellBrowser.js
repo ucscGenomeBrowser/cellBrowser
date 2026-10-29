@@ -9273,31 +9273,51 @@ var cellbrowser = function() {
         });
     }
 
-    var gPlotMatrixIndex = null; // lazily loaded index into exprMatrix.plot.bin, {geneId: [byteOffset, byteLength]}
+    // Index into exprMatrix.plot.bin, {gene: [byteOffset, byteLength]}, for the dataset at
+    // gPlotMatrixUrl. It holds the download while it runs, so the genes of one dot plot share it,
+    // and it is tied to the dataset, as the user can switch datasets without reloading the page.
+    var gPlotMatrixUrl = null;
+    var gPlotMatrixPromise = null;
+
+    function plotIndexAddNames(index) {
+        /* cbBuild keys the index like exprMatrix.json: "ENSG...|SOD1" when the matrix has both an
+           ID and a symbol. The dot plot asks for the ID or the symbol alone, so add both as keys. */
+        let keys = Object.keys(index);
+        for (let key of keys) {
+            let pipePos = key.indexOf("|");
+            if (pipePos===-1)
+                continue;
+            let geneId = key.slice(0, pipePos);
+            let sym = key.slice(pipePos+1);
+            if (index[geneId]===undefined)
+                index[geneId] = index[key];
+            if (index[sym]===undefined)
+                index[sym] = index[key];
+        }
+        return index;
+    }
 
     function loadPlotMatrixIndex(onDone) {
         /* Lazily fetch the index for the quantized plot-only matrix (exprMatrix.plot.json), once per
            dataset. Calls onDone(index) where index is null if the dataset has no plot matrix or the
-           index hasn't loaded yet. */
+           index could not be loaded. */
         if (!db.conf.hasPlotMatrix) {
             onDone(null);
             return;
         }
-        if (gPlotMatrixIndex !== null) {
-            onDone(gPlotMatrixIndex);
-            return;
-        }
-        var url = cbUtil.joinPaths([db.url, "exprMatrix.plot.json"]);
-        $.getJSON(url)
-            .done(function(index) {
-                gPlotMatrixIndex = index;
-                onDone(gPlotMatrixIndex);
-            })
-            .fail(function() {
-                warn("Could not load exprMatrix.plot.json, falling back to full-precision matrix");
-                gPlotMatrixIndex = {}; // don't retry the failed fetch on every gene
-                onDone(null);
+        if (gPlotMatrixPromise===null || gPlotMatrixUrl!==db.url) {
+            gPlotMatrixUrl = db.url;
+            var url = cbUtil.joinPaths([db.url, "exprMatrix.plot.json"]);
+            gPlotMatrixPromise = new Promise(function(resolve) {
+                $.getJSON(url)
+                    .done(function(index) { resolve(plotIndexAddNames(index)); })
+                    .fail(function() {
+                        console.warn("Could not load exprMatrix.plot.json, falling back to full-precision matrix");
+                        resolve(null); // kept, so we don't retry the failed fetch on every gene
+                    });
             });
+        }
+        gPlotMatrixPromise.then(onDone);
     }
 
     function gunzipAndConvertQuantized(comprData, sampleCount) {
@@ -9676,8 +9696,9 @@ var cellbrowser = function() {
 
                 let alpha = 0.7;
 
-                // the highest value lands exactly on binCount, one past the last color: it got "#undefined"
-                let colBin = Math.min(binCount-1, Math.round((avgExpr-avgMin) / binSize));
+                // the highest value lands exactly on binCount, one past the last color: it got "#undefined".
+                // If all averages are equal, binSize is 0 and the division gives NaN.
+                let colBin = (binSize > 0) ? Math.min(binCount-1, Math.round((avgExpr-avgMin) / binSize)) : 0;
                 let color = colors[colBin];
 
                 htmls.push("<circle class='tpDotCircle' data-row='"+rowI+"' data-col='"+colI+"' cx='"+x+"' cy='"+y+"' r='"+radius+"' fill-opacity='"+alpha+"' fill='#"+color+"' />");
@@ -10211,8 +10232,13 @@ var cellbrowser = function() {
         return new Promise(function(resolve, reject) {
             loadPlotMatrixIndex(function(plotIndex) {
                 if (plotIndex && plotIndex[geneId]) {
+                    // the plot matrix is only a faster copy, so if reading it fails, use the full one
                     promiseGeneFromPlotMatrix(geneId, geneExprOnProgress, metaArr, metaCount, cellMask, plotIndex)
-                        .then(resolve, reject);
+                        .then(resolve, function(err) {
+                            console.warn("Could not read "+geneId+" from the plot matrix, using the full matrix:", err);
+                            promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount, cellMask)
+                                .then(resolve, reject);
+                        });
                 } else {
                     promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount, cellMask)
                         .then(resolve, reject);
