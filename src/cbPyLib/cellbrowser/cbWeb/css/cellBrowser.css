@@ -13,18 +13,40 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         /*border-bottom: 1px solid black; */
 }
 
+/* fixed to the window and filling all of it: the page underneath can be a few pixels taller
+ * than the window, and a box positioned on the page scrolled with it and showed a strip below */
 #tpExprView {
-        position: absolute;
+        position: fixed;
         z-index: 600;
         display: block;
         background-color: white;
-        top: 1%;
-        left: 1%;
-        height: 99%;
-        width: 99%;
-        border: 1px solid grey;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
         overflow-y: auto;
 }
+
+/* dot plot hover box, see exprTipShow() */
+#tpExprTip {
+        display: none;
+        position: fixed;
+        z-index: 700;
+        pointer-events: none;
+        white-space: nowrap;
+        background-color: white;
+        color: black;
+        border: 1px solid #aaa;
+        border-radius: 4px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        padding: 6px 9px;
+        font-size: 13px;
+        line-height: 1.4;
+}
+.tpExprTipTitle { font-weight: bold; font-size: 14px; }
+
+/* the hovered dot's row label and gene name */
+#tpExprDotPlot .tpExprHi { font-weight: bold; fill: #1a5fb4; }
 
 #tpExprViewHeader {
         display: flex;
@@ -136,7 +158,14 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
         padding: 6px;
 }
 
+#tpExprPerturbRow label {
+        margin-left: 6px;
+        margin-right: 6px;
+        margin-bottom: 0;
+}
+
 #tpGeneExprLabel {
+        margin-left: 6px;
         margin-right: 6px;
         margin-bottom: 0;
 }
@@ -346,8 +375,14 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 }
 .progress-label {
         position: absolute;
-        left: 50%;
+        left: 0;
+        right: 0;
         top: 4px;
+        padding: 0 8px;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
         font-weight: bold;
         /*text-shadow: 1px 1px 0 #fff;*/
 }

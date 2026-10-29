@@ -9569,17 +9569,18 @@ var cellbrowser = function() {
             return s;
     }
 
-    function svgMaxTextLength(parentEl, fontSize, strings) {
-        // return maximum width in SVG pixels of array of strings */
+    function svgMaxTextLength(parentEl, fontSize, strings, fontWeight) {
+        // return maximum width in SVG pixels of array of strings. fontWeight is optional, e.g. "bold" */
         let htmls = [];
         let chartHeight = 500;
         let chartWidth = 500;
+        let weightAttr = fontWeight ? " font-weight='"+fontWeight+"'" : "";
         htmls.push("<svg xmlns='http://www.w3.org/2000/svg' height='"+chartHeight+"' width='"+chartWidth+"'>");
         for (let i=0; i < strings.length; i++) {
             let label = stringEmptyLabel(strings[i]);
             let x = 1;
             let y = 20;
-            htmls.push("<text class='tpTestString' font-family='sans-serif' font-size='"+fontSize+"' fill='transparent' x='"+x+"' y='"+y+"'>"+label+"</text>");
+            htmls.push("<text class='tpTestString' font-family='sans-serif'"+weightAttr+" font-size='"+fontSize+"' fill='transparent' x='"+x+"' y='"+y+"'>"+label+"</text>");
         }
         htmls.push("</svg>");
 
@@ -9594,14 +9595,13 @@ var cellbrowser = function() {
         return maxWidth;
     }
 
-    function plotDotRowLabels(htmls, minX, minY, rowDist, labels, cellCounts, fill, fontSize) {
-        /* plot the names of the meta values downwards on the left */
+    function plotDotRowLabels(htmls, minX, minY, rowDist, labels, fill, fontSize) {
+        /* plot the names of the meta values downwards on the left. The hover box is in buildExprDotplot. */
         let x = minX;
         for (let i=0; i < labels.length; i++) {
             let label = stringEmptyLabel(labels[i]);
             let y = minY+(i*rowDist)+fontSize;
-            let tooltip = cellCounts[i]+" cells";
-            htmls.push("<text class='tpExprRowLabel' title='"+tooltip+"' font-family='sans-serif' font-size='"+fontSize+"' fill='"+fill+"' "+
+            htmls.push("<text class='tpExprRowLabel' data-row='"+i+"' font-family='sans-serif' font-size='"+fontSize+"' fill='"+fill+"' "+
                 "alignment-baseline='bottom' text-anchor='start' x='"+x+"' y='"+y+"'>"+label+"</text>");
         }
     }
@@ -9614,7 +9614,7 @@ var cellbrowser = function() {
         for (let i=0; i < geneSyms.length; i++) {
             let label = geneSyms[i];
             let x = minX+(i*xDist)+(fontSize);
-            htmls.push("<text class='tpExprColLabel' data-gene='"+label+"' font-family='sans-serif' font-weight='bold' font-size='"+
+            htmls.push("<text class='tpExprColLabel' data-gene='"+label+"' data-col='"+i+"' font-family='sans-serif' font-weight='bold' font-size='"+
                     fontSize+"' fill='"+fill+"' transform='translate("+x+", "+y+
                     ") rotate(45)' alignment-baseline='bottom' text-anchor='end'>ⓧ&nbsp;"+label+"</text>");
         }
@@ -9649,7 +9649,7 @@ var cellbrowser = function() {
 
     function plotDotCircles(htmls, syms, rowLabels, dotRows, leftPad, topPad, colDist, 
                                 rowDist, maxDotSize, colors, cellCounts, avgMin, avgMax) {
-        /* plot the circles of the dot plot */
+        /* plot the circles of the dot plot. The hover box is in buildExprDotplot. */
         let rows = dotRows;
 
         let radius = maxDotSize/0.5;
@@ -9659,11 +9659,8 @@ var cellbrowser = function() {
 
         for (let rowI=0; rowI < rows.length; rowI++) {
             let row = rows[rowI];
-            let label = rowLabels[rowI]
 
             for (let colI=0; colI < row.length; colI++) {
-                let sym = syms[colI];
-
                 let cellCount = cellCounts[rowI];
                 let colData = row[colI];
                 let nonZeroCount = colData[0];
@@ -9679,12 +9676,11 @@ var cellbrowser = function() {
 
                 let alpha = 0.7;
 
-                let colBin = Math.min(binCount, Math.round((avgExpr-avgMin) / binSize)); // at the edge, floating point problems can make it sometimes 21
+                // the highest value lands exactly on binCount, one past the last color: it got "#undefined"
+                let colBin = Math.min(binCount-1, Math.round((avgExpr-avgMin) / binSize));
                 let color = colors[colBin];
 
-                let cellCountStr = cellCount.toLocaleString('en-US');
-                let tooltip = label+": "+cellCountStr+" cells. For "+sym+", "+nonZeroCount+" cells are non-zero ("+Math.round(100*nonZeroPercent)+"%), avgExpr="+avgExpr.toFixed(2);
-                htmls.push("<circle class='tpDotCircle' title='"+tooltip+"' cx='"+x+"' cy='"+y+"' r='"+radius+"' fill-opacity='"+alpha+"' fill='#"+color+"' />");
+                htmls.push("<circle class='tpDotCircle' data-row='"+rowI+"' data-col='"+colI+"' cx='"+x+"' cy='"+y+"' r='"+radius+"' fill-opacity='"+alpha+"' fill='#"+color+"' />");
             }
         }
     }
@@ -9763,6 +9759,54 @@ var cellbrowser = function() {
         exprDataUpdateMinMax(exprData);
     }
 
+    function exprTipShow(lines, anchorEl) {
+        /* show the dot plot hover box: one line per string, the first one in bold. It goes above and
+         * to the right of anchorEl, so the hovered dot's own row and column stay visible, and flips to
+         * the left or below where there is no room. */
+        let tip = getById("tpExprTip");
+        if (!tip) {
+            tip = document.createElement("div");
+            tip.id = "tpExprTip";
+            getById("tpExprView").appendChild(tip);
+        }
+        tip.innerHTML = "";
+        for (let i=0; i < lines.length; i++) {
+            let lineEl = document.createElement("div");
+            lineEl.textContent = lines[i]; // labels come from the dataset, so never as HTML
+            if (i===0)
+                lineEl.className = "tpExprTipTitle";
+            tip.appendChild(lineEl);
+        }
+        tip.style.display = "block";
+
+        let anchor = anchorEl.getBoundingClientRect();
+        let gap = 10;
+        let x = anchor.right + gap;
+        if (x + tip.offsetWidth > window.innerWidth - 4)
+            x = anchor.left - gap - tip.offsetWidth;
+        let y = anchor.top - gap - tip.offsetHeight;
+        if (y < 4)
+            y = anchor.bottom + gap;
+        tip.style.left = Math.max(4, x)+"px";
+        tip.style.top = y+"px";
+    }
+
+    function exprTipHide() {
+        /* hide the dot plot hover box and the row/gene highlight */
+        let tip = getById("tpExprTip");
+        if (tip)
+            tip.style.display = "none";
+        for (let el of document.querySelectorAll("#tpExprDotPlot .tpExprHi"))
+            el.classList.remove("tpExprHi");
+    }
+
+    function exprHighlight(selector) {
+        /* make a row label or gene name stand out while its dot is hovered */
+        let el = document.querySelector("#tpExprDotPlot "+selector);
+        if (el)
+            el.classList.add("tpExprHi");
+    }
+
     function onDotCircleHover(ev, minY, maxY, minX, maxX) {
         /* user hovers over the dotplot circle */
         if(DEBUG) console.log(ev);
@@ -9799,6 +9843,7 @@ var cellbrowser = function() {
 
     function buildExprDotplot(parentDomId, exprData) {
         /* create an svg under parentDomId that shows dot plots for each meta category */
+        exprTipHide(); // a redraw replaces the hovered element, so its mouseout never comes
         let syms = exprData.syms;
         let cellCounts = exprData.cellCounts;
         let dotRows = exprData.rows;
@@ -9839,20 +9884,24 @@ var cellbrowser = function() {
 
         let fontSize = 14;
         let rowLabelWidth = 10+svgMaxTextLength(parentEl, fontSize, rowLabels);
+        // the bold header over the row labels must fit too, or it runs under the slanted gene names
+        let headerLabel = exprData.metaFieldLabel ? exprData.metaFieldLabel.replace(/_/g, " ") : null;
+        if (headerLabel)
+            rowLabelWidth = Math.max(rowLabelWidth, 10+svgMaxTextLength(parentEl, fontSize, [headerLabel], "bold"));
 
         rowLabelWidth = Math.max(50, rowLabelWidth); // need some minimum width since the column labels are slanted to the left
 
         let colLabelHeight = plotDotColumnLabelsAutoSize(parentEl, htmls, leftPad+rowLabelWidth, topPad, colWidth, syms)+10;
         let textColor = (lightMode === 1) ? "black" : "white";
-        if (exprData.metaFieldLabel)
-            // y offset -14 (not -6): the row labels right below this start at exactly colLabelHeight,
+        if (headerLabel)
+            // y offset -20 (not -6): the row labels right below this start at exactly colLabelHeight,
             // so -6 left only a 14px baseline-to-baseline gap (equal to fontSize itself) -- the two
-            // lines of text visually touched/overlapped. -14 gives ~22px, breathing room for two
-            // consecutive 14px text lines, using the open space above rather than crowding below.
+            // lines of text visually touched/overlapped. -20 gives ~28px, so the header reads as a
+            // header and not as the first row, using the open space above rather than crowding below.
             htmls.push("<text font-family='sans-serif' font-weight='bold' font-size='"+fontSize+"' fill='"+textColor+
-                "' alignment-baseline='bottom' text-anchor='start' x='"+leftPad+"' y='"+(topPad+colLabelHeight-14)+
-                "'>"+exprData.metaFieldLabel.replace(/_/g, " ")+"</text>");
-        plotDotRowLabels(htmls, leftPad, colLabelHeight, rowHeight, rowLabels, cellCounts, textColor, fontSize);
+                "' alignment-baseline='bottom' text-anchor='start' x='"+leftPad+"' y='"+(topPad+colLabelHeight-20)+
+                "'>"+headerLabel+"</text>");
+        plotDotRowLabels(htmls, leftPad, colLabelHeight, rowHeight, rowLabels, textColor, fontSize);
 
         let colorPal = makeColorPalette(cDefGradPalette, 20);
 
@@ -9866,22 +9915,54 @@ var cellbrowser = function() {
 
         htmls.unshift("<svg id='tpExprDotPlot' xmlns='http://www.w3.org/2000/svg' height='"+chartHeight+"' width='"+chartWidth+"'>");
 
-        // used for mouseover later
-        htmls.push('<line id="tpExprDotPlotXLine" x1="0" y1="0" x2="0" y2="0" stroke="transparent" stroke-width="1"/>');
-        htmls.push('<line id="tpExprDotPlotYLine" x1="0" y1="0" x2="0" y2="0" stroke="transparent" stroke-width="1"/>');
+        // used for mouseover later. They are drawn over the dots, so they must not take the mouse,
+        // or the dot gets a mouseout, the lines go away, it gets a mouseover again: flicker
+        htmls.push('<line id="tpExprDotPlotXLine" pointer-events="none" x1="0" y1="0" x2="0" y2="0" stroke="transparent" stroke-width="1"/>');
+        htmls.push('<line id="tpExprDotPlotYLine" pointer-events="none" x1="0" y1="0" x2="0" y2="0" stroke="transparent" stroke-width="1"/>');
         htmls.push("</svg>");
 
         parentEl.innerHTML = htmls.join("");
 
-        $(".tpDotCircle").on("mouseover", function(ev) { 
-                    onDotCircleHover(ev, topPad+colLabelHeight-8, chartHeight, leftPad+rowLabelWidth, legendMinX-10)
+        // all cells in the plot, also the rows hidden by a split/subsplit filter, for the row-label percentages
+        let totalCells = exprData.cellTotal || cellCounts.reduce(function(a, b) { return a+b; }, 0);
+        let fmt = function(n) { return n.toLocaleString('en-US'); };
+
+        $(".tpDotCircle").on("mouseover", function(ev) {
+                    onDotCircleHover(ev, topPad+colLabelHeight-8, chartHeight, leftPad+rowLabelWidth, legendMinX-10);
+                    let rowI = parseInt(this.getAttribute("data-row"));
+                    let colI = parseInt(this.getAttribute("data-col"));
+                    let cellCount = cellCounts[rowI];
+                    let nonZeroCount = dotRows[rowI][colI][0];
+                    let pct = (cellCount===0) ? 0 : Math.round(100*nonZeroCount/cellCount);
+                    let lines = [syms[colI], stringEmptyLabel(rowLabels[rowI]),
+                        "Expressed in "+fmt(nonZeroCount)+" of "+fmt(cellCount)+" cells ("+pct+"%)",
+                        "Average expression: "+dotRows[rowI][colI][1].toFixed(2)];
+                    if (exprData.perturbLabel)
+                        lines.push("Perturbation: "+exprData.perturbLabel);
+                    exprTipShow(lines, this);
+                    exprHighlight(".tpExprRowLabel[data-row='"+rowI+"']");
+                    exprHighlight(".tpExprColLabel[data-col='"+colI+"']");
                 } );
-        $(".tpDotCircle").on("mouseout", function(ev) { 
+        $(".tpDotCircle").on("mouseout", function(ev) {
                     document.getElementById("tpExprDotPlotXLine").setAttribute("stroke", "transparent");
                     document.getElementById("tpExprDotPlotYLine").setAttribute("stroke", "transparent");
+                    exprTipHide();
                 } );
 
+        $(".tpExprRowLabel").on("mouseover", function(ev) {
+                    let rowI = parseInt(this.getAttribute("data-row"));
+                    let pct = (totalCells===0) ? 0 : 100*cellCounts[rowI]/totalCells;
+                    let ofWhat = exprData.perturbLabel ? "the "+exprData.perturbLabel+" cells" : "all cells";
+                    exprTipShow([stringEmptyLabel(rowLabels[rowI]),
+                        fmt(cellCounts[rowI])+" cells ("+pct.toFixed(1)+"% of "+ofWhat+")"], this);
+                } );
+        $(".tpExprColLabel").on("mouseover", function(ev) {
+                    exprTipShow([this.getAttribute("data-gene"), "Click to remove this gene from the plot"], this);
+                } );
+        $(".tpExprRowLabel, .tpExprColLabel").on("mouseout", exprTipHide);
+
         function onExprColLabelClick(ev) {
+            exprTipHide(); // the label is redrawn, so it never gets its mouseout
             var geneSym = ev.target.getAttribute("data-gene");
             exprDataRemoveGene(geneSym);
             buildExprDotplot("tpExprViewPlot", exprData); 
@@ -9890,8 +9971,6 @@ var cellbrowser = function() {
         }
 
         $(".tpExprColLabel").on("click", onExprColLabelClick);
-        $(".tpDotCircle").tooltip({show:false}); // switch off animations. For some reason, the Bootstrap tooltip doesn't seem to work on the SVG tag
-        $("text").tooltip({show:false}); // switch off animations. For some reason, the Bootstrap tooltip doesn't seem to work on the SVG tag
     }
 
     //function summarizeGeneExpr(metaToExpr, doLog) {
@@ -10348,33 +10427,51 @@ var cellbrowser = function() {
                 var subsplitCount = subsplitMetaInfo.valCounts.length;
                 var numCells = primaryMetaInfo.arr.length;
                 var combinedArr = new Int32Array(numCells);
+                var comboCounts = new Uint32Array(primaryCount * subsplitCount);
                 for (var c = 0; c < numCells; c++) {
-                    combinedArr[c] = primaryMetaInfo.arr[c] * subsplitCount + subsplitMetaInfo.arr[c];
+                    var combo = primaryMetaInfo.arr[c] * subsplitCount + subsplitMetaInfo.arr[c];
+                    combinedArr[c] = combo;
+                    comboCounts[combo]++;
                 }
+                // most combinations of two fields have no cells at all (e.g. a midbrain cell type in a
+                // pallium neighborhood), so only make rows for the ones that do, and renumber the cells
+                var comboToRow = new Int32Array(primaryCount * subsplitCount).fill(-1);
                 var primaryLabels = primaryMetaInfo.ui.shortLabels;
                 var subsplitLabels = subsplitMetaInfo.ui.shortLabels;
                 var combinedLabels = [];
                 var combinedValCounts = [];
+                var rowPrimaryIdx = [];  // for the split/subsplit filters, see buildExprDotplotFiltered
+                var rowSubsplitIdx = [];
                 for (var pi = 0; pi < primaryCount; pi++) {
                     for (var si = 0; si < subsplitCount; si++) {
+                        var comboIdx = pi * subsplitCount + si;
+                        if (comboCounts[comboIdx]===0)
+                            continue;
+                        comboToRow[comboIdx] = combinedLabels.length;
                         var lbl = primaryLabels[pi] + " :: " + subsplitLabels[si];
                         combinedLabels.push(lbl);
-                        combinedValCounts.push([lbl, 0]);
+                        combinedValCounts.push([lbl, comboCounts[comboIdx]]);
+                        rowPrimaryIdx.push(pi);
+                        rowSubsplitIdx.push(si);
                     }
                 }
+                for (var c = 0; c < numCells; c++)
+                    combinedArr[c] = comboToRow[combinedArr[c]];
                 exprData.metaData = {
                     arr: combinedArr,
                     ui: { shortLabels: combinedLabels },
                     valCounts: combinedValCounts
                 };
                 exprData.metaLabels = combinedLabels;
-                exprData._subsplitCount = subsplitCount;
                 exprData._subsplitLabels = subsplitLabels;
+                exprData._rowPrimaryIdx = rowPrimaryIdx;
+                exprData._rowSubsplitIdx = rowSubsplitIdx;
             } else {
                 exprData.metaData = primaryMetaInfo;
                 exprData.metaLabels = primaryMetaInfo.ui.shortLabels;
-                exprData._subsplitCount = 0;
                 exprData._subsplitLabels = null;
+                exprData._rowPrimaryIdx = null;
+                exprData._rowSubsplitIdx = null;
             }
 
             var otherMetaInfos = [];
@@ -10397,6 +10494,8 @@ var cellbrowser = function() {
                     cellMask[c] = (perturbArr[c] === perturbFilter.valueIdx) ? 1 : 0;
                 }
             }
+            // for the hover box, so it says which cells the numbers are about
+            exprData.perturbLabel = (cellMask===null) ? null : perturbMetaInfo.valCounts[perturbFilter.valueIdx][0];
 
             $("#progressBarMeta").children().first().text("Annotations summarized");
             exprDataLoadGenes(geneIds, exprData, onGenesDone, cellMask, onError);
@@ -10752,17 +10851,18 @@ var cellbrowser = function() {
             buildExprDotplot(parentDomId, exprData);
             return;
         }
-        var subsplitCount = exprData._subsplitCount || 0;
         var filteredData = {};
         Object.assign(filteredData, exprData);
         filteredData.metaLabels = [];
         filteredData.rows = [];
         filteredData.cellCounts = [];
+        filteredData.cellTotal = exprData.cellCounts.reduce(function(a, b) { return a+b; }, 0);
         for (var rowIdx = 0; rowIdx < exprData.metaLabels.length; rowIdx++) {
             var include = true;
-            if (subsplitCount > 0) {
-                var primaryIdx = Math.floor(rowIdx / subsplitCount);
-                var ssIdx = rowIdx % subsplitCount;
+            if (exprData._rowPrimaryIdx) {
+                // subsplit: only the combinations that have cells are rows, so look up which they are
+                var primaryIdx = exprData._rowPrimaryIdx[rowIdx];
+                var ssIdx = exprData._rowSubsplitIdx[rowIdx];
                 if (splitFilter !== null && splitFilter.indexOf(primaryIdx) === -1) include = false;
                 if (subsplitFilter !== null && subsplitFilter.indexOf(ssIdx) === -1) include = false;
             } else {
@@ -10869,7 +10969,7 @@ var cellbrowser = function() {
             htmls.push("<div class='tpExprHeaderRow' id='tpExprPerturbRow'>");
             htmls.push('<label for="tpExprPerturbCombo">Filter by perturbation</label>');
             htmls.push('<select id="tpExprPerturbCombo" placeholder="All cells"></select>');
-            htmls.push('<span id="tpExprPerturbCount" style="font-size:12px;color:#888;margin-left:6px"></span>');
+            htmls.push('<span id="tpExprPerturbCount" style="font-size:14px;color:#555;margin-left:6px"></span>');
             htmls.push("</div>"); // tpExprHeaderRow row0
         }
 
