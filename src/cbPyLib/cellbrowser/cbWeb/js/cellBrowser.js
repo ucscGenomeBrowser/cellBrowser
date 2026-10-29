@@ -13437,39 +13437,54 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             doScroll = true;
 
         var labelLines = [clusterName];
+        // a legend row already shows its name and percentage, so on the legend the box is only
+        // worth showing if it has something more: a long name, top markers or a cluster image
+        var hasExtraInfo = false;
 
         var labelField = renderer.getLabelField();
         var metaInfo = db.findMetaInfo(labelField);
         if (!metaInfo) return;
+
+        // how many cells this cluster holds, and what share of the dataset that is.
+        // Same source and precision rule as the legend's frequency column, so the
+        // two always agree.
+        // The legend shows "IN_CGE" as "IN CGE", and a legend hover passes that displayed text, so
+        // find its row by the value index instead, when we have one, and use the real value below.
+        var origName = clusterName;
+        var countLine = null;
+        if (gLegend && gLegend.rows) {
+            let total = 0, myCount = null;
+            for (let r = 0; r < gLegend.rows.length; r++) {
+                let row = gLegend.rows[r];
+                total += row.count;
+                if (intKeyOverride!==undefined ? row.intKey===intKeyOverride : row.label===clusterName) {
+                    myCount = row.count;
+                    origName = row.label;
+                }
+            }
+            if (myCount !== null && total > 0) {
+                let pct = (myCount / total) * 100;
+                let prec = (pct < 1) ? 1 + countLeadingZerosAfterDecimal(pct) : 1;
+                // the legend row next to the box shows the rounded share, so give the exact count there
+                let countStr = isLegend ? myCount.toLocaleString('en-US') : prettyNumber(myCount);
+                countLine = countStr + " " + gSampleDesc + "s (" + pct.toFixed(prec) + "%)";
+            }
+        }
+
         var longLabels = metaInfo.ui.longLabels;
         if (longLabels) {
             for (let i=0; i<longLabels.length; i++) {
                 let shortLabel = metaInfo.ui.shortLabels[i];
                 let longLabel = longLabels[i];
-                if (clusterName===shortLabel && longLabel!==shortLabel) {
+                if (origName===shortLabel && longLabel!==shortLabel) {
                     labelLines.push(longLabels[i]);
+                    hasExtraInfo = true;
                     break;
                 }
             }
         }
-
-        // how many cells this cluster holds, and what share of the dataset that is.
-        // Same source and precision rule as the legend's frequency column, so the
-        // two always agree.
-        if (gLegend && gLegend.rows) {
-            let total = 0, myCount = null;
-            for (let r = 0; r < gLegend.rows.length; r++) {
-                total += gLegend.rows[r].count;
-                if (gLegend.rows[r].label === clusterName)
-                    myCount = gLegend.rows[r].count;
-            }
-            if (myCount !== null && total > 0) {
-                let pct = (myCount / total) * 100;
-                let prec = (pct < 1) ? 1 + countLeadingZerosAfterDecimal(pct) : 1;
-                labelLines.push(prettyNumber(myCount) + " " + gSampleDesc + "s (" +
-                                pct.toFixed(prec) + "%)");
-            }
-        }
+        if (countLine)
+            labelLines.push(countLine);
 
         // The markers belong to db.conf.labelField. A legend hover is about the field the legend
         // shows, which can differ from the plot's label field, and two fields can share values
@@ -13479,8 +13494,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             hoverField = (gLegend && gLegend.type==="meta" && gLegend.metaInfo) ? gLegend.metaInfo.name : null;
 
         if (hoverField === db.conf.labelField) {
-            if (db.conf.topMarkers!==undefined && db.conf.topMarkers[clusterName]!==undefined) {
-                labelLines.push("Top enriched markers: "+db.conf.topMarkers[clusterName].join(", "));
+            if (db.conf.topMarkers!==undefined && db.conf.topMarkers[origName]!==undefined) {
+                labelLines.push("Top enriched markers: "+db.conf.topMarkers[origName].join(", "));
+                hasExtraInfo = true;
             }
             labelLines.push("");
 
@@ -13488,14 +13504,18 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 labelLines.push("Click to show full marker gene list.");
 
             if (db.conf.clusterPngDir!==undefined) {
-                var fullPath = cbUtil.joinPaths([db.url, db.conf.clusterPngDir, clusterName+".png"]);
+                var fullPath = cbUtil.joinPaths([db.url, db.conf.clusterPngDir, origName+".png"]);
                 labelLines.push("<img src='"+fullPath+"'>");
+                hasExtraInfo = true;
             }
         }
 
         if (!isLegend)
             labelLines.push("Alt/Option-Click to select cells in cluster; Shift-Click to add cluster to selection");
-        showTooltip(ev.clientX+15, ev.clientY, labelLines.join("<br>"));
+        if (isLegend && !hasExtraInfo)
+            hideTooltip(); // it would only repeat the row. Hovering the percentage gives "N of M" already.
+        else
+            showTooltip(ev.clientX+15, ev.clientY, labelLines.join("<br>"));
 
         // XX currently, switch off fattening if there is a difference between label/color fields
         let highIdx = null;
