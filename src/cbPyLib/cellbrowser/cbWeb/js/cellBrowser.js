@@ -9645,7 +9645,8 @@ var cellbrowser = function() {
     }
 
     function plotDotColumnLabelsAutoSize(parentEl, htmls, minX, minY, xDist, geneSyms) {
-        /* plot the the names of the genes at the top. return height */
+        /* plot the the names of the genes at the top. return [height, shift], shift is how far
+         * everything right of the row labels was moved so the slanted gene names stay on the page */
         // we need to know the height of the gene name boxes, so plot these in white and measure their height
         let htmls2 = [];
         let chartHeight = 500;
@@ -9656,19 +9657,26 @@ var cellbrowser = function() {
 
         parentEl.innerHTML = htmls2.join("");
 
+        let svgLeft = parentEl.firstChild.getBoundingClientRect().left;
         let domEls = document.getElementsByClassName("tpExprColLabel");
         let maxHeight = 0;
+        let minLeft = minX;
         for (let el of domEls) {
-            maxHeight = Math.max(maxHeight, el.getBoundingClientRect().height);
+            let rect = el.getBoundingClientRect();
+            maxHeight = Math.max(maxHeight, rect.height);
+            minLeft = Math.min(minLeft, rect.left-svgLeft);
         }
         maxHeight += 10;
 
         parentEl.innerHTML = "";
 
+        // long names, e.g. ENSMUSG00000101344.1_Gm29183, slant left past the row labels and off the page
+        let shift = Math.max(0, 6-minLeft);
+
         // now that we know the height, plot them again
         let textColor = (lightMode === 1) ? "black" : "white";
-        plotDotColumnLabels(htmls, minX, minY+maxHeight, xDist, geneSyms, textColor);
-        return maxHeight;
+        plotDotColumnLabels(htmls, minX+shift, minY+maxHeight, xDist, geneSyms, textColor);
+        return [maxHeight, shift];
     }
 
     function plotDotCircles(htmls, syms, rowLabels, dotRows, leftPad, topPad, colDist, 
@@ -9916,7 +9924,9 @@ var cellbrowser = function() {
 
         rowLabelWidth = Math.max(50, rowLabelWidth); // need some minimum width since the column labels are slanted to the left
 
-        let colLabelHeight = plotDotColumnLabelsAutoSize(parentEl, htmls, leftPad+rowLabelWidth, topPad, colWidth, syms)+10;
+        let colLabelSize = plotDotColumnLabelsAutoSize(parentEl, htmls, leftPad+rowLabelWidth, topPad, colWidth, syms);
+        let colLabelHeight = colLabelSize[0]+10;
+        rowLabelWidth += colLabelSize[1];
         let textColor = (lightMode === 1) ? "black" : "white";
         if (headerLabel)
             // y offset -20 (not -6): the row labels right below this start at exactly colLabelHeight,
