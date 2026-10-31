@@ -14,17 +14,19 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 }
 
 /* fixed to the window and filling all of it: the page underneath can be a few pixels taller
- * than the window, and a box positioned on the page scrolled with it and showed a strip below */
+ * than the window, and a box positioned on the page scrolled with it and showed a strip below.
+ * The title bar and the controls stay put, only #tpExprViewPlot scrolls. */
 #tpExprView {
         position: fixed;
         z-index: 600;
-        display: block;
+        display: flex;
+        flex-direction: column;
         background-color: white;
         top: 0;
         left: 0;
         right: 0;
         bottom: 0;
-        overflow-y: auto;
+        overflow: hidden;
 }
 
 /* dot plot hover box, see exprTipShow() */
@@ -147,15 +149,32 @@ section { font-weight: bold; padding-top: 5px; padding-bottom: 5px }
 .tpExprFilterAll { border-bottom: 1px solid #eee; margin-bottom: 4px; padding-bottom: 3px; font-size: 13px; }
 #tpGeneExprSubsplitLabel { margin-left: 6px; margin-right: 6px; margin-bottom: 0; }
 
+/* takes the space below the controls and scrolls both ways, so a dot plot with many genes or rows
+ * can be scrolled while the controls above it stay in view */
 #tpExprViewPlot {
         display:flex;
         flex-direction: row;
         flex-flow: wrap;
+        align-items: flex-start;
+        align-content: flex-start;
         padding-top:10px;
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+}
+
+/* a flex item can shrink, so a dot plot with many genes was squeezed to the window width and its
+ * right side cut off. Keep its full width so #tpExprViewPlot can scroll sideways instead. */
+#tpExprViewPlot > svg {
+        flex-shrink: 0;
 }
 
 #tpExprViewContent {
         padding: 6px;
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
 }
 
 #tpExprPerturbRow label {
