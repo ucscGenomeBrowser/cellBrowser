@@ -9373,6 +9373,10 @@ var cellbrowser = function() {
                     let decoded = gunzipAndConvertQuantized(comprData, metaArr.length);
                     let exprArr = decoded[0];
                     let geneDesc = decoded[1];
+                    // cbBuild stores the gene ID as the desc; show the symbol, like loadExprAndDiscretize
+                    let geneInfo = db.geneOffsets[geneDesc];
+                    if (geneDesc.charAt(0)!=='[' && geneInfo && geneInfo[2])
+                        geneDesc = geneInfo[2];
                     resolve(buildDotGeneData(exprArr, locusStr, geneDesc, metaArr, metaCount, cellMask));
                 }, reject);
             }
