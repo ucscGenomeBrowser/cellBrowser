@@ -10623,6 +10623,21 @@ var cellbrowser = function() {
             chosenSetValue("tpGeneExprMetaCombo", "tpMetaVal_"+metaIdx);
         }
 
+        // genes from the URL or the quick genes can be missing from the matrix, e.g. NKX2-1 when the
+        // dataset calls it NKX2.1. Leave those out, or the whole dot plot fails to load.
+        if (geneIds!==null && !db.peakOffsets) {
+            let missing = geneIds.filter(function(g) { return db.findGenesExact(g.split("|")[0]).length===0; });
+            if (missing.length > 0) {
+                geneIds = geneIds.filter(function(g) { return missing.indexOf(g)===-1; });
+                alert("Not in this dataset, so left out of the dot plot: "+missing.join(", "));
+                if (geneIds.length===0) {
+                    if (exprPlotGeneIds().length > 0)
+                        return; // nothing to add
+                    geneIds = [db.getRandomLocus()]; // the plot needs at least one gene
+                }
+            }
+        }
+
         if (geneIds===null) { // metaName was changed = re-calc the expr object
             geneIds = exprPlotGeneIds();
             db.exprData = null;
