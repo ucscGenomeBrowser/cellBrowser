@@ -37,6 +37,67 @@ var cbUtil = (function () {
       return parts.map(function(part) { return part.trim().replace(/(^[\/]*|[\/]*$)/g, ''); }).join(separator || '/');
     };
 
+    // Web root of the data files, set from the "dataRoot" key in cb.conf (see
+    // loadClientConf in cellBrowser.js). Empty = data sits next to the code,
+    // which is the normal single-directory install.
+    my.dataRoot = "";
+
+    my.setDataRoot = function setDataRoot(root) {
+    /* Serve the data from somewhere other than the directory the code was
+     * loaded from. Accepts an absolute URL ("https://cells.ucsc.edu") for a
+     * code-only sandbox pointing at a shared data host, or a server-absolute
+     * path ("/cells-data") for another directory on the same server. A bare
+     * "/" is treated as unset. */
+        root = (root || "").trim().replace(/\/+$/, "");
+        // A server-absolute path is expanded to a full URL right here, so that
+        // dataRoot is only ever "" or scheme+host+path. Everything downstream
+        // feeds it to joinPaths(), which strips a leading slash and would
+        // silently turn "/cells-data/ds" back into a page-relative path.
+        if (root.charAt(0) === "/" && typeof window !== "undefined")
+            root = window.location.origin + root;
+        my.dataRoot = root;
+    };
+
+    my.dataUrl = function dataUrl(parts) {
+    /* joinPaths(), but rooted at dataRoot. Use this for every file that lives
+     * in the data tree (dataset dirs, search.json, genes/, downloads/) so that
+     * a sandbox with only index.html + js/ can read a shared data directory.
+     * Do NOT use it for the code's own files (js, css, cb.conf itself).
+     * With no dataRoot set this behaves exactly like joinPaths(). */
+        if (typeof parts === "string")
+            parts = [parts];
+        var rel = my.joinPaths(parts);
+        if (my.dataRoot === "")
+            return rel;
+        // not joinPaths() here: it strips the leading slash, which would turn a
+        // server-absolute dataRoot ("/cells-data") into a relative path
+        return (rel === "") ? my.dataRoot+"/" : my.dataRoot+"/"+rel;
+    };
+
+    my.absDataUrl = function absDataUrl(parts) {
+    /* dataUrl(), but always fully qualified with scheme and host. Needed when
+     * the URL is handed to another server to fetch, e.g. a hub.txt passed to
+     * hgTracks, which cannot resolve a path relative to this page. */
+        var url = my.dataUrl(parts);
+        var origin, rel;
+        var m = url.match(/^(https?:\/\/[^\/]+)\/?(.*)$/);
+        if (m) {
+            origin = m[1];
+            rel = m[2];
+        } else if (url.charAt(0) === "/") {
+            origin = window.location.origin;
+            rel = url.substring(1);
+        } else {
+            // relative to the page: pathname only, so a "?" or "#" on the
+            // current URL cannot end up inside the path we hand out
+            return my.absPath(window.location.origin + window.location.pathname, url);
+        }
+        // always finish through absPath: dataset settings such as hubUrl are
+        // written relative to the dataset dir ("../hubs/x/hub.txt"), and the
+        // ".." has to be resolved here rather than shipped to the other server
+        return my.absPath(origin + "/", rel);
+    };
+
     my.dumpObj = function (o) {
     /* for debugging */
         if(DEBUG) console.log(JSON.stringify(o));
@@ -121,7 +182,7 @@ var cbUtil = (function () {
         });
     };
 
-    my.loadFile = function(url, arrType, onDone, onProgress, otherInfo, start, end) {
+    my.loadFile = function(url, arrType, onDone, onProgress, otherInfo, start, end, onError) {
         /* load text or binary file with HTTP GET into fileData variable and call function
          * onDone(fileData, otherInfo) when done.
          * convert the data to arrType. arrType can be either a class like
@@ -129,6 +190,8 @@ var cbUtil = (function () {
          * for gzip'ed string.  To switch off type casting, set arrType=null
          *
          * optional: byte range request for start-end (0-based, inclusive).
+         * optional: onError(message) is called if the file could not be loaded, e.g. when the
+         * network connection dropped. Without it, an alert is shown.
          * */
         var oReq = new XMLHttpRequest();
         oReq.open("GET", url, true);
@@ -140,10 +203,19 @@ var cbUtil = (function () {
 
         oReq.onload = cbUtil.onDoneBinaryData;
         oReq.onprogress = onProgress;
-        oReq.onerror = function(e) { 
+        oReq.onerror = function(e) {
+            if (onError) {
+                onError("the network connection failed while loading "+url);
+                return;
+            }
             // Github rejects accept-encoding: headers coming from Firefox at the moment.
-            alert("Could not load file "+url+". If this is Firefox and running on Github, please contact us."); 
+            alert("Could not load file "+url+". If this is Firefox and running on Github, please contact us.");
         };
+        oReq.onabort = function(e) {
+            if (onError)
+                onError("the download of "+url+" was interrupted");
+        };
+        oReq._onError = onError; // keep this for the callback
         oReq._onDone = onDone; // keep this for the callback
         oReq._otherInfo = otherInfo; // keep this for the callback
         oReq._arrType = arrType; // keep this for the callback casting
@@ -178,15 +250,21 @@ var cbUtil = (function () {
         var url = this._url;
         // 200 = OK, 206 = Partial Content OK
         if (this.status !== 200 && this.status !== 206) {
-            alert("Could not load "+url+", error " + oEvent.statusText);
+            if (this._onError)
+                this._onError("the web server returned error "+this.status+" "+this.statusText+" for "+url);
+            else
+                alert("Could not load "+url+", error " + oEvent.statusText);
             return;
         }
 
         var binData = this.response;
 
         if (!binData) {
-          alert("internal error when loading "+url+": no reponse from server?");
-          return;
+            if (this._onError)
+                this._onError("the web server sent no data for "+url);
+            else
+                alert("internal error when loading "+url+": no reponse from server?");
+            return;
         }
 
         // if the user wants only a byte range...
@@ -414,8 +492,13 @@ function CbDbFile(url) {
 
     const DEBUG = false;
 
+    // name identifies the dataset (cart keys, URL "ds" argument, API calls) and
+    // is always the plain dataset path. url is where its files are fetched from
+    // and picks up the cb.conf dataRoot prefix, if one is set. Every data file
+    // below is built from self.url, so this is the single place that redirects
+    // per-dataset loads to another server or directory.
     self.name = url;
-    self.url = url;
+    self.url = cbUtil.dataUrl(url);
 
     self.exprBinCount = 10;
 
@@ -625,7 +708,7 @@ function CbDbFile(url) {
         return idx;
     };
 
-    this._startMetaLoad = function(metaInfo, arrType, onMetaDone, onProgress, extraInfo) {
+    this._startMetaLoad = function(metaInfo, arrType, onMetaDone, onProgress, extraInfo, onError) {
         /* start the loading of a meta data file and call onMetaDone when ready */
         var fieldName = metaInfo.name;
         var binUrl = cbUtil.joinPaths([self.url, "metaFields", fieldName+".bin.gz"]);
@@ -633,12 +716,13 @@ function CbDbFile(url) {
             binUrl += "?"+metaInfo.md5;
         cbUtil.loadFile(binUrl, arrType,
                 onMetaDone,
-                onProgress, metaInfo);
+                onProgress, metaInfo, undefined, undefined, onError);
     }
 
-    this.loadMetaVec = function(metaInfo, onDone, onProgress, otherInfo, strategy) {
+    this.loadMetaVec = function(metaInfo, onDone, onProgress, otherInfo, strategy, onError) {
     /* get an array of numbers, one per cell, that reflect the meta field contents
      * and an object with some info about the field. call onDone(arr, metaInfo) when done.
+     * optional: onError(message) is called if the file could not be loaded.
      * Keep all compressed arrays in metaCache;
      * Numerical meta data (int/float) is discretized, binning info is written to metaInfo.binInfo
      * and the original data is added to metaInfo.origVals
@@ -718,7 +802,7 @@ function CbDbFile(url) {
             return;
         }
         else {
-            self._startMetaLoad(metaInfo, null, onMetaDone, onProgress, metaInfo);
+            self._startMetaLoad(metaInfo, null, onMetaDone, onProgress, metaInfo, onError);
             return;
         }
     };
@@ -1010,7 +1094,8 @@ function CbDbFile(url) {
         return newArr;
     }
 
-    this.loadExprAndDiscretize = function(locusName, onDone, onProgress, strategy) {
+    this.loadExprAndDiscretize = function(locusName, onDone, onProgress, strategy, onError) {
+    /* optional: onError(message) is called if the data could not be loaded. */
     /* given a locus name, retrieve data from expression matrix
      * and call onDone with (array, discretizedArray, locusName, geneDesc (or ""),
      * binInfo).
@@ -1157,7 +1242,7 @@ function CbDbFile(url) {
             }
 
             cbUtil.loadFile(url+"?"+names.join("-"), Uint8Array, onChunkDone, onProgress, relRanges,
-                minStart, maxEnd);
+                minStart, maxEnd, onError);
         }
     };
 
@@ -1838,7 +1923,7 @@ function CbDbFile(url) {
         var addUrl = "";
         if (fileInfo)
             addUrl = "#"+fileInfo.md5
-        url = "genes/"+dbAndGene+".json"+addUrl;
+        url = cbUtil.dataUrl(["genes", dbAndGene+".json"])+addUrl;
         cbUtil.loadJson(url, genesDone, true);
     }
 

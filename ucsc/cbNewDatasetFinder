@@ -1,0 +1,71 @@
+#!/bin/bash
+# File: cbNewDatasetFinder by Marc Perry
+#
+# N.B.: Before running this script the very first time it was 
+# necessary to create a list of the directories in datasets/ on hgwdev
+# and save that list to a file named previous_dirs.txt.
+# The script cannot run if that file is not in place.
+# At the end of each run the contents of today_dirs.txt
+# overwrites previous_dirs.txt (if there are any new directories in 
+# datasets/) 
+#
+#
+# Last Updated: 2026-07-30, Status: in development
+
+set -beEu -o pipefail
+set -x
+
+DIR_TO_WATCH="/hive/data/inside/cells/datasets/"
+BASELINE="/hive/data/inside/cells/datasets/previous_dirs.txt"
+TODAY="/hive/data/inside/cells/datasets/today_dirs.txt"
+
+# Get today's directory list
+ls -F -1 "${DIR_TO_WATCH}" | grep / | perl -pe 's/\///' > "${TODAY}"
+
+# identify if there are any lines only in the second file 
+# N.B. we are using the unix command named 'comm'.  The two input files being
+# compared have to be sorted before you can use the comm program
+# Fortunately for us the output of ls -F 1 is automatically 
+# lexicographically sorted, so we do not need to add an extra sorting
+# step
+NEW_ONLY=$(comm -13 "$BASELINE" "$TODAY")
+
+# If the contents of previous_dirs.txt and today_dirs.txt are identical
+# The the output from comm -13 is empty, and this conditional test will fail
+# (skipping the nested code block)
+if [ -n "$NEW_ONLY" ]; then
+    MISSING_META=""
+
+    while read DIR; do
+        # This find command ONLY checks the NEW directories, it also checks all
+        # subdirectories.  As soon as it finds a file named meta.tsv it stops
+        # searching the current directory
+        FOUND=$(find "${DIR_TO_WATCH}${DIR}" -name meta.tsv -print -quit)
+
+        # If there is a match in $FOUND that means cbImport was run,  so the script
+        # goes to check the next directory in $NEW_ONLY
+        # However, if $FOUND is empty, then the name of the $DIR gets added to 
+        # the variable $MISSING_META (it is a concatenation step)
+        if [ -z "$FOUND" ]; then
+            MISSING_META="${MISSING_META}${DIR}"$'\n'
+        fi
+    done <<< "$NEW_ONLY"
+
+    ## If $MISSING_META contains anything (the names of directories that need you to run cbImport) then launch Email
+    if [ -n "$MISSING_META" ]; then
+        {
+            echo "Subject: Someone needs to run cbImport in these new datasets/ directories on hgwdev."
+            echo "To: cells@ucsc.edu"
+            echo
+            echo -e "$MISSING_META"
+        } | /usr/sbin/sendmail -t
+    fi
+
+    # Update the baseline for tomorrow's comparison
+    cp "$TODAY" "$BASELINE"
+
+else
+    # When $NEW_ONLY is empty this script exits without doing anything else
+    exit 0
+fi
+

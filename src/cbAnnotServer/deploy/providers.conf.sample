@@ -1,0 +1,74 @@
+# cbAnnotServer sign-in providers
+#
+# THIS FILE HOLDS CLIENT SECRETS. Keep it off the web tree and chmod 600 it.
+# It is not the frontend's cb.conf -- that one is fetched by the browser over
+# HTTP and must never contain a secret. The service warns at startup if this
+# file is group- or world-readable.
+#
+# Install to /hive/data/inside/cells/cbAnnotServer/providers.conf, or point
+# CBANNOT_PROVIDERS_CONF somewhere else. Changes take effect on gunicorn
+# restart; no code change and no release are needed to add a provider.
+#
+# One [provider:slug] stanza per provider. The slug is what gets stored in
+# oauth_identities.provider, so do not rename one after people have signed in
+# with it. A stanza with no client_id/client_secret is skipped silently, which
+# is how a provider ships dormant until its app has been registered.
+#
+# Keys (all optional unless noted):
+#   label          button text shown in the sign-in dialog
+#   discovery      OIDC discovery document URL. Required unless the slug is one
+#                  of the built-in presets: google, orcid, orcid-sandbox,
+#                  cilogon, globus, microsoft (see providers.py).
+#   client_id      required
+#   client_secret  required
+#   scope          space-separated OAuth scopes
+#   subject_claim  claim holding the stable per-user id (default "sub")
+#   trust_email    "yes" lets a VERIFIED email from this provider link the login
+#                  onto an existing account with the same address. Default "no"
+#                  everywhere except Google. Turn it on only for an issuer that
+#                  really verifies addresses and really sends email_verified:
+#                  an issuer that hands out unverified addresses could otherwise
+#                  be used to take over somebody else's account.
+#   enabled        "no" keeps the stanza but switches the provider off
+#
+# Every provider must have its callback URL registered with that provider:
+#   https://cells.ucsc.edu/api/auth/oauth/<slug>/callback
+
+[provider:google]
+client_id     =
+client_secret =
+
+[provider:orcid]
+client_id     =
+client_secret =
+
+# CILogon is an OpenID Connect broker sitting in front of InCommon / eduGAIN --
+# thousands of university identity providers -- plus ORCID, Google and
+# Microsoft. It is how this service offers "sign in with your institution"
+# without becoming a SAML service provider itself (no Shibboleth, no federation
+# metadata, no certificates).
+#
+# Two things to get right before enabling it:
+#  - subject_claim. CILogon's default "sub" is fine for most IdPs, but some
+#    campus IdPs recycle eduPersonPrincipalName when a person leaves, which
+#    would hand a departed user's account to whoever inherits the username.
+#    Where the federation guarantees a permanent id, name it here.
+#  - trust_email stays "no". CILogon relays whatever the upstream campus IdP
+#    asserts, and the quality of that varies across thousands of institutions.
+#[provider:cilogon]
+#client_id     = cilogon:/client_id/xxxxxxxxxxxxxxxx
+#client_secret =
+#subject_claim = sub
+#trust_email   = no
+
+#[provider:microsoft]
+#client_id     =
+#client_secret =
+
+# A provider with no preset just supplies its own discovery URL.
+#[provider:example]
+#label         = Sign in with Example
+#discovery     = https://id.example.org/.well-known/openid-configuration
+#client_id     =
+#client_secret =
+#scope         = openid email profile

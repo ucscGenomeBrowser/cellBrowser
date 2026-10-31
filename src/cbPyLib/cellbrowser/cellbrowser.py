@@ -2075,6 +2075,75 @@ def isMtx(path):
         logging.debug("%s is not an MTX file" % path)
         return False
 
+def exprDecode(geneCompr, matType):
+    """ inverse of exprEncode: given the compressed bytes for one gene (as stored at the
+    [offset, length] recorded in exprMatrix.json), return (geneDesc, exprArr) where exprArr
+    is a numpy array in cell order. """
+    geneStr = zlib.decompress(geneCompr)
+    geneIdLen = struct.unpack("<H", geneStr[:2])[0]
+    geneDesc = geneStr[2:2+geneIdLen].decode("ascii")
+    arrBytes = geneStr[2+geneIdLen:]
+    dtype = "<f4" if matType=="float" else "<u4"
+    exprArr = np.frombuffer(arrBytes, dtype=dtype)
+    return geneDesc, exprArr
+
+def exprEncodeQuantized(geneDesc, exprArr):
+    """ Encode one gene's expression as 8-bit linearly-quantized values, for the reduced "plot"
+    matrix used only by the dot plot and violin plot on very large datasets -- not for coloring
+    or per-cell hover, which keep using the full-precision matrix. Chosen over a floating-point
+    8-bit format (e.g. FP8) because our values are log-normalized and sit in a narrow, known
+    range per gene, so a plain linear mapping uses the 256 available levels fully; it also needs
+    no custom bit-packing, since Uint8Array/numpy.uint8 already exist natively on both ends.
+
+    Format of a record, before zlib compression:
+    - 2 bytes: length of geneDesc
+    - len(geneDesc) bytes: geneDesc
+    - 4 bytes: min value (float32)
+    - 4 bytes: max value (float32)
+    - array of n 1-byte uint8s (n = number of cells), linearly mapped from [min, max] to [0, 255]
+    A gene with no variation (max==min, e.g. all-zero) stores min==max and an all-zero byte
+    array; decoders must treat max==min as "every cell has this exact value" to avoid a divide
+    by zero when mapping back to a float.
+
+    The dot plot counts a cell as expressing when its value is not 0, so min is always stored as
+    0: byte 0 decodes to exactly 0, and a non-zero value never rounds down to byte 0 (on raw
+    counts with a max of 2000, a count of 1-3 would otherwise become 0). A gene with negative or
+    non-finite values (scaled data, -inf) cannot be stored this way: return None for it, and the
+    browser uses the full-precision matrix for that gene. """
+    arr = np.asarray(exprArr, dtype="float32")
+    if not np.all(np.isfinite(arr)) or float(np.amin(arr)) < 0:
+        return None
+
+    geneDesc = str(geneDesc)
+    header = struct.pack("<H", len(geneDesc))
+    if isPy3:
+        header += bytes(geneDesc, encoding="ascii")
+    else:
+        header += geneDesc
+
+    minVal = 0.0
+    maxVal = float(np.amax(arr))
+    if maxVal > minVal:
+        qArr = np.round(arr / maxVal * 255.0).astype("uint8")
+        qArr[(arr > 0) & (qArr == 0)] = 1
+    else:
+        qArr = np.zeros(len(arr), dtype="uint8")
+
+    header += struct.pack("<ff", minVal, maxVal)
+    return zlib.compress(header + qArr.tobytes())
+
+def exprDecodeQuantized(geneCompr):
+    """ inverse of exprEncodeQuantized: return (geneDesc, minVal, maxVal, qArr) where qArr is a
+    uint8 numpy array. Dequantize with minVal + qArr/255.0*(maxVal-minVal), or just minVal
+    everywhere if maxVal==minVal. """
+    geneStr = zlib.decompress(geneCompr)
+    geneIdLen = struct.unpack("<H", geneStr[:2])[0]
+    geneDesc = geneStr[2:2+geneIdLen].decode("ascii")
+    pos = 2+geneIdLen
+    minVal, maxVal = struct.unpack("<ff", geneStr[pos:pos+8])
+    qArr = np.frombuffer(geneStr[pos+8:], dtype="uint8")
+    return geneDesc, minVal, maxVal, qArr
+
 def exprEncode(geneDesc, exprArr, matType):
     """ convert an array of numbers of type matType (int or float) to a compressed string of
     float32s
@@ -2171,9 +2240,15 @@ def indexAtacOffsetsByChrom(exprIndex):
     return dict(byChrom)
 
 def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJsonFname, \
-        metaSampleNames, matType=None, genesAreRanges=False, geneAnnots=None):
+        metaSampleNames, matType=None, genesAreRanges=False, geneAnnots=None,
+        plotBinFname=None, plotJsonFname=None, plotMinCells=200000):
     """ convert gene expression vectors to vectors of deciles
         and make json gene symbol -> (file offset, line length)
+
+    If plotBinFname/plotJsonFname are given and there are at least plotMinCells cells (and this
+    is not an ATAC dataset), also write a second, 8-bit-quantized copy of the matrix in the same
+    pass, for the dot plot and violin plot to use on very large datasets instead of downloading
+    the full-precision column for every gene. Returns (matType, wrotePlotMatrix).
     """
     logging.info("converting %s to %s and writing index to %s, type %s" % (fname, binFname, jsonFname, matType))
     logging.info("Compressing gene expression vectors...")
@@ -2186,6 +2261,16 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     discretIndex = {}
     exprIndex = {}
+
+    wrotePlotMatrix = (plotBinFname is not None and not genesAreRanges and numpyLoaded and
+        len(metaSampleNames) >= plotMinCells)
+    plotOfh = None
+    plotIndex = {}
+    if wrotePlotMatrix:
+        plotTmpFname = plotBinFname + ".tmp"
+        plotOfh = open(plotTmpFname, "wb")
+        logging.info("%d cells >= %d, also writing a quantized plot-only matrix to %s" %
+            (len(metaSampleNames), plotMinCells, plotBinFname))
 
     skipIds = 0
     highCount = 0
@@ -2278,6 +2363,12 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
         exprIndex[key] = (ofh.tell(), len(exprStr))
         ofh.write(exprStr)
 
+        if wrotePlotMatrix:
+            plotStr = exprEncodeQuantized(geneDesc, exprArr)
+            if plotStr is not None: # else not in the index, the browser uses the full matrix for it
+                plotIndex[key] = (plotOfh.tell(), len(plotStr))
+                plotOfh.write(plotStr)
+
         if geneCount % 1000 == 0:
             logging.info("Wrote compressed expression values for %d %s" % (geneCount, dataType))
 
@@ -2285,6 +2376,8 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
 
     discretOfh.close()
     ofh.close()
+    if wrotePlotMatrix:
+        plotOfh.close()
 
     if noSymFound!=0:
         logging.warn("No symbol found for %d genes" % noSymFound)
@@ -2330,7 +2423,14 @@ def matrixToBin(fname, geneToSym, binFname, jsonFname, discretBinFname, discretJ
     renameFile(tmpFname, binFname)
     renameFile(discretTmp, discretBinFname)
 
-    return matType
+    if wrotePlotMatrix:
+        plotJsonOfh = open(plotJsonFname, "w")
+        json.dump(plotIndex, plotJsonOfh)
+        plotJsonOfh.close()
+        renameFile(plotTmpFname, plotBinFname)
+        logging.info("Wrote quantized plot matrix to %s" % plotBinFname)
+
+    return matType, wrotePlotMatrix
 
 def sepForFile(fname):
     if fname.endswith(".csv") or fname.endswith(".csv.gz") or fname.endswith(".csv.Z"):
@@ -3089,7 +3189,8 @@ def parseMarkerTable(filename, geneToSym):
 
     return data, newHeaders
 
-def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac):
+def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac,
+        geneToSymFromMatrix=None):
     """ split .tsv on first field and create many files in outDir with columns 2-end.
         Returns the names of the clusters and a dict topMarkers with clusterName -> list of five top marker genes.
     """
@@ -3097,6 +3198,20 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac):
 
     if filename is None:
         return
+
+    # Marker files are often written with gene symbols while the matrix is keyed
+    # by accession (CELLxGENE h5ads index genes by Ensembl ID, for instance).
+    # Every row then fails the matrixGeneIds test and the cluster marker tables
+    # come out empty, with only a warning. Build symbol -> matrix-id so we can
+    # recover those rows instead of dropping them.
+    symToMatrixId = {}
+    if not isAtac:
+        for idToSym in (geneToSymFromMatrix, geneToSym):
+            if not idToSym:
+                continue
+            for gId, sym in iterItems(idToSym):
+                if sym and gId in matrixGeneIds and sym not in symToMatrixId:
+                    symToMatrixId[sym] = gId
 
     data, newHeaders = parseMarkerTable(filename, geneToSym)
 
@@ -3122,6 +3237,7 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac):
         ofh.write("\t".join(newHeaders))
         ofh.write("\n")
         missGeneIds = set()
+        symFixed = set()
         for row in rows:
             row[2] = "%0.5E" % row[2] # limit score to 5 digits
             geneId = row[0]
@@ -3137,13 +3253,40 @@ def splitMarkerTable(filename, geneToSym, matrixGeneIds, outDir, isAtac):
                 row[1] = "%s:%d-%d" % (chrom, start, end) # nicer for the display
             else:
                 if geneId not in matrixGeneIds:
-                    missGeneIds.add(geneId)
-                    continue
+                    # the marker file may be using symbols against an
+                    # accession-keyed matrix -- translate rather than drop
+                    altId = symToMatrixId.get(geneId)
+                    if altId is None:
+                        missGeneIds.add(geneId)
+                        continue
+                    row[0] = altId
+                    if not row[1]:
+                        row[1] = geneId
+                    symFixed.add(geneId)
 
             ofh.write("\t".join(row))
             ofh.write("\n")
 
+        if len(symFixed)!=0:
+            logging.warn("%s, cluster '%s': %d marker genes were given as symbols but the "
+                "matrix is keyed by accession. They were matched up automatically. "
+                "Consider rewriting the marker file to use the matrix identifiers." %
+                (filename, clusterName, len(symFixed)))
+
         if len(missGeneIds)!=0:
+            # Losing EVERY gene is never a data quirk, it means the marker file
+            # and the matrix are keyed differently and the symbol fallback above
+            # could not rescue it either. The old code only warned, so the build
+            # succeeded and the Cluster Markers tab came up silently empty.
+            if len(rows)!=0 and len(missGeneIds)==len(rows):
+                someMiss = list(missGeneIds)[:3]
+                someMat = list(matrixGeneIds)[:3]
+                errAbort("None of the %d marker genes for cluster '%s' in %s are in the "
+                    "expression matrix, so the marker table would be empty. This almost "
+                    "always means the two use different gene identifiers. Marker genes "
+                    "look like: %s. Matrix genes look like: %s. Rewrite the marker file "
+                    "to use the same identifiers as the matrix." %
+                    (len(rows), clusterName, filename, someMiss, someMat))
             logging.error("Marker table contains these genes, they were skipped, they are not in the matrix: %s" % (",".join(missGeneIds)))
             #logging.error("Use --force to accept this.")
 
@@ -3408,12 +3551,18 @@ def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=No
         del summInfo["methodsFile"]
 
     if "imagesFile" in summInfo:
+        # 'imagesFile' is relative to the dataset's input directory, so resolve it against
+        # inDir. Reading it as a bare name only works while the process happens to be sitting
+        # in that directory, which cbBuild does but a batch rebuild of many collections does not.
         imgFname = summInfo["imagesFile"]
+        imgPath = join(inDir, imgFname)
         if imgFname.endswith(".json"):
             readFileIntoDict(summInfo, "imageSets", inDir, imgFname, mustExist=True)
         else:
-            summInfo["imageSets"] = parseImageTsv(imgFname)
-        outConf["fileVersions"]["supplImageConf"] = getFileVersion(imgFname)
+            summInfo["imageSets"] = parseImageTsv(imgPath)
+        fileVer = getFileVersion(imgPath)
+        fileVer["fname"] = imgFname # record it as written in desc.conf, not as a build path
+        outConf["fileVersions"]["supplImageConf"] = fileVer
     #else:
         #readFileIntoDict(summInfo, "imageSets", inDir, "images.json")
 
@@ -3904,6 +4053,98 @@ def parseLineInfo(inFname, limits):
 
     return lines, endPoints
 
+def computeDotplotCache(datasetDir, inConf, outConf, sampleNames):
+    """ Precompute, for each quick gene, the average expression and percent-expressed per value
+    of clusterField. The dot plot otherwise downloads and aggregates the full per-cell expression
+    vector for every gene on every page load, which is fine for a small dataset but means
+    megabytes per gene on a multi-million-cell one. Reads directly from the already-written
+    exprMatrix.bin/.json (the same bytes the browser would otherwise download), so this works
+    the same way regardless of what format the dataset was originally uploaded in.
+    Writes dotplotCache.json and registers it in outConf. A silent no-op for ATAC datasets (the
+    dot plot is disabled there), or if there is no clusterField/defColorField or no quickGenes. """
+    if inConf.get("atacSearch"):
+        return
+    # same fallback cbData.js's getDefaultColorField() uses: clusterField is old-dataset
+    # backwards-compat, most datasets only set defColorField
+    clusterField = outConf.get("clusterField") or outConf.get("defColorField")
+    quickGenes = outConf.get("quickGenes")
+    if not clusterField or not quickGenes:
+        return
+    if not numpyLoaded:
+        logging.warn("numpy is not available, skipping the dot plot cache")
+        return
+
+    jsonFname = join(datasetDir, "exprMatrix.json")
+    binFname = join(datasetDir, "exprMatrix.bin")
+    if not isfile(jsonFname) or not isfile(binFname):
+        return
+
+    geneOffsets = readJson(jsonFname)
+    matType = "float" if outConf.get("matrixArrType")=="Float32" else "int"
+
+    metaFname = join(datasetDir, "meta.tsv")
+    with open(metaFname) as f:
+        header = f.readline().rstrip("\n\r").split("\t")
+    idField = header[0]
+    if clusterField not in header:
+        logging.warn("Dot plot cache: clusterField '%s' not found in meta.tsv, skipping" % clusterField)
+        return
+
+    import pandas as pd
+    # keep_default_na/na_filter=False: an empty cell in meta.tsv is a literal "" category elsewhere in
+    # the build pipeline (e.g. a cell with no annotation), not a missing value. Without this, pandas'
+    # default NaN-sniffing turns "" into NaN, pd.factorize codes it -1, and np.bincount rejects that.
+    metaDf = pd.read_csv(metaFname, sep="\t", usecols=[idField, clusterField], dtype=str, index_col=idField,
+            keep_default_na=False, na_filter=False)
+    clusterSeries = metaDf.loc[sampleNames, clusterField]
+    codes, uniqueLabels = pd.factorize(clusterSeries.values)
+    codes = np.asarray(codes)
+    nClusters = len(uniqueLabels)
+
+    cache = {}
+    skipCount = 0
+    with open(binFname, "rb") as bf:
+        for quickGeneRow in quickGenes:
+            geneId = quickGeneRow[0]
+            offsLen = geneOffsets.get(geneId)
+            if offsLen is None:
+                skipCount += 1
+                continue
+            offset, length = offsLen
+            bf.seek(offset)
+            data = bf.read(length)
+            geneDesc, exprArr = exprDecode(data, matType)
+            # geneDesc is a JSON array ["symbol", annot1, ...] when gene annotations were added at
+            # import time (see convertExprMatrix/geneAnnots); the display symbol is just the first
+            # element. The JS does the same unwrapping for the live-computed path.
+            if geneDesc.startswith("["):
+                geneDesc = json.loads(geneDesc)[0]
+            exprArr = exprArr.astype("float64")
+
+            cellCounts = np.bincount(codes, minlength=nClusters)
+            nonZeroCounts = np.bincount(codes, weights=(exprArr!=0).astype("float64"), minlength=nClusters)
+            sums = np.bincount(codes, weights=exprArr, minlength=nClusters)
+            avgs = np.divide(sums, cellCounts, out=np.zeros_like(sums), where=cellCounts!=0)
+
+            geneRows = {}
+            for i, label in enumerate(uniqueLabels):
+                geneRows[str(label)] = [int(cellCounts[i]), int(round(nonZeroCounts[i])), float(avgs[i])]
+            cache[geneId] = {"desc": geneDesc, "rows": geneRows}
+
+    if skipCount:
+        logging.warn("Dot plot cache: %d of %d quick genes could not be found in the expression matrix, skipped" %
+            (skipCount, len(quickGenes)))
+
+    if len(cache)==0:
+        logging.warn("Dot plot cache: no genes could be cached, not writing a cache file")
+        return
+
+    outFname = join(datasetDir, "dotplotCache.json")
+    with open(outFname, "w") as ofh:
+        json.dump({"clusterField": clusterField, "genes": cache}, ofh)
+    outConf["dotplotCache"] = "dotplotCache.json"
+    logging.info("Wrote dot plot cache for %d genes to %s" % (len(cache), outFname))
+
 def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSym, outDir, needFilterMatrix):
     """ trim a copy of the expression matrix for downloads, also create an indexed
     and compressed version
@@ -3935,6 +4176,8 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
     binMatIndex = join(outDir, "exprMatrix.json")
     discretBinMat = join(outDir, "discretMat.bin")
     discretMatrixIndex = join(outDir, "discretMat.json")
+    plotBinMat = join(outDir, "exprMatrix.plot.bin")
+    plotMatrixIndex = join(outDir, "exprMatrix.plot.json")
 
     genesAreRanges = (inConf.get("atacSearch")!=None)
 
@@ -3946,10 +4189,12 @@ def convertExprMatrix(inConf, outMatrixFname, outConf, metaSampleNames, geneToSy
         outConf["geneAnnotFields"] = geneAnnotHeaders
         outConf["fileVersions"]["geneAnnots"] = getFileVersion(annotFname)
 
-    matType = matrixToBin(outMatrixFname, geneToSym, binMat, binMatIndex, discretBinMat, \
+    matType, hasPlotMatrix = matrixToBin(outMatrixFname, geneToSym, binMat, binMatIndex, discretBinMat, \
             discretMatrixIndex, metaSampleNames, matType=matType, genesAreRanges=genesAreRanges,
-            geneAnnots=geneAnnots)
+            geneAnnots=geneAnnots, plotBinFname=plotBinMat, plotJsonFname=plotMatrixIndex)
     outConf["fileVersions"]["exprMatrix"] = getFileVersion(binMatIndex)
+    if hasPlotMatrix:
+        outConf["hasPlotMatrix"] = True
 
     # these are the Javascript type names, not the python ones (they are also better to read than the Python ones)
     if matType=="int" or matType=="forceInt":
@@ -4155,7 +4400,8 @@ def checkClusterNames(markerFname, clusterNames, clusterLabels, doAbort):
                 "Users may not notice the problem, but it may indicate an erroneous meta data file.") % \
                 (markerFname, notInLabels))
 
-def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, outDir):
+def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, outDir,
+        geneToSymFromMatrix=None):
     """ split the marker tables into one file per cluster and add filenames as 'markers' in outConf
     also add the 'topMarkers' to outConf, the top five markers for every cluster.
     """
@@ -4178,10 +4424,21 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, out
 
         clusterName = "markers_%d" % markerIdx # use sha1 of input file ?
         markerDir = join(outDir, "markers", clusterName)
+        # markers_N is positional, so adding/removing/reordering marker tabs
+        # changes what N means. makeDir() does not clear the directory, so files
+        # from the tab that used to live here survive and get served under the
+        # new tab's name -- wrong columns, wrong numbers, no warning. Wipe it.
+        if isdir(markerDir):
+            old = glob.glob(join(markerDir, "*.tsv.gz")) + glob.glob(join(markerDir, "*.tsv"))
+            if old:
+                logging.info("Clearing %d stale file(s) from %s" % (len(old), markerDir))
+                for fn in old:
+                    os.remove(fn)
         makeDir(markerDir)
 
         isAtac = inConf.get("atacSearch")
-        clusterNames, topMarkers = splitMarkerTable(markerFname, geneToSym, matrixGeneIds, markerDir, isAtac)
+        clusterNames, topMarkers = splitMarkerTable(markerFname, geneToSym, matrixGeneIds, markerDir, isAtac,
+            geneToSymFromMatrix=geneToSymFromMatrix)
         if markerIdx == primaryIdx:
             outConf["topMarkers"] = topMarkers
 
@@ -4195,9 +4452,21 @@ def convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, out
             newDict["columnOrder"] = markerInfo["columnOrder"]
         if "columnLabels" in markerInfo:
             newDict["columnLabels"] = markerInfo["columnLabels"]
+        # the JS reads these two to set the table's initial sort; without copying
+        # them here they can never be set from cellbrowser.conf
+        if "sortColumn" in markerInfo:
+            newDict["sortColumn"] = markerInfo["sortColumn"]
+        if "sortOrder" in markerInfo:
+            newDict["sortOrder"] = markerInfo["sortOrder"]
         newMarkers.append( newDict )
 
     outConf["markers"] = newMarkers
+    # The toolbar button falls back to markers[0].shortLabel, so adding or
+    # reordering marker tabs silently renames the button. clusterMarkersLabel
+    # pins it; the JS already reads it, it just was never copied out here.
+    copyConf(inConf, outConf, "clusterMarkersLabel")
+    copyConf(inConf, outConf, "dotPlotMaxGenes")
+    copyConf(inConf, outConf, "markerDownloadCols")
 
 def areProbablyGeneIds(ids):
     " if 80% of 'ids' start with the same letter, they are probably gene IDs, not symbols "
@@ -4851,6 +5120,12 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         writeConfig(inConf, outConf, datasetDir)
     else:
         logging.info("Matrix and meta sample names have not changed, not indexing matrix again")
+        # convertExprMatrix (and the hasPlotMatrix flag it sets) didn't run above, so check the
+        # filesystem directly rather than trust in-memory state carried from an earlier build --
+        # outConf is not reliably repopulated from the previous dataset.json on every code path
+        # that can reach here.
+        if isfile(join(datasetDir, "exprMatrix.plot.bin")):
+            outConf["hasPlotMatrix"] = True
 
     convertTraces(inConf, sampleNames, datasetDir, outConf)
 
@@ -4863,7 +5138,8 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
 
     matrixSyms, matrixGeneIds, geneToSymFromMatrix = readValidGenes(datasetDir, inConf)
 
-    convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, datasetDir)
+    convertMarkers(inConf, outConf, geneToSym, clusterLabels, matrixGeneIds, datasetDir,
+        geneToSymFromMatrix=geneToSymFromMatrix)
 
     readQuickGenes(inConf, geneToSym, matrixSyms, matrixGeneIds, geneToSymFromMatrix, datasetDir, outConf)
 
@@ -4883,6 +5159,10 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
         "facets", "multiModal", "showHeatmap", "perturbationField",
         ]:
         copyConf(inConf, outConf, tag)
+
+    # must run after the copyConf loop above: outConf["clusterField"]/["defColorField"] are not
+    # reliably set yet any earlier in this function.
+    computeDotplotCache(datasetDir, inConf, outConf, sampleNames)
 
     if "name" not in outConf:
         copyConf(inConf, outConf, "name")
@@ -5264,7 +5544,7 @@ def saveMarkers(adata, markerField, nb_marker, fname):
                 gene = gene.decode("utf8")
             if symToId:
                 sym = symToId.get(gene)
-                if sym!=None:
+                if isinstance(sym, str):
                     gene = sym+"|"+gene
             ofh.write( sep.join( (cluster, gene, str(score)) ) )
             ofh.write("\n")
@@ -5770,6 +6050,93 @@ def findParentConfigs(inFname, dataRoot, currentName):
     logging.debug("parent datasets of %s are: %s, full path: %s, parts %s" % (inFname, fnameList, fullPath, pathParts))
     return list(reversed(fnameList)), fullPath, list(reversed(parentInfos))
 
+def loadCollLinks(collInfo, webRoot, collFname):
+    """ Resolve the 'links' setting of a collection.
+
+    A collection can list datasets that live elsewhere in the tree, so that the same
+    dataset shows up in more than one collection without a second copy on disk:
+
+        links = ["sea-ad-mtg/cohort"]
+
+    An entry is the dataset's name, which is its path relative to the web root, the
+    same string that appears as "name" in its own dataset.json. To relabel or reorder
+    the dataset inside this collection, use a dict instead of a string:
+
+        links = [{"name" : "sea-ad-mtg/cohort", "shortLabel" : "Middle temporal gyrus", "priority" : 5}]
+
+    Returns the dataset.json contents of every link target, as if they were
+    subdirectories of this collection. The caller merges them with the real
+    subdirectories, so links take part in the same 'priority' sort.
+    """
+    links = collInfo.get("links")
+    if not links:
+        return []
+
+    if not isinstance(links, list):
+        errAbort("'links' in %s must be a list, e.g. links = [\"sea-ad-mtg/cohort\"]" % collFname)
+
+    selfName = collInfo.get("name", "")
+    linkDatasets = []
+
+    for link in links:
+        override = {}
+        if isinstance(link, dict):
+            override = dict(link)
+            linkName = override.pop("name", None)
+            if linkName is None:
+                errAbort("An entry of 'links' in %s is a dict without a 'name', in %s" % (collFname, repr(link)))
+        elif isinstance(link, str):
+            linkName = link
+        else:
+            errAbort("An entry of 'links' in %s must be a string or a dict, not %s" % (collFname, repr(link)))
+
+        linkName = linkName.strip().strip("/")
+        if linkName=="":
+            errAbort("'links' in %s contains an empty dataset name" % collFname)
+
+        # linking to yourself or to something below you would show the same dataset
+        # twice and, for a collection, make the dataset list recurse
+        if linkName==selfName or (selfName!="" and linkName.startswith(selfName+"/")):
+            errAbort("'links' in %s points to '%s', which is the collection itself or one of its "
+                    "own subdirectories. A link is only for datasets outside this collection." %
+                    (collFname, linkName))
+
+        jsonFname = join(webRoot, linkName, "dataset.json")
+        if not isfile(jsonFname):
+            errAbort("'links' in %s points to '%s' but %s does not exist. A link target has to be "
+                    "built before the collection that links to it. Build '%s' first, then rebuild "
+                    "this collection." % (collFname, linkName, jsonFname, linkName))
+
+        linkInfo = readJson(jsonFname, keepOrder=True)
+
+        if not "shortLabel" in linkInfo:
+            errAbort("%s has no 'shortLabel', so '%s' cannot be linked from %s. Rebuild that "
+                    "dataset, then retry." % (jsonFname, linkName, collFname))
+        if not "md5" in linkInfo:
+            linkInfo["md5"] = calcMd5ForDataset(linkInfo)
+
+        # the JS resolves a dataset by its name as a path from the web root, so the name
+        # has to stay the target's real location, not something relative to this collection
+        linkInfo["name"] = linkName
+        linkInfo["isLink"] = True
+        linkInfo.update(override)
+
+        if linkInfo.get("visibility")=="hide":
+            logging.warning("'links' in %s points to '%s', but that dataset sets visibility='hide', "
+                    "so it will not appear in the dataset list." % (collFname, linkName))
+
+        linkDatasets.append(linkInfo)
+
+    seen = set()
+    for ds in linkDatasets:
+        if ds["name"] in seen:
+            errAbort("'links' in %s lists '%s' more than once" % (collFname, ds["name"]))
+        seen.add(ds["name"])
+
+    logging.info("Collection %s links to %d datasets: %s" %
+            (collFname, len(linkDatasets), ", ".join([ds["name"] for ds in linkDatasets])))
+    return linkDatasets
+
 def rebuildCollections(dataRoot, webRoot, collList):
     " recreate the dataset.json files for a list of cellbrowser.conf files of collections "
     collList = list(collList)
@@ -5792,6 +6159,19 @@ def rebuildCollections(dataRoot, webRoot, collList):
 
         # the collections summary comes from the JSON files
         datasets = subdirDatasetJsonData(webCollDir)
+
+        # datasets that live elsewhere in the tree but are shown here as well, see 'links'.
+        # They are merged before summarizing so they take part in the same 'priority' sort
+        # as the real subdirectories.
+        linkDatasets = loadCollLinks(collInfo, webRoot, collFname)
+        if linkDatasets:
+            subDirNames = set([ds["name"] for ds in datasets])
+            for ds in linkDatasets:
+                if ds["name"] in subDirNames:
+                    errAbort("'links' in %s points to '%s', but a subdirectory of this collection "
+                            "already provides that dataset." % (collFname, ds["name"]))
+            datasets = list(sorted(datasets + linkDatasets, key=lambda k: k.get('priority', 10)))
+
         collSumm = summarizeDatasets(datasets)
 
         # sort the top level datasets alphabetically
@@ -5868,7 +6248,41 @@ def fixupName(inConfFname, inConf):
 
     return dataRoot, relPath, inConf, dsName
 
-def addParents(inConfFname, dataRoot, dsName, outConf, todoConfigs):
+def getConfOrganisms(conf):
+    " return the 'organisms' list of a config, whether it sits at the top level or under 'facets' "
+    orgs = conf.get("organisms")
+    if not orgs:
+        orgs = (conf.get("facets") or {}).get("organisms")
+    return orgs
+
+def inheritOrganisms(parentFnames, inConf, outConf, dsName):
+    """ Datasets inside a collection usually do not declare 'organisms' themselves, only the
+    collection does. Copy it down from the nearest parent that declares exactly one organism.
+    A parent listing several organisms says nothing about this particular child, so skip those.
+    A dataset that declares its own organism always keeps it.
+    """
+    if getConfOrganisms(inConf):
+        return
+
+    # parentFnames is ordered nearest-first
+    for confFname in parentFnames:
+        parentConf = confCache.get(confFname)
+        if parentConf is None:
+            continue
+        orgs = getConfOrganisms(parentConf)
+        if not orgs:
+            continue
+        if len(orgs)==1:
+            logging.info("%s does not declare 'organisms', inheriting %s from %s" %
+                    (dsName, orgs[0], confFname))
+            outConf["organisms"] = list(orgs)
+        else:
+            logging.warning("%s does not declare 'organisms' and its parent %s lists %d of them, "
+                    "so it cannot be inherited. Add 'organisms' to this dataset's cellbrowser.conf." %
+                    (dsName, confFname, len(orgs)))
+        return
+
+def addParents(inConfFname, dataRoot, dsName, inConf, outConf, todoConfigs):
     # find all parent cellbrowser.conf-files and fixup the dataset's "name"
     # keep a list of parent config files in todoConfigs (they will need to be updated later)
     if dataRoot is None:
@@ -5882,6 +6296,7 @@ def addParents(inConfFname, dataRoot, dsName, outConf, todoConfigs):
         todoConfigs.update(parentFnames)
         outConf["parents"] = parentInfos
         outConf["name"] = fullPath
+        inheritOrganisms(parentFnames, inConf, outConf, dsName)
 
     return outConf
 
@@ -5927,6 +6342,10 @@ def _descFieldAsStr(val):
 def _collectSearchDocs(conf, outDir, docs):
     " recursively collect searchable dataset fields from dataset.json + desc.json files "
     for ds in conf.get("datasets", []):
+        if ds["name"] == "":
+            continue # "" is the reserved sentinel for "whole site root" (see e.g. the "parents" field);
+                      # an entry using it is a link back to the top-level collection, not a real child,
+                      # and recursing into it reprocesses the same dataset.json forever
         dsDir = join(outDir, ds["name"])
         confPath = join(dsDir, "dataset.json")
         descPath = join(dsDir, "desc.json")
@@ -6020,11 +6439,18 @@ def build(confFnames, outDir, port=None, doDebug=False, devMode=False, redo=None
         inConf = loadConfig(inConfFname)
         inDir = dirname(abspath(inConfFname))
 
+        # 'links' only means something for a collection, and this is a real dataset, so the
+        # setting would be quietly dropped. Say so, it is an easy file to get wrong.
+        if "links" in inConf:
+            logging.warning("%s sets 'links', but this is a dataset, not a collection, so the setting "
+                    "is ignored. Move 'links' to the cellbrowser.conf of the collection that should "
+                    "show the linked datasets." % inConfFname)
+
         outConf = OrderedDict()
         outConf["fileVersions"] = dict()
 
         dataRoot, relPath, inConf, dsName = fixupName(inConfFname, inConf)
-        outConf = addParents(inConfFname, dataRoot, dsName, outConf, todoConfigs)
+        outConf = addParents(inConfFname, dataRoot, dsName, inConf, outConf, todoConfigs)
 
         checkDsCase(inConfFname, relPath, inConf)
 
@@ -6516,7 +6942,9 @@ def copyMarkers(outDir):
         localSrc = join(MARKER_SOURCE_DIR, fname)
         if isfile(localSrc):
             logging.info("Copying marker database from %s" % localSrc)
-            if not os.path.samefile(localSrc, destPath):
+            # samefile() stats both sides, so it raises on a first run into a
+            # fresh output directory, where the destination does not exist yet
+            if not (isfile(destPath) and os.path.samefile(localSrc, destPath)):
                 shutil.copy(localSrc, destPath)
             present.append(fname)
         else:
@@ -6551,6 +6979,9 @@ def copyStatic(baseDir, outDir):
     copyAllFiles(baseDir, "js", outDir)
     copyAllFiles(baseDir, "css", outDir)
     copyAllFiles(baseDir, "genes", outDir, ext=".json.gz")
+    # mouse symbol -> MGI ID table for the marker table links, plain .json so the filter above skips it
+    for fname in glob.glob(join(baseDir, "genes", "mgiIds-*.json")):
+        shutil.copyfile(fname, join(outDir, "genes", basename(fname)))
 
     copyAndReplace(join(baseDir, "js", "cellBrowser.js"), join(outDir, "js"))
     copyMarkers(outDir)
@@ -6629,6 +7060,10 @@ def summarizeDatasets(datasets):
         if "facets" in ds:
             summDs["facets"] = dict(ds["facets"])
 
+        # the dataset really lives in another collection, we only show it here, see 'links'
+        if ds.get("isLink"):
+            summDs["isLink"] = True
+
         # these are generated
         if "sampleCount" in ds:
             summDs["sampleCount"] = ds["sampleCount"]
@@ -6684,7 +7119,7 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         #"ext/jquery-ui-1.11.3.custom.css",
         "ext/jquery.tipsy.1.0.3.min.css", "ext/bootstrap.min.css",
         "ext/introjs.2.4.0.min.css", "ext/bootstrap-submenu.min.css",
-        "ext/bootstrap-dropmenu.min.css", "ext/font-awesome.css",
+        "ext/bootstrap-dropmenu.min.css",
         "ext/googleMaterialIcons.css", "ext/chosen.1.8.2.min.css",
         "ext/select2.4.0.4.min.css",
         "ext/selectize.bootstrap3.css",
@@ -6753,7 +7188,18 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         gaTag = getConfig("gaTag")
         writeGaScript(ofh, gaTag)
 
-    md5 = md5WithPython(join(outDir, "dataset.json"))
+    # rootMd5 is only a cache-buster for the top-level dataset.json. A directory
+    # that holds just the code and reads its data from elsewhere (cb.conf
+    # dataRoot) has no dataset.json of its own, so fall back to an empty string
+    # rather than aborting: the frontend treats a missing md5 as "no md5".
+    rootJson = join(outDir, "dataset.json")
+    if isfile(rootJson):
+        md5 = md5WithPython(rootJson)
+    else:
+        logging.info("%s does not exist: writing index.html without a dataset.json md5. "
+                "This is expected for a code-only directory that gets its data via "
+                "the dataRoot setting in cb.conf." % rootJson)
+        md5 = ""
 
     ofh.write('</head>\n')
     ofh.write('<body>\n')
@@ -6834,8 +7280,7 @@ def cbUpgrade(outDir, doData=True, doCode=False, devMode=False, port=None):
     if doCode or devMode:
         copyStatic(webDir, outDir)
 
-    if not devMode:
-        makeIndexHtml(webDir, outDir, devMode=devMode)
+    makeIndexHtml(webDir, outDir, devMode=devMode)
 
     if port:
         print("Interrupt this process, e.g. with Ctrl-C, to stop the webserver")

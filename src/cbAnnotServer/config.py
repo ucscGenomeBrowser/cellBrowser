@@ -30,8 +30,26 @@ class Config:
     MAIL_USE_TLS = os.environ.get("CBANNOT_MAIL_USE_TLS", "false").lower() == "true"
     MAIL_DEFAULT_SENDER = os.environ.get("CBANNOT_MAIL_FROM", "noreply@cells.ucsc.edu")
 
-    # Base URL used to construct links in verification / reset emails
+    # Base URL used to construct links in verification / reset emails, and the
+    # base for OAuth redirect (callback) URLs.
     SITE_BASE_URL = os.environ.get("CBANNOT_SITE_BASE_URL", "http://localhost:5000")
+
+    # ---- OAuth / OpenID Connect sign-in -----------------------------------
+    # Providers are NOT configured here. They live in a server-side conf file
+    # (default /hive/data/inside/cells/cbAnnotServer/providers.conf, override
+    # with CBANNOT_PROVIDERS_CONF), one [provider:slug] stanza each, so adding
+    # Microsoft / CILogon / any other OIDC issuer is a config change plus a
+    # restart -- no code, no release. See providers.py for the format and the
+    # built-in presets, and deploy/providers.conf.sample for a worked example.
+    #
+    # That file holds client secrets, so it must stay off the web tree and
+    # chmod 600. It is emphatically not the frontend's cb.conf, which the
+    # browser fetches over HTTP.
+    #
+    # The original CBANNOT_GOOGLE_* / CBANNOT_ORCID_* environment variables
+    # still work (providers.py folds them in), so an existing deployment keeps
+    # running unchanged; a conf-file stanza for the same slug wins.
+    PROVIDERS_CONF = os.environ.get("CBANNOT_PROVIDERS_CONF")
 
     # Dev-only CORS. Production serves the frontend and this API from the same
     # Apache host (same origin), so no CORS is needed. For local dev, where the

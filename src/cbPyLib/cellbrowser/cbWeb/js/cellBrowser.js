@@ -11,7 +11,13 @@
 "use strict";
 
 var cellbrowser = function() {
-    const DEBUG = false;
+    // Debug mode: verbose console logging plus a timing bar along the bottom of
+    // the window. Off by default; enabled at runtime with the URL parameter
+    // ?debug=1 (inspired by the genome browser's &measureTiming). Set from the
+    // URL in main() -- not here, because the URL helpers rely on regexes that are
+    // initialized further down and aren't ready during module evaluation. See
+    // initDebugMode() and cbTiming().
+    let DEBUG = false;
 
     // Src: https://stackoverflow.com/questions/56393880/how-do-i-detect-dark-mode-using-javascript
     const darkModeMq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
@@ -28,6 +34,13 @@ var cellbrowser = function() {
     // null = not yet checked, false = checked and logged out,
     // {loggedIn:true, email, display_name} = logged in.
     var gCbUser = null;
+
+    // Which sign-in providers the backend offers, from GET /api/auth/providers:
+    // {password:true, providers:[{slug,label}, ...]}. null = not yet fetched.
+    // The list is whatever the server's providers.conf configured, so a site
+    // that adds Microsoft or CILogon gets a button here with no code change --
+    // nothing in this file names an individual provider.
+    var gAuthProviders = null;
 
     // Site config from the web root "cb.conf" file (see loadClientConf).
     // null = not yet loaded, otherwise an object of key -> value.
@@ -160,17 +173,76 @@ var cellbrowser = function() {
 
     // links to various external databases
     var dbLinks = {
-        "HPO" : "https://hpo.jax.org/app/browse/gene/", // entrez ID
+        "HPO" : "https://hpo.jax.org/browse/gene/NCBIGene:", // entrez ID
         "OMIM" : "https://omim.org/entry/", // OMIM ID
         "COSMIC" : "http://cancer.sanger.ac.uk/cosmic/gene/analysis?ln=", // gene symbol
         "SFARI" : "https://gene.sfari.org/database/human-gene/", // gene symbol
         "GeneCards" : "https://www.genecards.org/cgi-bin/carddisp.pl?gene=", // gene symbol
+        "MGI" : "https://www.informatics.jax.org/marker/summary?nomen=", // mouse gene symbol
+        "MGIGene" : "https://www.informatics.jax.org/marker/MGI:", // numeric MGI ID
+        "AllenMouseISH" : "https://mouse.brain-map.org/search/show?exact_match=true&search_type=gene&search_term=", // mouse gene symbol
+        "IMPC" : "https://www.mousephenotype.org/data/search?term=", // mouse gene symbol
+        "IMPCGene" : "https://www.mousephenotype.org/data/genes/MGI:", // numeric MGI ID
         "ZFIN" : "https://zfin.org/", // ZFIN ID
         "BrainSpLMD" : "http://www.brainspan.org/lcm/search?exact_match=true&search_type=gene&search_term=", // entrez
         "BrainSpMouseDev" : "http://developingmouse.brain-map.org/gene/show/", // internal Brainspan ID
-        "Eurexp" : "http://www.eurexpress.org/ee/databases/assay.jsp?assayID=", // internal ID
         "LMD" : "http://www.brainspan.org/lcm/search?exact_match=true&search_type=gene&search_term=" // entrez
     };
+
+    // Databases we used to link to that have gone away. Marker files annotated before the link
+    // was dropped still carry these tokens, so they are skipped when a marker table is drawn
+    // rather than rendered as a bare word. Eurexpress: eurexpress.org no longer serves a valid
+    // certificate, and its assay IDs mean nothing at any other site, so there is no replacement.
+    var deadDbs = {"Eurexp" : true};
+
+    // Mouse gene symbol -> numeric MGI ID. With it, MGI and IMPC links go to the gene page;
+    // without it they go to a symbol search, which is where they went before this table
+    // existed. Built by cbWeb/genes/makeMgiIds.py out of the MGI file we already ship for
+    // ortholog mapping, and named after the version of that file so it can be cached forever.
+    var mgiIdsFile = "mgiIds-8Dec17.json";
+    var gMgiIds = null;        // the table, once it has arrived
+    var gMgiIdsLoading = null; // the promise for it while it is in flight
+
+    function loadMgiIds() {
+    /* fetch the symbol -> MGI ID table once, and hand back a promise for it. A failure
+     * resolves to an empty table rather than rejecting: every link has a symbol-search
+     * fallback, so a table that never arrives costs precision, not a working page. */
+        if (gMgiIds !== null)
+            return Promise.resolve(gMgiIds);
+        if (gMgiIdsLoading !== null)
+            return gMgiIdsLoading;
+
+        var url = cbUtil.dataUrl(["genes", mgiIdsFile]);
+        gMgiIdsLoading = new Promise(function(resolve) {
+            // silent: a missing table is a fallback, not something to alert the user about
+            cbUtil.loadJson(url, function(data) {
+                gMgiIds = data || {};
+                gMgiIdsLoading = null;
+                resolve(gMgiIds);
+            }, true);
+        });
+        return gMgiIdsLoading;
+    }
+
+    function extLink(url, label, title) {
+    /* one link in the Links column of a marker table */
+        return "<a target=_blank class='link' style='font-size:80%; color:#AAA' title='"+title+"' href='"+url+"'>"+label+"</a>";
+    }
+
+    function mgiLinkUrls(sym) {
+    /* MGI and IMPC URLs for a mouse gene symbol: the gene page when the symbol is in the
+     * ID table, the symbol search when it is not. */
+        var mgiId = gMgiIds ? gMgiIds[sym] : undefined;
+        if (mgiId === undefined)
+            return {
+                mgi : dbLinks.MGI+encodeURIComponent(sym),
+                impc : dbLinks.IMPC+encodeURIComponent(sym)
+            };
+        return {
+            mgi : dbLinks.MGIGene+mgiId,
+            impc : dbLinks.IMPCGene+mgiId
+        };
+    }
 
     function _dump(o) {
     /* for debugging */
@@ -280,6 +352,137 @@ var cellbrowser = function() {
         }
     }
 
+    // --- Debug timing (like the genome browser's measureTiming) ---------------
+    // A running timer over the main dataset-load phases. Each cbTiming(label)
+    // call records the milliseconds since the previous call and appends a segment
+    // to the on-screen debug bar (and the console). Reset per dataset load. All
+    // calls are no-ops unless debug mode is on (?debug=1), so the marks sprinkled
+    // through the load path cost nothing in normal use.
+    //
+    // The bar can hold more than one timing run, separated by cbTimingGroup().
+    // The load phases are the first run; a differential expression job, which the
+    // user may start minutes later, is a second one, so its numbers are measured
+    // from the click and not from page load.
+    //
+    // rows entries are {label, delta, total} for a mark, or {group:name} for the
+    // start of a run.
+    var gDebugTiming = { t0: null, last: null, rows: [], lastDraw: null };
+
+    function initDebugMode() {
+        /* turn on debug mode if the URL has ?debug=1 (or ?debug=on). Call once at
+           startup, after the URL helpers' regexes are initialized. */
+        var debugVar = getVar("debug");
+        DEBUG = (debugVar==="1" || debugVar==="on");
+        // maxPlot.js and maxHeat.js are separate modules and cannot see the DEBUG
+        // above, which is private to this one. They read window.doDebug instead --
+        // maxPlot's debug() already did, it was just never set anywhere.
+        window.doDebug = DEBUG;
+        if (DEBUG)
+            console.log("cellBrowser: debug mode on (?debug=1)");
+    }
+
+    function cbTimingReset() {
+        /* start a fresh timing run (called at the top of loadDataset) */
+        gDebugTiming = { t0: null, last: null, rows: [], lastDraw: null };
+    }
+
+    function cbTimingGroup(name) {
+        /* start a new timing run on the same bar, keeping the runs already there.
+           Deltas and the total of the marks that follow are counted from here. A
+           second run under the same name replaces the first, so repeatedly running
+           the same thing does not make the bar grow without end. */
+        if (!DEBUG) return;
+        for (var i=0; i<gDebugTiming.rows.length; i++)
+            if (gDebugTiming.rows[i].group===name) { gDebugTiming.rows.length = i; break; }
+        var now = performance.now();
+        gDebugTiming.rows.push({group:name});
+        gDebugTiming.t0 = now;
+        gDebugTiming.last = now;
+        updateDebugBar();
+    }
+
+    function wrapDrawTiming(rend) {
+        /* wrap a MaxPlot's drawDots so each WebGL draw logs its duration and
+           updates the live 'draw' segment of the debug bar. Only called when
+           debug mode is on, so normal use keeps the original method untouched. */
+        if (!rend || rend._drawTimingWrapped) return;
+        rend._drawTimingWrapped = true;
+        var orig = rend.drawDots;
+        rend.drawDots = function() {
+            var t = performance.now();
+            var ret = orig.apply(rend, arguments);
+            var ms = performance.now() - t;
+            gDebugTiming.lastDraw = ms;
+            console.log("cbTiming drawDots: "+ms.toFixed(1)+" ms");
+            updateDebugBar();
+            return ret;
+        };
+    }
+
+    function cbTiming(label) {
+        /* record ms elapsed since the last cbTiming() call under 'label' */
+        if (!DEBUG) return;
+        var now = performance.now();
+        if (gDebugTiming.t0===null) { gDebugTiming.t0 = now; gDebugTiming.last = now; }
+        var delta = now - gDebugTiming.last;
+        var total = now - gDebugTiming.t0;
+        gDebugTiming.rows.push({label:label, delta:delta, total:total});
+        console.log("cbTiming "+label+": +"+delta.toFixed(0)+" ms (total "+total.toFixed(0)+" ms)");
+        gDebugTiming.last = now;
+        updateDebugBar();
+    }
+
+    function updateDebugBar() {
+        /* draw/refresh the fixed timing bar along the bottom of the window. Each
+           timing run gets its own row and the bar grows upward, so the load
+           numbers keep the position they had before a DE run was added, and the
+           close box stays put instead of being buried under a long line. */
+        if (!DEBUG) return;
+        var el = document.getElementById("tpDebugBar");
+        if (!el) {
+            el = document.createElement("div");
+            el.id = "tpDebugBar";
+            document.body.appendChild(el);
+        }
+        var rows = [];      // one finished row of html per timing run
+        var segs = null;    // segments of the row being built
+        var total = 0;
+
+        function endRow(extra) {
+            if (segs===null) return;
+            segs.push("<span class='tpDebugSeg tpDebugTot'>total "+total.toFixed(0)+" ms</span>");
+            if (extra) segs.push(extra);
+            rows.push("<div class='tpDebugRow'>"+segs.join("")+"</div>");
+        }
+        function startRow(label, cls) {
+            endRow();
+            segs = ["<span class='tpDebugSeg "+cls+"'>"+label+"</span>"];
+            total = 0;
+        }
+
+        startRow("debug", "tpDebugTag");        // the dataset-load run leads the bar
+        for (var i=0; i<gDebugTiming.rows.length; i++) {
+            var r = gDebugTiming.rows[i];
+            if (r.group!==undefined) {          // a new run: give it a row of its own
+                startRow(r.group, "tpDebugGroup");
+                continue;
+            }
+            total = r.total;
+            segs.push("<span class='tpDebugSeg'><span class='tpDebugLbl'>"+r.label+
+                "</span> <span class='tpDebugVal'>+"+r.delta.toFixed(0)+" ms</span></span>");
+        }
+        // the last redraw is whatever the renderer did most recently, so it belongs
+        // to the run at the bottom -- after a DE recolor, that is the DE row
+        var drawSeg = (gDebugTiming.lastDraw===null) ? null :
+            "<span class='tpDebugSeg tpDebugDraw'>draw "+gDebugTiming.lastDraw.toFixed(1)+" ms</span>";
+        endRow(drawSeg);
+
+        el.innerHTML = rows.join("") +
+            "<span class='tpDebugClose' title='hide (reload without debug=1 to disable)'>&times;</span>";
+        el.style.display = "block";
+        el.querySelector(".tpDebugClose").onclick = function() { el.style.display = "none"; };
+    }
+
     const getRandomIndexes = (length, size) =>
     /* get 'size' random indexes from an array of length 'length' */
     {
@@ -379,11 +582,29 @@ var cellbrowser = function() {
         gtag('event', eventName, {"dataset_name": eventLabel});
     }
 
+    function reportWebglProblem(eventName, reason) {
+        /* count a WebGL problem in two ways: a Google Analytics event, and a request for a file
+         * that does not exist, which shows up in the Apache access log (with the user agent) even
+         * when an ad blocker stops Google Analytics. Silent: it must never bother the user.
+         * eventName: "webgl_unavailable" (plot uses canvas 2D, reason says why), or from maxPlot:
+         * "webgl_context_lost", "webgl_context_restored", "webgl_restore_timeout", "webgl_restore_failed" */
+        if (!reason)
+            reason = eventName;
+        let dsName = (db && db.name) ? db.name : "";
+        if (typeof gtag === 'function')
+            gtag('event', eventName, {"reason": reason, "dataset_name": dsName});
+        try {
+            fetch("noWebgl.html?reason="+encodeURIComponent(reason), {cache: "no-store"}).catch(function() {});
+        } catch (err) {
+            // old browser without fetch, ignore
+        }
+    }
+
     function trackEventObj(eventName, obj) {
-    /* send an event obj to google analytics */
+    /* send an event with parameters obj to google analytics */
         if (typeof gtag !== 'function')
             return;
-        gtag('event', obj);
+        gtag('event', eventName, obj);
     }
 
     function classAddListener(className, type, listener) {
@@ -414,6 +635,60 @@ var cellbrowser = function() {
             outArr.push(cleanString(s));
         }
         return outArr;
+    }
+
+    function slugify(str) {
+        /* "Human Breast Cell Atlas" -> "human-breast-cell-atlas", for URLs */
+        return String(str).toLowerCase().replace(/[^a-z0-9]+/g, "-")
+                          .replace(/^-+|-+$/g, "");
+    }
+
+    function resolveFilterVals(selPar, filterVals) {
+        /* Turn a facet URL parameter into real facet values.
+         * Accepts, in order of preference:
+         *   ?proj=human-breast-cell-atlas     slug of the value (canonical)
+         *   ?proj=slug-one,slug-two           comma-separated for multi-select
+         *   ?proj=Human Breast Cell Atlas     the literal value
+         *   ?proj=SFARI GTEx                  legacy space-separated values
+         * Space used to be the multi-select separator, which silently broke any
+         * value containing a space -- "Human Breast Cell Atlas" was parsed as
+         * four filters and over-matched. Resolving against the known values
+         * first means multi-word values now work. */
+        // filterVals comes from getDatasetAttrs(), which returns [value, label]
+        // pairs like ["Human Cell Atlas", "Human Cell Atlas (28)"] -- plain
+        // strings are also accepted. Key off the value, as buildComboBox does,
+        // otherwise the whole pair gets slugified and nothing ever matches.
+        var bySlug = {};
+        for (var i = 0; i < filterVals.length; i++) {
+            var fv = filterVals[i];
+            var val = Array.isArray(fv) ? fv[0] : fv;
+            bySlug[slugify(val)] = val;
+        }
+
+        var toks = (selPar.indexOf(",") !== -1) ? selPar.split(",") : [selPar];
+        var out = [];
+        for (var t = 0; t < toks.length; t++) {
+            var tok = toks[t].trim();
+            if (tok === "")
+                continue;
+            var hit = bySlug[slugify(tok)];
+            if (hit !== undefined) {
+                out.push(hit);
+                continue;
+            }
+            // legacy space-separated list: resolve each word on its own
+            if (tok.indexOf(" ") !== -1) {
+                var parts = tok.split(" "), anyHit = false;
+                for (var p = 0; p < parts.length; p++) {
+                    var h2 = bySlug[slugify(parts[p])];
+                    if (h2 !== undefined) { out.push(h2); anyHit = true; }
+                }
+                if (anyHit)
+                    continue;
+            }
+            out.push(tok); // unknown value, pass through
+        }
+        return out;
     }
 
     function findMetaValIndex(metaInfo, value) {
@@ -631,7 +906,7 @@ var cellbrowser = function() {
         let md5 = datasetInfo.md5;
         if (datasetInfo.hasFiles && datasetInfo.hasFiles.indexOf("datasetDesc")!==-1) {
             // description is not through html files but a json file
-            var jsonUrl = cbUtil.joinPaths([datasetName, "desc.json"]) +"?"+md5;
+            var jsonUrl = cbUtil.dataUrl([datasetName, "desc.json"]) +"?"+md5;
             fetch(jsonUrl)
               .then(function(response) {
                 if(!response.ok) {
@@ -775,15 +1050,15 @@ var cellbrowser = function() {
         if (label)
             htmls.push("<b> Matrix for "+label+":</b> ");
 
-        htmls.push("<a href='"+dsName+"/"+matFname+"'>"+matFname+"</a>");
+        htmls.push("<a href='"+cbUtil.dataUrl([dsName, matFname])+"'>"+matFname+"</a>");
         if (matFname.endsWith(".mtx.gz")) {
             var prefix = "";
             if (matFname.indexOf("_")!==-1)
                 prefix = matFname.split("_")[0]+"_";
             var ftName = prefix+"features.tsv.gz";
-            htmls.push(", <a href='"+dsName+"/"+ftName+"'>"+ftName+"</a>");
+            htmls.push(", <a href='"+cbUtil.dataUrl([dsName, ftName])+"'>"+ftName+"</a>");
             var barName = prefix+"barcodes.tsv.gz";
-            htmls.push(", <a href='"+dsName+"/"+barName+"'>"+barName+"</a>");
+            htmls.push(", <a href='"+cbUtil.dataUrl([dsName, barName])+"'>"+barName+"</a>");
         }
         htmls.push("<br>");
     }
@@ -795,8 +1070,8 @@ var cellbrowser = function() {
             for (let suppFile of supplFiles) {
                 let label = suppFile.label;
                 let fname = suppFile.file;
-                htmls.push("<b>"+label+":</b> <a href='"+dsName);
-                htmls.push("/"+fname+"'>"+fname+"</a>");
+                htmls.push("<b>"+label+":</b> <a href='"+cbUtil.dataUrl([dsName, fname]));
+                htmls.push("'>"+fname+"</a>");
                 htmls.push("<br>");
             }
         }
@@ -838,16 +1113,16 @@ var cellbrowser = function() {
                     buildLinkToMatrix(htmls, datasetInfo.name, matBaseName, "dataset");
                     htmls.push("</p>");
                 } else {
-                    htmls.push("<p><b>Matrix:</b> <a href='"+datasetInfo.name);
-                    htmls.push("/exprMatrix.tsv.gz'>exprMatrix.tsv.gz</a>");
+                    htmls.push("<p><b>Matrix:</b> <a href='"+cbUtil.dataUrl([datasetInfo.name, "exprMatrix.tsv.gz"]));
+                    htmls.push("'>exprMatrix.tsv.gz</a>");
                 }
                 if (desc.unitDesc)
                     htmls.push("<br>Values in matrix are: "+desc.unitDesc);
                 htmls.push("</p>");
 
                 if (desc.rawMatrixFile) {
-                    htmls.push("<p><b>Raw count matrix:</b> <a href='"+datasetInfo.name);
-                    htmls.push("/"+desc.rawMatrixFile+"'>"+desc.rawMatrixFile+"</a>");
+                    htmls.push("<p><b>Raw count matrix:</b> <a href='"+cbUtil.dataUrl([datasetInfo.name, desc.rawMatrixFile]));
+                    htmls.push("'>"+desc.rawMatrixFile+"</a>");
                     if (desc.rawMatrixNote)
                         htmls.push("<br>"+desc.rawMatrixNote);
                     htmls.push("</p>");
@@ -855,24 +1130,24 @@ var cellbrowser = function() {
 
                 htmls.push("<p><i><a style='float:right; padding-left: 100px'; target=_blank href='https://cellbrowser.readthedocs.io/en/master/load.html'>Help: Load matrix/meta into Seurat or Scanpy</a></i></p>");
 
-                htmls.push("<p><b>Cell meta annotations:</b> <a target=_blank href='"+datasetInfo.name);
-                htmls.push("/meta.tsv'>meta.tsv</a>");
+                htmls.push("<p><b>Cell meta annotations:</b> <a target=_blank href='"+cbUtil.dataUrl([datasetInfo.name, "meta.tsv"]));
+                htmls.push("'>meta.tsv</a>");
                 if (desc.metaNote)
                     htmls.push("<br>"+desc.metaNote);
                 htmls.push("</p>");
 
                 htmls.push("<p><b>Dimensionality reduction coordinates:</b><br>");
                 for (let fname of desc.coordFiles)
-                    htmls.push("<a target=_blank href='"+datasetInfo.name+"/"+fname+"'>"+fname+"</a><br>");
+                    htmls.push("<a target=_blank href='"+cbUtil.dataUrl([datasetInfo.name, fname])+"'>"+fname+"</a><br>");
                 htmls.push("</p>");
 
                 buildSupplFiles(desc, datasetInfo.name, htmls);
 
                 htmls.push("<p><b>Dataset description</b>: ");
-                htmls.push("<a target=_blank href='"+datasetInfo.name+"/desc.json'>desc.json</a></p>");
+                htmls.push("<a target=_blank href='"+cbUtil.dataUrl([datasetInfo.name, "desc.json"])+"'>desc.json</a></p>");
 
                 htmls.push("<p><b>Cell Browser configuration</b>: ");
-                htmls.push("<a target=_blank href='"+datasetInfo.name+"/dataset.json'>dataset.json</a></p>");
+                htmls.push("<a target=_blank href='"+cbUtil.dataUrl([datasetInfo.name, "dataset.json"])+"'>dataset.json</a></p>");
 
                 htmls.push("<p><b>Bulk download via rsync:</b><br>");
                 htmls.push("<code style='display:inline-block; background:#f4f4f4; border:1px solid #ddd; padding:4px 8px; border-radius:3px; font-size:12px; user-select:all'>");
@@ -915,7 +1190,7 @@ var cellbrowser = function() {
             htmls.push("<a name='imgCat"+catIdx+"'></a>");
             catIdx++;
             htmls.push("<b>"+catInfo.categoryLabel+":</b><br>");
-            let imgDir = datasetInfo.name+"/images/";
+            let imgDir = cbUtil.dataUrl([datasetInfo.name, "images"])+"/";
             htmls.push("<div style='padding-left:1em; padding-top:4px' class='tpImgSets'>");
 
             for (let imgSet of catInfo.categoryImageSets) {
@@ -1030,7 +1305,7 @@ var cellbrowser = function() {
         }
         if (desc.image) {
             htmls.push("<img style='float:right; padding-left:5px' src='");
-            htmls.push(datasetInfo.name+"/"+desc.image[0]+"'");
+            htmls.push(cbUtil.dataUrl([datasetInfo.name, desc.image[0]])+"'");
             if (desc.imageMap)
                 htmls.push(" usemap='#clickmap'");
             htmls.push(" width='"+desc.image[1]+"' height='"+desc.image[2]+"'>");
@@ -1263,6 +1538,30 @@ var cellbrowser = function() {
                 htmls.push("<span class='badge' style='background-color: #188725'>"+dataset.collectionCount+" collections</span>");
             }
 
+            // the dataset is only shown here, it lives in another collection (conf setting 'links')
+            // The chain icon is an inline SVG, as we have no icon font for it, see htmlAddInfoIcon()
+            if (dataset.isLink) {
+                let linkIcon = '<svg style="width:11px;height:11px;vertical-align:-1px" fill="currentColor" '+
+                    'xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640"><!--!Font Awesome Free v7.3.1 by '+
+                    '@fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free '+
+                    'Copyright 2026 Fonticons, Inc.--><path d="M451.5 160C434.9 160 418.8 164.5 404.7 172.7C388.9 '+
+                    '156.7 370.5 143.3 350.2 133.2C378.4 109.2 414.3 96 451.5 96C537.9 96 608 166 608 252.5C608 '+
+                    '294 591.5 333.8 562.2 363.1L491.1 434.2C461.8 463.5 422 480 380.5 480C294.1 480 224 410 224 '+
+                    '323.5C224 322 224 320.5 224.1 319C224.6 301.3 239.3 287.4 257 287.9C274.7 288.4 288.6 303.1 '+
+                    '288.1 320.8C288.1 321.7 288.1 322.6 288.1 323.4C288.1 374.5 329.5 415.9 380.6 415.9C405.1 '+
+                    '415.9 428.6 406.2 446 388.8L517.1 317.7C534.4 300.4 544.2 276.8 544.2 252.3C544.2 201.2 '+
+                    '502.8 159.8 451.7 159.8zM307.2 237.3C305.3 236.5 303.4 235.4 301.7 234.2C289.1 227.7 274.7 '+
+                    '224 259.6 224C235.1 224 211.6 233.7 194.2 251.1L123.1 322.2C105.8 339.5 96 363.1 96 '+
+                    '387.6C96 438.7 137.4 480.1 188.5 480.1C205 480.1 221.1 475.7 235.2 467.5C251 483.5 269.4 '+
+                    '496.9 289.8 507C261.6 530.9 225.8 544.2 188.5 544.2C102.1 544.2 32 474.2 32 387.7C32 346.2 '+
+                    '48.5 306.4 77.8 277.1L148.9 206C178.2 176.7 218 160.2 259.5 160.2C346.1 160.2 416 230.8 416 '+
+                    '317.1C416 318.4 416 319.7 416 321C415.6 338.7 400.9 352.6 383.2 352.2C365.5 351.8 351.6 '+
+                    '337.1 352 319.4C352 318.6 352 317.9 352 317.1C352 283.4 334 253.8 307.2 237.5z"/></svg>';
+                htmls.push("<span class='badge' style='background-color: #6c757d' "+
+                    "title='This dataset is part of another collection and is shown here as well'>"+
+                    linkIcon+"</span>");
+            }
+
             //if (dataset.tags!==undefined) {
                 //for (var tagI = 0; tagI < dataset.tags.length; tagI++) {
                     //var tag = dataset.tags[tagI];
@@ -1317,7 +1616,7 @@ var cellbrowser = function() {
         gSearchIndexCallbacks.push(onDone);
         if (gSearchIndexLoading) return;
         gSearchIndexLoading = true;
-        $.getJSON("search.json", function(docs) {
+        $.getJSON(cbUtil.dataUrl("search.json"), function(docs) {
             var ms = new MiniSearch({
                 fields: ['shortLabel', 'title', 'abstract', 'paper', 'organisms', 'body_parts',
                          'diseases', 'lab', 'submitter', 'authors', 'institution',
@@ -1434,16 +1733,35 @@ var cellbrowser = function() {
         return '';
     }
 
+    // the dataset dialog's faceting filters: combobox id and URL variable
+    const cDatasetFilters = [
+        ["tpBodyCombo", "bp"], ["tpDisCombo", "dis"], ["tpOrgCombo", "org"], ["tpProjCombo", "proj"],
+        ["tpStageCombo", "stage"], ["tpDomCombo", "dom"], ["tpAssayCombo", "assay"], ["tpSourceCombo", "source"]
+    ];
+
+    function clearDatasetFilters() {
+        /* reset all dataset filters and show all datasets again */
+        var urlArgs = {};
+        for (var [comboId, urlVar] of cDatasetFilters) {
+            $("#"+comboId).val([]).trigger("chosen:updated");
+            urlArgs[urlVar] = null;
+        }
+        changeUrl(urlArgs);
+        filterDatasetsDom();
+    }
+
     function filterDatasetsDom() {
         /* keep only datasets that fulfill the filters */
 
         // read the current filter values of the dropboxes
         var categories = ["Body", "Dis", "Org", "Proj", "Stage", "Dom", "Assay", "Source"];
         var filtVals = {};
+        var activeFilterCount = 0;
         for (var category of categories) {
             var vals = $("#tp"+category+"Combo").val();
-            if (vals===undefined)
+            if (vals===undefined || vals===null)
                 vals = [];
+            activeFilterCount += vals.length;
 
             // strip special chars
             var cleanVals = [];
@@ -1497,6 +1815,20 @@ var cellbrowser = function() {
             $('#tpDatasetCount').text("(filters active, "+shownCount+" datasets shown)");
         else
             $('#tpDatasetCount').text("("+shownCount+" dataset collections)");
+
+        // note next to the "Filters" header, so active filters are visible when it is collapsed
+        var noteEl = $('#tpFilterNote');
+        if (activeFilterCount===0)
+            noteEl.empty();
+        else {
+            var filtWord = (activeFilterCount===1 ? " filter is" : " filters are");
+            noteEl.html(": "+activeFilterCount+filtWord+" active, "+
+                "<span id='tpFilterClear' class='link'>click here to clear filters and show all datasets</span>");
+            $('#tpFilterClear').click(function(ev) {
+                ev.preventDefault(); // a click inside <summary> would also open/close the filters
+                clearDatasetFilters();
+            });
+        }
     }
 
     function openDatasetDialog(openDsInfo, selName, openTab) {
@@ -1532,8 +1864,9 @@ var cellbrowser = function() {
             html.push("<div style='min-width:0'>");
             html.push("<div style='margin-bottom:2px; font-size:12px; color:#555'>"+filterLabel+"</div>");
             let selPar = getVar(urlVar);
+            let filtList = [];
             if (selPar && selPar!=="")
-                filtList = selPar.split(" ");
+                filtList = resolveFilterVals(selPar, filterVals);
             buildComboBox(html, comboId, filterVals, filtList, comboLabel, 200, {multi:true});
             html.push("</div>");
             return true;
@@ -1577,26 +1910,17 @@ var cellbrowser = function() {
 
         function onFilterChange(ev) {
             /* called when user changes a filter: updates list of datasets shown */
-            var filtNames = $(this).val();
+            var filtNames = $(this).val() || [];
 
             var param = null;
-            if (this.id==="tpBodyCombo")
-                param = "bp";
-            else if (this.id=="tpDisCombo")
-                param = "dis";
-            else if (this.id=="tpOrgCombo")
-                param = "org";
-            else if (this.id=="tpProjCombo")
-                param = "proj";
-            else if (this.id=="tpDomCombo")
-                param = "dom";
-            else if (this.id=="tpAssayCombo")
-                param = "assay";
-            else if (this.id=="tpStageCombo")
-                param = "stage";
+            for (var [comboId, urlVar] of cDatasetFilters)
+                if (this.id===comboId)
+                    param = urlVar;
 
             // change the URL
-            var filtArg = filtNames.join(" "); // space encodes as + in URL
+            // slugs joined by comma: a space separator breaks any value that
+            // contains a space (see resolveFilterVals)
+            var filtArg = filtNames.map(slugify).join(",");
             var urlArgs = {}
             urlArgs[param] = filtArg;
             changeUrl(urlArgs);
@@ -1746,7 +2070,6 @@ var cellbrowser = function() {
         }
 
         let doFilters = false;
-        let filtList = [];
         let bodyParts = null;
         let diseases = null;
         let organisms = null;
@@ -1779,7 +2102,7 @@ var cellbrowser = function() {
             if (doFilters) {
                 noteLines.push("<details id='tpFilterDetails' style='margin-bottom:6px'>" +
                     "<summary style='cursor:pointer; font-weight:bold; color:#444; padding:2px 0; list-style:none; display:flex; align-items:center'>" +
-                    "<span class='tpFilterArrow' style='display:inline-block; margin-right:5px; font-size:10px'>&#9654;</span>Filters</summary>" +
+                    "<span class='tpFilterArrow' style='display:inline-block; margin-right:5px; font-size:10px'>&#9654;</span>Filters<span id='tpFilterNote' style='font-weight:normal; white-space:pre-wrap'></span></summary>" +
                     "<div style='display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding-top:8px'>");
 
                 buildFilter(noteLines, bodyParts, "Organ", "bp", "tpBodyCombo", "select organs...");
@@ -1839,9 +2162,12 @@ var cellbrowser = function() {
             });
         }
 
-        var winWidth = window.innerWidth - 0.05*window.innerWidth;
-        var winHeight = window.innerHeight - 0.05*window.innerHeight;
-        var tabsWidth = winWidth - leftPaneWidth - 50;
+        // the full page, without scrollbars (window.innerWidth includes them)
+        var winWidth = document.documentElement.clientWidth;
+        var winHeight = document.documentElement.clientHeight;
+        // the info pane floats right of the list: if it does not fit next to it, it wraps below the
+        // list, out of view. So leave some room for the dialog's padding and the list's scrollbar.
+        var tabsWidth = winWidth - leftPaneWidth - 80;
         listGroupHeight = winHeight - 100;
 
         var htmls = ["<div style='line-height: 1.1em'>"];
@@ -1891,8 +2217,12 @@ var cellbrowser = function() {
 
         var selDatasetIdx = 0;
 
+        // at startup, only the root collection (or a collection from the URL) is loaded and there
+        // is nothing behind the dialog: the user has to pick a dataset, so it cannot be closed
+        var noDatasetLoaded = (db===null || !db.conf || !db.conf.metaFields);
+
         var buttons = [];
-        if (db!==null) {
+        if (!noDatasetLoaded) {
             var cancelLabel = "Cancel";
             if (onlyInfo)
                 cancelLabel = "Close";
@@ -1908,7 +2238,12 @@ var cellbrowser = function() {
 
         $(".ui-dialog-content").dialog("close"); // close the last dialog box
 
-        showDialogBox(htmls, title, {width: winWidth, height:winHeight, buttons: buttons});
+        showDialogBox(htmls, title, {width: winWidth, height:winHeight, buttons: buttons, noClose: noDatasetLoaded});
+
+        // the dialog's padding and border come on top of the width, remove them so it fits the window
+        var dlgWidthExtra = $("#tpDialog").closest(".ui-dialog").outerWidth() - winWidth;
+        if (dlgWidthExtra > 0)
+            $("#tpDialog").dialog("option", "width", winWidth - dlgWidthExtra);
 
         $("#tpOpenDialogTabs").tabs();
 
@@ -2070,8 +2405,7 @@ var cellbrowser = function() {
 
     function onSelChange(selection) {
     /* called each time when the selection has been changed */
-        var cellIds = [];
-        selection.forEach(function(x) {cellIds.push(x)});
+        var cellIds = selection.toArray();
         $("#tpSetBackground").parent("li").removeClass("disabled");
 
         updateSelectionButtons();
@@ -2147,7 +2481,7 @@ var cellbrowser = function() {
 
     function onSaveAsClick() {
     /* File - Save Image as ... */
-        var canvas = $("canvas")[0];
+        var canvas = renderer.getImageCanvas();
         canvas.toBlob(function(blob) { saveAs( blob , "cellBrowser.png"); } , "image/png");
     }
 
@@ -3398,6 +3732,12 @@ var cellbrowser = function() {
                 // default (and over a window.cbAnnotApiBase set for local dev)
                 if ("annotApiBase" in gClientConf)
                     window.cbAnnotApiBase = gClientConf["annotApiBase"];
+                // dataRoot lets a directory that holds only the code (index.html
+                // and js/) read its datasets from another directory or server,
+                // e.g. a personal sandbox pointing at the shared data tree. This
+                // runs before mainInit(), so every data load below sees it.
+                if ("dataRoot" in gClientConf)
+                    cbUtil.setDataRoot(gClientConf["dataRoot"]);
             })
             .fail(function() {
                 gClientConf = {};   // no config file deployed: use built-in defaults
@@ -3418,6 +3758,18 @@ var cellbrowser = function() {
         if (gClientConf === null)
             return false;   // config not loaded yet: treat as off
         var v = (gClientConf["showLogin"] || "").trim().toLowerCase();
+        return (v === "on" || v === "true" || v === "1" || v === "yes");
+    }
+
+    function cbDeEnabled() {
+        /* Is the differential-expression feature turned on for this site? Gated
+         * behind the "showDiffExp" flag in cb.conf, exactly like showLogin above.
+         * Defaults to OFF so the still-in-progress DE UI (whose statistics are a
+         * placeholder until the compute backend is wired up) does not leak onto
+         * installs like cells.ucsc.edu. A site opts in with "showDiffExp=on". */
+        if (gClientConf === null)
+            return false;
+        var v = (gClientConf["showDiffExp"] || "").trim().toLowerCase();
         return (v === "on" || v === "true" || v === "1" || v === "yes");
     }
 
@@ -3472,6 +3824,71 @@ var cellbrowser = function() {
         });
     }
 
+    function fetchAuthProviders(onDone) {
+        /* Ask the backend which sign-in providers are live (password + which
+         * OAuth providers are configured). Cached after the first call. Falls
+         * back to password-only if the endpoint is missing (older backend). */
+        if (gAuthProviders !== null) { if (onDone) onDone(gAuthProviders); return; }
+        $.ajax({
+            url: cbApiUrl("/api/auth/providers"),
+            dataType: "json",
+            xhrFields: { withCredentials: true }
+        }).done(function(data) {
+            gAuthProviders = data || { password: true, providers: [] };
+            if (!gAuthProviders.providers)
+                gAuthProviders.providers = [];   // older backend: no OAuth at all
+            if (onDone) onDone(gAuthProviders);
+        }).fail(function() {
+            gAuthProviders = { password: true, providers: [] };
+            if (onDone) onDone(gAuthProviders);
+        });
+    }
+
+    function oauthSignIn(provider, isLink) {
+        /* Start the OAuth flow. This must be a top-level navigation (not an
+         * AJAX call): the provider shows its own consent page and then redirects
+         * back to our callback, which drops the user back into the app already
+         * signed in.
+         * isLink adds ?link=1, which the backend reads as "add this as another
+         * way to sign in to the account I am already using" rather than "sign
+         * me in" -- see _link_identity() in oauth.py. */
+        var url = cbApiUrl("/api/auth/oauth/" + provider + "/login");
+        window.location.href = isLink ? (url + "?link=1") : url;
+    }
+
+    function oauthButton(prov, isLink) {
+        /* One provider button. The label comes from the server's conf file, so
+         * it is built with .text() rather than string concatenation -- a label
+         * is operator-supplied, not developer-supplied. */
+        return $("<button>")
+            .attr("type", "button")
+            .addClass("tpOAuthBtn ui-button ui-widget ui-corner-all")
+            .attr("data-provider", prov.slug)
+            .data("provider", prov.slug)
+            .text(prov.label || ("Sign in with " + prov.slug))
+            .click(function() { oauthSignIn(prov.slug, isLink); });
+    }
+
+    function renderOAuthButtons() {
+        /* Fill #tpOAuthRow with a button per configured provider, in the order
+         * the server listed them. Nothing here knows the name of any particular
+         * provider: adding one is a server-side conf change. Hidden entirely
+         * when no OAuth provider is configured, so a password-only backend shows
+         * the plain email/password dialog with nothing extra. */
+        var row = $("#tpOAuthRow");
+        if (row.length === 0)
+            return;
+        fetchAuthProviders(function(p) {
+            var provs = p.providers || [];
+            if (provs.length === 0) { row.hide(); return; }
+            row.empty();
+            for (var i = 0; i < provs.length; i++)
+                row.append(oauthButton(provs[i], false));
+            row.append("<div class='tpOAuthOr'><span>or use an email and password</span></div>");
+            row.show();
+        });
+    }
+
     function refreshAuthUi() {
         /* set the account menu label + dropdown to match gCbUser */
         var label = $("#tpAccountLabel");
@@ -3485,6 +3902,7 @@ var cellbrowser = function() {
             var items = [];
             items.push('<li class="dropdown-header" style="padding:3px 20px">Signed in as<br><span id="tpAccountEmail"></span></li>');
             items.push('<li role="separator" class="divider"></li>');
+            items.push('<li><a href="#" id="tpLinkedSignInsLink">Linked sign-ins&hellip;</a></li>');
             items.push('<li><a href="#" id="tpSignOutLink">Sign out</a></li>');
             menu.html(items.join(""));
             // set via .text() rather than HTML — email is user-controlled and the
@@ -3522,6 +3940,174 @@ var cellbrowser = function() {
         if (isOk) el.addClass("tpAuthMsgOk"); else el.removeClass("tpAuthMsgOk");
     }
 
+    function showLinkedSignInsDialog() {
+        /* Manage the ways this account can sign in: the password, plus each
+         * linked external provider.
+         *
+         * This exists because the same person can reach us through more than
+         * one issuer -- signing in with Google directly and through a broker
+         * like CILogon produces two different subjects. Without a way to link
+         * them, the second one silently becomes a second, empty account with
+         * none of the user's saved annotations. Linking from here attaches the
+         * new identity to the account they are already signed in to. */
+        if (!isLoggedIn()) { showLoginDialog("signin"); return; }
+
+        var htmls = [];
+        htmls.push("<style>"
+            + "#tpLinkedList{list-style:none;padding:0;margin:0 0 14px 0}"
+            + "#tpLinkedList li{padding:6px 0;border-bottom:1px solid #eee;display:flex;align-items:center}"
+            + "#tpLinkedList li .tpLinkedWho{flex:1}"
+            + "#tpLinkedList li .tpLinkedSub{color:#888;font-size:90%}"
+            + "#tpLinkedMsg{color:#b00;min-height:1.1em;margin:8px 0}"
+            + "#tpLinkedMsg.tpAuthMsgOk{color:#080}"
+            + "#tpLinkedAddRow button.tpOAuthBtn{display:block;width:100%;margin-bottom:8px;padding:8px}"
+            + "</style>");
+        htmls.push("<div id='tpLinkedMsg'></div>");
+        htmls.push("<ul id='tpLinkedList'><li>Loading&hellip;</li></ul>");
+        htmls.push("<div style='font-weight:bold;margin-bottom:6px'>Add another way to sign in</div>");
+        htmls.push("<div id='tpLinkedAddRow'></div>");
+
+        $("#tpLinkedDialog").remove();
+        $(document.body).append("<div id='tpLinkedDialog' style='display:none'>" + htmls.join("") + "</div>");
+        $("#tpLinkedDialog").dialog({
+            modal: true,
+            title: "Linked sign-ins",
+            width: 460,
+            closeOnEscape: true,
+            close: function() { $("#tpLinkedDialog").remove(); }
+        });
+
+        refreshLinkedSignIns();
+
+        // The "add" buttons start the same OAuth flow as the sign-in dialog,
+        // but with link=1 so the callback attaches rather than creates.
+        fetchAuthProviders(function(p) {
+            var row = $("#tpLinkedAddRow");
+            if (row.length === 0)
+                return;   // dialog closed while the request was in flight
+            var provs = p.providers || [];
+            row.empty();
+            if (provs.length === 0) {
+                row.text("This site has no external sign-in providers configured.");
+                return;
+            }
+            for (var i = 0; i < provs.length; i++)
+                row.append(oauthButton(provs[i], true));
+        });
+    }
+
+    function linkedMsg(text, isOk) {
+        var el = $("#tpLinkedMsg");
+        el.text(text || "");
+        if (isOk) el.addClass("tpAuthMsgOk"); else el.removeClass("tpAuthMsgOk");
+    }
+
+    function refreshLinkedSignIns() {
+        /* (Re)fill the list in the linked-sign-ins dialog from the server. */
+        $.ajax({
+            url: cbApiUrl("/api/auth/identities"),
+            dataType: "json",
+            xhrFields: { withCredentials: true }
+        }).done(function(data) {
+            var list = $("#tpLinkedList");
+            if (list.length === 0)
+                return;   // dialog closed while the request was in flight
+            list.empty();
+
+            if (data.hasPassword)
+                list.append($("<li>").append($("<span>").addClass("tpLinkedWho")
+                    .append($("<b>").text("Password"))
+                    .append($("<div>").addClass("tpLinkedSub")
+                        .text((gCbUser && gCbUser.email) || ""))));
+
+            var ids = data.identities || [];
+            // How many ways in are there in total? The server refuses to remove
+            // the last one, so disable the button rather than offer a click
+            // that can only fail.
+            var total = ids.length + (data.hasPassword ? 1 : 0);
+
+            for (var i = 0; i < ids.length; i++) {
+                var ident = ids[i];
+                // Provider slug, email and name all come from an external
+                // identity provider, so build with .text(), never HTML.
+                var who = $("<span>").addClass("tpLinkedWho")
+                    .append($("<b>").text(ident.provider))
+                    .append($("<div>").addClass("tpLinkedSub")
+                        .text(ident.email || ident.display_name || ""));
+                var btn = $("<button>").attr("type", "button")
+                    .addClass("ui-button ui-widget ui-corner-all")
+                    .text("Unlink")
+                    .data("identityId", ident.id);
+                if (total < 2)
+                    btn.prop("disabled", true)
+                       .attr("title", "This is the only way to sign in to this account");
+                else
+                    btn.click(onUnlinkClick);
+                list.append($("<li>").append(who).append(btn));
+            }
+
+            if (list.children().length === 0)
+                list.append($("<li>").text("No sign-in methods on record."));
+        }).fail(function() {
+            $("#tpLinkedList").empty().append($("<li>").text("Could not load your sign-in methods."));
+        });
+    }
+
+    function onUnlinkClick() {
+        var btn = $(this);
+        var id = btn.data("identityId");
+        if (!confirm("Remove this sign-in from your account? Your saved annotations are not affected."))
+            return;
+        btn.prop("disabled", true);
+        $.ajax({
+            url: cbApiUrl("/api/auth/identities/" + id),
+            method: "DELETE",
+            dataType: "json",
+            xhrFields: { withCredentials: true }
+        }).done(function() {
+            linkedMsg("Sign-in removed.", true);
+            checkLoginState(function() { refreshLinkedSignIns(); });
+        }).fail(function(xhr) {
+            btn.prop("disabled", false);
+            var msg = (xhr.responseJSON && xhr.responseJSON.error) || "could not remove this sign-in";
+            linkedMsg(msg, false);
+        });
+    }
+
+    function handleOAuthReturn() {
+        /* The OAuth callback redirects the browser back here with a cbAuth
+         * query parameter saying how it went (see _back_to_app in oauth.py).
+         * Report it, then strip our parameters from the URL so a reload or a
+         * bookmark does not carry them along. */
+        if (typeof URLSearchParams === "undefined")
+            return;
+        var params = new URLSearchParams(window.location.search);
+        var status = params.get("cbAuth");
+        if (!status)
+            return;
+        var provider = params.get("provider") || "that provider";
+        var reason = params.get("reason");
+
+        if (status === "linked")
+            alert("Sign-in method added: " + provider + ".");
+        else if (reason === "link-taken")
+            alert("That " + provider + " login is already attached to a different Cell Browser "
+                + "account. Sign in to that account instead, or contact us to have the two merged.");
+        else if (reason === "no-subject")
+            alert("That sign-in provider did not return enough information to identify you. "
+                + "Please try a different sign-in method.");
+        else
+            alert("Sign-in failed. Please try again.");
+
+        // Drop our own parameters, keep everything else the app put there.
+        params.delete("cbAuth");
+        params.delete("provider");
+        params.delete("reason");
+        var qs = params.toString();
+        window.history.replaceState({}, "",
+            window.location.pathname + (qs ? "?" + qs : "") + window.location.hash);
+    }
+
     function showLoginDialog(initialTab) {
         /* modal with three tabs: Sign In, Create Account, Forgot Password */
         var htmls = [];
@@ -3534,7 +4120,16 @@ var cellbrowser = function() {
             + ".tpAuthPane button.tpAuthSubmit{margin-top:14px}"
             + "#tpAuthMsg{color:#b00;min-height:1.1em;margin:10px 0}"
             + "#tpAuthMsg.tpAuthMsgOk{color:#080}"
+            + "#tpOAuthRow{margin-bottom:12px}"
+            + "#tpOAuthRow button.tpOAuthBtn{display:block;width:100%;margin-bottom:8px;padding:8px}"
+            + "#tpOAuthRow .tpOAuthOr{text-align:center;border-bottom:1px solid #ddd;line-height:0.1em;margin:14px 0 4px}"
+            + "#tpOAuthRow .tpOAuthOr span{background:#fff;padding:0 10px;color:#888;font-size:90%}"
             + "</style>");
+
+        // OAuth sign-in buttons (Google / ORCID), filled in asynchronously by
+        // renderOAuthButtons() from GET /api/auth/providers. Stays hidden if no
+        // OAuth provider is configured on the backend.
+        htmls.push("<div id='tpOAuthRow' style='display:none'></div>");
 
         htmls.push("<div id='tpAuthTabBar' style='margin-bottom:12px'>");
         htmls.push("<button type='button' class='tpAuthTab' data-pane='signin'>Sign In</button>");
@@ -3585,6 +4180,7 @@ var cellbrowser = function() {
         });
 
         authShowTab(initialTab || "signin");
+        renderOAuthButtons();
     }
 
     function onSignInSubmit() {
@@ -4039,6 +4635,8 @@ var cellbrowser = function() {
          htmls.push('<ul class="dropdown-menu">');
          //htmls.push('<li><a href="#" id="tpRenameClusters">Rename clusters...<span class="dropmenu-item-content"></span></a></li>');
          htmls.push('<li><a href="#" id="tpCustomAnnotsMgr" class="dropmenu-item"><span class="dropmenu-item-label">Custom Annotations...</span><span class="dropmenu-item-content">c a</span></a></li>');
+         if (cbDeEnabled())
+             htmls.push('<li><a href="#" id="tpDeMenu" class="dropmenu-item"><span class="dropmenu-item-label" style="font-weight:600">Differential expression&hellip;</span><span class="dropmenu-item-content"><span style="font-size:9px;font-weight:600;letter-spacing:0.08em;color:#337ab7;border:1px solid #cfe0f0;border-radius:3px;padding:1px 4px">NEW</span></span></a></li>');
          //htmls.push('<li><a href="#" id="tpCluster">Run clustering...<span class="dropmenu-item-content"></span></a></li>');
          htmls.push('<li class="disabled"><a href="#" id="tpSetBackground">Set as background cells<span class="dropmenu-item-content">b s</span></a></li>');
          htmls.push('<li class="disabled"><a href="#" id="tpResetBackground">Reset background cells<span class="dropmenu-item-content">b r</span></a></li>');
@@ -4116,11 +4714,13 @@ var cellbrowser = function() {
        if (cbLoginEnabled()) {
            $('#tpAccountMenu').on('click', '#tpSignInLink', function(ev) { ev.preventDefault(); showLoginDialog("signin"); });
            $('#tpAccountMenu').on('click', '#tpSignOutLink', function(ev) { ev.preventDefault(); cbSignOut(); });
+           $('#tpAccountMenu').on('click', '#tpLinkedSignInsLink', function(ev) { ev.preventDefault(); showLinkedSignInsDialog(); });
            refreshAuthUi();  // reflect whatever we already know; checkLoginState() refines it
        }
 
        $('#tpRenameClusters').click( onRenameClustersClick );
        $('#tpCustomAnnotsMgr').click( onCustomAnnotationsManagerClick );
+       $('#tpDeMenu').click( function(ev) { ev.preventDefault(); deOpen(); } );
        $('#tpSetBackground').click( onBackgroudSetClick );
        $('#tpResetBackground').click( onBackgroudResetClick );
        //$('#tpCluster').click( onRunClusteringClick );
@@ -5362,6 +5962,7 @@ var cellbrowser = function() {
                } else {
                     $("#splitJoinDiv").hide();
                }
+               cbTiming("render");
            }
        }
 
@@ -5409,6 +6010,7 @@ var cellbrowser = function() {
 
        function gotFirstCoords(coords, info, clusterMids) {
            /* XX very ugly way to implement promises. Need to rewrite with promise() one day . */
+           cbTiming("coords");
            gotCoords(coords, info, clusterMids);
            chosenSetValue("tpLayoutCombo", coordIdx);
            doneOnePart();
@@ -5460,7 +6062,7 @@ var cellbrowser = function() {
 
        // pre-load the dataset description file, as the users will often go directly to the info dialog
        // and the following pre-loads risk blocking this load.
-       var jsonUrl = cbUtil.joinPaths([db.conf.name, "desc.json"]) +"?"+db.conf.md5;
+       var jsonUrl = cbUtil.dataUrl([db.conf.name, "desc.json"]) +"?"+db.conf.md5;
        fetch(jsonUrl);
 
        if (db.conf.sampleCount < 50000) {
@@ -6164,7 +6766,9 @@ var cellbrowser = function() {
         htmlLines.push("</div>");
         $(document.body).append(htmlLines.join(""));
 
-        var dialogOpts = {modal:true, closeOnEscape:true};
+        // options.noClose: no X in the title bar, and Escape or a click outside do not close it
+        var noClose = (options.noClose===true);
+        var dialogOpts = {modal:true, closeOnEscape:!noClose};
         if (options.width!==undefined)
             dialogOpts["width"] = options.width;
         if (options.height!==undefined)
@@ -6184,9 +6788,12 @@ var cellbrowser = function() {
         //dialogOpts["width"] = "auto";
 
         dialogOpts["open"] = function() {
-            $(".ui-widget-overlay").on("click", function() {
-                $("#tpDialog").dialog("close");
-            });
+            if (noClose)
+                $(this).closest(".ui-dialog").find(".ui-dialog-titlebar-close").hide();
+            else
+                $(".ui-widget-overlay").on("click", function() {
+                    $("#tpDialog").dialog("close");
+                });
             $("#tpDialog").on("keydown", "input", function(e) {
                 if (e.which === 13)
                     $("#tpDialog").closest(".ui-dialog").find(".ui-dialog-buttonpane button:contains('OK')").click();
@@ -6522,7 +7129,10 @@ var cellbrowser = function() {
 
     function getDatasetSpecies() {
     /* Return "human", "mouse", etc. from db.conf.organisms, or null if unrecognized */
+        // newer datasets keep the organism under 'facets', older ones at the top level
         var orgs = db.conf.organisms;
+        if (!orgs && db.conf.facets)
+            orgs = db.conf.facets.organisms;
         if (!orgs || orgs.length === 0) return null;
         var s = orgs[0].toLowerCase();
         if (s.indexOf("sapiens") !== -1 || s.indexOf("human") !== -1) return "human";
@@ -6532,7 +7142,7 @@ var cellbrowser = function() {
 
     function loadMarkerIndex() {
     /* Load markers/index.json, filter by dataset species, and show the Browse button if available */
-        cbUtil.loadJson("downloads/markers/index.json", function(indexData) {
+        cbUtil.loadJson(cbUtil.dataUrl("downloads/markers/index.json"), function(indexData) {
             if (!indexData) return;
 
             var dsSpecies = getDatasetSpecies();
@@ -6571,7 +7181,10 @@ var cellbrowser = function() {
         gMarkerCellTypes = null;
         if (!url) return;
 
-        cbUtil.loadJson(url, function(rawData) {
+        // url is the dropdown's value, a plain "downloads/markers/<file>" key that
+        // is also matched against the index in updateMarkerBrowseLinks(). Keep it
+        // unprefixed and add dataRoot only here, at the fetch.
+        cbUtil.loadJson(cbUtil.dataUrl(url), function(rawData) {
             if (!rawData) return;
             gMarkerCellTypes = flattenMarkerData(rawData);
             addDatasetCounts(gMarkerCellTypes);
@@ -6922,7 +7535,7 @@ var cellbrowser = function() {
             updateMarkerBrowseLinks(url);
             if (!url) { $("#tpMarkerBrowseTree").empty(); return; }
             $("#tpMarkerBrowseTree").html("<div style='font-style:italic; font-size:11px; padding:4px'>Loading...</div>");
-            cbUtil.loadJson(url, function(rawData) {
+            cbUtil.loadJson(cbUtil.dataUrl(url), function(rawData) {
                 if (!rawData) return;
                 gMarkerBrowseCellTypes = flattenMarkerData(rawData);
                 // Render immediately with fallback (total-gene) counts so the dialog is interactive.
@@ -6954,7 +7567,7 @@ var cellbrowser = function() {
             $("#tpMarkerBrowseDbSelect").val(gMarkerBrowseSelectedUrl);
             updateMarkerBrowseLinks(gMarkerBrowseSelectedUrl);
             $("#tpMarkerBrowseTree").html("<div style='font-style:italic; font-size:11px; padding:4px'>Loading...</div>");
-            cbUtil.loadJson(gMarkerBrowseSelectedUrl, function(rawData) {
+            cbUtil.loadJson(cbUtil.dataUrl(gMarkerBrowseSelectedUrl), function(rawData) {
                 if (!rawData) return;
                 gMarkerBrowseCellTypes = flattenMarkerData(rawData);
                 updateMarkerBrowseTree("");
@@ -7515,6 +8128,7 @@ var cellbrowser = function() {
 
     function onConfigLoaded(datasetName) {
         /* dataset config JSON is loaded -> build the entire user interface */
+        cbTiming("config");
         // this is a collection if it does not have any field information
         if (db.conf.sampleDesc)
             gSampleDesc = db.conf.sampleDesc;
@@ -7568,11 +8182,15 @@ var cellbrowser = function() {
             var rendDiv = document.createElement('div');
             rendDiv.id = "tpMaxPlot";
 
+            // WebGL by default (maxPlot falls back to canvas 2D if WebGL2 does not work), URL drawMode=1 forces 2D
             const drawModeUrl = parseInt(getVar("drawMode"));
-            const drawMode = Number.isInteger(drawModeUrl) ? drawModeUrl :
-                (db.conf.sampleCount > 200000 ? 2 : undefined);
+            const drawMode = Number.isInteger(drawModeUrl) ? drawModeUrl : undefined;
             renderer = new MaxPlot(rendDiv, canvTop, canvLeft, canvWidth, canvHeight, {lightMode: lightMode, drawMode: drawMode});
             window.renderer = renderer;
+            if (renderer.webglFailReason)
+                reportWebglProblem("webgl_unavailable", renderer.webglFailReason);
+            renderer.onWebglEvent = function(eventName) { reportWebglProblem(eventName); };
+            if (DEBUG) wrapDrawTiming(renderer); // time each WebGL draw in the debug bar
 
             document.body.appendChild(rendDiv);
             activateTooltip(".mpButton");
@@ -7585,7 +8203,12 @@ var cellbrowser = function() {
             self.tooltipDiv = makeTooltipCont();
             document.body.appendChild(self.tooltipDiv);
 
-            buildEmptyLegendBar(metaBarWidth + metaBarMargin + renderer.width, toolBarHeight);
+            // The legend is a full-height right-hand column, so its top is
+            // menuBarHeight -- the same as #tpLeftSidebar, which it mirrors.
+            // Not canvTop: the canvas starts below the toolbar, the side columns
+            // do not. Passing toolBarHeight here overlapped the grey menu bar.
+            buildEmptyLegendBar(metaBarWidth + metaBarMargin + renderer.width,
+                                menuBarHeight);
 
             // Set buttons/inputs to not inherit color from bootstrap by default
             let bootstrapSheetRules = [...[...document.styleSheets].find((sheet) => sheet.href && sheet.href.includes("bootstrap.min.css")).cssRules];
@@ -7623,6 +8246,10 @@ var cellbrowser = function() {
             var annotShareToken = getVar("annotShare");
             if (annotShareToken)
                 loadSharedAnnotations(annotShareToken, function(err) { if (err) alert(err); });
+
+            var deShareToken = getVar("deShare");
+            if (deShareToken)
+                deOpenShared(deShareToken);
             else
                 syncCustomFieldsFromServer();
         }
@@ -7659,8 +8286,16 @@ var cellbrowser = function() {
          * be reset, as their values (gene or meta data) may not exist
          * there. If it's opened via a URL, the variables must stay. */
 
+        cbTimingReset();
+        cbTiming("dataset "+datasetName);
+
         gRecentGenes = [];
         // collections are not real datasets, so ask user which one they want
+
+        // tear down any differential-expression state/overlays: the group
+        // selection, results, and the gene badge belong to the old dataset and
+        // must not carry over (stale chips with no cells, a leftover gene badge).
+        deOnDatasetChange();
 
         if (db!==null && db.heatmap)
             removeHeatmap();
@@ -7683,7 +8318,7 @@ var cellbrowser = function() {
 
     function loadCollectionInfo(collName, onDone) {
         /* load collection info and run onDone */
-        var jsonUrl = cbUtil.joinPaths([collName, "dataset.json"]);
+        var jsonUrl = cbUtil.dataUrl([collName, "dataset.json"]);
         cbUtil.loadJson(jsonUrl, onDone);
     }
 
@@ -7873,6 +8508,15 @@ var cellbrowser = function() {
         /* load dataset sibling labels into collection combobox from json */
         var htmls = [];
         var datasets = collData.datasets;
+        // A collection that has been reduced to a single visible dataset has
+        // nowhere to jump to, so the dropdown is just a confusing no-op. Hide it
+        // rather than offering a one-item menu whose only entry is the current
+        // dataset. The combo is still built, so it repopulates if siblings
+        // are ever unhidden.
+        if (!datasets || datasets.length <= 1) {
+            $('#'+id).closest('.tpToolBarItem').hide();
+            return;
+        }
         for (var i = 0; i < datasets.length; i++) {
             var ds = datasets[i];
             var selStr =  "";
@@ -8320,9 +8964,12 @@ var cellbrowser = function() {
             } else {
                 // it's a url to a hub.txt file: either relative or absolute
                 if (!hubUrl.startsWith("http")) {
-                    // relative URL to a hub.txt file -> make absolute now
-                    //hubUrl = getBaseUrl()+db.name+"/"+hubUrl
-                    hubUrl = cbUtil.absPath("", cbUtil.joinPaths([getBaseUrl(), db.name, hubUrl]));
+                    // relative URL to a hub.txt file -> make absolute now.
+                    // hgTracks fetches this itself, so it has to be fully
+                    // qualified, and it has to point at the data tree (which
+                    // cb.conf dataRoot may put on another host) rather than at
+                    // whatever directory served this page.
+                    hubUrl = cbUtil.absDataUrl([db.name, hubUrl]);
                 }
                 // URL is an absolute link to a hub.txt URL
                 fullUrl = "https://genome.ucsc.edu/cgi-bin/hgTracks?hubUrl="+hubUrl+"&genome="+ucscDb;
@@ -8382,7 +9029,7 @@ var cellbrowser = function() {
         $(this).blur();  // remove focus = tooltip disappears
         var parentNames = db.name.split("/");
         parentNames.pop();
-        var newPath = cbUtil.joinPaths([parentNames.join("/"), "dataset.json"]);
+        var newPath = cbUtil.dataUrl([parentNames.join("/"), "dataset.json"]);
         cbUtil.loadJson(newPath, function(parentConf) {
             openDatasetDialog(parentConf, db.name);
         });
@@ -8512,7 +9159,7 @@ var cellbrowser = function() {
 
     function onGeneExprSubsplitComboChange(ev, choice) {
         /* gene expression viewer: called when user changes the subsplit meta field combo box */
-        var geneIds = db.exprData ? db.exprData.geneIds.slice() : [];
+        var geneIds = exprPlotGeneIds();
         db.exprData = null;
         if (geneIds.length > 0)
             buildGeneExprPlotsAddGenes(geneIds, null);
@@ -8576,10 +9223,35 @@ var cellbrowser = function() {
                 updatePerturbCount(idx, pvc, db.conf.sampleCount);
             }
         }
-        var geneIds = db.exprData ? db.exprData.geneIds.slice() : [];
+        var geneIds = exprPlotGeneIds();
         db.exprData = null; // force full reload so mask is rebuilt for all genes
         if (geneIds.length > 0)
             buildGeneExprPlotsAddGenes(geneIds, null);
+    }
+
+    function buildDotGeneData(exprArr, locusStr, geneDesc, metaArr, metaCount, cellMask) {
+        /* Aggregate a full-precision (or dequantized) per-cell expression vector into a geneData
+           object with gene-related attributes, exprMin, exprMax and dotRows. Shared by the live
+           full-precision path (promiseGeneSplitByMeta) and the quantized plot-matrix path
+           (promiseGeneFromPlotMatrix), so both feed the dot/violin plot through the same aggregation
+           code. geneData.dotRows is an array of [cellCount, zeroPerc, avg]. */
+        let res = cellMask ? splitExprByMetaMasked(metaArr, metaCount, exprArr, cellMask)
+                           : splitExprByMeta(metaArr, metaCount, exprArr);
+
+        let metaToExpr = res[0];
+        let exprMin = res[1];
+        let exprMax = res[2];
+        let dotData = calcDotData(metaToExpr, false);
+
+        let geneData = {};
+        geneData.dotRows = dotData.rows;
+        geneData.exprMin = exprMin;
+        geneData.exprMax = exprMax;
+        geneData.avgMin = dotData.avgMin;
+        geneData.avgMax = dotData.avgMax;
+        geneData.geneId = locusStr;
+        geneData.geneDesc = geneDesc;
+        return geneData;
     }
 
     function promiseGeneSplitByMeta(locusStr, onProgress, metaArr, metaCount, cellMask) {
@@ -8591,26 +9263,127 @@ var cellbrowser = function() {
             function gotGeneData(exprArr, decArr, locusStr, geneDesc, binInfo) {
                 /* called when the expression vector has been loaded and binning is done */
                 debug("Promise - Received expression vector, for "+locusStr+", desc: "+geneDesc);
-                let res = cellMask ? splitExprByMetaMasked(metaArr, metaCount, exprArr, cellMask)
-                                   : splitExprByMeta(metaArr, metaCount, exprArr);
-
-                let metaToExpr = res[0];
-                let exprMin = res[1];
-                let exprMax = res[2];
-                let dotData = calcDotData(metaToExpr, false);
-
-                let geneData = {};
-                geneData.dotRows = dotData.rows;
-                geneData.exprMin = exprMin;
-                geneData.exprMax = exprMax;
-                geneData.avgMin = dotData.avgMin;
-                geneData.avgMax = dotData.avgMax;
-                geneData.geneId = locusStr;
-                geneData.geneDesc = geneDesc;
-                resolve(geneData);
+                exprStatusThen("progressBarExpr", "Calculating averages for "+locusStr+"...", function() {
+                    resolve(buildDotGeneData(exprArr, locusStr, geneDesc, metaArr, metaCount, cellMask));
+                }, reject);
             }
 
-            db.loadExprAndDiscretize(locusStr, gotGeneData, onProgress, "none");
+            db.loadExprAndDiscretize(locusStr, gotGeneData, onProgress, "none",
+                function(msg) { reject(new Error(msg)); });
+        });
+    }
+
+    // Index into exprMatrix.plot.bin, {gene: [byteOffset, byteLength]}, for the dataset at
+    // gPlotMatrixUrl. It holds the download while it runs, so the genes of one dot plot share it,
+    // and it is tied to the dataset, as the user can switch datasets without reloading the page.
+    var gPlotMatrixUrl = null;
+    var gPlotMatrixPromise = null;
+
+    function plotIndexAddNames(index) {
+        /* cbBuild keys the index like exprMatrix.json: "ENSG...|SOD1" when the matrix has both an
+           ID and a symbol. The dot plot asks for the ID or the symbol alone, so add both as keys. */
+        let keys = Object.keys(index);
+        for (let key of keys) {
+            let pipePos = key.indexOf("|");
+            if (pipePos===-1)
+                continue;
+            let geneId = key.slice(0, pipePos);
+            let sym = key.slice(pipePos+1);
+            if (index[geneId]===undefined)
+                index[geneId] = index[key];
+            if (index[sym]===undefined)
+                index[sym] = index[key];
+        }
+        return index;
+    }
+
+    function loadPlotMatrixIndex(onDone) {
+        /* Lazily fetch the index for the quantized plot-only matrix (exprMatrix.plot.json), once per
+           dataset. Calls onDone(index) where index is null if the dataset has no plot matrix or the
+           index could not be loaded. */
+        if (!db.conf.hasPlotMatrix) {
+            onDone(null);
+            return;
+        }
+        if (gPlotMatrixPromise===null || gPlotMatrixUrl!==db.url) {
+            gPlotMatrixUrl = db.url;
+            var url = cbUtil.joinPaths([db.url, "exprMatrix.plot.json"]);
+            gPlotMatrixPromise = new Promise(function(resolve) {
+                $.getJSON(url)
+                    .done(function(index) { resolve(plotIndexAddNames(index)); })
+                    .fail(function() {
+                        console.warn("Could not load exprMatrix.plot.json, falling back to full-precision matrix");
+                        resolve(null); // kept, so we don't retry the failed fetch on every gene
+                    });
+            });
+        }
+        gPlotMatrixPromise.then(onDone);
+    }
+
+    function gunzipAndConvertQuantized(comprData, sampleCount) {
+        /* Inflate one record from the quantized plot matrix and dequantize it back to a Float32Array.
+           Mirrors gunzipAndConvert() in cbData.js, but the record carries a min/max float32 header
+           after the desc instead of a type byte, and the payload is 1 byte/cell (uint8) instead of
+           4 bytes/cell -- see exprEncodeQuantized() in cellbrowser.py for the exact format. Uses
+           .slice() (not offset views into the shared inflate buffer) so the Float32Array read of
+           min/max is always 4-byte aligned, regardless of descLen's parity. */
+        let buf = pako.inflate(comprData);
+
+        let descLen = cbUtil.baReadUint16(buf, 0);
+        let descArr = buf.slice(2, 2+descLen);
+        let geneDesc = String.fromCharCode.apply(null, descArr);
+
+        let headerEnd = 2 + descLen;
+        let minMaxBytes = buf.slice(headerEnd, headerEnd+8);
+        let minMax = new Float32Array(minMaxBytes.buffer);
+        let minVal = minMax[0];
+        let maxVal = minMax[1];
+
+        let qArr = buf.slice(headerEnd+8, headerEnd+8+sampleCount);
+
+        let exprArr = new Float32Array(sampleCount);
+        if (maxVal > minVal) {
+            let scale = (maxVal - minVal) / 255.0;
+            for (let i = 0; i < sampleCount; i++)
+                exprArr[i] = minVal + qArr[i] * scale;
+        } else {
+            exprArr.fill(minVal);
+        }
+        return [exprArr, geneDesc];
+    }
+
+    function promiseGeneFromPlotMatrix(locusStr, onProgress, metaArr, metaCount, cellMask, plotIndex) {
+        /* A promise for loading one gene's expression from the reduced-precision plot-only matrix and
+           aggregating it the same way as promiseGeneSplitByMeta. Used only for the dot/violin plot on
+           very large datasets, for cases the dotplot cache doesn't cover (custom split field, subsplit,
+           perturbation filter, or a gene outside quickGenes) -- never for coloring or hover, which keep
+           using the full-precision matrix via promiseGeneSplitByMeta. */
+        return new Promise(function(resolve, reject) {
+            let geneInfo = plotIndex[locusStr];
+            if (!geneInfo) {
+                reject(new Error("gene "+locusStr+" not found in exprMatrix.plot.json"));
+                return;
+            }
+            let start = geneInfo[0];
+            let end = geneInfo[0] + geneInfo[1];
+            let url = cbUtil.joinPaths([db.url, "exprMatrix.plot.bin"]);
+
+            function onDone(comprData) {
+                exprStatusThen("progressBarExpr", "Calculating averages for "+locusStr+"...", function() {
+                    let decoded = gunzipAndConvertQuantized(comprData, metaArr.length);
+                    let exprArr = decoded[0];
+                    let geneDesc = decoded[1];
+                    // cbBuild stores the gene ID as the desc; show the symbol, like loadExprAndDiscretize
+                    let geneInfo = db.geneOffsets[geneDesc];
+                    if (geneDesc.charAt(0)!=='[' && geneInfo && geneInfo[2])
+                        geneDesc = geneInfo[2];
+                    resolve(buildDotGeneData(exprArr, locusStr, geneDesc, metaArr, metaCount, cellMask));
+                }, reject);
+            }
+
+            function onError(msg) { reject(new Error(msg)); }
+
+            cbUtil.loadFile(url+"?"+locusStr, Uint8Array, onDone, onProgress, locusStr, start, end, onError);
         });
     }
 
@@ -8631,7 +9404,8 @@ var cellbrowser = function() {
                 resolve(metaInfo);
             }
 
-            db.loadMetaVec(metaInfo, gotMetaArray, onProgress, {}, db.conf.binStrategy);
+            db.loadMetaVec(metaInfo, gotMetaArray, onProgress, {}, db.conf.binStrategy,
+                function(msg) { reject(new Error(msg)); });
         });
     }
 
@@ -8819,17 +9593,18 @@ var cellbrowser = function() {
             return s;
     }
 
-    function svgMaxTextLength(parentEl, fontSize, strings) {
-        // return maximum width in SVG pixels of array of strings */
+    function svgMaxTextLength(parentEl, fontSize, strings, fontWeight) {
+        // return maximum width in SVG pixels of array of strings. fontWeight is optional, e.g. "bold" */
         let htmls = [];
         let chartHeight = 500;
         let chartWidth = 500;
+        let weightAttr = fontWeight ? " font-weight='"+fontWeight+"'" : "";
         htmls.push("<svg xmlns='http://www.w3.org/2000/svg' height='"+chartHeight+"' width='"+chartWidth+"'>");
         for (let i=0; i < strings.length; i++) {
             let label = stringEmptyLabel(strings[i]);
             let x = 1;
             let y = 20;
-            htmls.push("<text class='tpTestString' font-family='sans-serif' font-size='"+fontSize+"' fill='transparent' x='"+x+"' y='"+y+"'>"+label+"</text>");
+            htmls.push("<text class='tpTestString' font-family='sans-serif'"+weightAttr+" font-size='"+fontSize+"' fill='transparent' x='"+x+"' y='"+y+"'>"+label+"</text>");
         }
         htmls.push("</svg>");
 
@@ -8844,14 +9619,13 @@ var cellbrowser = function() {
         return maxWidth;
     }
 
-    function plotDotRowLabels(htmls, minX, minY, rowDist, labels, cellCounts, fill, fontSize) {
-        /* plot the names of the meta values downwards on the left */
+    function plotDotRowLabels(htmls, minX, minY, rowDist, labels, fill, fontSize) {
+        /* plot the names of the meta values downwards on the left. The hover box is in buildExprDotplot. */
         let x = minX;
         for (let i=0; i < labels.length; i++) {
             let label = stringEmptyLabel(labels[i]);
             let y = minY+(i*rowDist)+fontSize;
-            let tooltip = cellCounts[i]+" cells";
-            htmls.push("<text class='tpExprRowLabel' title='"+tooltip+"' font-family='sans-serif' font-size='"+fontSize+"' fill='"+fill+"' "+
+            htmls.push("<text class='tpExprRowLabel' data-row='"+i+"' font-family='sans-serif' font-size='"+fontSize+"' fill='"+fill+"' "+
                 "alignment-baseline='bottom' text-anchor='start' x='"+x+"' y='"+y+"'>"+label+"</text>");
         }
     }
@@ -8864,14 +9638,15 @@ var cellbrowser = function() {
         for (let i=0; i < geneSyms.length; i++) {
             let label = geneSyms[i];
             let x = minX+(i*xDist)+(fontSize);
-            htmls.push("<text class='tpExprColLabel' data-gene='"+label+"' font-family='sans-serif' font-weight='bold' font-size='"+
+            htmls.push("<text class='tpExprColLabel' data-gene='"+label+"' data-col='"+i+"' font-family='sans-serif' font-weight='bold' font-size='"+
                     fontSize+"' fill='"+fill+"' transform='translate("+x+", "+y+
                     ") rotate(45)' alignment-baseline='bottom' text-anchor='end'>ⓧ&nbsp;"+label+"</text>");
         }
     }
 
     function plotDotColumnLabelsAutoSize(parentEl, htmls, minX, minY, xDist, geneSyms) {
-        /* plot the the names of the genes at the top. return height */
+        /* plot the the names of the genes at the top. return [height, shift], shift is how far
+         * everything right of the row labels was moved so the slanted gene names stay on the page */
         // we need to know the height of the gene name boxes, so plot these in white and measure their height
         let htmls2 = [];
         let chartHeight = 500;
@@ -8882,24 +9657,31 @@ var cellbrowser = function() {
 
         parentEl.innerHTML = htmls2.join("");
 
+        let svgLeft = parentEl.firstChild.getBoundingClientRect().left;
         let domEls = document.getElementsByClassName("tpExprColLabel");
         let maxHeight = 0;
+        let minLeft = minX;
         for (let el of domEls) {
-            maxHeight = Math.max(maxHeight, el.getBoundingClientRect().height);
+            let rect = el.getBoundingClientRect();
+            maxHeight = Math.max(maxHeight, rect.height);
+            minLeft = Math.min(minLeft, rect.left-svgLeft);
         }
         maxHeight += 10;
 
         parentEl.innerHTML = "";
 
+        // long names, e.g. ENSMUSG00000101344.1_Gm29183, slant left past the row labels and off the page
+        let shift = Math.max(0, 6-minLeft);
+
         // now that we know the height, plot them again
         let textColor = (lightMode === 1) ? "black" : "white";
-        plotDotColumnLabels(htmls, minX, minY+maxHeight, xDist, geneSyms, textColor);
-        return maxHeight;
+        plotDotColumnLabels(htmls, minX+shift, minY+maxHeight, xDist, geneSyms, textColor);
+        return [maxHeight, shift];
     }
 
     function plotDotCircles(htmls, syms, rowLabels, dotRows, leftPad, topPad, colDist, 
                                 rowDist, maxDotSize, colors, cellCounts, avgMin, avgMax) {
-        /* plot the circles of the dot plot */
+        /* plot the circles of the dot plot. The hover box is in buildExprDotplot. */
         let rows = dotRows;
 
         let radius = maxDotSize/0.5;
@@ -8909,11 +9691,8 @@ var cellbrowser = function() {
 
         for (let rowI=0; rowI < rows.length; rowI++) {
             let row = rows[rowI];
-            let label = rowLabels[rowI]
 
             for (let colI=0; colI < row.length; colI++) {
-                let sym = syms[colI];
-
                 let cellCount = cellCounts[rowI];
                 let colData = row[colI];
                 let nonZeroCount = colData[0];
@@ -8929,12 +9708,12 @@ var cellbrowser = function() {
 
                 let alpha = 0.7;
 
-                let colBin = Math.min(binCount, Math.round((avgExpr-avgMin) / binSize)); // at the edge, floating point problems can make it sometimes 21
+                // the highest value lands exactly on binCount, one past the last color: it got "#undefined".
+                // If all averages are equal, binSize is 0 and the division gives NaN.
+                let colBin = (binSize > 0) ? Math.min(binCount-1, Math.round((avgExpr-avgMin) / binSize)) : 0;
                 let color = colors[colBin];
 
-                let cellCountStr = cellCount.toLocaleString('en-US');
-                let tooltip = label+": "+cellCountStr+" cells. For "+sym+", "+nonZeroCount+" cells are non-zero ("+Math.round(100*nonZeroPercent)+"%), avgExpr="+avgExpr.toFixed(2);
-                htmls.push("<circle class='tpDotCircle' title='"+tooltip+"' cx='"+x+"' cy='"+y+"' r='"+radius+"' fill-opacity='"+alpha+"' fill='#"+color+"' />");
+                htmls.push("<circle class='tpDotCircle' data-row='"+rowI+"' data-col='"+colI+"' cx='"+x+"' cy='"+y+"' r='"+radius+"' fill-opacity='"+alpha+"' fill='#"+color+"' />");
             }
         }
     }
@@ -8994,9 +9773,14 @@ var cellbrowser = function() {
     function exprDataRemoveGene(sym) {
         /* remove a gene from the dot plot expr data */
         let exprData = db.exprData;
+        if (!exprData || gExprLoading) // a reload is running, it will replace the plot anyway
+            return;
         let geneIdx = exprData.syms.indexOf(sym);
+        if (geneIdx===-1)
+            return;
         exprData.syms.splice(geneIdx, 1); // remove the symbol
         exprData.geneIds.splice(geneIdx, 1); // and the geneId
+        gExprGeneIds = exprData.geneIds.slice();
 
         // remove the gene data
         let rowCount = exprData.rows.length;
@@ -9006,6 +9790,54 @@ var cellbrowser = function() {
         }
         
         exprDataUpdateMinMax(exprData);
+    }
+
+    function exprTipShow(lines, anchorEl) {
+        /* show the dot plot hover box: one line per string, the first one in bold. It goes above and
+         * to the right of anchorEl, so the hovered dot's own row and column stay visible, and flips to
+         * the left or below where there is no room. */
+        let tip = getById("tpExprTip");
+        if (!tip) {
+            tip = document.createElement("div");
+            tip.id = "tpExprTip";
+            getById("tpExprView").appendChild(tip);
+        }
+        tip.innerHTML = "";
+        for (let i=0; i < lines.length; i++) {
+            let lineEl = document.createElement("div");
+            lineEl.textContent = lines[i]; // labels come from the dataset, so never as HTML
+            if (i===0)
+                lineEl.className = "tpExprTipTitle";
+            tip.appendChild(lineEl);
+        }
+        tip.style.display = "block";
+
+        let anchor = anchorEl.getBoundingClientRect();
+        let gap = 10;
+        let x = anchor.right + gap;
+        if (x + tip.offsetWidth > window.innerWidth - 4)
+            x = anchor.left - gap - tip.offsetWidth;
+        let y = anchor.top - gap - tip.offsetHeight;
+        if (y < 4)
+            y = anchor.bottom + gap;
+        tip.style.left = Math.max(4, x)+"px";
+        tip.style.top = y+"px";
+    }
+
+    function exprTipHide() {
+        /* hide the dot plot hover box and the row/gene highlight */
+        let tip = getById("tpExprTip");
+        if (tip)
+            tip.style.display = "none";
+        for (let el of document.querySelectorAll("#tpExprDotPlot .tpExprHi"))
+            el.classList.remove("tpExprHi");
+    }
+
+    function exprHighlight(selector) {
+        /* make a row label or gene name stand out while its dot is hovered */
+        let el = document.querySelector("#tpExprDotPlot "+selector);
+        if (el)
+            el.classList.add("tpExprHi");
     }
 
     function onDotCircleHover(ev, minY, maxY, minX, maxX) {
@@ -9044,6 +9876,7 @@ var cellbrowser = function() {
 
     function buildExprDotplot(parentDomId, exprData) {
         /* create an svg under parentDomId that shows dot plots for each meta category */
+        exprTipHide(); // a redraw replaces the hovered element, so its mouseout never comes
         let syms = exprData.syms;
         let cellCounts = exprData.cellCounts;
         let dotRows = exprData.rows;
@@ -9084,12 +9917,26 @@ var cellbrowser = function() {
 
         let fontSize = 14;
         let rowLabelWidth = 10+svgMaxTextLength(parentEl, fontSize, rowLabels);
+        // the bold header over the row labels must fit too, or it runs under the slanted gene names
+        let headerLabel = exprData.metaFieldLabel ? exprData.metaFieldLabel.replace(/_/g, " ") : null;
+        if (headerLabel)
+            rowLabelWidth = Math.max(rowLabelWidth, 10+svgMaxTextLength(parentEl, fontSize, [headerLabel], "bold"));
 
         rowLabelWidth = Math.max(50, rowLabelWidth); // need some minimum width since the column labels are slanted to the left
 
-        let colLabelHeight = plotDotColumnLabelsAutoSize(parentEl, htmls, leftPad+rowLabelWidth, topPad, colWidth, syms)+10;
+        let colLabelSize = plotDotColumnLabelsAutoSize(parentEl, htmls, leftPad+rowLabelWidth, topPad, colWidth, syms);
+        let colLabelHeight = colLabelSize[0]+10;
+        rowLabelWidth += colLabelSize[1];
         let textColor = (lightMode === 1) ? "black" : "white";
-        plotDotRowLabels(htmls, leftPad, colLabelHeight, rowHeight, rowLabels, cellCounts, textColor, fontSize);
+        if (headerLabel)
+            // y offset -20 (not -6): the row labels right below this start at exactly colLabelHeight,
+            // so -6 left only a 14px baseline-to-baseline gap (equal to fontSize itself) -- the two
+            // lines of text visually touched/overlapped. -20 gives ~28px, so the header reads as a
+            // header and not as the first row, using the open space above rather than crowding below.
+            htmls.push("<text font-family='sans-serif' font-weight='bold' font-size='"+fontSize+"' fill='"+textColor+
+                "' alignment-baseline='bottom' text-anchor='start' x='"+leftPad+"' y='"+(topPad+colLabelHeight-20)+
+                "'>"+headerLabel+"</text>");
+        plotDotRowLabels(htmls, leftPad, colLabelHeight, rowHeight, rowLabels, textColor, fontSize);
 
         let colorPal = makeColorPalette(cDefGradPalette, 20);
 
@@ -9103,22 +9950,54 @@ var cellbrowser = function() {
 
         htmls.unshift("<svg id='tpExprDotPlot' xmlns='http://www.w3.org/2000/svg' height='"+chartHeight+"' width='"+chartWidth+"'>");
 
-        // used for mouseover later
-        htmls.push('<line id="tpExprDotPlotXLine" x1="0" y1="0" x2="0" y2="0" stroke="transparent" stroke-width="1"/>');
-        htmls.push('<line id="tpExprDotPlotYLine" x1="0" y1="0" x2="0" y2="0" stroke="transparent" stroke-width="1"/>');
+        // used for mouseover later. They are drawn over the dots, so they must not take the mouse,
+        // or the dot gets a mouseout, the lines go away, it gets a mouseover again: flicker
+        htmls.push('<line id="tpExprDotPlotXLine" pointer-events="none" x1="0" y1="0" x2="0" y2="0" stroke="transparent" stroke-width="1"/>');
+        htmls.push('<line id="tpExprDotPlotYLine" pointer-events="none" x1="0" y1="0" x2="0" y2="0" stroke="transparent" stroke-width="1"/>');
         htmls.push("</svg>");
 
         parentEl.innerHTML = htmls.join("");
 
-        $(".tpDotCircle").on("mouseover", function(ev) { 
-                    onDotCircleHover(ev, topPad+colLabelHeight-8, chartHeight, leftPad+rowLabelWidth, legendMinX-10)
+        // all cells in the plot, also the rows hidden by a split/subsplit filter, for the row-label percentages
+        let totalCells = exprData.cellTotal || cellCounts.reduce(function(a, b) { return a+b; }, 0);
+        let fmt = function(n) { return n.toLocaleString('en-US'); };
+
+        $(".tpDotCircle").on("mouseover", function(ev) {
+                    onDotCircleHover(ev, topPad+colLabelHeight-8, chartHeight, leftPad+rowLabelWidth, legendMinX-10);
+                    let rowI = parseInt(this.getAttribute("data-row"));
+                    let colI = parseInt(this.getAttribute("data-col"));
+                    let cellCount = cellCounts[rowI];
+                    let nonZeroCount = dotRows[rowI][colI][0];
+                    let pct = (cellCount===0) ? 0 : Math.round(100*nonZeroCount/cellCount);
+                    let lines = [syms[colI], stringEmptyLabel(rowLabels[rowI]),
+                        "Expressed in "+fmt(nonZeroCount)+" of "+fmt(cellCount)+" cells ("+pct+"%)",
+                        "Average expression: "+dotRows[rowI][colI][1].toFixed(2)];
+                    if (exprData.perturbLabel)
+                        lines.push("Perturbation: "+exprData.perturbLabel);
+                    exprTipShow(lines, this);
+                    exprHighlight(".tpExprRowLabel[data-row='"+rowI+"']");
+                    exprHighlight(".tpExprColLabel[data-col='"+colI+"']");
                 } );
-        $(".tpDotCircle").on("mouseout", function(ev) { 
+        $(".tpDotCircle").on("mouseout", function(ev) {
                     document.getElementById("tpExprDotPlotXLine").setAttribute("stroke", "transparent");
                     document.getElementById("tpExprDotPlotYLine").setAttribute("stroke", "transparent");
+                    exprTipHide();
                 } );
 
+        $(".tpExprRowLabel").on("mouseover", function(ev) {
+                    let rowI = parseInt(this.getAttribute("data-row"));
+                    let pct = (totalCells===0) ? 0 : 100*cellCounts[rowI]/totalCells;
+                    let ofWhat = exprData.perturbLabel ? "the "+exprData.perturbLabel+" cells" : "all cells";
+                    exprTipShow([stringEmptyLabel(rowLabels[rowI]),
+                        fmt(cellCounts[rowI])+" cells ("+pct.toFixed(1)+"% of "+ofWhat+")"], this);
+                } );
+        $(".tpExprColLabel").on("mouseover", function(ev) {
+                    exprTipShow([this.getAttribute("data-gene"), "Click to remove this gene from the plot"], this);
+                } );
+        $(".tpExprRowLabel, .tpExprColLabel").on("mouseout", exprTipHide);
+
         function onExprColLabelClick(ev) {
+            exprTipHide(); // the label is redrawn, so it never gets its mouseout
             var geneSym = ev.target.getAttribute("data-gene");
             exprDataRemoveGene(geneSym);
             buildExprDotplot("tpExprViewPlot", exprData); 
@@ -9127,8 +10006,6 @@ var cellbrowser = function() {
         }
 
         $(".tpExprColLabel").on("click", onExprColLabelClick);
-        $(".tpDotCircle").tooltip({show:false}); // switch off animations. For some reason, the Bootstrap tooltip doesn't seem to work on the SVG tag
-        $("text").tooltip({show:false}); // switch off animations. For some reason, the Bootstrap tooltip doesn't seem to work on the SVG tag
     }
 
     //function summarizeGeneExpr(metaToExpr, doLog) {
@@ -9311,17 +10188,91 @@ var cellbrowser = function() {
         return { fieldNames: fieldNames, annotBins: annotBins, annotLabels: annotLabels, palettes: palettes };
     }
 
-    function exprDataLoadGenes(geneIds, exprData, onDone, cellMask) {
-        /* add a list of geneIds to the current exprData object and call onDone when done.*/
+    function exprLoadFailed(onError, err) {
+        /* a dot plot or heatmap load failed: tell the caller, or the user if the caller did not ask */
+        if (onError)
+            onError(err);
+        else
+            alert("Could not load the data: "+((err && err.message) ? err.message : err));
+    }
+
+    function tryGeneDataFromCache(geneId, exprData, cellMask) {
+        /* Return a geneData object built from db.dotplotCache, in the exact shape
+         * promiseGeneSplitByMeta resolves with -- or null if the cache cannot be used for this
+         * request. The cache only covers the plain split field over all cells, computed once at
+         * cbBuild time, so it is never used when: the cache hasn't loaded (yet), the field being
+         * split on does not match what was cached, a perturbation filter is restricting the cells
+         * (cellMask set -- the cached counts are for all cells), or the gene is not in the quick
+         * genes panel that was cached. A subsplit needs no separate check: its row labels are
+         * "primary :: subsplit" combinations that never appear as plain keys in the cache, so the
+         * per-row lookup below naturally misses and falls back. */
+        let cache = db.dotplotCache;
+        if (!cache || !cache.genes || cellMask)
+            return null;
+        if (exprData.metaFieldName!==cache.clusterField)
+            return null;
+        let geneCache = cache.genes[geneId];
+        if (!geneCache)
+            return null;
+
+        let dotRows = [];
+        for (let i = 0; i < exprData.metaLabels.length; i++) {
+            let row = geneCache.rows[exprData.metaLabels[i]];
+            if (row===undefined)
+                return null; // a current row has no cached value, do not risk a partial/wrong plot
+            dotRows.push(row); // [cellCount, nonZeroCount, avg], same shape as a live-computed row
+        }
+
+        return {
+            dotRows: dotRows,
+            exprMin: 0, exprMax: 0, avgMin: 0, avgMax: 0, // set but never read downstream either way
+            geneId: geneId,
+            geneDesc: geneCache.desc
+        };
+    }
+
+    function promiseGeneData(geneId, exprData, cellMask, metaArr, metaCount) {
+        /* A promise for one gene's dot-plot geneData, trying the fastest source that applies: the
+         * dotplotCache (quickGenes, no filter, plain split field), then the quantized plot matrix
+         * (any gene, but only on datasets big enough that cbBuild wrote one, and only once its index
+         * has loaded), falling back to the live full-precision computation otherwise. */
+        let cached = tryGeneDataFromCache(geneId, exprData, cellMask);
+        if (cached)
+            return Promise.resolve(cached);
+
+        if (!db.conf.hasPlotMatrix)
+            return promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount, cellMask);
+
+        return new Promise(function(resolve, reject) {
+            loadPlotMatrixIndex(function(plotIndex) {
+                if (plotIndex && plotIndex[geneId]) {
+                    // the plot matrix is only a faster copy, so if reading it fails, use the full one
+                    promiseGeneFromPlotMatrix(geneId, geneExprOnProgress, metaArr, metaCount, cellMask, plotIndex)
+                        .then(resolve, function(err) {
+                            console.warn("Could not read "+geneId+" from the plot matrix, using the full matrix:", err);
+                            promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount, cellMask)
+                                .then(resolve, reject);
+                        });
+                } else {
+                    promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount, cellMask)
+                        .then(resolve, reject);
+                }
+            });
+        });
+    }
+
+    function exprDataLoadGenes(geneIds, exprData, onDone, cellMask, onError) {
+        /* add a list of geneIds to the current exprData object and call onDone when done.
+         * onError(err) is called if something could not be loaded. */
         let promises = [];
         let metaArr = exprData.metaData.arr;
         let metaCount = exprData.metaData.valCounts.length;
 
         for (let geneId of geneIds) {
             geneId = geneId.split("|")[0]; // internal genes sometimes can be in format ENSG-ID|geneSymbol
-            if (exprData.geneIds.indexOf(geneId)===-1)
-                promises.push( promiseGeneSplitByMeta(geneId, geneExprOnProgress, metaArr, metaCount, cellMask));
-            else
+            if (exprData.geneIds.indexOf(geneId)===-1) {
+                promises.push( promiseGeneData(geneId, exprData, cellMask, metaArr, metaCount) );
+            } else
                 alert("This gene is already on the plot");
         }
 
@@ -9382,7 +10333,7 @@ var cellbrowser = function() {
 
             exprDataUpdateMinMax(exprData);
             onDone(exprData);
-        });
+        }).catch( function(err) { exprLoadFailed(onError, err); });
     }
 
     function computeMetaMatrix(groupingMetaInfo, otherMetaInfos) {
@@ -9435,10 +10386,11 @@ var cellbrowser = function() {
         return { fieldNames: fieldNames, metaBins: metaBins, metaLabels: metaLabels, palettes: palettes };
     }
 
-    function loadGroupedExprData(exprData, geneIds, metaName, subsplitName, onGenesDone, perturbFilter) {
+    function loadGroupedExprData(exprData, geneIds, metaName, subsplitName, onGenesDone, perturbFilter, onError) {
         /* load geneIds into exprData object, load expr data and summarize (average) by meta field.
          * subsplitName: optional second meta field to cross with metaName (null = no subsplit).
-         * perturbFilter: optional {name, valueIdx} to restrict cells by perturbation value. */
+         * perturbFilter: optional {name, valueIdx} to restrict cells by perturbation value.
+         * onError(err): optional, called if something could not be loaded. Default is an alert. */
 
         if (exprData===null) {
             exprData = {};
@@ -9493,42 +10445,73 @@ var cellbrowser = function() {
         }
 
         Promise.all(metaPromises).then( function (resArr) {
+            exprStatusThen("progressBarMeta", "Summarizing annotations...", function() { onMetaLoaded(resArr); },
+                function(err) { exprLoadFailed(onError, err); });
+        }).catch( function(err) { exprLoadFailed(onError, err); });
+
+        function onMetaLoaded(resArr) {
             var primaryMetaInfo = resArr[0];
             exprData._primaryLabels = primaryMetaInfo.ui.shortLabels;
+            // header for the row-label column, e.g. "Cell Type" -- the gene columns are
+            // labeled with their symbol, but nothing said what the rows are
+            exprData.metaFieldLabel = primaryMetaInfo.label || metaName;
+            // raw field name (not the display label), to match against db.dotplotCache.clusterField
+            exprData.metaFieldName = metaName;
 
             if (subsplitName) {
                 var subsplitMetaInfo = resArr[1];
+                // row labels below combine "primary :: subsplit" (see combinedLabels below), so the
+                // header over them needs to say the same, or it only describes half of each row
+                exprData.metaFieldLabel = exprData.metaFieldLabel + " :: " + (subsplitMetaInfo.label || subsplitName);
                 var primaryCount = primaryMetaInfo.valCounts.length;
                 var subsplitCount = subsplitMetaInfo.valCounts.length;
                 var numCells = primaryMetaInfo.arr.length;
                 var combinedArr = new Int32Array(numCells);
+                var comboCounts = new Uint32Array(primaryCount * subsplitCount);
                 for (var c = 0; c < numCells; c++) {
-                    combinedArr[c] = primaryMetaInfo.arr[c] * subsplitCount + subsplitMetaInfo.arr[c];
+                    var combo = primaryMetaInfo.arr[c] * subsplitCount + subsplitMetaInfo.arr[c];
+                    combinedArr[c] = combo;
+                    comboCounts[combo]++;
                 }
+                // most combinations of two fields have no cells at all (e.g. a midbrain cell type in a
+                // pallium neighborhood), so only make rows for the ones that do, and renumber the cells
+                var comboToRow = new Int32Array(primaryCount * subsplitCount).fill(-1);
                 var primaryLabels = primaryMetaInfo.ui.shortLabels;
                 var subsplitLabels = subsplitMetaInfo.ui.shortLabels;
                 var combinedLabels = [];
                 var combinedValCounts = [];
+                var rowPrimaryIdx = [];  // for the split/subsplit filters, see buildExprDotplotFiltered
+                var rowSubsplitIdx = [];
                 for (var pi = 0; pi < primaryCount; pi++) {
                     for (var si = 0; si < subsplitCount; si++) {
+                        var comboIdx = pi * subsplitCount + si;
+                        if (comboCounts[comboIdx]===0)
+                            continue;
+                        comboToRow[comboIdx] = combinedLabels.length;
                         var lbl = primaryLabels[pi] + " :: " + subsplitLabels[si];
                         combinedLabels.push(lbl);
-                        combinedValCounts.push([lbl, 0]);
+                        combinedValCounts.push([lbl, comboCounts[comboIdx]]);
+                        rowPrimaryIdx.push(pi);
+                        rowSubsplitIdx.push(si);
                     }
                 }
+                for (var c = 0; c < numCells; c++)
+                    combinedArr[c] = comboToRow[combinedArr[c]];
                 exprData.metaData = {
                     arr: combinedArr,
                     ui: { shortLabels: combinedLabels },
                     valCounts: combinedValCounts
                 };
                 exprData.metaLabels = combinedLabels;
-                exprData._subsplitCount = subsplitCount;
                 exprData._subsplitLabels = subsplitLabels;
+                exprData._rowPrimaryIdx = rowPrimaryIdx;
+                exprData._rowSubsplitIdx = rowSubsplitIdx;
             } else {
                 exprData.metaData = primaryMetaInfo;
                 exprData.metaLabels = primaryMetaInfo.ui.shortLabels;
-                exprData._subsplitCount = 0;
                 exprData._subsplitLabels = null;
+                exprData._rowPrimaryIdx = null;
+                exprData._rowSubsplitIdx = null;
             }
 
             var otherMetaInfos = [];
@@ -9551,9 +10534,82 @@ var cellbrowser = function() {
                     cellMask[c] = (perturbArr[c] === perturbFilter.valueIdx) ? 1 : 0;
                 }
             }
+            // for the hover box, so it says which cells the numbers are about
+            exprData.perturbLabel = (cellMask===null) ? null : perturbMetaInfo.valCounts[perturbFilter.valueIdx][0];
 
-            exprDataLoadGenes(geneIds, exprData, onGenesDone, cellMask);
-        });
+            $("#progressBarMeta").children().first().text("Annotations summarized");
+            exprDataLoadGenes(geneIds, exprData, onGenesDone, cellMask, onError);
+        }
+    }
+
+    // Dot plot loading state. A load takes seconds on big datasets and the user can change the split,
+    // subsplit, perturbation or genes meanwhile, so db.exprData is not a reliable source for the gene
+    // list (it is null during a full reload), and an older load can finish after a newer one.
+    var gExprGeneIds = [];   // the genes the dot plot should show, as of the latest request
+    var gExprLoadId = 0;     // incremented for every load: only the result of the latest one is drawn
+    var gExprLoading = false;
+
+    function exprPlotGeneIds() {
+        /* return a copy of the gene IDs that the dot plot shows or is loading */
+        return gExprGeneIds.slice();
+    }
+
+    function exprLoadCancel() {
+        /* forget any running dot plot load, its result will not be drawn */
+        gExprLoadId++;
+        gExprLoading = false;
+    }
+
+    function exprSetBusy(isBusy) {
+        /* grey out the dot plot controls while a load is running, so the user cannot start another one */
+        let header = getById("tpExprViewHeader");
+        if (!header)
+            return;
+        header.inert = isBusy; // no clicks and no keyboard focus
+        header.classList.toggle("tpExprBusy", isBusy);
+    }
+
+    function exprStatusThen(barId, text, func, onError) {
+        /* show text on a dot plot progress bar, then run func. The calculations are synchronous and
+         * block the page, so give the browser one frame to draw the text before starting them.
+         * func runs outside of any promise chain, so its exceptions go to onError, if given. */
+        let barEl = $("#"+barId);
+        if (barEl.length!==0) {
+            barEl.progressbar("value", 100);
+            barEl.children().first().text(text);
+        }
+        requestAnimationFrame(function() { setTimeout(function() {
+            try {
+                func();
+            } catch (err) {
+                if (!onError)
+                    throw err;
+                onError(err);
+            }
+        }, 0); });
+    }
+
+    function showExprLoadError(err, onRetry) {
+        /* a dot plot load failed: say why, unlock the controls and offer to try again */
+        console.error("dot plot load failed:", err);
+        let msg = (err && err.message) ? err.message : String(err);
+        let plotEl = getById("tpExprViewPlot");
+        if (plotEl) {
+            let htmls = [];
+            htmls.push("<div id='tpExprLoadError' style='padding:10px; max-width:700px'>");
+            htmls.push("<p><b>The data for the dot plot could not be loaded.</b></p>");
+            htmls.push("<p>This usually means that the network connection was interrupted, for example when "+
+                "the computer switched to another Wi-Fi network, or that the web server had a temporary problem. "+
+                "Please check your connection and try again.</p>");
+            htmls.push("<p id='tpExprLoadErrorDetails'></p>");
+            htmls.push("<button id='tpExprLoadRetry'>Try again</button>");
+            htmls.push("</div>");
+            plotEl.innerHTML = htmls.join("");
+            $("#tpExprLoadErrorDetails").text("Details: "+msg);
+            $("#tpExprLoadRetry").click(onRetry);
+        }
+        gExprLoading = false;
+        exprSetBusy(false);
     }
 
     function buildGeneExprPlotsAddGenes(geneIds, metaName, plotType) {
@@ -9568,10 +10624,30 @@ var cellbrowser = function() {
         }
 
         if (geneIds===null) { // metaName was changed = re-calc the expr object
-            geneIds = db.exprData.geneIds;
+            geneIds = exprPlotGeneIds();
+            db.exprData = null;
+        } else if (gExprLoading) {
+            // genes added while another load is running: that load's exprData object will be
+            // discarded, so reload everything, with the new genes added to the requested ones
+            let allGeneIds = exprPlotGeneIds();
+            for (let geneId of geneIds)
+                if (allGeneIds.indexOf(geneId)===-1)
+                    allGeneIds.push(geneId);
+            geneIds = allGeneIds;
             db.exprData = null;
         }
-            //geneIds = db.exprData.geneIds.push(geneIds);
+
+        // remember which genes we want, and that only the result of this load counts
+        if (db.exprData===null)
+            gExprGeneIds = geneIds.slice();
+        else
+            for (let geneId of geneIds)
+                if (gExprGeneIds.indexOf(geneId)===-1)
+                    gExprGeneIds.push(geneId);
+        gExprLoadId++;
+        let loadId = gExprLoadId;
+        gExprLoading = true;
+        exprSetBusy(true);
 
         if (geneIds.length>0)
             selectizeSetValue("tpGeneExprGeneCombo", geneIds[0].split("|")[0]);
@@ -9615,25 +10691,53 @@ var cellbrowser = function() {
 
         function onExprDataDone (exprData) {
             /* done loading expression data, now do the plotting */
+            if (loadId!==gExprLoadId) // the user changed something meanwhile, a newer load is running
+                return;
+            exprStatusThen("progressBarExpr", "Drawing the plot...", function() { drawExprData(exprData); },
+                onExprLoadError);
+        }
+
+        function onExprLoadError(err) {
+            if (loadId!==gExprLoadId) // an older load, already replaced or cancelled
+                return;
+            // the exprData object may be half-filled, so the next load starts from scratch
+            db.exprData = null;
+            // "try again" reloads the requested genes with the current split, subsplit and perturbation
+            showExprLoadError(err, function() { buildGeneExprPlotsAddGenes(null, null); });
+        }
+
+        function drawExprData(exprData) {
+            if (loadId!==gExprLoadId) // the view was closed meanwhile
+                return;
+            gExprLoading = false;
+            gExprGeneIds = exprData.geneIds.slice();
             // populate split filter panel
             var splitBtn = getById("tpExprSplitFilterBtn");
             var splitPanel = getById("tpExprSplitFilterPanel");
+            var splitLabel = getById("tpExprSplitFilterLabel");
             if (splitBtn && splitPanel) {
                 splitPanel.style.display = 'none'; // ensure closed before populating
                 populateExprFilterPanel("tpExprSplitFilterPanel", "tpExprSplitFilterBtn", exprData._primaryLabels || exprData.metaLabels);
                 splitBtn.style.display = '';
+                if (splitLabel)
+                    splitLabel.style.display = '';
             }
             // populate subsplit filter panel
             var ssBtn = getById("tpExprSubsplitFilterBtn");
             var ssPanel = getById("tpExprSubsplitFilterPanel");
+            var ssLabel = getById("tpExprSubsplitFilterLabel");
             if (ssBtn && ssPanel) {
                 if (exprData._subsplitLabels) {
                     ssPanel.style.display = 'none';
                     populateExprFilterPanel("tpExprSubsplitFilterPanel", "tpExprSubsplitFilterBtn", exprData._subsplitLabels);
                     ssBtn.style.display = '';
+                    if (ssLabel)
+                        ssLabel.style.display = '';
                 } else {
                     ssBtn.style.display = 'none';
                     ssPanel.innerHTML = '';
+                    if (ssLabel)
+                        ssLabel.style.display = 'none';
                 }
             }
             buildExprDotplotFiltered("tpExprViewPlot", exprData);
@@ -9642,9 +10746,10 @@ var cellbrowser = function() {
             let allGeneIdStr = exprData.geneIds.join(" ");
             let urlOpts = { "exprGene" : allGeneIdStr, "exprMeta" : metaName };
             changeUrl(urlOpts);
+            exprSetBusy(false);
         };
 
-        loadGroupedExprData(db.exprData, geneIds, metaName, subsplitName, onExprDataDone, perturbFilter);
+        loadGroupedExprData(db.exprData, geneIds, metaName, subsplitName, onExprDataDone, perturbFilter, onExprLoadError);
 
         //Promise.all([promiseGeneSplitByMeta(geneId, geneExprOnProgress), promiseMeta(metaName, geneExprOnProgress)]).then( function(resArr) {
         //    //if(DEBUG) console.log("promises are all loaded", resArr);
@@ -9691,14 +10796,22 @@ var cellbrowser = function() {
         window.violinCharts = [];
         window.removeEventListener("keyup", onEscapeCloseExprView);
         db.exprData = null;
+        exprLoadCancel(); // a load still running must not draw into the removed window
+        gExprGeneIds = [];
     }
 
     function onEscapeCloseExprView(e) {
         if(e.keyCode == 27) closeExprView(); 
     }
 
+    var SUBSPLIT_MAX_VALUES = 20; // fields with more distinct values than this are hidden from the
+        // subsplit dropdown: the dot plot shows one row per (primary field value x subsplit value)
+        // pair, so a high-cardinality subsplit field (e.g. per-sample/per-mouse IDs) multiplies out
+        // into an unusable, often mostly-empty wall of rows
+
     function buildMetaFieldComboWithNone(htmls, idOuter, id, optStr) {
-        /* like buildMetaFieldCombo but adds a "Show all" (no subsplit) option at top */
+        /* like buildMetaFieldCombo but adds a "Show all" (no subsplit) option at top. Fields with
+         * more than SUBSPLIT_MAX_VALUES distinct values are left out -- see its comment. */
         var metaFieldInfo = db.getMetaFields();
         htmls.push('<div id="'+idOuter+'" style="padding-left:2px; display:inline">');
         var entries = [["tpMetaVal_none", "Show all"]];
@@ -9706,6 +10819,7 @@ var cellbrowser = function() {
             var field = metaFieldInfo[i];
             var isNumeric = (field.type==="int" || field.type==="float");
             if (optStr==="noNums" && isNumeric) continue;
+            if (field.valCounts && field.valCounts.length > SUBSPLIT_MAX_VALUES) continue;
             entries.push(["tpMetaVal_"+i, field.label]);
         }
         buildComboBox(htmls, id, entries, 0, "Show all", 50);
@@ -9777,17 +10891,18 @@ var cellbrowser = function() {
             buildExprDotplot(parentDomId, exprData);
             return;
         }
-        var subsplitCount = exprData._subsplitCount || 0;
         var filteredData = {};
         Object.assign(filteredData, exprData);
         filteredData.metaLabels = [];
         filteredData.rows = [];
         filteredData.cellCounts = [];
+        filteredData.cellTotal = exprData.cellCounts.reduce(function(a, b) { return a+b; }, 0);
         for (var rowIdx = 0; rowIdx < exprData.metaLabels.length; rowIdx++) {
             var include = true;
-            if (subsplitCount > 0) {
-                var primaryIdx = Math.floor(rowIdx / subsplitCount);
-                var ssIdx = rowIdx % subsplitCount;
+            if (exprData._rowPrimaryIdx) {
+                // subsplit: only the combinations that have cells are rows, so look up which they are
+                var primaryIdx = exprData._rowPrimaryIdx[rowIdx];
+                var ssIdx = exprData._rowSubsplitIdx[rowIdx];
                 if (splitFilter !== null && splitFilter.indexOf(primaryIdx) === -1) include = false;
                 if (subsplitFilter !== null && subsplitFilter.indexOf(ssIdx) === -1) include = false;
             } else {
@@ -9800,6 +10915,48 @@ var cellbrowser = function() {
             }
         }
         buildExprDotplot(parentDomId, filteredData);
+    }
+
+    function onExprExportSvgClick() {
+        /* save the currently drawn dot plot as a standalone SVG file */
+        let svgEl = document.getElementById("tpExprDotPlot");
+        if (!svgEl) {
+            alert("No dot plot to export yet.");
+            return;
+        }
+        let svgText = new XMLSerializer().serializeToString(svgEl);
+        if (svgText.indexOf("xmlns=")===-1)
+            svgText = svgText.replace("<svg", "<svg xmlns='http://www.w3.org/2000/svg'");
+        let blob = new Blob([svgText], {type: "image/svg+xml"});
+        let dsName = (db.conf.shortLabel || db.name || "dataset").replace(/[^A-Za-z0-9._-]+/g, "_");
+        window.saveAs(blob, "dotplot_"+dsName+".svg");
+    }
+
+    function onExprExportTsvClick() {
+        /* save the average-expression and percent-expressed values behind the dot plot as a TSV,
+         * one row per (cluster, gene) pair. Same numbers the circles are drawn from. */
+        let exprData = db.exprData;
+        if (!exprData || !exprData.rows || exprData.rows.length===0) {
+            alert("No dot plot data to export yet.");
+            return;
+        }
+        let rowLabel = (exprData.metaFieldLabel || "Cluster").replace(/_/g, " ");
+        let lines = [[rowLabel, "Cell count", "Gene", "Percent expressed", "Avg expression"].join("\t")];
+        for (let rowIdx=0; rowIdx < exprData.rows.length; rowIdx++) {
+            let label = exprData.metaLabels[rowIdx];
+            let cellCount = exprData.cellCounts[rowIdx];
+            let row = exprData.rows[rowIdx];
+            for (let colIdx=0; colIdx < row.length; colIdx++) {
+                let sym = exprData.syms[colIdx];
+                let nonZeroCount = row[colIdx][0];
+                let avg = row[colIdx][1];
+                let pct = (cellCount!==0) ? (100*nonZeroCount/cellCount) : 0;
+                lines.push([label, cellCount, sym, pct.toFixed(2), avg.toFixed(4)].join("\t"));
+            }
+        }
+        let blob = new Blob([lines.join("\n")], {type: "text/tab-separated-values"});
+        let dsName = (db.conf.shortLabel || db.name || "dataset").replace(/[^A-Za-z0-9._-]+/g, "_");
+        window.saveAs(blob, "dotplot_"+dsName+".tsv");
     }
 
     function buildExprViewWindow() {
@@ -9815,6 +10972,18 @@ var cellbrowser = function() {
         if (db.exprData===undefined)
             db.exprData = null; // mark the object to be initialized on first start
 
+        // kick off the dot plot cache fetch now, in parallel with everything else below. It is tiny
+        // (KBs, not the multi-MB per-gene downloads it replaces) so by the time genes are actually
+        // requested it has usually already arrived. If it hasn't, db.dotplotCache is still undefined
+        // and every gene just falls back to the live per-cell computation, same as a dataset with no
+        // cache at all -- there is no race condition to worry about here.
+        if (db.conf.dotplotCache && db.dotplotCache===undefined) {
+            db.dotplotCache = null; // mark "fetch in progress", so we only ever fetch once
+            $.ajax({url: cbUtil.joinPaths([db.url, db.conf.dotplotCache]), dataType: "json", cache: true})
+                .done(function(data) { db.dotplotCache = data; })
+                .fail(function() { debug("Could not load dot plot cache "+db.conf.dotplotCache); });
+        }
+
         var htmls = [];
         htmls.push("<div id='tpExprView'>");
 
@@ -9825,7 +10994,13 @@ var cellbrowser = function() {
 
         htmls.push('<div id="tpExprViewContent">');
 
-        htmls.push('<div class="link" style="padding-bottom: 6px; padding-left: 6px" id="tpBackToCb">&#8592; Back to Cell Browser</div>');
+        htmls.push("<div style='display:flex; justify-content:space-between; align-items:center; padding: 6px 10px 6px 6px'>");
+        htmls.push('<div class="link" id="tpBackToCb">&#8592; Back to Cell Browser</div>');
+        htmls.push("<div id='tpExprExportRow'>");
+        htmls.push("<button id='tpExprExportSvg' title='Save the dot plot as a vector image'>Export SVG</button>");
+        htmls.push("<button id='tpExprExportTsv' title='Save the average expression and percent-expressed values behind the dot plot' style='margin-left:6px'>Export TSV</button>");
+        htmls.push("</div>"); // tpExprExportRow
+        htmls.push("</div>"); // back-to-cb + export row
 
         htmls.push("<div id='tpExprViewHeader'>");
 
@@ -9834,7 +11009,7 @@ var cellbrowser = function() {
             htmls.push("<div class='tpExprHeaderRow' id='tpExprPerturbRow'>");
             htmls.push('<label for="tpExprPerturbCombo">Filter by perturbation</label>');
             htmls.push('<select id="tpExprPerturbCombo" placeholder="All cells"></select>');
-            htmls.push('<span id="tpExprPerturbCount" style="font-size:12px;color:#888;margin-left:6px"></span>');
+            htmls.push('<span id="tpExprPerturbCount" style="font-size:14px;color:#555;margin-left:6px"></span>');
             htmls.push("</div>"); // tpExprHeaderRow row0
         }
 
@@ -9864,6 +11039,7 @@ var cellbrowser = function() {
         htmls.push('<label id="tpGeneExprMetaLabel" for="tpGeneExprMetaCombo">Split by cell annotation</label>');
         buildMetaFieldCombo(htmls, "tpGeneExprMetaComboBox", "tpGeneExprMetaCombo", 0, metaName, "noNums");
         htmlAddInfoIcon(htmls, "Expression data can only be split by categorical fields. Numerical fields are not shown here.");
+        htmls.push("<label class='tpExprFilterLabel' id='tpExprSplitFilterLabel' for='tpExprSplitFilterBtn' style='display:none'>Filter by</label>");
         htmls.push("<div class='tpExprFilterWrap'>");
         htmls.push("<button class='tpExprFilterBtn' id='tpExprSplitFilterBtn' style='display:none'>All &#9662;</button>");
         htmls.push("<div class='tpExprFilterPanel' id='tpExprSplitFilterPanel' style='display:none'></div>");
@@ -9874,6 +11050,10 @@ var cellbrowser = function() {
         htmls.push("<div class='tpExprHeaderRow'>");
         htmls.push('<label id="tpGeneExprSubsplitLabel">Subsplit by</label>');
         buildMetaFieldComboWithNone(htmls, "tpGeneExprSubsplitComboBox", "tpGeneExprSubsplitCombo", "noNums");
+        htmlAddInfoIcon(htmls, "Fields with more than "+SUBSPLIT_MAX_VALUES+" values are not shown here: each row "+
+            "in the plot is one combination of the split field and the subsplit field, so a high-value-count "+
+            "field like a per-sample or per-mouse ID would multiply into an unusably long list of mostly-empty rows.");
+        htmls.push("<label class='tpExprFilterLabel' id='tpExprSubsplitFilterLabel' for='tpExprSubsplitFilterBtn' style='display:none'>Filter by</label>");
         htmls.push("<div class='tpExprFilterWrap'>");
         htmls.push("<button class='tpExprFilterBtn' id='tpExprSubsplitFilterBtn' style='display:none'>All &#9662;</button>");
         htmls.push("<div class='tpExprFilterPanel' id='tpExprSubsplitFilterPanel' style='display:none'></div>");
@@ -9941,6 +11121,8 @@ var cellbrowser = function() {
         $("#tpBackToCb").click( closeExprView );
         $('#tpCloseButton').click( closeExprView );
         $('#tpGeneExprAddMulti').click( onGeneExprAddGenesClick  );
+        $('#tpExprExportSvg').click( onExprExportSvgClick );
+        $('#tpExprExportTsv').click( onExprExportTsvClick );
 
         // toggle filter panels on button click; close on outside click
         $(document.body).on('click', '.tpExprFilterBtn', function(ev) {
@@ -9991,7 +11173,14 @@ var cellbrowser = function() {
         if (getVar("exprGene", null) !== null) {
             geneIds = getVar("exprGene", null).split(" ");
         } else if (db.conf.quickGenes && db.conf.quickGenes.length > 0) {
-            if (db.conf.sampleCount > 200000)
+            // Big datasets default to a single gene because dot-plot averages
+            // over millions of cells are slow. dotPlotMaxGenes lets a dataset
+            // opt into more when its quick genes are a curated per-cell-type
+            // panel that is worth the wait. 0 or unset keeps the old behaviour.
+            var maxDot = parseInt(db.conf.dotPlotMaxGenes);
+            if (!isNaN(maxDot) && maxDot > 0)
+                geneIds = db.conf.quickGenes.slice(0, maxDot).map(function(qg) { return qg[0]; });
+            else if (db.conf.sampleCount > 200000)
                 geneIds = [db.conf.quickGenes[0][0]];
             else
                 geneIds = db.conf.quickGenes.map(function(qg) { return qg[0]; });
@@ -10027,7 +11216,7 @@ var cellbrowser = function() {
             var labelMetaInfo = db.findMetaInfo(db.conf.labelField);
             var clusterLabels = (labelMetaInfo && labelMetaInfo.ui && labelMetaInfo.ui.shortLabels) ? labelMetaInfo.ui.shortLabels :
                 (db.conf.markers[0].clusterList || []);
-            var clusterMarkersLabel = db.conf.clusterMarkersLabel || db.conf.markers[0].shortLabel || "Cluster Markers";
+            var clusterMarkersLabel = markerSetLabel(db.conf.clusterMarkersLabel || db.conf.markers[0].shortLabel || "Cluster Markers");
             htmls.push('<button id="tpClusterMarkersBtn" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="Open Cluster Markers for a cell type">'+clusterMarkersLabel+'</button>');
             // dropdown list is appended to body and positioned via JS to avoid wrapper div affecting button alignment
             var listHtmls = ['<div id="tpClusterMarkersList" style="display:none;position:fixed;z-index:9999;background:white;border:1px solid #ccc;border-radius:3px;max-height:300px;overflow-y:auto;min-width:150px;box-shadow:2px 2px 5px rgba(0,0,0,0.2)">'];
@@ -10336,19 +11525,18 @@ var cellbrowser = function() {
     function onMultiGeneLoadClick (ev) {
     /* user clicked 'load genes below' on the multi gene input dialog box to color the UMAP plot */
         let inGenes = parseGenesFromTextBox("#tpMultiGeneText");
+        if (!inGenes) // some genes were not found, the text box now says which
+            return;
         colorByMultiGenes(inGenes.geneIds, inGenes.syms);
     }
 
     function onGeneExprAddGenesLoadClick (ev) {
     /* user clicked 'load genes below' on the multi gene input dialog box to update the dotplot */
         let inGenes = parseGenesFromTextBox("#tpMultiGeneText");
-
-        function onExprDataDone() {
-            buildExprDotplot("tpExprViewPlot", exprData); 
-        }
-
-        exprDataLoadGenes(inGenes.geneIds, exprData, onExprDataDone);
-
+        if (!inGenes) // some genes were not found, the text box now says which
+            return;
+        // same as adding one gene with the gene combobox
+        buildGeneExprPlotsAddGenes(inGenes.geneIds, null);
     }
 
     function buildMultiGeneBox (htmls) {
@@ -10421,8 +11609,8 @@ var cellbrowser = function() {
                 "fields or fields with several hundred values cannot be selected here, as the labels would fill the screen.", "bottom");
         buildMetaFieldCombo(htmls, "tpLabelComboBox", "tpLabelCombo", 0, db.conf.labelField, "doLabels");
 
-        htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px" id="tpHoverHint" class="tpHint">Hover over a '+gSampleDesc+' to update data below</div>');
-        htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px; display: none" id="tpSelectHint" class="tpHint">Cells are selected. No update on hover.</div>');
+        htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px; padding-right:8px" id="tpHoverHint" class="tpHint">Hover over a '+gSampleDesc+' to update data below</div>');
+        htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px; padding-right:8px; display: none" id="tpSelectHint" class="tpHint">Cells are selected. No update on hover.</div>');
 
         htmls.push("<div id='tpMetaPanel'>");
         buildMetaPanel(htmls);
@@ -10461,10 +11649,14 @@ var cellbrowser = function() {
         htmls.push("</div>"); // tpLayoutTab
 
         htmls.push("<div id='tpToolsTab'>");
-        htmls.push("<div style='padding:8px'>");
+        htmls.push("<div id='tpToolsTabMain' style='padding:8px'>");
         htmls.push("<div style='margin-bottom:8px'><b>Annotations</b></div>");
         htmls.push("<button id='tpToolsNameSel' style='width:100%;margin-bottom:6px'>Name Selection</button>");
         htmls.push("<button id='tpToolsCustomAnnot' style='width:100%'>Manage Custom Annotations</button>");
+        if (cbDeEnabled()) {
+            htmls.push("<div style='margin:12px 0 8px'><b>Differential expression</b></div>");
+            htmls.push("<button id='tpToolsDe' style='width:100%'>Compare two populations&hellip;</button>");
+        }
         htmls.push("</div>");
         htmls.push("</div>"); // tpToolsTab
 
@@ -10511,6 +11703,7 @@ var cellbrowser = function() {
 
         $("#tpToolsNameSel").click(onSelectNameClick);
         $("#tpToolsCustomAnnot").click(onCustomAnnotationsManagerClick);
+        $("#tpToolsDe").click(deOpen);
 
         $('.tpGeneBarCell').click( onGeneClick );
         $('#tpChangeGenes').click( onChangeGenesClick );
@@ -11309,6 +12502,9 @@ var cellbrowser = function() {
         let els = document.getElementsByClassName("tpLegendCheckbox");
 
         let rows = gLegend.rows;
+        // for "invert" and "notNull": the colors to select and unselect, applied in one pass at the end
+        let selColIdxs = [];
+        let unselColIdxs = [];
         for (let i=0; i<els.length; i++) {
             let el = els[i];
             var valIdx = parseInt(el.getAttribute("data-value-index"));
@@ -11333,25 +12529,25 @@ var cellbrowser = function() {
             else if (status==="invert") {
                 if (!el.checked) {
                     el.checked = true;
-                    renderer.selectByColor(valIdx);
+                    selColIdxs.push(valIdx);
                     row.isChecked = true;
                 }
                 else {
                     el.checked = false;
                     row.isChecked = false;
-                    renderer.unselectByColor(valIdx);
+                    unselColIdxs.push(valIdx);
                 }
             }
             else if (status==="notNull") {
                 if ((i===0 && valStr===null) || (valStr!==null && likeEmptyString(valStr))) {
                     el.checked = false;
                     row.isChecked = false;
-                    renderer.unselectByColor(valIdx);
+                    unselColIdxs.push(valIdx);
                 }
                 else {
                     el.checked = true;
                     row.isChecked = true;
-                    renderer.selectByColor(valIdx);
+                    selColIdxs.push(valIdx);
                 }
             }
         }
@@ -11360,6 +12556,8 @@ var cellbrowser = function() {
             renderer.selectVisible();
         if (status==="none")
             renderer.selectClear();
+        if (status==="invert" || status==="notNull")
+            renderer.setByColors(selColIdxs, unselColIdxs);
 
         renderer.drawDots();
     }
@@ -11587,7 +12785,10 @@ var cellbrowser = function() {
         htmls.push("<small><button id='tpLegendAll'>All</button>");
         htmls.push("<button id='tpLegendNone'>None</button>");
         htmls.push("<button id='tpLegendInvert'>Invert</button>");
-        htmls.push("<button id='tpLegendNotNull'>&gt; 0</button></small>");
+        // "> 0" only makes sense for expression values
+        if (gLegend.type==="expr")
+            htmls.push("<button id='tpLegendNotNull'>&gt; 0</button>");
+        htmls.push("</small>");
 
         let buttonText = "Recolor checked values";
         if (gLegend.isColorOnlyChecked===true) {
@@ -11808,6 +13009,11 @@ var cellbrowser = function() {
         }
 
         buildViolinPlot();
+
+        // Differential expression: add A/B assignment affordances to the rows
+        // while the builder is open (§2). No-op otherwise.
+        if (typeof gDe !== "undefined" && gDe.active)
+            deAugmentLegend();
     }
 
     function onLegendValueRightClick(key, options) {
@@ -12271,25 +13477,66 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             doScroll = true;
 
         var labelLines = [clusterName];
+        // a legend row already shows its name and percentage, so on the legend the box is only
+        // worth showing if it has something more: a long name, top markers or a cluster image
+        var hasExtraInfo = false;
 
         var labelField = renderer.getLabelField();
         var metaInfo = db.findMetaInfo(labelField);
         if (!metaInfo) return;
+
+        // how many cells this cluster holds, and what share of the dataset that is.
+        // Same source and precision rule as the legend's frequency column, so the
+        // two always agree.
+        // The legend shows "IN_CGE" as "IN CGE", and a legend hover passes that displayed text, so
+        // find its row by the value index instead, when we have one, and use the real value below.
+        var origName = clusterName;
+        var countLine = null;
+        if (gLegend && gLegend.rows) {
+            let total = 0, myCount = null;
+            for (let r = 0; r < gLegend.rows.length; r++) {
+                let row = gLegend.rows[r];
+                total += row.count;
+                if (intKeyOverride!==undefined ? row.intKey===intKeyOverride : row.label===clusterName) {
+                    myCount = row.count;
+                    origName = row.label;
+                }
+            }
+            if (myCount !== null && total > 0) {
+                let pct = (myCount / total) * 100;
+                let prec = (pct < 1) ? 1 + countLeadingZerosAfterDecimal(pct) : 1;
+                // the legend row next to the box shows the rounded share, so give the exact count there
+                let countStr = isLegend ? myCount.toLocaleString('en-US') : prettyNumber(myCount);
+                countLine = countStr + " " + gSampleDesc + "s (" + pct.toFixed(prec) + "%)";
+            }
+        }
+
         var longLabels = metaInfo.ui.longLabels;
         if (longLabels) {
             for (let i=0; i<longLabels.length; i++) {
                 let shortLabel = metaInfo.ui.shortLabels[i];
                 let longLabel = longLabels[i];
-                if (clusterName===shortLabel && longLabel!==shortLabel) {
+                if (origName===shortLabel && longLabel!==shortLabel) {
                     labelLines.push(longLabels[i]);
+                    hasExtraInfo = true;
                     break;
                 }
             }
         }
+        if (countLine)
+            labelLines.push(countLine);
 
-        if (labelField === db.conf.labelField) {
-            if (db.conf.topMarkers!==undefined && db.conf.topMarkers[clusterName]!==undefined) {
-                labelLines.push("Top enriched markers: "+db.conf.topMarkers[clusterName].join(", "));
+        // The markers belong to db.conf.labelField. A legend hover is about the field the legend
+        // shows, which can differ from the plot's label field, and two fields can share values
+        // like "3", so check the legend's field there, not the label field.
+        var hoverField = labelField;
+        if (isLegend)
+            hoverField = (gLegend && gLegend.type==="meta" && gLegend.metaInfo) ? gLegend.metaInfo.name : null;
+
+        if (hoverField === db.conf.labelField) {
+            if (db.conf.topMarkers!==undefined && db.conf.topMarkers[origName]!==undefined) {
+                labelLines.push("Top enriched markers: "+db.conf.topMarkers[origName].join(", "));
+                hasExtraInfo = true;
             }
             labelLines.push("");
 
@@ -12297,14 +13544,18 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 labelLines.push("Click to show full marker gene list.");
 
             if (db.conf.clusterPngDir!==undefined) {
-                var fullPath = cbUtil.joinPaths([db.name, db.conf.clusterPngDir, clusterName+".png"]);
+                var fullPath = cbUtil.joinPaths([db.url, db.conf.clusterPngDir, origName+".png"]);
                 labelLines.push("<img src='"+fullPath+"'>");
+                hasExtraInfo = true;
             }
         }
 
         if (!isLegend)
             labelLines.push("Alt/Option-Click to select cells in cluster; Shift-Click to add cluster to selection");
-        showTooltip(ev.clientX+15, ev.clientY, labelLines.join("<br>"));
+        if (isLegend && !hasExtraInfo)
+            hideTooltip(); // it would only repeat the row. Hovering the percentage gives "N of M" already.
+        else
+            showTooltip(ev.clientX+15, ev.clientY, labelLines.join("<br>"));
 
         // XX currently, switch off fattening if there is a difference between label/color fields
         let highIdx = null;
@@ -12326,6 +13577,165 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var newName = name.replace(/\+/g, "Plus").replace(/-/g, "Minus").replace(/%/g, "Perc");
         var newName = newName.replace(/[^a-zA-Z_0-9+]/g, "");
         return newName;
+    }
+
+    function markerSetLabel(str) {
+        /* cbImportSeurat writes shortLabel "Seurat Cluster Markers" (see
+         * cellbrowser.R). The "Seurat " part says nothing to a user and makes the
+         * toolbar button and the dialog tabs needlessly wide, so drop it at
+         * display time -- that way already-built datasets are fixed without a
+         * rebuild. */
+        return String(str || "").replace(/^Seurat /, "");
+    }
+
+    function toFileNamePart(str) {
+        /* turn a label like "DEG (Wilcoxon)" or a cluster name like
+         * "151 TH Prkcd Grin2c Glut" into a filename-safe underscore form */
+        return String(str).replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+    }
+
+    function canonMarkerLabel(str) {
+        /* Downloads should not inherit each dataset's private wording for what is
+         * the same thing. "Cluster Markers", "Cluster-specific markers", "Cluster
+         * Marker Genes" and the "Seurat " variants all name their file
+         * Cluster_Markers_<cluster>.tsv. Labels that mean something different
+         * ("DEG (Wilcoxon)", "Curated Cluster Markers", "markers experimental
+         * condition") keep their own wording, because there the label is the only
+         * thing telling two downloads apart. Display labels are untouched. */
+        var s = markerSetLabel(str).trim();
+        // the tool that computed them is not part of what the file is
+        s = s.replace(/^(Seurat|Scanpy)\s+/i, "");
+        if (/^cluster[\s_-]*(specific)?[\s_-]*markers?(\s+genes)?$/i.test(s))
+            return "Cluster Markers";
+        return s;
+    }
+
+    function makeMarkerFileName(tabLabel, clusterName) {
+        /* e.g. "Cluster_Markers_151_TH_Prkcd_Grin2c_Glut.tsv" */
+        var parts = [];
+        var canon = canonMarkerLabel(tabLabel);
+        if (canon)
+            parts.push(toFileNamePart(canon));
+        parts.push(toFileNamePart(clusterName));
+        return parts.join("_")+".tsv";
+    }
+
+    // Constant columns a dataset can ask to have prepended to downloaded marker
+    // files, keyed by the names allowed in cellbrowser.conf's markerDownloadCols.
+    // The header text lives here rather than in each conf so the wording stays
+    // the same across datasets.
+    var markerDownloadColMakers = {
+        "cluster"   : function(ctx) { return ["Cell type", ctx.clusterName]; },
+        "cellCount" : function(ctx) {
+            return (ctx.cellCount===null) ? null : ["n cells", ctx.cellCount];
+        },
+        // the three below are provenance: the file name carries them, but that is lost
+        // as soon as someone concatenates downloads from several clusters or tabs
+        "clusterField" : function(ctx) {
+            return ctx.clusterField ? ["Annotation field", ctx.clusterField] : null;
+        },
+        "markerSet" : function(ctx) {
+            return ctx.markerSet ? ["Marker set", ctx.markerSet] : null;
+        },
+        "dataset"   : function(ctx) {
+            return ctx.dataset ? ["Dataset", ctx.dataset] : null;
+        }
+    };
+
+    function markerDownloadExtraCols(clusterName, clusterField, markerSet) {
+        /* Build the constant [header, value] columns for a marker download, from
+         * the dataset's markerDownloadCols setting. Unset means none: the
+         * downloaded file then matches the table on screen, which is the default
+         * because these columns repeat one value down every row. */
+        var want = db.conf.markerDownloadCols;
+        if (!want || !want.length)
+            return [];
+
+        var cellCount = null;
+        if (gLegend && gLegend.rows)
+            for (var gr = 0; gr < gLegend.rows.length; gr++)
+                if (gLegend.rows[gr].label === clusterName) {
+                    cellCount = gLegend.rows[gr].count;
+                    break;
+                }
+
+        var ctx = {
+            clusterName  : clusterName,
+            cellCount    : cellCount,
+            clusterField : clusterField || null,
+            markerSet    : markerSet || null,
+            dataset      : db.conf.shortLabel || db.name || null
+        };
+
+        var cols = [];
+        for (var i = 0; i < want.length; i++) {
+            var maker = markerDownloadColMakers[want[i]];
+            if (!maker) {
+                console.log("cellbrowser.conf: unknown markerDownloadCols value '"+
+                            want[i]+"', expected one of: "+
+                            Object.keys(markerDownloadColMakers).join(", "));
+                continue;
+            }
+            var col = maker(ctx);
+            if (col)
+                cols.push(col);
+        }
+        return cols;
+    }
+
+    function addConstantColumns(text, extraCols) {
+        /* Prepend constant (cluster, cellCount, ...) columns to a TSV string.
+         * These are deliberately not stored per-row in the marker files -- they
+         * are identical down the whole table and only clutter the dialog -- but
+         * a downloaded file needs them to say what it is. */
+        if (!extraCols || extraCols.length===0)
+            return text;
+        var nl = (text.indexOf("\r\n")!==-1) ? "\r\n" : "\n";
+        var lines = text.split(nl);
+        var heads = extraCols.map(function(c) { return c[0]; }).join("\t");
+        var vals  = extraCols.map(function(c) { return c[1]; }).join("\t");
+        var out = [];
+        for (var i=0; i<lines.length; i++) {
+            if (lines[i]==="") { out.push(lines[i]); continue; }
+            out.push((i===0 ? heads : vals) + "\t" + lines[i]);
+        }
+        return out.join(nl);
+    }
+
+    function downloadMarkerTsv(url, fileName, extraCols) {
+        /* Marker files are served gzipped without Content-Encoding, so following
+         * the plain link hands the user a .gz named after the sanitized cluster.
+         * Fetch, gunzip and save it under a descriptive .tsv name instead.
+         * extraCols is an optional list of [header, value] constant columns. */
+        var req = new XMLHttpRequest();
+        req.responseType = "arraybuffer";
+        req.addEventListener("load", function(res) {
+            if (res.target.status !== 200) {
+                alert("Could not download "+url);
+                return;
+            }
+            var data = res.target.response;
+            if (url.endsWith(".gz"))
+                data = pako.ungzip(data);
+            else
+                data = new Uint8Array(data);
+            if (extraCols && extraCols.length) {
+                var txt = new TextDecoder("utf-8").decode(data);
+                data = new TextEncoder().encode(addConstantColumns(txt, extraCols));
+            }
+            var blobUrl = URL.createObjectURL(
+                new Blob([data], {type:"text/tab-separated-values"}));
+            var a = document.createElement("a");
+            a.href = blobUrl;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 1000);
+        });
+        req.addEventListener("error", function() { alert("Could not download "+url); });
+        req.open("GET", url, true);
+        req.send();
     }
 
     function onlyAlphaNum(name) {
@@ -12656,6 +14066,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         htmls.push("<div id='tpPaneHeader' style='padding: 0.4em 0'>");
 
         var buttons = [];
+        var tabDownloads = []; // per-tab {url, fileName}, filled in the tab loop below
 
         if (tabInfo===undefined || tabInfo.length===0) {
             tabInfo = [];
@@ -12672,7 +14083,17 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             buttons.push({
                 text:"Download as file",
                 click: function() {
-                    document.location.href = markerTsvUrl;
+                    // download the tab the user is looking at, not the last one built
+                    var actIdx = 0;
+                    if (tabDownloads.length > 1) {
+                        var uiIdx = $("#tabs").tabs("option", "active");
+                        if (typeof uiIdx === "number" && uiIdx >= 0)
+                            actIdx = uiIdx;
+                    }
+                    var dl = tabDownloads[actIdx];
+                    if (dl===undefined)
+                        return;
+                    downloadMarkerTsv(dl.url, dl.fileName, dl.extraCols);
                 }
             });
         }
@@ -12684,13 +14105,20 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             htmls.push("<div id='tabs'>");
             htmls.push("<ul>");
             for (var tabIdx = 0; tabIdx < tabInfo.length; tabIdx++) {
-                var tabLabel = tabInfo[tabIdx].shortLabel;
+                var tabLabel = markerSetLabel(tabInfo[tabIdx].shortLabel);
                 htmls.push("<li><a href='#tabs-"+tabIdx+"'>"+tabLabel+"</a>");
             }
             htmls.push("</ul>");
         }
 
-        var allTabLabels = tabInfo.map(function(t) { return t.shortLabel; });
+        // The MGI ID table is only used by mouse datasets, so only they fetch it, and the
+        // fetch starts here rather than inside the row builder: it then runs alongside the
+        // marker TSV downloads instead of after them, so the first marker window a person
+        // opens waits for the slower of the two rather than for one and then the other.
+        // Every window after that finds the table already in memory and waits for nothing.
+        var mgiIdsReady = (getDatasetSpecies()==="mouse") ? loadMgiIds() : Promise.resolve(null);
+
+        var allTabLabels = tabInfo.map(function(t) { return markerSetLabel(t.shortLabel); });
         var markerSetsStr = allTabLabels.length > 1
             ? allTabLabels.slice(0, -1).join(", ") + " and " + allTabLabels[allTabLabels.length-1]
             : allTabLabels[0];
@@ -12700,14 +14128,33 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             var divName = "tabs-"+tabIdx;
             var tabDir = tabInfo[tabIdx].name;
             var sanName = sanitizeName(clusterName);
-            var markerTsvUrl = cbUtil.joinPaths([db.name, "markers", tabDir, sanName+".tsv.gz"]);
+            var markerTsvUrl = cbUtil.joinPaths([db.url, "markers", tabDir, sanName+".tsv.gz"]);
+            var dlExtra = markerDownloadExtraCols(clusterName, currentField,
+                                                  markerSetLabel(tabInfo[tabIdx].shortLabel));
+            tabDownloads[tabIdx] = {
+                url : markerTsvUrl,
+                fileName : makeMarkerFileName(markerSetLabel(tabInfo[tabIdx].shortLabel), clusterName),
+                extraCols : dlExtra
+            };
             htmls.push("<div id='"+divName+"'>");
             htmls.push("Loading...");
             htmls.push("</div>");
 
-            var errorMsg = "No markers found for '"+clusterName+"' in '"+currentField+"'. "+
-                markerSetsStr+" are available for the '"+db.conf.labelField+"' field.";
-            loadClusterTsv(markerTsvUrl, loadMarkersFromTsv, divName, clusterName, errorMsg);
+            // Name the tab that is empty, not every tab. The old wording listed
+            // all tab labels, so an empty tab read as if the cluster had no data
+            // anywhere -- misleading when the other tabs do have it.
+            var thisTabLabel = markerSetLabel(tabInfo[tabIdx].shortLabel);
+            var otherTabs = allTabLabels.filter(function(l) { return l !== thisTabLabel; });
+            var errorMsg = "No \u201C"+thisTabLabel+"\u201D for \u201C"+clusterName+"\u201D. "+
+                "This cell type is not in that analysis.";
+            if (otherTabs.length)
+                errorMsg += " Try the other tab"+(otherTabs.length>1?"s":"")+": "+
+                            otherTabs.join(", ")+".";
+            loadClusterTsv(markerTsvUrl, function(results, localFile, divId, cluster) {
+                mgiIdsReady.then(function() {
+                    loadMarkersFromTsv(results, localFile, divId, cluster);
+                });
+            }, divName, clusterName, errorMsg);
         }
 
         htmls.push("</div>"); // tabs
@@ -12716,6 +14163,17 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         var winWidth = window.innerWidth - 0.10*window.innerWidth;
         var winHeight = window.innerHeight - 0.10*window.innerHeight;
         var title = "Cluster markers for &quot;"+clusterName+"&quot;";
+
+        // Cell count belongs at the top of the dialog, not repeated down an
+        // n_cells column -- it is identical for every row of a cluster.
+        if (gLegend && gLegend.rows) {
+            for (var cc = 0; cc < gLegend.rows.length; cc++)
+                if (gLegend.rows[cc].label === clusterName) {
+                    title += " - " + prettyNumber(gLegend.rows[cc].count) +
+                             " " + gSampleDesc + "s";
+                    break;
+                }
+        }
 
         var metaInfo = getClusterFieldInfo();
         if (metaInfo && metaInfo.ui && metaInfo.ui.longLabels) {
@@ -12738,6 +14196,11 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
     function geneListFormat(htmls, s, symbol) {
     /* transform a string in the format dbName|linkId|mouseOver;... to html and push these to the htmls array */
         var dbParts = s.split(";");
+        // drop entries for databases that no longer exist, before the separators are worked out,
+        // so a retired entry does not leave a stray comma behind
+        dbParts = dbParts.filter(function(dbPart) {
+            return !deadDbs[dbPart.split("|")[0]];
+        });
         for (var i = 0; i < dbParts.length; i++) {
             var dbPart = dbParts[i];
             var idParts = dbPart.split("|");
@@ -12775,12 +14238,58 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         var headerRow = rows[0];
 
+        // A _geneCards column only appears in files written by older cbMarkerAnnotate runs.
+        // The link is built from the gene symbol below instead, gated on the dataset being
+        // human. Drop the column rather than render it: it carries no organism check of its
+        // own, so keeping it would put GeneCards on e.g. a macaque dataset, where the gate
+        // says it should not appear.
+        var geneCardsIdx = -1;
+        for (var ci = 0; ci < headerRow.length; ci++) {
+            if (headerRow[ci].split("|")[0] === "_geneCards") {
+                geneCardsIdx = ci;
+                break;
+            }
+        }
+        if (geneCardsIdx !== -1) {
+            for (var ri = 0; ri < rows.length; ri++) {
+                if (rows[ri].length > geneCardsIdx)
+                    rows[ri].splice(geneCardsIdx, 1);
+            }
+            headerRow = rows[0];
+        }
+
+        // The links to outside databases that are keyed on the gene symbol alone are built
+        // here rather than read from the file, but they get a column of their own so they line
+        // up with the annotation columns cbMarkerAnnotate writes. One column holds all of them,
+        // the way _expr holds BrainSpan LMD and MouseDev together.
+        // The column is only added when this dataset will actually produce a link, so a dataset
+        // that produces none does not get an empty column. That is the rule cbMarkerAnnotate
+        // uses on its own columns.
+        var dsSpecies = getDatasetSpecies();
+        var hubUrl = makeHubUrl();
+        var showGeneCards = (dsSpecies==="human");
+        var showMgi = (dsSpecies==="mouse");
+        var linksInserted = (hubUrl!==null || showGeneCards || showMgi);
+        if (linksInserted) {
+            for (var li = 0; li < rows.length; li++) {
+                if (rows[li].length > 1)   // skip the trailing empty row papaparse leaves
+                    rows[li].splice(2, 0, li===0 ? "_links" : "");
+            }
+            headerRow = rows[0];
+        }
+
         var htmls = [];
 
         var markerListIdx = parseInt(divId.split("-")[1]);
         var markerInfo = db.conf.markers[markerListIdx];
         var selectOnClick = markerInfo.selectOnClick;
         var sortColumn = markerInfo.sortColumn || 1;
+        // sortColumn counts the columns as displayed, which do not include the leading id
+        // column, so inserting Links at displayed position 1 moves every column at or after it
+        // one to the right. Without this the default sort of 1 lands on Links, where sorting
+        // does nothing, instead of on the first real column.
+        if (linksInserted && sortColumn >= 1)
+            sortColumn += 1;
         var sortOrder = markerInfo.sortOrder || "asc";
         var sortOrderNum = 0;
         if (sortOrder==="desc")
@@ -12810,9 +14319,12 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         }
 
         //htmls.push("<table class='table' data-sortlist='[[1,1],[4,0]]' id='tpMarkerTable'>");
-        htmls.push("<table class='table' data-sortlist='[["+sortColumn+","+sortOrder+"]]' id='"+tableId+"'>");
+        // tablesorter wants 0/1 here, not the "asc"/"desc" string, otherwise the
+        // sortlist is invalid and the configured sortOrder is silently ignored
+        htmls.push("<table class='table' data-sortlist='[["+sortColumn+","+sortOrderNum+"]]' id='"+tableId+"'>");
         htmls.push("<thead>");
         var hprdCol = null;
+        var linksCol = null;
         var geneListCol = null;
         var exprCol = null;
         var pValCol = null;
@@ -12855,8 +14367,9 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             else if (colLabel==="_zfin") {
                 colLabel = "ZFIN";
             }
-            else if (colLabel==="_geneCards") {
-                colLabel = "GeneCards";
+            else if (colLabel==="_links") {
+                colLabel = "Links";
+                linksCol = i;
             }
 
             if (logFcCol === null && /log.*fc/i.test(colLabel)) {
@@ -12881,8 +14394,6 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
             htmls.push("</th>");
         }
         htmls.push("</thead>");
-
-        var hubUrl = makeHubUrl();
 
         var MAX_UNFILTERED_ROWS = 200;
         var enrichedCount = 0;
@@ -12926,10 +14437,23 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                     h.push("<td>");
                     if (j === symColIdx) {
                         h.push("<a data-gene='"+geneId+"' class='link tpLoadGeneLink'>"+geneSym+"</a>");
+                    } else if (j === linksCol) {
+                        var extLinks = [];
                         if (hubUrl!==null) {
                             var fullHubUrl = hubUrl+"&position="+geneSym+"&singleSearch=knownCanonical";
-                            h.push("<a target=_blank class='link' style='margin-left: 10px; font-size:80%; color:#AAA' title='link to UCSC Genome Browser' href='"+fullHubUrl+"'>Genome</a>");
+                            extLinks.push(extLink(fullHubUrl, "Genome", "link to UCSC Genome Browser"));
                         }
+                        if (showGeneCards)
+                            extLinks.push(extLink(dbLinks.GeneCards+encodeURIComponent(geneSym), "GeneCards", "link to GeneCards"));
+                        if (showMgi) {
+                            var mouseUrls = mgiLinkUrls(geneSym);
+                            extLinks.push(extLink(mouseUrls.mgi, "MGI", "link to Mouse Genome Informatics"));
+                            extLinks.push(extLink(dbLinks.AllenMouseISH+encodeURIComponent(geneSym), "Allen ISH",
+                                "in-situ hybridization images in the Allen Mouse Brain Atlas"));
+                            extLinks.push(extLink(mouseUrls.impc, "IMPC",
+                                "knockout phenotypes at the International Mouse Phenotyping Consortium"));
+                        }
+                        h.push(extLinks.join(", "));
                     } else {
                         if (val.startsWith("./")) {
                             var imgUrl = val.replace("./", db.url+"/");
@@ -13029,9 +14553,14 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         $table.tablesorter(tableOpt);
         //$('#tpMarkerTable').trigger('sorton', tableOpt.sortList); // does not work, though documented
         // this is a pretty bad hack, but I have no idea why the sortList option doesn't work above...
-        $("[data-column='1']").trigger("sort"); // this seems to work!
+        // It used to sort displayed column 1 no matter what. That was the first real column
+        // until the Links column was inserted in front of it, and sorting Links does nothing
+        // because every row of it is the same. sortColumn is that index, already shifted past
+        // Links where one was added, and it defaults to 1, so this is unchanged for a table
+        // without a Links column.
+        $("[data-column='"+sortColumn+"']").trigger("sort"); // this seems to work!
         if (doDescSort)
-            $("[data-column='1']").trigger("sort"); // second click...
+            $("[data-column='"+sortColumn+"']").trigger("sort"); // second click...
 
         // When there are more rows than MAX_UNFILTERED_ROWS, re-render from the full
         // dataset on filter changes so all rows are searchable, not just the first 200.
@@ -13233,9 +14762,49 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         return zoomRange;
     }
 
+    // subdomains that map to a "projects" facet filter on the homepage
+    // dataset-picker dialog, instead of a single dataset/collection name.
+    // e.g. sfari.cells.ucsc.edu -> cells.ucsc.edu?proj=SFARI, showing a
+    // live, auto-updating list of every dataset tagged projects=["SFARI"].
+    // One subdomain per project: adding a second key for the same project
+    // just gives readers two URLs to remember for the same page. Additional
+    // subdomains, including ones added after this code ships, belong in
+    // projects.tsv (see loadProjectSubdomains below), not here.
+    var PROJECT_SUBDOMAINS = {
+        "sfari": "SFARI",
+        "hbca": "Human Breast Cell Atlas",
+    };
+
+    function loadProjectSubdomains(onDone) {
+        /* Read "projects.tsv" from the web root, if present, and add its
+         * subdomain -> project pairs to PROJECT_SUBDOMAINS (entries in the file
+         * win over the built-in ones above). Two tab-separated columns, lines
+         * starting with # are ignored. Like cb.conf, a missing file is normal and
+         * the built-in list is used. It always calls back, so startup is never
+         * blocked. */
+        $.ajax({ url: "projects.tsv", dataType: "text", cache: false })
+            .done(function(text) {
+                var lines = text.split("\n");
+                for (var i = 0; i < lines.length; i++) {
+                    var line = lines[i].replace(/\r$/, "");
+                    if (line.trim()==="" || line.charAt(0)==="#")
+                        continue;
+                    var parts = line.split("\t");
+                    if (parts.length < 2 || parts[0].trim()==="" || parts[1].trim()==="")
+                        continue;
+                    PROJECT_SUBDOMAINS[parts[0].trim().toLowerCase()] = parts[1].trim();
+                }
+            })
+            .always(function() {
+                onDone();
+            });
+    }
+
     function redirectIfSubdomain() {
         /* rewrite the URL if at ucsc and subdomain is specified
-         * e.g. autism.cells.ucsc.edu -> cells.ucsc.edu?ds=autism */
+         * e.g. autism.cells.ucsc.edu -> cells.ucsc.edu?ds=autism
+         * or, for a known project subdomain, e.g.
+         * sfari.cells.ucsc.edu -> cells.ucsc.edu?proj=SFARI */
         /* we cannot run in the subdomain, as otherwise localStorage and
          * cookies are not shared */
 
@@ -13251,7 +14820,13 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                 var datasetName = hostParts[0];
                 hostParts.shift();
                 myUrl.hostname = hostParts.join(".");
-                myUrl.search = "ds="+datasetName;
+                // hostnames are case-insensitive, so HBCA and hbca must agree
+                var subKey = datasetName.toLowerCase();
+                if (PROJECT_SUBDOMAINS.hasOwnProperty(subKey)) {
+                    myUrl.search = "proj="+slugify(PROJECT_SUBDOMAINS[subKey]);
+                } else {
+                    myUrl.search = "ds="+datasetName;
+                }
                 window.location.replace(myUrl.href);
                 return true;
             }
@@ -13293,7 +14868,19 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         /* Load the site config first (it may set the login API endpoint), then
          * start the app. loadClientConf always calls back, even if cb.conf is
          * absent, so startup is never blocked by a missing config file. */
-        loadClientConf(function() { mainInit(rootMd5); });
+        initDebugMode();
+        loadClientConf(function() {
+            // rootMd5 is baked into index.html from the dataset.json sitting next
+            // to the code. With dataRoot set we read a different dataset.json, so
+            // that md5 describes the wrong file: it would pin the cache-buster to
+            // a value that never changes when the real one does, hiding new
+            // datasets. Drop it and let loadConfig() fall back to a random buster.
+            if (cbUtil.dataRoot !== "")
+                rootMd5 = null;
+            loadProjectSubdomains(function() {
+                mainInit(rootMd5);
+            });
+        });
     }
 
     function mainInit(rootMd5) {
@@ -13307,6 +14894,10 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         setupKeyboard();
         buildMenuBar();
         checkLoginState();  // updates the account menu once /api/auth/me responds
+        // Report and clear the ?cbAuth=... an OAuth callback redirected us back
+        // with. Runs after buildMenuBar() so the account menu is already in place.
+        if (cbLoginEnabled())
+            handleOAuthReturn();
 
         var datasetName = getDatasetNameFromUrl()
         // pre-load dataset.json here?
@@ -13316,11 +14907,1561 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         loadDataset(datasetName, false, rootMd5);
     }
 
+    // ============================================================
+    // Differential Expression (Redmine #24912)
+    // Additive feature. A Tools-menu / Tools-tab launcher opens a builder
+    // that takes over the sidebar; A/B cell-type groups are assigned from
+    // the legend; the plot recolors by group; a run opens a results pop-up
+    // (sortable gene table + volcano); clicking a gene recolors the scatter
+    // by expression (reusing the existing gene-search path). New surfaces
+    // only — no existing surface is restyled. See the design handoff and
+    // plans/differential-expression.md.
+    // ============================================================
+
+    var DE_A_COL = "c2603a", DE_B_COL = "42559f", DE_NEUTRAL = "dedcd6";
+
+    var gDe = {
+        active: false,
+        field: null,            // metaInfo.name of the cell-type field driving groups
+        metaInfo: null,
+        a: [], b: [],           // arrays of value-indices (intKeys) per group
+        valFilter: '',          // text filter for the in-builder value list
+        target: 'A',            // which group a value click assigns to ('A'|'B')
+        bMode: 'rest',          // 'rest' | 'pick'; default one-vs-rest
+        aField: '', aValues: [], bField: '', bValues: [],   // per-group cross-field filter (multi-value)
+        test: 'wilcox', lfcCut: 1, padjCut: 0.05, minPct: 0.1, subsample: 5000,
+        paramsOpen: false,
+        running: false, canceled: false, jobId: null,
+        results: null,          // snapshot: { genes, nA, nB, aLabel, bLabel, lfcCut, padjCut, minPct, test }
+        selectedGene: null,
+        sortKey: 'auc', sortDir: -1,
+        plotType: 'volcano',    // 'volcano' | 'ma'
+        geneFilter: '', side: 'all',
+        history: [],            // in-memory recents (this session)
+        saved: [],              // this user's saved comparisons (logged in), from the server
+        savedOpen: true, recentOpen: false   // collapsible comparison-list sections
+    };
+
+    // ---- small helpers -------------------------------------------------
+
+    function deCellTypeField() {
+        /* the cell-type / cluster field that group A/B are defined over */
+        return db.conf.labelField || (db.getDefaultColorField && db.getDefaultColorField());
+    }
+    function deFmt(n) { return (n===undefined||n===null) ? "" : n.toLocaleString(); }
+    function deTypeLabel(intKey) {
+        var mi = gDe.metaInfo;
+        if (mi.ui && mi.ui.shortLabels && mi.ui.shortLabels[intKey]!==undefined)
+            return (mi.ui.shortLabels[intKey]+"").replace(/_/g, " ");
+        if (mi.valCounts && mi.valCounts[intKey]) return (mi.valCounts[intKey][0]+"").replace(/_/g, " ");
+        return ""+intKey;
+    }
+    function deTypeCount(intKey) {
+        var mi = gDe.metaInfo;
+        return (mi.valCounts && mi.valCounts[intKey]) ? mi.valCounts[intKey][1] : 0;
+    }
+    function deTypeColor(intKey) {
+        if (gLegend && gLegend.rows)
+            for (var i=0;i<gLegend.rows.length;i++)
+                if (gLegend.rows[i].intKey===intKey)
+                    return gLegend.rows[i].color || gLegend.rows[i].defColor || "888888";
+        return "888888";
+    }
+    function deGroupCount(list) {
+        var s=0; for (var i=0;i<list.length;i++) s += deTypeCount(list[i]); return s;
+    }
+    function deCanvasRect() {
+        var c = renderer && renderer.canvas;
+        if (!c) return {left:0, top:0, width:600, height:400};
+        var r = c.getBoundingClientRect();
+        return {left:r.left+window.scrollX, top:r.top+window.scrollY, width:r.width, height:r.height};
+    }
+    function deMetaEnumFields() {
+        var out=[]; var fields = db.getMetaFields ? db.getMetaFields() : (db.conf.metaFields||[]);
+        for (var i=0;i<fields.length;i++){
+            var f=fields[i];
+            if (f.type==="enum" && f.valCounts && f.valCounts.length>1 && f.valCounts.length<200)
+                out.push(f);
+        }
+        return out;
+    }
+
+    function deSetField(field){
+        // switch the field DE compares on: clear the (field-specific) groups and
+        // filters, recolor the map by the new field so its legend drives A/B
+        if (!field || field===gDe.field) return;
+        gDe.field = field;
+        gDe.metaInfo = db.findMetaInfo(field);
+        gDe.a=[]; gDe.b=[]; gDe.target='A'; gDe.bMode='rest'; gDe.valFilter='';
+        gDe.aField=''; gDe.aValues=[]; gDe.bField=''; gDe.bValues=[];
+        colorByMetaField(field, function(){ renderer.drawDots(); deRenderBody(); deRecolorPlot(); });
+    }
+
+    // ---- open / close --------------------------------------------------
+
+    function deOpen() {
+        if (!db || !db.conf) return;
+        // Group by whatever categorical field the legend is currently showing, so
+        // assignment always matches what the user sees (datasets often color by a
+        // clustering field that isn't conf.labelField, e.g. "leiden_1.5 names").
+        // Fall back to the configured cell-type field when the current coloring is
+        // expression or a non-categorical field.
+        var field = null;
+        if (gLegend && gLegend.type==="meta" && gLegend.metaInfo && gLegend.metaInfo.type==="enum")
+            field = gLegend.metaInfo.name;
+        if (!field) field = deCellTypeField();
+        if (!field) { alert("This dataset has no cell-type annotation to compare."); return; }
+        gDe.field = field;
+        gDe.metaInfo = db.findMetaInfo(field);
+        gDe.active = true;
+        deLoadSavedList();   // async; re-renders the builder when the list arrives
+
+        // Host the builder inside the sidebar Tools tab so the tab bar
+        // (Annotation / Genes / Layout / Tools) stays visible and usable.
+        // Switch to the Tools tab and swap its content for the builder.
+        var toolsIdx = $('#tpLeftTabs a[href="#tpToolsTab"]').parent().index();
+        if (toolsIdx >= 0) $("#tpLeftTabs").tabs("option", "active", toolsIdx);
+
+        // While the builder is open, keep it on the Tools tab: block the app's
+        // *programmatic* tab switches (e.g. activateTab("meta") fired when a
+        // selection or coloring changes), but still let the user click any tab
+        // header. jQuery UI marks user clicks with event.originalEvent;
+        // programmatic .tabs("option","active") calls have none.
+        $("#tpLeftTabs").off("tabsbeforeactivate.de").on("tabsbeforeactivate.de", function(event, ui){
+            if (gDe.active && !event.originalEvent &&
+                ui.newPanel && ui.newPanel.attr("id") !== "tpToolsTab")
+                event.preventDefault();
+        });
+        deBuildPanel();
+
+        // make sure the legend shows the cell-type field so A/B assignment works
+        var needSwitch = (!gLegend || gLegend.type!=="meta" || !gLegend.metaInfo || gLegend.metaInfo.name!==field);
+        if (needSwitch) {
+            colorByMetaField(field, function(){ renderer.drawDots(); deRenderBody(); deRecolorPlot(); });
+        } else {
+            buildLegendBar(); // re-render to add the A/B augmentation
+            deRenderBody(); deRecolorPlot();
+        }
+    }
+
+    function deClose() {
+        gDe.active = false;
+        deHideRunning();
+        deCloseResults();
+        deClearGene(true);
+        $("#tpDeBuilder").remove();
+        $("#tpToolsTabMain").show();   // restore the normal Tools-tab content
+        $("#tpLeftTabs").off("tabsbeforeactivate.de");
+        $("#tpDeLegHint").remove();
+        // restore normal cell-type coloring (drops the A/B override and the augmentation)
+        if (gDe.field)
+            colorByMetaField(gDe.field, function(){ renderer.drawDots(); });
+        // gDe.a / gDe.b are kept so re-opening resumes where the user left off
+    }
+
+    function deOnDatasetChange() {
+        /* A new dataset is loading. Remove every DE overlay (builder, results
+         * pop-up, running scrim, legend hint) and reset the builder state to
+         * empty, so nothing carries over from the previous dataset: group chips
+         * reference the old field's value-indices (which map to nothing here) and
+         * the gene coloring is for a gene that may not exist. Unlike deClose() we
+         * do NOT re-color — the old renderer/legend is about to be rebuilt for
+         * the new dataset. */
+        gDe.active = false;
+        $("#tpDeBuilder").remove();
+        $("#tpToolsTabMain").show();
+        $("#tpLeftTabs").off("tabsbeforeactivate.de");
+        $("#tpDeLegHint").remove();
+        deCloseResults();
+        deHideRunning();
+        gDe.field=null; gDe.metaInfo=null;
+        gDe.a=[]; gDe.b=[]; gDe.target='A'; gDe.bMode='rest';
+        gDe.aField=''; gDe.aValues=[]; gDe.bField=''; gDe.bValues=[];
+        gDe.results=null; gDe.selectedGene=null; gDe.history=[];
+        gDe.sortKey='auc'; gDe.sortDir=-1; gDe.geneFilter=''; gDe.side='all';
+        gDe.running=false; gDe.canceled=false; gDe.paramsOpen=false;
+    }
+
+    // ---- builder panel (§1) --------------------------------------------
+
+    function deBuildPanel() {
+        $("#tpDeBuilder").remove();
+        var h = [];
+        h.push("<div id='tpDeBuilder'>");
+        h.push("<div class='tpDeHead'>");
+        h.push("<div class='tpDeTitle'>Differential expression</div>");
+        h.push("<div class='tpDeSub'>Build two populations, then compare.</div>");
+        h.push("<div class='tpDeClose' id='tpDeCloseBtn' title='Close'>&times;</div>");
+        h.push("</div>");
+        h.push("<div class='tpDeBody' id='tpDeBody'></div>");
+        h.push("</div>");
+        // put the builder into the Tools tab and hide that tab's normal content
+        var host = document.getElementById("tpToolsTab") || document.getElementById("tpLeftSidebar");
+        $("#tpToolsTabMain").hide();
+        if (host) host.insertAdjacentHTML("beforeend", h.join(""));
+        $("#tpDeCloseBtn").click(deClose);
+    }
+
+    function deGroupCardHtml(which) {
+        var isA = (which==="A");
+        var col = isA ? DE_A_COL : DE_B_COL;
+        var list = isA ? gDe.a : gDe.b;
+        // a group is the active click target (highlighted) when selected; Group B
+        // in "all other cells" mode can't be a target (nothing to click into)
+        var canTarget = isA || gDe.bMode==='pick';
+        var isActive = canTarget && gDe.target===which;
+        var h=[];
+        h.push("<div class='tpDeCard"+(isActive?" tpDeActive":"")+"' data-grp='"+which+"'>");
+
+        // Group B mode toggle — Bootstrap btn-group, matching the site's
+        // enriched/depleted markers toggle
+        if (!isA) {
+            h.push("<div class='btn-group btn-group-xs btn-group-justified' id='tpDeBmode' role='group' style='margin-bottom:9px'>");
+            h.push("<div class='btn-group btn-group-xs' role='group'><button type='button' data-mode='rest' class='btn btn-default"+(gDe.bMode==='rest'?' active':'')+"'>All other cells</button></div>");
+            h.push("<div class='btn-group btn-group-xs' role='group'><button type='button' data-mode='pick' class='btn btn-default"+(gDe.bMode==='pick'?' active':'')+"'>Pick cell types</button></div>");
+            h.push("</div>");
+        }
+
+        // header row with live count
+        var n = isA ? deGroupCount(gDe.a) : (gDe.bMode==='rest' ? Math.max(0, db.conf.sampleCount - deGroupCount(gDe.a)) : deGroupCount(gDe.b));
+        var nonEmpty = isA ? gDe.a.length>0 : (gDe.bMode==='rest' ? gDe.a.length>0 : gDe.b.length>0);
+        var warn = (nonEmpty && n>0 && n<25) ? " tpDeWarn" : "";
+        var countTxt = nonEmpty ? (deFmt(n)+" cells") : "empty";
+        h.push("<div class='tpDeCardHead'>");
+        h.push("<span class='tpDeDot' style='background:#"+col+"'></span>");
+        h.push("<span class='tpDeCardLabel'>Group "+which+"</span>");
+        h.push("<span class='tpDeCount"+warn+"'>"+countTxt+"</span>");
+        h.push("</div>");
+
+        if (!isA && gDe.bMode==='rest') {
+            h.push("<div class='tpDeRestNote'>Every cell not in Group A, after filters. This is the one-vs-rest marker test.</div>");
+            h.push("</div>"); // card
+            return h.join("");
+        }
+
+        // chips or empty hint
+        if (list.length===0) {
+            var hint = isActive
+                ? "Pick cell types from the list above."
+                : "Click here, then pick cell types from the list above.";
+            h.push("<div class='tpDeHint'>"+hint+"</div>");
+        } else {
+            h.push("<div class='tpDeChips'>");
+            for (var i=0;i<list.length;i++){
+                var k=list[i];
+                h.push("<span class='tpDeChip' data-key='"+k+"' data-grp='"+which+"' "+
+                    "style='background:"+deTint(col,0.06)+";border-color:"+deTint(col,0.25)+"'>");
+                h.push("<span class='tpDeChipDot' style='background:#"+deTypeColor(k)+"'></span>");
+                h.push("<span>"+deTypeLabel(k)+"</span>");
+                h.push("<span class='tpDeChipN' style='color:"+col+"'>"+deFmt(deTypeCount(k))+"</span>");
+                h.push("<span class='tpDeChipX' data-key='"+k+"' data-grp='"+which+"' style='color:"+col+"'>&times;</span>");
+                h.push("</span>");
+            }
+            h.push("</div>");
+        }
+
+        // filter row (secondary cross-field capability)
+        var fields = deMetaEnumFields();
+        var fSel = isA ? gDe.aField : gDe.bField;
+        var vSel = isA ? gDe.aValues : gDe.bValues;   // selected filter values (array)
+        h.push("<div class='tpDeFilterRow' data-grp='"+which+"'>");
+        h.push("<select class='tpDeFilterField'><option value=''>No filter</option>");
+        for (var j=0;j<fields.length;j++){
+            var fn=fields[j].name;
+            if (fn===gDe.field) continue;   // no point filtering by the field being compared
+            h.push("<option value='"+deEsc(fn)+"'"+(fn===fSel?" selected":"")+">"+deEsc(fields[j].label||fn)+"</option>");
+        }
+        h.push("</select>");
+        h.push("<select class='tpDeFilterValue'>");
+        if (fSel){
+            var fi=db.findMetaInfo(fSel);
+            h.push("<option value=''>Add value&hellip;</option>");
+            var vc=fi.valCounts||[];
+            for (var v=0;v<vc.length;v++){
+                if (vSel.indexOf(vc[v][0])>-1) continue;   // already added
+                h.push("<option value='"+deEsc(vc[v][0])+"'>"+deEsc(vc[v][0])+"</option>");
+            }
+        } else {
+            h.push("<option value=''>&mdash;</option>");
+        }
+        h.push("</select>");
+        h.push("</div>");
+        // selected filter values as removable chips (multiple allowed)
+        if (fSel && vSel.length){
+            h.push("<div class='tpDeFilterChips' data-grp='"+which+"'>");
+            for (var vi=0; vi<vSel.length; vi++)
+                h.push("<span class='tpDeFilterChip'>"+deEsc(vSel[vi])+
+                       "<span class='tpDeFilterChipX' data-grp='"+which+"' data-idx='"+vi+"'>&times;</span></span>");
+            h.push("</div>");
+        }
+
+        h.push("</div>"); // card
+        return h.join("");
+    }
+
+    function deTint(hex, frac) {
+        /* mix a hex color 'frac' of the way from white, for chip backgrounds */
+        var r=parseInt(hex.substr(0,2),16), g=parseInt(hex.substr(2,2),16), b=parseInt(hex.substr(4,2),16);
+        r=Math.round(255+(r-255)*frac); g=Math.round(255+(g-255)*frac); b=Math.round(255+(b-255)*frac);
+        return "rgb("+r+","+g+","+b+")";
+    }
+
+    function deRenderBody() {
+        if (!gDe.active) return;
+        var body = document.getElementById("tpDeBody");
+        if (!body) return;
+        var h=[];
+        // which metadata field to compare on — any enum field, including custom
+        // annotations. Switching it recolors the map so its values become the
+        // legend you assign A/B from.
+        var efields = deMetaEnumFields();
+        if (efields.length){
+            h.push("<div class='tpDeFieldRow'>");
+            h.push("<span class='tpDeFieldLabel'>Compare by</span>");
+            h.push("<select class='tpDeField' id='tpDeField'>");
+            for (var ei=0; ei<efields.length; ei++){
+                var ef=efields[ei];
+                h.push("<option value='"+deEsc(ef.name)+"'"+(ef.name===gDe.field?" selected":"")+">"+deEsc(ef.label||ef.name)+"</option>");
+            }
+            h.push("</select></div>");
+        }
+        // which group legend clicks go to (clear indication + control)
+        h.push("<div class='tpDeTargetRow'>");
+        h.push("<span class='tpDeTargetLabel'>Add to:</span>");
+        h.push("<div class='btn-group btn-group-xs' id='tpDeTarget' role='group'>");
+        h.push("<button type='button' data-grp='A' class='btn btn-default"+(gDe.target==='A'?' active':'')+"'>Group A</button>");
+        h.push("<button type='button' data-grp='B' class='btn btn-default"+(gDe.target==='B'?' active':'')+"'>Group B</button>");
+        h.push("</div></div>");
+        // clickable list of the field's values, right here next to the A/B toggle
+        // (so assignment doesn't require the far-right legend)
+        h.push(deValueListHtml());
+        // Group A card
+        h.push(deGroupCardHtml("A"));
+        // swap
+        h.push("<div class='tpDeSwap'><span class='tpDeSwapLine'></span>"+
+               "<button class='tpDeSwapBtn' id='tpDeSwap'>&#8645; swap</button>"+
+               "<span class='tpDeSwapLine'></span></div>");
+        // Group B card
+        h.push(deGroupCardHtml("B"));
+
+        // test settings (collapsed by default)
+        var sum = gDe.test+" &middot; |lfc|&ge;"+gDe.lfcCut+" &middot; p<"+gDe.padjCut;
+        h.push("<div class='tpDeCard tpDeSettings'>");
+        h.push("<div class='tpDeSettingsHead' id='tpDeSettingsHead'><b>Test settings</b><span class='tpDeSummary'>"+sum+"</span></div>");
+        if (gDe.paramsOpen) {
+            h.push("<div class='tpDeSettingsBody'>");
+            // Wilcoxon rank-sum is the only implemented test (see de/wilcoxon_np.py
+            // and runDeJob METHODS); don't offer tests that would fail on submit.
+            h.push(deSetRow("Test","<select id='tpDeTest'>"+
+                deOpt("wilcox","Wilcoxon rank-sum",gDe.test)+"</select>"));
+            h.push(deSetRow("Min. log₂ fold change","<input id='tpDeLfc' type='number' step='0.1' value='"+gDe.lfcCut+"'>"));
+            h.push(deSetRow("Adjusted p cutoff","<input id='tpDePadj' type='number' step='0.01' value='"+gDe.padjCut+"'>"));
+            h.push(deSetRow("Min. fraction expressing","<input id='tpDeMinPct' type='number' step='0.05' value='"+gDe.minPct+"'>"));
+            h.push(deSetRow("Subsample per group","<input id='tpDeSub' type='number' step='500' value='"+gDe.subsample+"'>"));
+            h.push("<div class='tpDeFoot'>Benjamini-Hochberg correction across all tested genes.</div>");
+            h.push("</div>");
+        }
+        h.push("</div>");
+
+        // validation banner
+        var msg = deValidate();
+        if (msg) h.push("<div class='tpDeBanner'>"+msg+"</div>");
+
+        // run row
+        var runDisabled = (msg || gDe.running) ? " disabled" : "";
+        var runLabel = gDe.running ? "Running…" : "Run comparison";
+        h.push("<div class='tpDeRunRow'>");
+        h.push("<button class='tpDeRun' id='tpDeRun'"+runDisabled+">"+runLabel+"</button>");
+        h.push("<button class='tpDeReset' id='tpDeReset'>Reset</button>");
+        h.push("</div>");
+
+        // comparison lists as collapsible sections: Saved (persistent, signed in)
+        // and Recent (this session). Both shown for a signed-in user.
+        if (isLoggedIn() && gDe.saved.length)
+            h.push(deListSection("saved", "Saved comparisons", gDe.savedOpen, deSavedRowsHtml()));
+        if (gDe.history.length)
+            h.push(deListSection("recent", "Recent comparisons", gDe.recentOpen, deRecentRowsHtml()));
+
+        body.innerHTML = h.join("");
+        deWireBody();
+    }
+
+    function deSetRow(label, control){ return "<div class='tpDeSetRow'><label>"+label+"</label>"+control+"</div>"; }
+    function deOpt(val,label,cur){ return "<option value='"+val+"'"+(val===cur?" selected":"")+">"+label+"</option>"; }
+
+    function deWireBody() {
+        $("#tpDeField").change(function(){ deSetField($(this).val()); });
+        // value list: filter narrows it (re-render only the list, keep input focus);
+        // clicking a value assigns it to the active group
+        $("#tpDeValFilter").on("input", function(){
+            gDe.valFilter = this.value;
+            $("#tpDeValList").html(deValueRowsHtml());
+            deWireValueRows();
+        });
+        deWireValueRows();
+        $("#tpDeSettingsHead").click(function(){ gDe.paramsOpen=!gDe.paramsOpen; deRenderBody(); });
+        $("#tpDeRun").click(deRun);
+        $("#tpDeReset").click(deReset);
+        $("#tpDeSwap").click(deSwap);
+
+        // target group selector: which group legend clicks assign to
+        $("#tpDeTarget button").click(function(){
+            deSetTarget($(this).data("grp"));
+        });
+        // clicking a group card also makes it the active target, and brings the
+        // value list (which now assigns to that group) into view
+        $("#tpDeBody .tpDeCard[data-grp]").click(function(ev){
+            if ($(ev.target).closest("button, select, .tpDeChipX, .btn-group").length) return;
+            deSetTarget($(this).data("grp"));
+            var vh=document.querySelector("#tpDeBody .tpDeValHead");
+            if (vh) vh.scrollIntoView({block:"nearest", behavior:"smooth"});
+        });
+
+        // Group B mode toggle (rest / pick)
+        $("#tpDeBmode button").click(function(){
+            var m=$(this).data("mode");
+            if (m==='rest'){ gDe.bMode='rest'; if (gDe.target==='B') gDe.target='A'; }
+            else { gDe.bMode='pick'; gDe.target='B'; }
+            deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
+        });
+
+        // chip remove
+        $("#tpDeBody .tpDeChipX").click(function(ev){
+            ev.stopPropagation();
+            var k=parseInt($(this).data("key")), grp=$(this).data("grp");
+            deRemoveType(k, grp);
+        });
+
+        // filters (multi-value: the dropdown adds a value, chips remove them)
+        $("#tpDeBody .tpDeFilterField").change(function(){
+            var grp=$(this).closest(".tpDeFilterRow").data("grp"); var val=this.value;
+            if (grp==="A"){ gDe.aField=val; gDe.aValues=[]; } else { gDe.bField=val; gDe.bValues=[]; }
+            deRenderBody();
+        });
+        $("#tpDeBody .tpDeFilterValue").change(function(){
+            var grp=$(this).closest(".tpDeFilterRow").data("grp"); var val=this.value;
+            if (!val) return;
+            var arr = (grp==="A") ? gDe.aValues : gDe.bValues;
+            if (arr.indexOf(val)===-1) arr.push(val);
+            deRenderBody();
+        });
+        $("#tpDeBody .tpDeFilterChipX").click(function(ev){
+            ev.stopPropagation();
+            var grp=$(this).data("grp"), idx=parseInt($(this).data("idx"));
+            (grp==="A" ? gDe.aValues : gDe.bValues).splice(idx,1);
+            deRenderBody();
+        });
+
+        // settings inputs -> state
+        $("#tpDeTest").change(function(){ gDe.test=this.value; });
+        $("#tpDeLfc").change(function(){ gDe.lfcCut=parseFloat(this.value)||0; });
+        $("#tpDePadj").change(function(){ gDe.padjCut=parseFloat(this.value)||0.05; });
+        $("#tpDeMinPct").change(function(){ gDe.minPct=parseFloat(this.value)||0; });
+        $("#tpDeSub").change(function(){ gDe.subsample=parseInt(this.value)||5000; });
+
+        // recent
+        $("#tpDeBody .tpDeRecent").click(function(){
+            var e=gDe.history[parseInt($(this).data("idx"))];
+            if (!e) return;
+            // restore that comparison's groups and re-open its results (all recent
+            // comparisons are for the current dataset — history is cleared on
+            // dataset switch). No re-run: the stored results are shown as-is.
+            gDe.a=e.snap.a.slice(); gDe.b=e.snap.b.slice(); gDe.bMode=e.snap.bMode; gDe.target='A';
+            deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
+            if (e.results){ gDe.results=e.results; gDe.selectedGene=null;
+                gDe.geneFilter=''; gDe.side='all'; gDe.sortKey='auc'; gDe.sortDir=-1;
+                deShowResults(); }
+        });
+
+        // collapsible section headers (Saved / Recent)
+        $("#tpDeBody .tpDeListHead").click(function(){
+            var sec=$(this).data("sec");
+            if (sec==="saved") gDe.savedOpen=!gDe.savedOpen;
+            else if (sec==="recent") gDe.recentOpen=!gDe.recentOpen;
+            deRenderBody();
+        });
+
+        // saved comparisons: open on row click; share / delete on their controls
+        $("#tpDeBody .tpDeSaved .tpDeSavedMain").click(function(){
+            deOpenSaved(parseInt($(this).closest(".tpDeSaved").data("id")));
+        });
+        $("#tpDeBody .tpDeSavedShare").click(function(ev){ ev.stopPropagation();
+            deShareSaved(parseInt($(this).closest(".tpDeSaved").data("id"))); });
+        $("#tpDeBody .tpDeSavedDel").click(function(ev){ ev.stopPropagation();
+            deDeleteSaved(parseInt($(this).closest(".tpDeSaved").data("id"))); });
+    }
+
+    // ---- group assignment ----------------------------------------------
+
+    function deToggleType(intKey, group) {
+        var inA = gDe.a.indexOf(intKey)>-1, inB = gDe.b.indexOf(intKey)>-1;
+        if (group==='A') {
+            if (inB) gDe.b.splice(gDe.b.indexOf(intKey),1);
+            if (inA) gDe.a.splice(gDe.a.indexOf(intKey),1);
+            else gDe.a.push(intKey);
+        } else {
+            gDe.bMode='pick'; // assigning to B leaves rest mode
+            if (inA) gDe.a.splice(gDe.a.indexOf(intKey),1);
+            if (inB) gDe.b.splice(gDe.b.indexOf(intKey),1);
+            else gDe.b.push(intKey);
+        }
+        deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
+    }
+
+    function deRemoveType(intKey, group) {
+        var list = (group==='A') ? gDe.a : gDe.b;
+        var i=list.indexOf(intKey); if (i>-1) list.splice(i,1);
+        deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
+    }
+
+    function deSwap() {
+        var a=gDe.a, b=gDe.b;
+        if (gDe.bMode==='rest') {
+            // materialize the complement of A into an explicit list, then swap
+            var all=[]; var vc=gDe.metaInfo.valCounts||[];
+            for (var k=0;k<vc.length;k++) if (vc[k][1]>0 && a.indexOf(k)===-1) all.push(k);
+            gDe.b=a; gDe.a=all; gDe.bMode='pick';
+        } else {
+            gDe.a=b; gDe.b=a;
+        }
+        var af=gDe.aField, av=gDe.aValues; gDe.aField=gDe.bField; gDe.aValues=gDe.bValues; gDe.bField=af; gDe.bValues=av;
+        deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
+    }
+
+    function deReset() {
+        gDe.a=[]; gDe.b=[]; gDe.bMode='rest'; gDe.target='A';
+        gDe.aField=''; gDe.bField=''; gDe.aValues=[]; gDe.bValues=[];
+        deUpdateLegendHint();
+        gDe.results=null; deCloseResults(); deClearGene(true);
+        deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
+    }
+
+    // ---- legend augmentation (§2) --------------------------------------
+
+    function deAugmentLegend() {
+        if (!gDe.active) return;
+        if (!gLegend || gLegend.type!=="meta" || !gLegend.metaInfo || gLegend.metaInfo.name!==gDe.field) return;
+
+        // header hint telling the user which group a click assigns to
+        if (!document.getElementById("tpDeLegHint")) {
+            var title=document.getElementById("tpLegendTitle");
+            if (title) title.insertAdjacentHTML("afterend",
+                "<div id='tpDeLegHint' style='font-size:10.5px;padding:1px 0 3px'></div>");
+        }
+        deUpdateLegendHint();
+
+        // Membership tint per row (no per-row buttons — the 4-column grid legend
+        // clips extra items; assignment is by clicking the row into the active
+        // group). Swallow the row's mouseup so the normal legend select doesn't
+        // fire onSelChange -> activateTab("meta") and yank us off the Tools tab.
+        var aset=new Set(gDe.a), bset=new Set(gDe.b);
+        var rows=document.querySelectorAll('#tpLegendRows .tpLegend');
+        rows.forEach(function(row){
+            var intKey=parseInt(row.id.split("_")[1]);
+            row.classList.toggle('tpDeRowA', aset.has(intKey));
+            row.classList.toggle('tpDeRowB', bset.has(intKey));
+            row.style.cursor = "pointer";
+            row.addEventListener('mouseup', function(e){
+                if (!gDe.active) return;
+                e.stopImmediatePropagation(); e.preventDefault();
+                deToggleType(intKey, gDe.target);
+            }, true);
+        });
+    }
+
+    function deUpdateLegendHint() {
+        var el=document.getElementById("tpDeLegHint");
+        if (!el) return;
+        var col = gDe.target==='A' ? DE_A_COL : DE_B_COL;
+        el.innerHTML = "Click a cell type &rarr; <b style='color:#"+col+"'>Group "+gDe.target+"</b>";
+    }
+
+    function deValueRowsHtml() {
+        // rows only (so the filter input can re-render the list without losing focus).
+        // Sorted by cell count so the biggest/most-relevant values are on top — the
+        // key to staying usable on fields with many values (e.g. "Sub Cell Type").
+        var mi = gDe.metaInfo;
+        if (!mi || !mi.valCounts) return "";
+        var aset = new Set(gDe.a), bset = new Set(gDe.b);
+        var rows = [];
+        for (var k=0; k<mi.valCounts.length; k++)
+            rows.push({ key:k, label:deTypeLabel(k), count:deTypeCount(k) });
+        rows.sort(function(x,y){ return y.count - x.count; });
+        var filt = (gDe.valFilter||"").toLowerCase();
+        var h = [], shown = 0;
+        for (var i=0;i<rows.length;i++){
+            var r=rows[i];
+            if (filt && r.label.toLowerCase().indexOf(filt)===-1) continue;
+            var inA=aset.has(r.key), inB=bset.has(r.key);
+            var tint = inA ? deTint(DE_A_COL,0.85) : (inB ? deTint(DE_B_COL,0.85) : "");
+            h.push("<div class='tpDeValRow"+((inA||inB)?" tpDeValOn":"")+"' data-key='"+r.key+"'"+
+                   (tint?" style='background:"+tint+"'":"")+">");
+            h.push("<span class='tpDeValDot' style='background:#"+deTypeColor(r.key)+"'></span>");
+            h.push("<span class='tpDeValLbl' title='"+deEsc(r.label)+"'>"+deEsc(r.label)+"</span>");
+            h.push("<span class='tpDeValN'>"+r.count.toLocaleString()+"</span>");
+            if (inA)      h.push("<span class='tpDeValBadge' style='background:#"+DE_A_COL+"'>A</span>");
+            else if (inB) h.push("<span class='tpDeValBadge' style='background:#"+DE_B_COL+"'>B</span>");
+            else          h.push("<span class='tpDeValBadge tpDeValBadgeEmpty'></span>");
+            h.push("</div>");
+            shown++;
+        }
+        if (shown===0) h.push("<div class='tpDeValEmpty'>No matches</div>");
+        return h.join("");
+    }
+
+    function deValueListHtml() {
+        var mi = gDe.metaInfo;
+        if (!mi || !mi.valCounts || !mi.valCounts.length) return "";
+        var tcol = gDe.target==='A' ? DE_A_COL : DE_B_COL;
+        return "<div class='tpDeValHead'>"+
+               "<span class='tpDeValTo' style='color:#"+tcol+"'>Adding to Group "+gDe.target+"</span>"+
+               "<span class='tpDeValTot'>"+mi.valCounts.length+" types</span>"+
+               "</div>"+
+               "<input class='tpDeValFilter' id='tpDeValFilter' placeholder='Filter "+
+                    deEsc(mi.label||mi.name)+"…' value='"+deEsc(gDe.valFilter||"")+"'>"+
+               "<div class='tpDeValList' id='tpDeValList' style='border-left:3px solid #"+tcol+"'>"+
+                    deValueRowsHtml()+"</div>";
+    }
+
+    function deWireValueRows() {
+        $("#tpDeBody .tpDeValRow").click(function(){
+            var st = $("#tpDeValList").scrollTop();       // keep the scroll position
+            deToggleType(parseInt($(this).data("key")), gDe.target);
+            $("#tpDeValList").scrollTop(st);
+        });
+    }
+
+    function deSetTarget(grp) {
+        if (grp==='B' && gDe.bMode==='rest') gDe.bMode='pick'; // can't add to "all other cells"
+        gDe.target = grp;
+        deUpdateLegendHint();
+        deRefreshLegendMarks(); deRenderBody(); deRecolorPlot();
+    }
+
+    function deRefreshLegendMarks() {
+        var aset=new Set(gDe.a), bset=new Set(gDe.b);
+        document.querySelectorAll('#tpLegendRows .tpLegend').forEach(function(row){
+            var k=parseInt(row.id.split("_")[1]);
+            row.classList.toggle('tpDeRowA', aset.has(k));
+            row.classList.toggle('tpDeRowB', bset.has(k));
+            var a=row.querySelector('.tpDeLegA'), b=row.querySelector('.tpDeLegB');
+            if (a) a.classList.toggle('tpDeOn', aset.has(k));
+            if (b) b.classList.toggle('tpDeOn', bset.has(k));
+        });
+    }
+
+    // ---- plot recolor by group (§3) ------------------------------------
+
+    function deRecolorPlot() {
+        if (!gDe.active) return;
+        var mi=gDe.metaInfo;
+        var hasA=gDe.a.length>0;
+        var hasB=(gDe.bMode==='rest') ? hasA : gDe.b.length>0;
+
+        if (!mi.arr) { db.loadMetaVec(mi, function(arr){ mi.arr=arr; deRecolorPlot(); }); return; }
+
+        if (!hasA && !hasB) {
+            // nothing assigned -> keep the normal cell-type coloring
+            renderer.setColorArr(mi.arr);
+            renderer.setColors(legendGetColors(gLegend.rows));
+            renderer.drawDots();
+            return;
+        }
+
+        var aset=new Set(gDe.a), bset=new Set(gDe.b);
+        var arr=mi.arr, n=arr.length, colArr=new Uint8Array(n);
+        for (var i=0;i<n;i++){
+            var t=arr[i];
+            if (aset.has(t)) colArr[i]=0;
+            else if (gDe.bMode==='rest') colArr[i]= hasA ? 1 : 2;
+            else if (bset.has(t)) colArr[i]=1;
+            else colArr[i]=2;
+        }
+        renderer.setColorArr(colArr);
+        renderer.setColors([DE_A_COL, DE_B_COL, DE_NEUTRAL]);
+        renderer.drawDots();
+    }
+
+    // ---- validation (§7) -----------------------------------------------
+
+    function deValidate() {
+        if (gDe.a.length===0) return "Add at least one cell type to Group A.";
+        if (gDe.bMode==='pick' && gDe.b.length===0)
+            return "Add at least one cell type to Group B, or switch B to all other cells.";
+        var overlap=gDe.a.filter(function(k){ return gDe.b.indexOf(k)>-1; });
+        if (overlap.length) return "The same cell type is in both groups: "+overlap.map(deTypeLabel).join(", ")+".";
+        var nA=deGroupCount(gDe.a);
+        if (nA>0 && nA<25) return "Group A has only "+nA+" cells. At least 25 are needed for a stable rank-sum test.";
+        var nB=(gDe.bMode==='rest') ? Math.max(0, db.conf.sampleCount-nA) : deGroupCount(gDe.b);
+        if (gDe.bMode==='pick' && nB>0 && nB<25) return "Group B has only "+nB+" cells. At least 25 are needed for a stable rank-sum test.";
+        return null;
+    }
+
+    // ---- run + compute seam (§4) ---------------------------------------
+
+    function deComparisonTitle() {
+        function lab(list){
+            if (!list.length) return "";
+            var names=list.map(deTypeLabel);
+            return names.length<=2 ? names.join(" + ") : (names[0]+" +"+(names.length-1)+" more");
+        }
+        var aLab=lab(gDe.a); if (gDe.aValues.length) aLab+=" · "+gDe.aValues.join("/");
+        var bLab=(gDe.bMode==='rest') ? "All other cells" : lab(gDe.b);
+        if (gDe.bMode!=='rest' && gDe.bValues.length) bLab+=" · "+gDe.bValues.join("/");
+        return aLab+"  vs  "+bLab;
+    }
+
+    function deIsCustomField() {
+        return !!(gDe.metaInfo && gDe.metaInfo.isCustom);
+    }
+
+    function deValuesToCellIds(intKeys) {
+        // Custom-annotation fields don't exist in the dataset's meta.tsv, so the
+        // worker can't resolve them by name. Resolve the selected values to the
+        // actual cell barcodes here (mi.arr is the per-cell value vector, the same
+        // one deRecolorPlot uses; db.cellIds are the barcodes, i.e. the meta.tsv
+        // key column). deEnsureCellData guarantees both are loaded before this runs.
+        var arr=gDe.metaInfo.arr, want=new Set(intKeys), ids=db.cellIds, out=[];
+        for (var i=0;i<arr.length;i++)
+            if (want.has(arr[i])) out.push(ids[i]);
+        return out;
+    }
+
+    function deBuildSpec() {
+        var custom = deIsCustomField();
+        function grp(list, filtField, filtVals) {
+            var filter = (filtField && filtVals.length) ? {field:filtField, values:filtVals.slice()} : null;
+            // real metadata field -> field+values (worker resolves via meta.tsv);
+            // custom field -> explicit barcodes (worker's cellIds selector)
+            return custom ? { ids: deValuesToCellIds(list), filter: filter }
+                          : { values: list.map(deTypeLabel), filter: filter };
+        }
+        var dsName = db.name || (db.conf && db.conf.name);
+        return {
+            dataset: dsName,
+            // absolute dataset URL so the (possibly off-host) DE worker can fetch
+            // the served expression files over HTTP — see deCache.py on the server
+            dataUrl: cbUtil.absDataUrl([dsName]),
+            field: gDe.field,
+            groupA: grp(gDe.a, gDe.aField, gDe.aValues),
+            groupB: gDe.bMode==='rest' ? "rest" : grp(gDe.b, gDe.bField, gDe.bValues),
+            test: gDe.test, minPct: gDe.minPct, subsample: gDe.subsample,
+            lfcCut: gDe.lfcCut, padjCut: gDe.padjCut
+        };
+    }
+
+    function deEnsureCellData(onReady) {
+        // For a custom field, deBuildSpec needs the field's per-cell vector and the
+        // cell barcodes; load them (once) before building the spec. No-op — and
+        // synchronous — for real metadata fields, which resolve server-side.
+        if (!deIsCustomField()) { onReady(); return; }
+        var mi=gDe.metaInfo;
+        function haveIds(){ if (db.cellIds) onReady(); else db.loadCellIds(null, function(){ onReady(); }); }
+        if (mi.arr) haveIds();
+        else db.loadMetaVec(mi, function(arr){ mi.arr=arr; haveIds(); });
+    }
+
+    function deRun() {
+        if (deValidate() || gDe.running) return;
+        cbTimingGroup("de");               // a DE run is its own group on the debug bar
+        deEnsureCellData(function(){       // custom fields: load barcodes first
+            cbTiming("de cellData");       // ~0 ms unless a custom field needed barcodes
+            var spec=deBuildSpec();
+            gDe.running=true; gDe.canceled=false;
+            deRenderBody();       // reflect Running… + disabled button
+            deShowRunning();
+            cbTiming("de submit");         // spec build + the Running… repaint
+            deSubmitJob(spec,
+                function(p,label){ deUpdateProgress(p,label); },
+                function(result){ if (gDe.canceled) return; gDe.running=false;
+                    // result.elapsed is the backend's own runtime, when it reported one
+                    cbTiming("de job"+(result.elapsed!=null ? " (server "+result.elapsed+"s)" : ""));
+                    deHideRunning(); deOnResults(result, spec); deRenderBody(); },
+                function(err){ gDe.running=false; deHideRunning(); deRenderBody(); alert("Differential expression failed: "+err); }
+            );
+        });
+    }
+
+    function deOnResults(result, spec) {
+        // snapshot the thresholds at run time so the pop-up can re-filter without a re-run
+        gDe.results = {
+            genes: result.genes, nA: result.nA, nB: result.nB,
+            aLabel: deComparisonTitle().split("  vs  ")[0],
+            bLabel: (gDe.bMode==='rest') ? "All other cells" : deComparisonTitle().split("  vs  ")[1],
+            lfcCut: spec.lfcCut, padjCut: spec.padjCut, minPct: spec.minPct, test: spec.test,
+            filters: result.filters,   // the gene filters the backend actually applied
+            spec: spec                 // the recipe, so the pop-up can Save this comparison
+        };
+        gDe.sortKey='auc'; gDe.sortDir=-1; gDe.geneFilter=''; gDe.side='all'; gDe.selectedGene=null;
+
+        var sig=deSignificant(gDe.results.genes, gDe.results);
+        var title=deComparisonTitle();
+        gDe.history.unshift({ title:title, n:sig.length, results:gDe.results,
+            snap:{a:gDe.a.slice(), b:gDe.b.slice(), bMode:gDe.bMode} });
+        // de-dup by title, keep last 4
+        var seen={}; gDe.history=gDe.history.filter(function(e){ if(seen[e.title]) return false; seen[e.title]=1; return true; }).slice(0,4);
+
+        deShowResults();
+    }
+
+    /* The single integration point for the DE backend. The endpoint is a
+     * SITE-WIDE setting, so it comes from cb.conf ("deUrl", exposed as
+     * gClientConf["deUrl"]) — the same layer as annotApiBase / showLogin — not
+     * from a dataset's dataset.json. window.cbDeUrl is a local-dev override.
+     * If set, POST the spec and poll for status/results (see
+     * plans/differential-expression.md, three-tier flow). Otherwise fall back
+     * to a clearly-labelled client-side placeholder that stages progress and
+     * synthesizes statistics over the dataset's REAL gene symbols, so the whole
+     * UI flow — running → results → gene select → recolor — works before the
+     * backend is deployed. Only the DE statistics are placeholder; the genes
+     * and their expression coloring are real. */
+    function deSubmitJob(spec, onProgress, onDone, onErr) {
+        var url = (typeof gClientConf !== "undefined" && gClientConf && gClientConf["deUrl"]) || window.cbDeUrl || null;
+        if (url) { deSubmitJobHttp(url, spec, onProgress, onDone, onErr); return; }
+        deSubmitJobStub(spec, onProgress, onDone);
+    }
+
+    function deSubmitJobHttp(url, spec, onProgress, onDone, onErr) {
+        // POST spec -> {jobId}; then poll url?jobId=... every 2s until done/failed.
+        fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(spec)})
+            .then(function(r){ return r.json(); })
+            .then(function(sub){
+                if (!sub || !sub.jobId) throw new Error("no jobId returned");
+                gDe.jobId = sub.jobId;    // so Cancel can tell the backend to stop it
+                var poll=function(){
+                    if (gDe.canceled) return;
+                    fetch(url+"?jobId="+encodeURIComponent(sub.jobId))
+                        .then(function(r){ return r.json(); })
+                        .then(function(st){
+                            // elapsed is the worker's own runtime (runDeJob.py writes it
+                            // to status.json); the debug bar shows it next to the round trip
+                            if (st.status==="done") { gDe.jobId=null; onDone({genes:st.result.genes, nA:st.result.n_pop1, nB:st.result.n_pop2, filters:st.result.filters, elapsed:st.elapsed}); }
+                            else if (st.status==="failed" || st.status==="canceled") { gDe.jobId=null; onErr(st.error||st.status); }
+                            else {
+                                var label = st.stage || "running";
+                                if (st.step && st.nSteps) label = "Step "+st.step+" of "+st.nSteps+": "+label;
+                                onProgress(st.progress!=null ? st.progress*100 : null, label);
+                                setTimeout(poll, 2000);
+                            }
+                        }).catch(function(e){ onErr(""+e); });
+                };
+                poll();
+            }).catch(function(e){ onErr(""+e); });
+    }
+
+    function deHash(str){ var h=2166136261>>>0; for(var i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return (h>>>0)/4294967296; }
+
+    function deSubmitJobStub(spec, onProgress, onDone) {
+        var stages=[["Preparing matrix",6],["Subsampling cells",22],["Filtering genes by detection rate",46],
+                    ["Computing rank-sum statistics",74],["Benjamini-Hochberg correction",94]];
+        var i=0;
+        (function step(){
+            if (gDe.canceled) return;
+            if (i<stages.length){ onProgress(stages[i][1], stages[i][0]); i++; setTimeout(step, 300); return; }
+            onProgress(100, "done");
+            // synthesize over real genes
+            var ids=db.allGeneIds ? db.allGeneIds() : [];
+            var cap=Math.min(ids.length, 1500);
+            var aLabel=deComparisonTitle().split("  vs  ")[0], bLabel=deComparisonTitle().split("  vs  ")[1];
+            var genes=[];
+            for (var g=0; g<cap; g++){
+                var info=db.getGeneInfo(ids[g]); var sym=info.sym||ids[g];
+                var seed=sym+"|"+aLabel+"|"+bLabel;
+                var u1=deHash(seed+"1"), u2=deHash(seed+"2"), u3=deHash(seed+"3"), u4=deHash(seed+"4");
+                var lfc=Math.round((u1*2-1)*4*100)/100;
+                var strength=deHash(seed+"s");
+                var negLog = (Math.abs(lfc)>=1) ? (2 + strength*28*Math.abs(lfc)/4) : (strength*2.5);
+                var pAdj=Math.pow(10, -negLog); if (pAdj<1e-300) pAdj=1e-300;
+                var pctA=Math.round((lfc>0 ? 0.3+u3*0.7 : u3*0.7)*100)/100;
+                var pctB=Math.round((lfc<0 ? 0.3+u4*0.7 : u4*0.7)*100)/100;
+                // AUC and per-group means, kept consistent with the fake log2FC so
+                // the MA plot / AUC column look sensible (real values come from the
+                // backend). meanA = meanB * 2^lfc; AUC>0.5 when up in A.
+                var meanB=Math.round((0.2 + u2*3)*100)/100;
+                var meanA=Math.round(Math.min(60, meanB*Math.pow(2, lfc))*100)/100;
+                var auc=Math.max(0.02, Math.min(0.98, 0.5 + lfc*0.11 + (u4-0.5)*0.08));
+                auc=Math.round(auc*1000)/1000;
+                genes.push({symbol:sym, log2FC:lfc, pAdj:pAdj, pctA:pctA, pctB:pctB, auc:auc, meanA:meanA, meanB:meanB});
+            }
+            var nA=deGroupCount(gDe.a);
+            var nB=(gDe.bMode==='rest') ? Math.max(0, db.conf.sampleCount-nA) : deGroupCount(gDe.b);
+            setTimeout(function(){ if(!gDe.canceled) onDone({genes:genes, nA:nA, nB:nB}); }, 250);
+        })();
+    }
+
+    // running overlay
+    function deShowRunning() {
+        deHideRunning();
+        var r=deCanvasRect();
+        var h="<div id='tpDeRunning' style='left:"+r.left+"px;top:"+r.top+"px;width:"+r.width+"px;height:"+r.height+"px'>"+
+            "<div class='tpDeRunCard'>"+
+            "<div class='tpDeRunTop'><span id='tpDeSpinner'></span><span>Running differential expression</span></div>"+
+            "<div class='tpDeProgTrack'><div class='tpDeProgFill' id='tpDeProgFill'></div></div>"+
+            "<div class='tpDeStage' id='tpDeStage'>queued</div>"+
+            "<div class='tpDeCancel'><button id='tpDeCancel'>Cancel</button></div>"+
+            "</div></div>";
+        document.body.insertAdjacentHTML("beforeend", h);
+        $("#tpDeCancel").click(deCancelJob);
+    }
+
+    function deCancelJob(){
+        // stop watching locally, and tell the backend to actually stop the job
+        // (it kills the running compute, or skips it if not yet started)
+        gDe.canceled=true; gDe.running=false;
+        var url = (typeof gClientConf !== "undefined" && gClientConf && gClientConf["deUrl"]) || window.cbDeUrl || null;
+        if (url && gDe.jobId)
+            fetch(url+"?jobId="+encodeURIComponent(gDe.jobId), {method:"DELETE"}).catch(function(){});
+        gDe.jobId=null;
+        deHideRunning(); deRenderBody();
+    }
+    function deUpdateProgress(p, label) {
+        var fill=document.getElementById("tpDeProgFill"), st=document.getElementById("tpDeStage");
+        if (fill && p!==null && p!==undefined) fill.style.width=p+"%";
+        else if (fill) fill.style.width="40%"; // indeterminate fallback
+        if (st && label) st.textContent=label;
+    }
+    function deHideRunning(){ var el=document.getElementById("tpDeRunning"); if(el) el.remove(); }
+
+    // ---- results pop-up (§5) — non-modal dialog over the canvas ---------
+
+    function deSignificant(genes, thr) {
+        return genes.filter(function(g){
+            return Math.abs(g.log2FC)>=thr.lfcCut && g.pAdj<thr.padjCut && Math.max(g.pctA,g.pctB)>=thr.minPct;
+        });
+    }
+
+    function deShowResults() {
+        deCloseResults();
+        var div=document.createElement("div"); div.id="tpDeResults";
+        document.body.appendChild(div);
+        deRenderResults();
+        var r=deCanvasRect();
+        var w=Math.min(1040, Math.max(820, r.width-40));
+        // in debug mode a bar is pinned to the bottom of the window above everything
+        // else, so shrink and lift the dialog to keep its buttons clear. It carries a
+        // row per timing run and the DE row already exists by now, so measure it
+        // rather than assuming a height.
+        var barEl=DEBUG ? document.getElementById("tpDebugBar") : null;
+        var barHeight=(barEl && barEl.style.display!=="none") ? barEl.offsetHeight+2 : 0;
+        var ht=Math.min(640, Math.max(360, r.height-40-barHeight));
+        // Save to account sits next to Download CSV. Shown to everyone so the
+        // feature is discoverable, but greyed out when signed out — clicking it
+        // then opens the sign-in dialog (deSaveComparison), and the tooltip says so.
+        var deButtons=[{ text:"Save to account", click: deSaveComparison },
+                       { text:"Download CSV", click: deDownloadCsv }];
+        $("#tpDeResults").dialog({
+            modal:false, closeOnEscape:true, resizable:true, draggable:true,
+            width:w, height:ht, title:"Differential expression results",
+            position:{ my:"center", of: renderer.canvas,
+                at:(barHeight ? "center center-"+Math.round(barHeight/2) : "center") },
+            buttons:deButtons,
+            close:function(){ deCloseResults(); }
+        });
+        if (!isLoggedIn()) {
+            $("#tpDeResults").closest(".ui-dialog").find(".ui-dialog-buttonpane button")
+                .filter(function(){ return $(this).text()==="Save to account"; })
+                .addClass("tpDeBtnDisabled")
+                .attr("title", "Sign in to save comparisons to your account");
+        }
+
+        // The pop-up is non-modal (so the map recolors when you click a gene), so
+        // there is no overlay to catch an outside click. Add one, but keep it open
+        // for clicks on the map (#tpMaxPlot) and the builder/sidebar so those stay
+        // usable. Deferred so the click that opened it doesn't immediately close it.
+        setTimeout(function(){
+            $(document).on("mousedown.tpDeOutside", function(ev){
+                if (!$("#tpDeResults").length) return;
+                var t=$(ev.target);
+                if (t.closest(".ui-dialog").length) return;      // inside a jQuery UI dialog
+                if (t.closest("#tpMaxPlot").length) return;      // the map + its controls
+                if (t.closest("#tpLeftSidebar").length) return;  // the DE builder / sidebar
+                deCloseResults();
+            });
+        }, 0);
+        cbTiming("de render");     // volcano plot + gene table + dialog
+    }
+    function deCloseResults() {
+        $(document).off("mousedown.tpDeOutside");
+        if ($("#tpDeResults").length && $("#tpDeResults").hasClass("ui-dialog-content"))
+            $("#tpDeResults").dialog("destroy");
+        $("#tpDeResults").remove();
+    }
+
+    // ---- save / load / share saved comparisons -------------------------
+    // Persist a comparison to the logged-in user's account: the two population
+    // selectors + method/params (the recipe, re-run on open) plus a small cached
+    // significant-gene subset (LZString-compressed) for an instant preview. See
+    // the cbAnnotServer /api/de/saved endpoints (de_saved.py).
+
+    function deEsc(s){ return String(s==null?"":s).replace(/[&<>"]/g, function(c){
+        return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
+
+    function deToast(msg){
+        // brief, non-blocking confirmation (the Save button sits in the results
+        // dialog, so the updated list in the builder is out of view)
+        var t=$("<div class='tpDeToast'></div>").text(msg).appendTo("body");
+        setTimeout(function(){ t.fadeOut(400, function(){ t.remove(); }); }, 1400);
+    }
+
+    function deSavedDate(iso){
+        var d=new Date(iso); if (isNaN(d.getTime())) return "";
+        try { return d.toLocaleDateString(undefined, {year:"numeric",month:"short",day:"numeric"}); }
+        catch(e){ return String(iso).slice(0,10); }
+    }
+
+    function deListSection(key, title, open, innerHtml){
+        // collapsible header + body, like the "Test settings" section
+        var caret = open ? "▾" : "▸";
+        var h="<div class='tpDeListSec'>";
+        h+="<div class='tpDeListHead' data-sec='"+key+"'><span class='tpDeListCaret'>"+caret+"</span>"+title+"</div>";
+        if (open) h+="<div class='tpDeListBody'>"+innerHtml+"</div>";
+        h+="</div>";
+        return h;
+    }
+
+    function deSavedRowsHtml(){
+        var h="";
+        for (var i=0;i<gDe.saved.length;i++){
+            var sv=gDe.saved[i];
+            h+="<div class='tpDeSaved' data-id='"+sv.id+"'>"
+              +"<div class='tpDeSavedMain'><div class='tpDeRecentTitle'>"+deEsc(sv.label)+"</div>"
+              +"<div class='tpDeRecentSub'>"+deSavedDate(sv.updated_at)+"</div></div>"
+              +"<span class='tpDeSavedAct tpDeSavedShare' title='Copy a shareable link'>Share</span>"
+              +"<span class='tpDeSavedAct tpDeSavedDel' title='Delete this saved comparison'>&times;</span>"
+              +"</div>";
+        }
+        return h;
+    }
+
+    function deRecentRowsHtml(){
+        var h="";
+        for (var i=0;i<gDe.history.length;i++){
+            var e=gDe.history[i];
+            h+="<div class='tpDeRecent' data-idx='"+i+"'>"
+              +"<div class='tpDeRecentTitle'>"+deEsc(e.title)+"</div>"
+              +"<div class='tpDeRecentSub'>"+e.n+" significant genes</div>"
+              +"</div>";
+        }
+        return h;
+    }
+
+    function deLoadSavedList(){
+        // Pull this user's saved comparisons for the current dataset. No-op when
+        // signed out — the builder shows in-memory recents in that case.
+        if (!isLoggedIn() || !db || !db.name) { gDe.saved=[]; return; }
+        $.ajax({ url:cbApiUrl("/api/de/saved/"+cbDatasetPath(db.name)), dataType:"json",
+                 xhrFields:{withCredentials:true} })
+            .done(function(resp){ gDe.saved=(resp && resp.items) || []; if (gDe.active) deRenderBody(); })
+            .fail(function(){ gDe.saved=[]; });
+    }
+
+    function deSaveComparison(){
+        if (!isLoggedIn()) { showLoginDialog("signin"); return; }
+        var res=gDe.results, spec=res && res.spec;
+        if (!res || !spec) { alert("Nothing to save yet — run a comparison first."); return; }
+        var defLabel=(res.aLabel||"A")+" vs "+(res.bLabel||"B");
+        var label=window.prompt("Save this comparison as:", defLabel);
+        if (label===null) return;              // cancelled
+        label=(label.trim() || defLabel).slice(0,255);
+
+        // cache only the significant genes (what the table shows), compressed
+        var sig=deSignificant(res.genes, res);
+        var cache={ genes:sig, nA:res.nA, nB:res.nB, aLabel:res.aLabel, bLabel:res.bLabel,
+                    lfcCut:res.lfcCut, padjCut:res.padjCut, minPct:res.minPct, test:res.test,
+                    filters:res.filters };
+        var payload={
+            label: label,
+            pop1: spec.groupA, pop2: spec.groupB, method: spec.test,
+            parameters: { field:spec.field, minPct:spec.minPct, subsample:spec.subsample,
+                          lfcCut:spec.lfcCut, padjCut:spec.padjCut },
+            results: LZString.compressToBase64(JSON.stringify(cache))
+        };
+        cbApiPost("/api/de/saved/"+cbDatasetPath(db.name), payload,
+            function(){ deLoadSavedList(); deToast("Comparison saved"); },
+            function(msg){ alert("Could not save comparison: "+msg); });
+    }
+
+    function deSpecFromSaved(it){
+        // Rebuild the builder spec from a stored comparison so it can be re-run.
+        var p=it.parameters||{};
+        return { dataset: db.name||(db.conf&&db.conf.name), field:p.field,
+                 groupA: it.pop1, groupB: it.pop2, test: it.method,
+                 minPct:p.minPct, subsample:p.subsample, lfcCut:p.lfcCut, padjCut:p.padjCut };
+    }
+
+    function deCacheToResults(cache, spec){
+        return { genes:cache.genes, nA:cache.nA, nB:cache.nB,
+                 aLabel:cache.aLabel, bLabel:cache.bLabel,
+                 lfcCut:cache.lfcCut, padjCut:cache.padjCut, minPct:cache.minPct, test:cache.test,
+                 filters:cache.filters, spec:spec, cached:true };
+    }
+
+    function deShowCachedThenRerun(it, allowRerun){
+        var spec=deSpecFromSaved(it), cache=null;
+        try { cache=JSON.parse(LZString.decompressFromBase64(it.results)); } catch(e){}
+        if (cache){
+            gDe.results=deCacheToResults(cache, spec);
+            gDe.selectedGene=null; gDe.geneFilter=''; gDe.side='all'; gDe.sortKey='auc'; gDe.sortDir=-1;
+            deShowResults();
+        }
+        if (!allowRerun) return;
+        // upgrade the cached preview to the full interactive result in the background
+        gDe.canceled=false;
+        deSubmitJob(spec, function(){},
+            function(result){
+                if (!gDe.results) return;
+                gDe.results.genes=result.genes; gDe.results.nA=result.nA; gDe.results.nB=result.nB;
+                gDe.results.cached=false;
+                if ($("#tpDeResults").length) deRenderResults();
+            },
+            function(){ /* backend unavailable: keep the cached preview */ });
+    }
+
+    function deOpenSaved(id){
+        $.ajax({ url:cbApiUrl("/api/de/saved/item/"+id), dataType:"json", xhrFields:{withCredentials:true} })
+            .done(function(resp){ if (resp && resp.item) deShowCachedThenRerun(resp.item, true); })
+            .fail(function(){ alert("Could not open that saved comparison."); });
+    }
+
+    function deShareSaved(id){
+        cbApiPost("/api/de/saved/item/"+id+"/share", {},
+            function(resp){
+                var url=new URL(window.location.href);
+                url.searchParams.set("deShare", resp.token);
+                window.prompt("Shareable link (anyone with it can view this comparison):", url.toString());
+            },
+            function(msg){ alert("Could not create a share link: "+msg); });
+    }
+
+    function deDeleteSaved(id){
+        if (!window.confirm("Delete this saved comparison?")) return;
+        $.ajax({ url:cbApiUrl("/api/de/saved/item/"+id), method:"DELETE", xhrFields:{withCredentials:true} })
+            .done(function(){ deLoadSavedList(); })
+            .fail(function(){ alert("Could not delete that saved comparison."); });
+    }
+
+    function deOpenShared(token){
+        // Public read of a shared comparison (?deShare=<token>). Read-only: shows
+        // the sharer's cached results, no background re-run.
+        if (!cbDeEnabled()) return;
+        $.ajax({ url:cbApiUrl("/api/de/saved/shared/"+encodeURIComponent(token)), dataType:"json",
+                 xhrFields:{withCredentials:true} })
+            .done(function(resp){
+                if (!resp || !resp.item) { alert("Shared comparison not found."); return; }
+                deShowCachedThenRerun(resp.item, false);
+            })
+            .fail(function(){ alert("Could not load the shared comparison."); });
+    }
+
+    function deRenderResults() {
+        var res=gDe.results; if (!res) return;
+        var sig=deSignificant(res.genes, res);
+        var upA=sig.filter(function(g){return g.log2FC>0;}).length;
+        var upB=sig.length-upA;
+        var h=[];
+        h.push("<div class='tpDeResHead'>");
+        h.push("<span class='tpDeResSub'>"+sig.length+" significant &middot; "+upA+" up in A, "+upB+" up in B &middot; n="+deFmt(res.nA)+"/"+deFmt(res.nB)+"</span>");
+        h.push("</div>");
+
+        if (sig.length===0) {
+            h.push(deEmptyStateHtml(res));
+            $("#tpDeResults").html(h.join(""));
+            $("#tpDeLoosen").click(deLoosen);
+            $("#tpDeEditGroups").click(function(){ deCloseResults(); });
+            return;
+        }
+
+        h.push("<div id='tpDeResBody'>");
+        h.push("<div id='tpDeResTableWrap'>");
+        // controls
+        // row 1: search box + gene count
+        h.push("<div class='tpDeCtrls'>");
+        h.push("<input class='tpDeGeneFilter' id='tpDeGeneFilter' placeholder='Filter genes' value='"+gDe.geneFilter+"'>");
+        h.push("<span class='tpDeGeneCount' id='tpDeGeneCount'></span>");
+        h.push("</div>");
+        // row 2: All / Up in A / Up in B, below the search box
+        h.push("<div class='tpDeCtrls2'>");
+        h.push("<span class='btn-group btn-group-xs' id='tpDeSide' role='group'>"+
+            "<button type='button' data-side='all' class='btn btn-default"+(gDe.side==='all'?' active':'')+"'>All</button>"+
+            "<button type='button' data-side='a' class='btn btn-default"+(gDe.side==='a'?' active':'')+"'>Up in A</button>"+
+            "<button type='button' data-side='b' class='btn btn-default"+(gDe.side==='b'?' active':'')+"'>Up in B</button></span>");
+        h.push("</div>");
+        // results table — Bootstrap .table, like the cluster-markers pop-up
+        h.push("<table class='table' id='tpDeTable'><thead><tr>"+
+            deHeadCell("name","Gene","","Gene symbol. Click a row to color the map by this gene and see its distribution below.")+
+            deHeadCell("lfc","log₂FC","tpDeNum","log₂ fold change of mean expression, A vs B: positive = higher in A, negative = higher in B.")+
+            deHeadCell("auc","AUC","tpDeNum","How well this gene alone separates A from B. 0.5 = no difference, 1 = always higher in A, 0 = always higher in B.")+
+            deHeadCell("padj","p-adj","tpDeNum","Benjamini-Hochberg adjusted p-value (FDR). With many cells nearly everything is significant, so read it as a ranking more than an exact cutoff.")+
+            deHeadCell("meanA","mean A","tpDeNum","Mean expression across the cells in Group A.")+
+            deHeadCell("meanB","mean B","tpDeNum","Mean expression across the cells in Group B.")+
+            deHeadCell("pctA","pct A","tpDeNum","Fraction of Group A cells in which this gene is detected (non-zero).")+
+            deHeadCell("pctB","pct B","tpDeNum","Fraction of Group B cells in which this gene is detected (non-zero).")+
+            "</tr></thead><tbody id='tpDeTbody'></tbody></table>");
+        h.push("</div>"); // tableWrap
+        h.push("<div id='tpDeResVolcano'>"+
+            "<div class='tpDeVolHead'>"+
+              "<span class='btn-group btn-group-xs' id='tpDePlotToggle' role='group'>"+
+                "<button type='button' data-plot='volcano' class='btn btn-default"+(gDe.plotType!=='ma'?' active':'')+"'>Volcano</button>"+
+                "<button type='button' data-plot='ma' class='btn btn-default"+(gDe.plotType==='ma'?' active':'')+"'>MA</button>"+
+              "</span>"+
+              "<span class='tpDeVolHint'>click a point to color the map</span></div>"+
+            "<div id='tpDeVolcanoSvg'></div>"+
+            "<div class='tpDeVolHead' style='margin-top:10px'><span class='tpDeVolTitle'>Distribution</span></div>"+
+            "<div id='tpDeViolin'></div></div>");
+        h.push("</div>"); // resBody
+
+        $("#tpDeResults").html(h.join(""));
+        activateTooltip("#tpDeTable thead th");
+        $("#tpDeGeneFilter").on("input", function(){ gDe.geneFilter=this.value; deRenderTable(); });
+        $("#tpDeSide button").click(function(){ gDe.side=$(this).data("side"); deRenderResults(); });
+        $("#tpDeResults #tpDeTable thead th").click(function(){
+            var k=$(this).data("key");
+            if (gDe.sortKey===k) gDe.sortDir=-gDe.sortDir; else { gDe.sortKey=k; gDe.sortDir=1; }
+            deRenderResults();
+        });
+        $("#tpDePlotToggle button").click(function(){ gDe.plotType=$(this).data("plot"); deRenderResults(); });
+        deRenderTable();
+        deRenderPlot();
+        deRenderViolin(gDe.selectedGene);
+    }
+
+    function deHeadCell(key,label,cls,tip){
+        var on=(gDe.sortKey===key);
+        var caret=on ? (gDe.sortDir>0 ? " ▴" : " ▾") : "";
+        // NB: the title drives the tooltip; do NOT add the .hasTooltip class here —
+        // it is display:inline-flex globally and would break the table layout.
+        var titleAttr = tip ? " title=\""+tip+"\" data-placement=\"top\"" : "";
+        return "<th data-key='"+key+"' class='"+cls+(on?' tpDeSortOn':'')+"'"+titleAttr+">"+label+caret+"</th>";
+    }
+
+    function deFilteredSortedGenes() {
+        var res=gDe.results; var sig=deSignificant(res.genes, res);
+        var rows=sig;
+        if (gDe.side==='a') rows=rows.filter(function(g){return g.log2FC>0;});
+        else if (gDe.side==='b') rows=rows.filter(function(g){return g.log2FC<0;});
+        if (gDe.geneFilter){ var q=gDe.geneFilter.toUpperCase(); rows=rows.filter(function(g){return g.symbol.toUpperCase().indexOf(q)>-1;}); }
+        var key=gDe.sortKey, dir=gDe.sortDir;
+        rows=rows.slice().sort(function(a,b){
+            var va,vb;
+            if (key==='name'){ va=a.symbol.toUpperCase(); vb=b.symbol.toUpperCase(); return va<vb?-dir:va>vb?dir:0; }
+            if (key==='lfc'){ va=a.log2FC; vb=b.log2FC; }
+            else if (key==='auc'){ va=a.auc; vb=b.auc; }
+            else if (key==='padj'){ va=a.pAdj; vb=b.pAdj; }
+            else if (key==='meanA'){ va=a.meanA; vb=b.meanA; }
+            else if (key==='meanB'){ va=a.meanB; vb=b.meanB; }
+            else if (key==='pctA'){ va=a.pctA; vb=b.pctA; }
+            else { va=a.pctB; vb=b.pctB; }
+            return (va-vb)*dir;
+        });
+        return rows;
+    }
+
+    function deRenderTable() {
+        var rows=deFilteredSortedGenes();
+        var tb=document.getElementById("tpDeTbody");
+        var cnt=document.getElementById("tpDeGeneCount");
+        if (cnt) cnt.textContent=rows.length+" genes";
+        if (!tb) return;
+        var h=[]; var cap=Math.min(rows.length, 400); // DOM cap per spec
+        for (var i=0;i<cap;i++){
+            var g=rows[i];
+            var dirCol=g.log2FC>0 ? DE_A_COL : DE_B_COL;
+            var sel=(g.symbol===gDe.selectedGene) ? " tpDeRowSel" : "";
+            h.push("<tr class='tpDeTrow"+sel+"' data-sym='"+g.symbol+"'>");
+            h.push("<td class='tpDeGene'><span class='tpDeDirDot' style='background:#"+dirCol+"'></span>"+g.symbol+"</td>");
+            h.push("<td class='tpDeNum' style='color:"+(g.log2FC>0?'#a94c2c':'#3a4a8c')+"'>"+g.log2FC.toFixed(2)+"</td>");
+            h.push("<td class='tpDeNum'>"+(g.auc!==undefined?g.auc.toFixed(2):'')+"</td>");
+            h.push("<td class='tpDeNum'>"+deFmtP(g.pAdj)+"</td>");
+            h.push("<td class='tpDeNum' style='color:#6b6f76'>"+(g.meanA!==undefined?g.meanA.toFixed(2):'')+"</td>");
+            h.push("<td class='tpDeNum' style='color:#6b6f76'>"+(g.meanB!==undefined?g.meanB.toFixed(2):'')+"</td>");
+            h.push("<td class='tpDeNum' style='color:#6b6f76'>"+Math.round(g.pctA*100)+"%</td>");
+            h.push("<td class='tpDeNum' style='color:#6b6f76'>"+Math.round(g.pctB*100)+"%</td>");
+            h.push("</tr>");
+        }
+        tb.innerHTML=h.join("");
+        $("#tpDeTbody tr").click(function(){ deSelectGene($(this).data("sym")); });
+    }
+
+    function deFmtP(p){
+        if (p>=0.001) return p.toFixed(3);
+        var e=p.toExponential(1); return e.replace("e","e");
+    }
+
+    function deRenderVolcano() {
+        var host=document.getElementById("tpDeVolcanoSvg"); if(!host) return;
+        var res=gDe.results; var genes=res.genes;
+        var maxAbs=0, maxNeg=0;
+        for (var i=0;i<genes.length;i++){
+            var a=Math.abs(genes[i].log2FC); if(a>maxAbs)maxAbs=a;
+            var nl=-Math.log10(Math.max(genes[i].pAdj,1e-300)); if(nl>maxNeg)maxNeg=nl;
+        }
+        var xMax=Math.ceil(maxAbs*1.08*2)/2 || 1;
+        var yMax=(maxNeg*1.08)||1;
+        var bx0=34,bx1=360,by0=10,by1=238;
+        function sx(v){ return bx0 + (v+xMax)/(2*xMax)*(bx1-bx0); }
+        function sy(v){ return by1 - (v/yMax)*(by1-by0); }
+        var lfcCut=res.lfcCut, pCut=-Math.log10(res.padjCut);
+        var s=[];
+        s.push("<svg viewBox='0 0 368 268' style='width:100%;height:auto' id='tpDeVolSvgEl'>");
+        // axes
+        s.push("<line x1='"+bx0+"' y1='"+by0+"' x2='"+bx0+"' y2='"+by1+"' stroke='#e2e0da'/>");
+        s.push("<line x1='"+bx0+"' y1='"+by1+"' x2='"+bx1+"' y2='"+by1+"' stroke='#e2e0da'/>");
+        // threshold guides
+        s.push("<line x1='"+sx(0)+"' y1='"+by0+"' x2='"+sx(0)+"' y2='"+by1+"' stroke='#cfc9bd' stroke-dasharray='2 4'/>");
+        s.push("<line x1='"+sx(lfcCut)+"' y1='"+by0+"' x2='"+sx(lfcCut)+"' y2='"+by1+"' stroke='#cfc9bd' stroke-dasharray='2 4'/>");
+        s.push("<line x1='"+sx(-lfcCut)+"' y1='"+by0+"' x2='"+sx(-lfcCut)+"' y2='"+by1+"' stroke='#cfc9bd' stroke-dasharray='2 4'/>");
+        s.push("<line x1='"+bx0+"' y1='"+sy(pCut)+"' x2='"+bx1+"' y2='"+sy(pCut)+"' stroke='#cfc9bd' stroke-dasharray='2 4'/>");
+        // points
+        var sig=deSignificant(genes, res); var sigSet={}; sig.forEach(function(g){sigSet[g.symbol]=1;});
+        for (var p=0;p<genes.length;p++){
+            var g=genes[p]; var nlg=-Math.log10(Math.max(g.pAdj,1e-300));
+            var isSig=sigSet[g.symbol]; var isSel=(g.symbol===gDe.selectedGene);
+            var col=isSel ? "#23262b" : (isSig ? "#"+(g.log2FC>0?DE_A_COL:DE_B_COL) : "#cfcec8");
+            var op=isSel?1:(isSig?0.85:0.55); var rr=isSel?5:3;
+            s.push("<circle class='tpDeVolPt' data-sym='"+g.symbol+"' cx='"+sx(g.log2FC).toFixed(1)+"' cy='"+sy(nlg).toFixed(1)+"' r='"+rr+"' fill='"+col+"' fill-opacity='"+op+"' style='cursor:pointer'/>");
+        }
+        // No labels by default — with long gene IDs they pile up unreadably.
+        // Label only the gene the user has selected (clicked in the table or
+        // volcano); its point is also drawn larger and in ink above.
+        if (gDe.selectedGene) {
+            for (var t=0;t<genes.length;t++){
+                if (genes[t].symbol!==gDe.selectedGene) continue;
+                var g2=genes[t], nlg2=-Math.log10(Math.max(g2.pAdj,1e-300));
+                var anchor=g2.log2FC>0?"end":"start", dx=g2.log2FC>0?-7:7;
+                s.push("<text x='"+(sx(g2.log2FC)+dx).toFixed(1)+"' y='"+(sy(nlg2)-7).toFixed(1)+"' font-size='11' font-weight='600' font-family='monospace' fill='#23262b' text-anchor='"+anchor+"'>"+g2.symbol+"</text>");
+                break;
+            }
+        }
+        // axis titles
+        s.push("<text x='"+((bx0+bx1)/2)+"' y='262' font-size='9.5' fill='#8b8f96' text-anchor='middle'>log₂ fold change (A / B)</text>");
+        s.push("<text x='10' y='"+((by0+by1)/2)+"' font-size='9.5' fill='#8b8f96' text-anchor='middle' transform='rotate(-90 10 "+((by0+by1)/2)+")'>−log₁₀ p-adj</text>");
+        s.push("</svg>");
+        host.innerHTML=s.join("");
+        $("#tpDeVolcanoSvg .tpDeVolPt").click(function(){ deSelectGene($(this).data("sym")); });
+    }
+
+    function deRenderPlot(){ if (gDe.plotType==='ma') deRenderMA(); else deRenderVolcano(); }
+
+    function deRenderMA() {
+        // MA plot: x = average expression (log2 of the mean of the two group means),
+        // y = log2 fold-change. Uses meanA/meanB from the results.
+        var host=document.getElementById("tpDeVolcanoSvg"); if(!host) return;
+        var res=gDe.results; var genes=res.genes;
+        function avgExpr(g){ return Math.log2(((g.meanA||0)+(g.meanB||0))/2 + 1); }
+        var xMax=0, maxAbs=0, i;
+        for (i=0;i<genes.length;i++){ var ax=avgExpr(genes[i]); if(ax>xMax)xMax=ax; var a=Math.abs(genes[i].log2FC); if(a>maxAbs)maxAbs=a; }
+        xMax=xMax*1.05||1; var yMax=Math.ceil(maxAbs*1.08*2)/2||1;
+        var bx0=34,bx1=360,by0=10,by1=238;
+        function sx(v){ return bx0 + (v/xMax)*(bx1-bx0); }
+        function sy(v){ return (by0+by1)/2 - (v/yMax)*((by1-by0)/2); }
+        var lfcCut=res.lfcCut;
+        var s=[];
+        s.push("<svg viewBox='0 0 368 268' style='width:100%;height:auto'>");
+        s.push("<line x1='"+bx0+"' y1='"+by0+"' x2='"+bx0+"' y2='"+by1+"' stroke='#e2e0da'/>");
+        s.push("<line x1='"+bx0+"' y1='"+by1+"' x2='"+bx1+"' y2='"+by1+"' stroke='#e2e0da'/>");
+        // guides at logFC 0 and ±lfcCut
+        s.push("<line x1='"+bx0+"' y1='"+sy(0).toFixed(1)+"' x2='"+bx1+"' y2='"+sy(0).toFixed(1)+"' stroke='#bbb' stroke-dasharray='2 3'/>");
+        s.push("<line x1='"+bx0+"' y1='"+sy(lfcCut).toFixed(1)+"' x2='"+bx1+"' y2='"+sy(lfcCut).toFixed(1)+"' stroke='#cfc9bd' stroke-dasharray='2 4'/>");
+        s.push("<line x1='"+bx0+"' y1='"+sy(-lfcCut).toFixed(1)+"' x2='"+bx1+"' y2='"+sy(-lfcCut).toFixed(1)+"' stroke='#cfc9bd' stroke-dasharray='2 4'/>");
+        var sig=deSignificant(genes, res); var sigSet={}; sig.forEach(function(g){sigSet[g.symbol]=1;});
+        for (var p=0;p<genes.length;p++){
+            var g=genes[p]; var isSig=sigSet[g.symbol]; var isSel=(g.symbol===gDe.selectedGene);
+            var col=isSel ? "#23262b" : (isSig ? "#"+(g.log2FC>0?DE_A_COL:DE_B_COL) : "#cfcec8");
+            var op=isSel?1:(isSig?0.85:0.5); var rr=isSel?5:3;
+            s.push("<circle class='tpDeVolPt' data-sym='"+g.symbol+"' cx='"+sx(avgExpr(g)).toFixed(1)+"' cy='"+sy(g.log2FC).toFixed(1)+"' r='"+rr+"' fill='"+col+"' fill-opacity='"+op+"' style='cursor:pointer'/>");
+        }
+        if (gDe.selectedGene) {
+            for (var t=0;t<genes.length;t++){ if (genes[t].symbol!==gDe.selectedGene) continue;
+                var g2=genes[t];
+                s.push("<text x='"+(sx(avgExpr(g2))-7).toFixed(1)+"' y='"+(sy(g2.log2FC)-7).toFixed(1)+"' font-size='11' font-weight='600' font-family='monospace' fill='#23262b' text-anchor='end'>"+g2.symbol+"</text>"); break; }
+        }
+        s.push("<text x='"+((bx0+bx1)/2)+"' y='262' font-size='9.5' fill='#8b8f96' text-anchor='middle'>average expression (log₂)</text>");
+        s.push("<text x='10' y='"+((by0+by1)/2)+"' font-size='9.5' fill='#8b8f96' text-anchor='middle' transform='rotate(-90 10 "+((by0+by1)/2)+")'>log₂ fold change (A / B)</text>");
+        s.push("</svg>");
+        host.innerHTML=s.join("");
+        $("#tpDeVolcanoSvg .tpDeVolPt").click(function(){ deSelectGene($(this).data("sym")); });
+    }
+
+    // Per-gene A-vs-B expression distribution (violin). Uses the browser's real
+    // per-cell expression vectors (the same ones used to color the map) split by
+    // group membership — no backend needed.
+    function deRenderViolin(sym) {
+        var host=document.getElementById("tpDeViolin"); if(!host) return;
+        if (!sym) { host.innerHTML="<div class='tpDeVolHint' style='padding:8px 2px'>Click a gene above to see its expression in Group A vs Group B.</div>"; return; }
+        var mi=gDe.metaInfo;
+        if (!mi || !mi.arr) { host.innerHTML="<div class='tpDeVolHint' style='padding:8px 2px'>(distribution unavailable)</div>"; return; }
+        host.innerHTML="<div class='tpDeVolHint' style='padding:8px 2px'>Loading "+sym+"&hellip;</div>";
+        var geneId=sym;
+        if (db.geneSyns){ var ids=db.findGenesExact(sym); if (ids && ids.length) geneId=ids[0]; }
+        db.loadExprAndDiscretize(geneId, function(exprArr){
+            if (gDe.selectedGene!==sym) return; // selection changed while loading
+            var arr=mi.arr, aset=new Set(gDe.a), bset=new Set(gDe.b);
+            var aVals=[], bVals=[];
+            for (var i=0;i<exprArr.length;i++){
+                var t=arr[i], e=exprArr[i];
+                if (aset.has(t)) aVals.push(e);
+                else if (gDe.bMode==='rest') bVals.push(e);
+                else if (bset.has(t)) bVals.push(e);
+            }
+            deDrawViolin(host, sym, aVals, bVals);
+        }, null, "none");
+    }
+
+    function deViolinStats(vals) {
+        /* density (histogram) + median/mean for one group's expression values */
+        var n=vals.length, max=0, i;
+        for (i=0;i<n;i++) if (vals[i]>max) max=vals[i];
+        var s=vals.slice().sort(function(a,b){return a-b;});
+        var median = n ? (n%2 ? s[(n-1)/2] : (s[n/2-1]+s[n/2])/2) : 0;
+        var sum=0; for (i=0;i<n;i++) sum+=vals[i];
+        return { n:n, max:max, median:median, mean:n?sum/n:0, sorted:s };
+    }
+
+    function dePctl(sorted, q){ if(!sorted.length) return 0; return sorted[Math.min(sorted.length-1, Math.floor(q*sorted.length))]; }
+
+    function deDrawViolin(host, sym, aVals, bVals) {
+        var W=368, H=170, bx0=40, bx1=356, by0=14, by1=140;
+        var sa=deViolinStats(aVals), sb=deViolinStats(bVals);
+        // cap the y-axis at the 98th percentile so a few high-expressing cells
+        // don't flatten the whole distribution (matrices may be raw counts)
+        var yMax=Math.max(dePctl(sa.sorted,0.98), dePctl(sb.sorted,0.98));
+        if (yMax<=0) yMax=Math.max(sa.max, sb.max, 0.001);
+        yMax*=1.05;
+        var NB=26; // density bins
+        function density(sorted){
+            var d=new Array(NB).fill(0), n=sorted.length, j=0;
+            for (var i=0;i<n;i++){ var bi=Math.min(NB-1, Math.floor(sorted[i]/yMax*NB)); d[bi]++; }
+            // light 3-point smoothing; normalize to peak
+            var sm=d.map(function(v,k){ var a=d[k-1]||0,b=d[k+1]||0; return (a+2*v+b)/4; });
+            var pk=Math.max.apply(null, sm)||1;
+            return sm.map(function(v){ return v/pk; });
+        }
+        function sy(v){ return by1 - (v/yMax)*(by1-by0); }
+        function violin(cx, dens, col){
+            var halfW=52, out=[];
+            // right side down, left side up -> closed mirrored path
+            for (var k=0;k<NB;k++){ var y=sy((k+0.5)/NB*yMax); out.push((k===0?"M":"L")+(cx+dens[k]*halfW).toFixed(1)+" "+y.toFixed(1)); }
+            for (var k2=NB-1;k2>=0;k2--){ var y2=sy((k2+0.5)/NB*yMax); out.push("L"+(cx-dens[k2]*halfW).toFixed(1)+" "+y2.toFixed(1)); }
+            out.push("Z");
+            return "<path d='"+out.join(" ")+"' fill='#"+col+"' fill-opacity='0.35' stroke='#"+col+"' stroke-width='1'/>";
+        }
+        var s=[];
+        s.push("<svg viewBox='0 0 "+W+" "+H+"' style='width:100%;height:auto'>");
+        // y axis
+        s.push("<line x1='"+bx0+"' y1='"+by0+"' x2='"+bx0+"' y2='"+by1+"' stroke='#e2e0da'/>");
+        s.push("<line x1='"+bx0+"' y1='"+by1+"' x2='"+bx1+"' y2='"+by1+"' stroke='#e2e0da'/>");
+        var ticks=[0, yMax/2, yMax];
+        ticks.forEach(function(tv){ s.push("<text x='"+(bx0-4)+"' y='"+(sy(tv)+3).toFixed(1)+"' font-size='9' font-family='monospace' fill='#8b8f96' text-anchor='end'>"+tv.toFixed(1)+"</text>"); });
+        var cxA=Math.round(bx0+(bx1-bx0)*0.32), cxB=Math.round(bx0+(bx1-bx0)*0.72);
+        s.push(violin(cxA, density(sa.sorted), DE_A_COL));
+        s.push(violin(cxB, density(sb.sorted), DE_B_COL));
+        // median lines
+        s.push("<line x1='"+(cxA-16)+"' y1='"+sy(sa.median).toFixed(1)+"' x2='"+(cxA+16)+"' y2='"+sy(sa.median).toFixed(1)+"' stroke='#23262b' stroke-width='1.5'/>");
+        s.push("<line x1='"+(cxB-16)+"' y1='"+sy(sb.median).toFixed(1)+"' x2='"+(cxB+16)+"' y2='"+sy(sb.median).toFixed(1)+"' stroke='#23262b' stroke-width='1.5'/>");
+        // x labels
+        s.push("<text x='"+cxA+"' y='"+(by1+15)+"' font-size='11' font-weight='600' fill='#"+DE_A_COL+"' text-anchor='middle'>A</text>");
+        s.push("<text x='"+cxB+"' y='"+(by1+15)+"' font-size='11' font-weight='600' fill='#"+DE_B_COL+"' text-anchor='middle'>B</text>");
+        s.push("<text x='10' y='"+((by0+by1)/2)+"' font-size='9.5' fill='#8b8f96' text-anchor='middle' transform='rotate(-90 10 "+((by0+by1)/2)+")'>expression</text>");
+        s.push("</svg>");
+        // footer: gene + n + median
+        s.push("<div style='font-size:11px;color:#6b6f76;font-family:monospace;padding:2px 2px 0'>"+
+            sym+" &middot; A n="+deFmt(sa.n)+" med="+sa.median.toFixed(2)+" &middot; B n="+deFmt(sb.n)+" med="+sb.median.toFixed(2)+"</div>");
+        host.innerHTML=s.join("");
+    }
+
+    function deDownloadCsv() {
+        var res=gDe.results; if(!res) return;
+        var rows=res.genes.slice().sort(function(a,b){return a.pAdj-b.pAdj;});
+        var aName=res.aLabel, bName=res.bLabel, f=res.filters||{};
+        function q(s){ return '"'+String(s).replace(/"/g,'""')+'"'; }
+        function sig(g){ return (Math.abs(g.log2FC)>=res.lfcCut && g.pAdj<res.padjCut
+                                 && Math.max(g.pctA,g.pctB)>=res.minPct) ? 1 : 0; }
+        var excl=[];
+        if (f.exclude_mito) excl.push("mitochondrial");
+        if (f.exclude_ribo) excl.push("ribosomal");
+        if (f.exclude_hemo) excl.push("hemoglobin");
+        // self-documenting header (commented) so a downloaded file states exactly
+        // what it contains — same gene set the FDR is computed over
+        var lines=[
+            "# UCSC Cell Browser differential expression",
+            "# dataset: "+(db.name||""),
+            "# group A: "+aName+" (n="+deFmt(res.nA)+")",
+            "# group B: "+bName+" (n="+deFmt(res.nB)+")",
+            "# test: Wilcoxon rank-sum",
+            "# gene filters (define the tested set = the FDR denominator = the rows below):",
+            "#   detected in >= "+(f.min_gene_cells!=null?f.min_gene_cells:3)+" cells in a group",
+            "#   detected in >= "+Math.round((f.min_pct!=null?f.min_pct:res.minPct||0)*100)+"% of a group",
+            "#   excluded gene classes: "+(excl.length?excl.join(", "):"none"),
+            "# p_adj: Benjamini-Hochberg FDR over the "+rows.length+" genes below",
+            "# significant column: 1 = |log2FC| >= "+res.lfcCut+" and p_adj < "+res.padjCut
+        ];
+        if (res.cached) lines.push("# note: significant-gene subset of a saved comparison");
+        lines.push("gene,log2FC,auc,p_adj,mean_A,mean_B,pct_A,pct_B,significant,group_A,group_B,test");
+        for (var i=0;i<rows.length;i++){
+            var g=rows[i];
+            lines.push([g.symbol, g.log2FC, g.auc, g.pAdj, g.meanA, g.meanB, g.pctA, g.pctB, sig(g),
+                q(aName), q(bName), res.test].join(","));
+        }
+        var blob=new Blob([lines.join("\n")], {type:"text/csv"});
+        var a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+        a.download="cellbrowser_DE_results.csv"; document.body.appendChild(a); a.click();
+        setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 100);
+    }
+
+    // ---- empty state (§7) ----------------------------------------------
+
+    function deEmptyStateHtml(res) {
+        var canLoosen = deSignificant(res.genes, {lfcCut:0.25, padjCut:res.padjCut, minPct:res.minPct}).length>0;
+        var h=[];
+        h.push("<div class='tpDeEmpty'>");
+        h.push("<h3>No genes passed the thresholds</h3>");
+        h.push("<p>The rank-sum test found no gene with |log₂FC| ≥ "+res.lfcCut+" and adjusted p < "+res.padjCut+
+               ". These two populations may be transcriptionally similar, or the groups may be too small to reach significance.</p>");
+        h.push("<div class='tpDeEmptyBtns'>");
+        if (canLoosen)
+            h.push("<button class='tpDeLoosen' id='tpDeLoosen'>Loosen to |log₂FC| ≥ 0.25, p-adj < "+res.padjCut+"</button>");
+        h.push("<button class='tpDeEditGroups' id='tpDeEditGroups'>Edit groups</button>");
+        h.push("</div></div>");
+        return h.join("");
+    }
+
+    function deLoosen() {
+        // re-filter the EXISTING result in place (p-values unchanged) — no re-run
+        gDe.results.lfcCut=0.25;
+        gDe.lfcCut=0.25;
+        deRenderResults();
+        deRenderBody();
+    }
+
+    // ---- gene selection recolors scatter (§6) --------------------------
+
+    function deSelectGene(sym) {
+        if (!sym) return;
+        // clicking the already-selected gene toggles the highlight off
+        if (sym===gDe.selectedGene) { deClearGene(); return; }
+        gDe.selectedGene=sym;
+        $("#tpDeTbody tr").removeClass("tpDeRowSel");
+        $("#tpDeTbody tr[data-sym='"+sym+"']").addClass("tpDeRowSel");
+        deRenderPlot();       // highlight the point in the volcano/MA
+        deRenderViolin(sym);  // show the gene's A-vs-B distribution in the pop-up
+        // We deliberately do NOT recolor the map by the gene: the results pop-up
+        // covers the canvas (so nobody sees it) and it would replace the grouping
+        // legend needed to build the next comparison. The violin is the per-gene view.
+    }
+
+    function deClearGene(silent) {
+        gDe.selectedGene=null;
+        if (silent) return;
+        $("#tpDeTbody tr").removeClass("tpDeRowSel");
+        if (gDe.active && gDe.results) { deRenderPlot(); deRenderViolin(null); }
+    }
+
     // only export these functions
     return {
         "main":main,
         "selectizeClear" : selectizeClear,
-        "selectizeSetValue" : selectizeSetValue
+        "selectizeSetValue" : selectizeSetValue,
+        "deOpen" : deOpen
     }
 
 }();

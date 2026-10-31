@@ -1,0 +1,29 @@
+# systemd unit for the Cell Browser DE worker daemon (#24912).
+# Preferred over the cron watchdog on hosts where you can install a unit as root.
+# systemd's Restart=always covers crashes; the pidfile/heartbeat are only needed
+# by the cron fallback, so they can be omitted from de.env here.
+#
+# Install (as root):
+#   cp deWorker.service /etc/systemd/system/deWorker.service   # edit paths first
+#   systemctl daemon-reload
+#   systemctl enable --now deWorker.service
+#   journalctl -u deWorker -f
+[Unit]
+Description=Cell Browser differential-expression worker (#24912)
+After=network.target
+
+[Service]
+Type=simple
+User=otto
+# The queue location, scanpy python, dataset roots, timeouts. Same file the cron
+# watchdog sources. Keep it non-world-readable if it ever holds a secret.
+EnvironmentFile=/hive/data/inside/cells/cbAnnotServer/de.env
+ExecStart=/hive/data/inside/cells/cbAnnotServer/cellBrowser/src/cbAnnotServer/de/deploy/runDeWorker.sh
+Restart=always
+RestartSec=5
+# Give a long-running job room; SIGTERM lets the daemon finish the current job.
+TimeoutStopSec=650
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
