@@ -52,22 +52,20 @@ showLogin=off
 
 # Show the on-the-fly differential expression feature (Redmine #24912): the
 # "Differential expression" item in the Tools menu and the Tools tab. Like
-# showLogin, this is a feature flag that defaults to OFF, so the still-in-
-# progress DE UI does not appear on installs that have not opted in. Turn it on
-# only where it is ready to be seen.
+# showLogin, this is a feature flag that defaults to OFF. Turn it on together
+# with deUrl below; without deUrl the tool only produces placeholder numbers.
 #   on / true / 1 / yes       = show the DE feature
 #   off / anything / absent   = hide it
-# Note: even with the UI shown, the statistics are placeholder until deUrl below
-# points at a real compute backend.
 showDiffExp=off
 
 # Endpoint for the on-the-fly differential expression backend (Redmine #24912).
 # The frontend POSTs a DE job spec here and polls the same URL for status and
 # results. This is a site-wide service (one backend per server), so it belongs
 # here and not in any dataset's cellbrowser.conf.
-#   absent / empty = no backend: the "Differential expression" tool still opens
-#                    and builds groups, but a run produces placeholder results
-#                    so the UI can be demoed before the backend is deployed.
-#   a URL          = use this DE service, e.g.:
-#                      deUrl=https://cells.ucsc.edu/cgi-bin/cbDe
+#   a path / URL   = use this DE service. On a site where Apache proxies /api to
+#                    cbAnnotServer (cells.ucsc.edu, cells-test), that is:
+#                      deUrl=/api/de
+#   absent / empty = no backend: the tool still opens and builds groups, but a
+#                    run returns made-up placeholder numbers, for demoing the UI
+#                    only. Never leave it empty on a site with showDiffExp=on.
 deUrl=

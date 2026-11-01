@@ -17,18 +17,35 @@ The frontend (cellBrowser.js deSubmitJobHttp) speaks one URL:
 Config keys (app.config or env, env wins for the standalone dev server):
     DE_QUEUE_DIR    job queue root (enables *direct* mode)
     DE_RELAY_URL    direct-instance URL (enables *proxy* mode)
-    DE_RELAY_KEY    shared secret sent as X-DE-Key on the relayed call (optional)
+    DE_RELAY_KEY    shared secret, set to the same value on both tiers. The proxy
+                    sends it as X-DE-Key along with X-DE-Requester (who really
+                    asked); the direct side believes X-DE-Requester only when the
+                    key matches. It is not required on every request, because
+                    browsers on the dev-side sites post to the direct instance
+                    without one.
+    DE_DATA_HOSTS   hosts a job's dataUrl may point at (see deCache.checkDataUrl)
+    DE_MAX_JOBS_PER_REQUESTER  queued+running jobs one person may have (2)
+    DE_MAX_JOBS_TOTAL          queued+running jobs across everyone (20)
+    DE_QUEUE_STALE_SEC         unfinished jobs older than this stop counting
+                               toward those limits (3600)
 
 The builder spec (from deBuildSpec) is translated to the worker's spec.json shape
 (pop1/pop2 selectors + method + parameters). de_jobs DB tracking / account tie-in
 is added by the production (proxy) instance later; direct mode is pure filesystem.
 """
 import os
+import re
+import hmac
 import json
 import time
 import secrets
 
 from flask import Blueprint, request, jsonify, current_app
+
+try:
+    from . import deCache
+except ImportError:          # run standalone (python de_submit.py)
+    import deCache
 
 bp = Blueprint("de", __name__)
 
@@ -38,6 +55,33 @@ _TEST_TO_METHOD = {"wilcox": "wilcoxon", "wilcoxon": "wilcoxon"}
 
 def _cfg(key, default=None):
     return current_app.config.get(key) or os.environ.get(key) or default
+
+
+def _cfgInt(key, default):
+    try:
+        return int(_cfg(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+# A dataset name is a docroot-relative path, possibly collection-nested (a/b).
+# Anything else (absolute paths, "..") could walk the worker's local-docroot
+# fallback out of the docroot.
+_DATASET_RE = re.compile(r"^[A-Za-z0-9_.+-]+(/[A-Za-z0-9_.+-]+)*$")
+
+
+def _checkSpec(fe):
+    """Return None if a builder spec is safe to queue, else a reason it isn't."""
+    ds = fe.get("dataset")
+    if not isinstance(ds, str) or not _DATASET_RE.match(ds) \
+            or any(p in (".", "..") for p in ds.split("/")):
+        return "bad dataset name"
+    dataUrl = fe.get("dataUrl")
+    if dataUrl is not None:
+        if not isinstance(dataUrl, str):
+            return "bad dataUrl"
+        return deCache.checkDataUrl(dataUrl, deCache.dataHosts(_cfg("DE_DATA_HOSTS")))
+    return None
 
 
 def translateSpec(fe):
@@ -114,9 +158,11 @@ def _jobDir(queue, jobId):
     return os.path.join(queue, jobId)
 
 
-def _requesterMeta():
-    """Who submitted this job, for the DE job log: the logged-in email if there is
-    a session, else the client IP (honoring X-Forwarded-For behind the proxy)."""
+def _localRequester():
+    """Who is asking, as seen by this instance: the logged-in email if there is a
+    session, else the client IP. Behind Apache the client IP is the LAST
+    X-Forwarded-For entry, the one our own proxy appended; earlier entries come
+    from the client and can say anything."""
     user = None
     try:
         from flask_login import current_user
@@ -125,9 +171,80 @@ def _requesterMeta():
     except Exception:
         user = None
     xff = request.headers.get("X-Forwarded-For", "")
-    remote = (xff.split(",")[0].strip() if xff else request.remote_addr) or ""
-    return {"requester": user, "remote": remote,
-            "submitted_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+    remote = (xff.split(",")[-1].strip() if xff else request.remote_addr) or ""
+    return {"requester": user, "remote": remote}
+
+
+def _relayKeyOk():
+    """True if the request carries the shared relay key (and one is configured)."""
+    key = _cfg("DE_RELAY_KEY")
+    got = request.headers.get("X-DE-Key", "")
+    return bool(key) and hmac.compare_digest(got.encode(), key.encode())
+
+
+def _requesterMeta():
+    """Who submitted this job, for the DE job log and the queue limits. A request
+    relayed by the production instance carries the real user in X-DE-Requester;
+    that is believed only when the relay key matches, otherwise anyone could
+    claim to be anyone and dodge the per-requester limit."""
+    who = None
+    if request.headers.get("X-DE-Requester") and _relayKeyOk():
+        try:
+            fwd = json.loads(request.headers["X-DE-Requester"])
+            who = {"requester": (str(fwd["requester"])[:200] if fwd.get("requester") else None),
+                   "remote": str(fwd.get("remote") or "")[:100]}
+        except (ValueError, TypeError, AttributeError, KeyError):
+            who = None
+    if who is None:
+        who = _localRequester()
+    who["submitted_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    return who
+
+
+def _requesterKey(meta):
+    """The identity the per-requester limit counts: the account if signed in,
+    else the IP address."""
+    return (meta or {}).get("requester") or (meta or {}).get("remote") or "unknown"
+
+
+def _queueBusy(queue, who):
+    """Return a message if the queue is too full to take another job from `who`,
+    else None. Counts unfinished jobs: queued or running, not done/failed/canceled.
+    Jobs older than DE_QUEUE_STALE_SEC are ignored so a dead job can't block the
+    queue forever. Two submits arriving at the same instant can both get in, so
+    the limits are approximate. That's fine, since they only exist to stop one
+    person from filling the queue."""
+    perUser = _cfgInt("DE_MAX_JOBS_PER_REQUESTER", 2)
+    total = _cfgInt("DE_MAX_JOBS_TOTAL", 20)
+    cutoff = time.time() - _cfgInt("DE_QUEUE_STALE_SEC", 3600)
+    nAll = nMine = 0
+    try:
+        entries = list(os.scandir(queue))
+    except OSError:
+        return None
+    for e in entries:
+        spec = os.path.join(e.path, "spec.json")
+        try:
+            if not e.is_dir() or os.path.getmtime(spec) < cutoff:
+                continue
+        except OSError:
+            continue
+        st = _readJson(os.path.join(e.path, "status.json")) or {}
+        if st.get("state") in ("done", "failed", "canceled"):
+            continue
+        nAll += 1
+        try:
+            with open(os.path.join(e.path, "requester")) as fh:
+                if fh.read() == who:
+                    nMine += 1
+        except OSError:
+            pass
+    if perUser > 0 and nMine >= perUser:
+        return ("You already have %d comparisons running or waiting. "
+                "Please wait for one to finish." % nMine)
+    if total > 0 and nAll >= total:
+        return "The server is busy with other comparisons right now. Please try again in a few minutes."
+    return None
 
 
 def _submitDirect(queue, feSpec, meta=None):
@@ -137,6 +254,10 @@ def _submitDirect(queue, feSpec, meta=None):
     jobId = "de_" + secrets.token_hex(6)
     d = _jobDir(queue, jobId)
     os.makedirs(d, exist_ok=True)
+    # small side file so _queueBusy can count jobs per requester without
+    # parsing every spec (a cellIds spec can be megabytes)
+    with open(os.path.join(d, "requester"), "w") as fh:
+        fh.write(_requesterKey(meta))
     tmp = os.path.join(d, "spec.json.tmp")
     with open(tmp, "w") as fh:
         json.dump(spec, fh)
@@ -183,12 +304,16 @@ def _readJson(path):
 # ---- proxy mode (no /hive) -----------------------------------------------
 
 def _submitProxy(relay, key, feSpec):
+    """Forward a submit. Returns (body, http status) so a refusal from the
+    direct side (e.g. 429 queue full) reaches the browser unchanged."""
     import requests
     headers = {"Content-Type": "application/json"}
     if key:
         headers["X-DE-Key"] = key
+        # who really asked; the direct side only sees this instance's address
+        headers["X-DE-Requester"] = json.dumps(_localRequester())
     r = requests.post(relay, json=feSpec, headers=headers, timeout=15)
-    return r.json()
+    return r.json(), r.status_code
 
 
 def _statusProxy(relay, key, jobId):
@@ -232,11 +357,19 @@ def de():
 
     if request.method == "POST":
         feSpec = request.get_json(force=True, silent=True) or {}
+        why = _checkSpec(feSpec)
+        if why:
+            return jsonify({"status": "failed", "error": why}), 400
         try:
             if relay:
-                return jsonify(_submitProxy(relay, key, feSpec))
+                body, code = _submitProxy(relay, key, feSpec)
+                return jsonify(body), code
             if queue:
-                return jsonify(_submitDirect(queue, feSpec, _requesterMeta()))
+                meta = _requesterMeta()
+                busy = _queueBusy(queue, _requesterKey(meta))
+                if busy:
+                    return jsonify({"status": "failed", "error": busy}), 429
+                return jsonify(_submitDirect(queue, feSpec, meta))
         except KeyError as e:
             return jsonify({"status": "failed", "error": "missing field %s" % e}), 400
         return jsonify({"status": "failed", "error": "DE backend not configured"}), 503

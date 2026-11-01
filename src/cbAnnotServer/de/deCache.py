@@ -21,15 +21,67 @@ new directory and old versions age out. The cache is bounded by a byte budget an
 evicted least-recently-used (by directory mtime, bumped on every hit).
 """
 import fcntl
+import fnmatch
 import hashlib
 import json
 import os
 import shutil
+import urllib.error
 import urllib.parse
 import urllib.request
 
 # The four files CbExprReader needs from a cbBuild output directory.
 _NEEDED = ("dataset.json", "exprMatrix.json", "exprMatrix.bin", "meta.tsv")
+
+# Hosts the worker may fetch a dataset from. The dataUrl comes from the browser,
+# and the worker sits inside the firewall, so without this check anyone who can
+# reach /api/de could make the worker fetch an internal URL. Override with
+# DE_DATA_HOSTS (comma-separated, shell-style wildcards). "cells-*.gi.ucsc.edu"
+# covers cells-test, cells-beta and the personal sandboxes; the "*." entries
+# cover the project subdomains (e.g. sfari.cells-test.gi.ucsc.edu).
+DEFAULT_DATA_HOSTS = ("cells.ucsc.edu,*.cells.ucsc.edu,cells-*.gi.ucsc.edu,"
+                      "*.cells-test.gi.ucsc.edu,*.cells-beta.gi.ucsc.edu")
+
+
+def dataHosts(value=None):
+    """The allowed-host patterns, from value, else DE_DATA_HOSTS, else the default."""
+    value = value or os.environ.get("DE_DATA_HOSTS") or DEFAULT_DATA_HOSTS
+    return [h.strip().lower() for h in value.split(",") if h.strip()]
+
+
+def checkDataUrl(dataUrl, hosts=None):
+    """Return None if dataUrl is an http(s) URL on an allowed host and default
+    port, else a short reason it was refused. hosts is a list from dataHosts()."""
+    if hosts is None:
+        hosts = dataHosts()
+    try:
+        u = urllib.parse.urlparse(dataUrl)
+        port = u.port
+    except (ValueError, TypeError, AttributeError):
+        return "dataUrl is not a valid URL"
+    if u.scheme not in ("http", "https"):
+        return "dataUrl must be http or https"
+    if u.username or u.password:
+        return "dataUrl may not contain a user name or password"
+    if port not in (None, 80, 443):
+        return "dataUrl may not name a port"
+    host = (u.hostname or "").lower()
+    if not host or not any(fnmatch.fnmatchcase(host, pat) for pat in hosts):
+        return "dataUrl host %r is not an allowed Cell Browser host" % host
+    return None
+
+
+class _CheckedRedirect(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only if its target passes checkDataUrl too, so an
+    allowed host can't bounce the worker to a URL it would have refused."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        why = checkDataUrl(newurl)
+        if why:
+            raise urllib.error.HTTPError(newurl, code, "redirect refused: " + why, headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_opener = urllib.request.build_opener(_CheckedRedirect)
 
 # Streaming download chunk. exprMatrix.bin can be tens of GB, so never read a
 # whole file into memory -- copy in fixed blocks straight to disk.
@@ -49,7 +101,7 @@ def _fetchToFile(url, destPath, onBytes=None):
     """Stream url to destPath (a .tmp path), chunked. Calls onBytes(nSoFar) as it
     goes so the caller can report progress. Raises on any HTTP/network error."""
     req = urllib.request.Request(url, headers={"User-Agent": "cbDeWorker"})
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with _opener.open(req, timeout=120) as resp:
         got = 0
         with open(destPath, "wb") as out:
             while True:
@@ -65,7 +117,7 @@ def _fetchToFile(url, destPath, onBytes=None):
 
 def _fetchJson(url):
     req = urllib.request.Request(url, headers={"User-Agent": "cbDeWorker"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with _opener.open(req, timeout=60) as resp:
         return json.load(resp)
 
 
@@ -150,7 +202,12 @@ def ensureDataset(dataUrl, cacheRoot, maxBytes=0, status=None):
     cacheRoot directory on /hive to cache under
     maxBytes  LRU budget for the whole cache (0 = unbounded)
     status    optional callback status(msg) for progress (e.g. bytes downloaded)
+
+    Raises ValueError if dataUrl is not on an allowed host (see checkDataUrl).
     """
+    why = checkDataUrl(dataUrl)
+    if why:
+        raise ValueError(why)
     base = dataUrl.rstrip("/")
     # dataset.json is small and tells us the current build md5 (our version key),
     # so always fetch it fresh -- that is how a rebuilt dataset is detected.

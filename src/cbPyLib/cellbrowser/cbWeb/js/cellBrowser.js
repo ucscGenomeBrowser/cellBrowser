@@ -15741,7 +15741,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
         fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(spec)})
             .then(function(r){ return r.json(); })
             .then(function(sub){
-                if (!sub || !sub.jobId) throw new Error("no jobId returned");
+                // a refusal (queue full, bad request) carries its reason in .error
+                if (!sub || !sub.jobId) throw new Error((sub && sub.error) || "no jobId returned");
                 gDe.jobId = sub.jobId;    // so Cancel can tell the backend to stop it
                 var poll=function(){
                     if (gDe.canceled) return;
@@ -15761,7 +15762,7 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
                         }).catch(function(e){ onErr(""+e); });
                 };
                 poll();
-            }).catch(function(e){ onErr(""+e); });
+            }).catch(function(e){ onErr((e && e.message) || ""+e); });
     }
 
     function deHash(str){ var h=2166136261>>>0; for(var i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return (h>>>0)/4294967296; }

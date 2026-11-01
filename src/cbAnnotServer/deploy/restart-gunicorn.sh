@@ -29,13 +29,19 @@ start_via_watchdog() {
 }
 
 check_health() {
-    sleep 2
-    if curl -fsS --max-time 5 "$HEALTH_URL" >/dev/null 2>&1; then
-        echo "OK: gunicorn healthy at $HEALTH_URL"
-    else
-        echo "WARNING: health check failed at $HEALTH_URL — check the logs"
-        return 1
-    fi
+    # Workers can take several seconds to boot (imports, db.create_all), so a
+    # single check 2s after the reload reported failure on a reload that was
+    # merely slow. Retry once a second for up to CBANNOT_HEALTH_WAIT seconds.
+    local wait="${CBANNOT_HEALTH_WAIT:-15}" i
+    for ((i = 1; i <= wait; i++)); do
+        sleep 1
+        if curl -fsS --max-time 5 "$HEALTH_URL" >/dev/null 2>&1; then
+            echo "OK: gunicorn healthy at $HEALTH_URL (after ${i}s)"
+            return 0
+        fi
+    done
+    echo "WARNING: health check still failing at $HEALTH_URL after ${wait}s — check the logs"
+    return 1
 }
 
 MPID="$(find_master)"

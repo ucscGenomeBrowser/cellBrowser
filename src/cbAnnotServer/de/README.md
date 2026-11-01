@@ -176,6 +176,27 @@ It translates the builder spec (groupA/groupB/field) into the worker `spec.json`
 shape, including one-vs-rest and the per-group metadata filter. Run the standalone
 dev server (direct mode) with `python de_submit.py` (needs Flask).
 
+Because production forwards jobs from the open internet to a worker inside the
+firewall, every submit is checked before it is queued:
+
+- **Dataset and dataUrl.** The dataset name must be a plain docroot-relative path
+  (no `..`, not absolute). The dataUrl must be http(s), on the default port, with
+  no user name, on a host matching `DE_DATA_HOSTS` (comma-separated wildcards;
+  default in `deCache.DEFAULT_DATA_HOSTS`: cells.ucsc.edu, cells-*.gi.ucsc.edu and
+  their project subdomains). The worker repeats the check in
+  `deCache.ensureDataset` and refuses redirects to hosts off the list. Without
+  this, anyone could make hgcompute-08 fetch an internal URL.
+- **Queue limits** (direct mode): `DE_MAX_JOBS_PER_REQUESTER` (2) queued+running
+  jobs per person, `DE_MAX_JOBS_TOTAL` (20) overall. Over either, the POST
+  returns 429 with a message the UI shows. A person is the signed-in account, or
+  the client IP if anonymous. Unfinished jobs older than `DE_QUEUE_STALE_SEC`
+  (3600) stop counting, so a dead job can't jam the queue.
+- **Who asked, across the relay.** Behind Apache the client IP is the *last*
+  X-Forwarded-For entry. The proxy tier sends the real user and IP as
+  `X-DE-Requester` with `X-DE-Key`; the direct tier believes it only when the key
+  matches its own `DE_RELAY_KEY`, so set the same value on both. Without a valid
+  key the header is ignored and the job is charged to the caller's own address.
+
 Verified 2026-08-12: full loop on hgwdev — POST spec → direct Flask → queue →
 worker → poll done, real Wilcoxon on adipose-tissue (Diabetic vs rest, 11,979 vs
 14,371, 2006 genes).
@@ -187,6 +208,5 @@ worker → poll done, real Wilcoxon on adipose-tissue (Diabetic vs rest, 11,979 
 - Production cbAnnotServer registers the blueprint in proxy mode (`DE_RELAY_URL`)
   and sets `deUrl` in cb.conf; the dev-side `de_submit.py` runs in direct mode.
 - `de_jobs` table + account tie-in on the production (proxy) tier (per plan).
-- Auth on the proxy→direct call (`X-DE-Key` shared secret is stubbed in).
 - Statistics: pseudoreplication caveat in the UI; Memento / pseudobulk as the
   Phase-2 sounder method. Other scanpy tests (t-test, logreg) are easy adds.

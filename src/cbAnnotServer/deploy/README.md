@@ -65,6 +65,11 @@ cron watchdog sources). See `config.py` for the full list.
 | `CBANNOT_MAIL_PORT` | `25` for the local MTA |
 | `CBANNOT_MAIL_FROM` | envelope/from address, e.g. `noreply@cells.ucsc.edu` |
 | `CBANNOT_PROVIDERS_CONF` | path to the sign-in provider conf file; default `/hive/data/inside/cells/cbAnnotServer/providers.conf` (see OAuth below) |
+| `DE_QUEUE_DIR` | dev side only (has `/hive`): the DE job queue, e.g. `/hive/data/inside/cells/deJobs`. Selects *direct* mode |
+| `DE_RELAY_URL` | production only (no `/hive`): the dev-side DE endpoint, e.g. `https://cells-test.gi.ucsc.edu/api/de`. Selects *proxy* mode |
+| `DE_RELAY_KEY` | the same random string on both tiers; lets the dev side trust who the production side says asked (see `de/README.md`) |
+| `DE_DATA_HOSTS` | optional; hosts a DE job may fetch data from. The default covers the cells sites |
+| `DE_MAX_JOBS_PER_REQUESTER` / `DE_MAX_JOBS_TOTAL` | optional, dev side; queue limits (2 / 20) |
 
 ## Email (verification / password reset)
 
