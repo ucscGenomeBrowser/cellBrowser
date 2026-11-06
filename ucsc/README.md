@@ -21,3 +21,28 @@ edited in place.
 
 That directory is for otto only. Keep running these scripts from your own
 checkout, and do not put the shared directory on your PATH.
+
+## The login/annotation/DE server
+
+otto also runs the Cell Browser server in src/cbAnnotServer: gunicorn on
+hgwdev (login, custom annotations, the DE API) and the DE worker on
+hgcompute-08. Both run from /cluster/home/otto/cellsServer, which only otto
+can write. It holds the installed code, the two pythons (venv for the server,
+deenv for the DE worker), settings (etc/), the database (db/), the DE job
+queue (deJobs/) and logs. Only the DE download cache is elsewhere, on /hive.
+
+To change what they run, commit and push, then in your checkout:
+
+    git fetch
+    cd ucsc
+    sudo -u otto make install-annot
+
+and restart both with the commands it prints. otto can't write to your
+checkout, so the fetch has to be yours. `sudo -u otto make setup-annot` creates
+the directory and builds both pythons; run it once, and again after changing
+either requirements.txt. `make validate-annot` lists any difference from your
+checkout, and cbCheckInstalled checks this copy against develop too.
+
+Settings, database and job queue are readable only by otto: the settings hold
+the session key, and the database holds password hashes. Code and logs are
+group-readable.

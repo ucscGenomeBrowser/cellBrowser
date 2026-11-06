@@ -20,7 +20,7 @@ Claiming is restart-safe: a job is claimed by atomically creating a `worker.lock
 or a stale lock (worker died mid-job).
 
 Config via environment (all optional):
-    DE_JOBS_DIR       job queue root         (default /hive/data/inside/cells/deJobs)
+    DE_JOBS_DIR       job queue root         (default /cluster/home/otto/cellsServer/deJobs)
     DE_CBBUILD_DIR    cbBuild web output root (dataset dirs; runDeJob reads it)
     DE_WORKER_PYTHON  python that has scanpy (default this interpreter)
     DE_POLL_SEC       queue poll interval    (default 2)
@@ -39,7 +39,7 @@ import signal
 import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-JOBS_DIR   = os.environ.get("DE_JOBS_DIR", "/hive/data/inside/cells/deJobs")
+JOBS_DIR   = os.environ.get("DE_JOBS_DIR", "/cluster/home/otto/cellsServer/deJobs")
 # Append-only TSV, one row per finished job: who ran what, on which data, how long.
 DE_JOB_LOG = os.environ.get("DE_JOB_LOG",
     os.path.join(os.path.dirname(JOBS_DIR.rstrip("/")) or ".", "deJobs.tsv"))

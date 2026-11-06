@@ -139,7 +139,7 @@ def default_conf_path():
     otherwise: next to the database, on /hive, off the web tree."""
     return os.environ.get(
         "CBANNOT_PROVIDERS_CONF",
-        "/hive/data/inside/cells/cbAnnotServer/providers.conf")
+        "/cluster/home/otto/cellsServer/etc/providers.conf")
 
 
 def _spec_from(slug, values, warn):

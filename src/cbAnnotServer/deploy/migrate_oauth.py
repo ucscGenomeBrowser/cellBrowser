@@ -12,7 +12,7 @@ every row, then recreates the indexes.
 
 Usage (run once, with the service stopped, after backing up the DB):
 
-    CBANNOT_DATABASE_URI=sqlite:////hive/data/inside/cells/cbAnnotServer/cbAnnot.db \\
+    CBANNOT_DATABASE_URI=sqlite:////cluster/home/otto/cellsServer/db/cbAnnot.db \\
         python3 deploy/migrate_oauth.py
 
 It is idempotent: if `oauth_provider` already exists it reports "already
@@ -57,7 +57,7 @@ CREATE TABLE users_new (
 
 def main():
     uri = os.environ.get("CBANNOT_DATABASE_URI") \
-        or "sqlite:////hive/data/inside/cells/cbAnnotServer/cbAnnot.db"
+        or "sqlite:////cluster/home/otto/cellsServer/db/cbAnnot.db"
     path = db_path_from_uri(uri)
     if not os.path.exists(path):
         sys.exit(f"database not found: {path}")

@@ -11,12 +11,40 @@
 #
 # After fixing one of these scripts: commit, push, then "make install". A push
 # alone does not change what cron runs.
+#
+# The login/annotation/DE server (src/cbAnnotServer) is installed by separate
+# targets, run as otto, into CELLSSERVER, a directory only otto can write
+# (RM #38664). Everything the server and the DE worker use lives there: code,
+# both pythons, settings, database, job queue and logs. Only the DE download
+# cache stays on /hive.
+#
+#   git fetch                                    first, as yourself; otto can't
+#   sudo -u otto make setup-annot                once, and after changing either
+#                                                requirements.txt: build the venvs
+#   sudo -u otto make install-annot              copy the committed src/cbAnnotServer
+#                                                to ANNOT, record it in INSTALLED.txt,
+#                                                then restart it with the commands it prints
+#   make validate-annot                          report any difference from this checkout
+#
+# Unlike SCRIPTS, nothing there is group-writable: the server keeps passwords
+# and the session key, and anyone who could edit its code or settings could run
+# code as otto. Logs and code are group-readable; settings, database and job
+# queue are otto-only.
 
 PREFIX = /hive/data/inside/cells/scripts
 SCRIPTS = updateNewsSec cbPingHidden tabulate_facets.pl cbCheckInstalled
 GROUP = genecats
 # the venv is built from the system python, never from whatever conda is on PATH
 SYSPYTHON = /usr/bin/python3
+CELLSSERVER = /cluster/home/otto/cellsServer
+ANNOT = ${CELLSSERVER}/cbAnnotServer
+ANNOTSRC = src/cbAnnotServer
+# the DE worker's python; hgwdev and hgcompute-08 both have it
+DEPYTHON = /usr/bin/python3.13
+# otto runs git in someone else's checkout; -c (this command only) stops git
+# refusing it as "dubious ownership". GIT_OPTIONAL_LOCKS=0 keeps it from trying
+# to write the checkout's index.
+GIT = GIT_OPTIONAL_LOCKS=0 git -C $(abspath ..) -c safe.directory='*'
 
 install: check-prefix check-clean
 	umask 002; for s in ${SCRIPTS}; do install -m 775 $$s ${PREFIX}/$$s; done
@@ -47,4 +75,53 @@ check-clean:
 check-prefix:
 	@test -x ${PREFIX}/env/bin/python3 || { echo "${PREFIX} is not set up; run 'make setup' once first"; exit 1; }
 
-.PHONY: install validate setup check-clean check-prefix
+# The server's code goes in as committed (git archive), never from the working
+# tree, so venv/, __pycache__ and stray local files can't come along. A fresh
+# copy is built next to ANNOT and synced over it; ANNOT/venv is left alone.
+install-annot: check-otto check-annot-prefix check-clean-annot
+	rm -rf ${ANNOT}.new
+	umask 027; mkdir ${ANNOT}.new && ${GIT} archive HEAD:${ANNOTSRC} | tar -x -C ${ANNOT}.new
+	umask 027; rsync -rlpt --delete --exclude /venv/ ${ANNOT}.new/ ${ANNOT}/
+	rm -rf ${ANNOT}.new
+	umask 027; cd ${ANNOT} && files=`find . -path ./venv -prune -o -type f ! -name INSTALLED.txt -print | sed 's|^\./||' | sort` && \
+	  ( echo "commit `${GIT} rev-parse HEAD`"; \
+	    echo "installed `date '+%Y-%m-%d %H:%M'` by $${SUDO_USER:-$$USER}"; \
+	    md5sum $$files ) > INSTALLED.txt
+	@head -2 ${ANNOT}/INSTALLED.txt
+	@echo "Now restart both, as otto:"
+	@echo "  ${ANNOT}/deploy/restart-gunicorn.sh hard          (on hgwdev)"
+	@echo "  ${ANNOT}/de/deploy/restart-worker.sh              (on hgcompute-08)"
+
+validate-annot: check-annot-prefix
+	@tmp=`mktemp -d` && ${GIT} archive HEAD:${ANNOTSRC} | tar -x -C $$tmp && \
+	  { diff -rq --exclude venv --exclude __pycache__ --exclude INSTALLED.txt $$tmp ${ANNOT}; status=$$?; \
+	    rm -rf $$tmp; exit $$status; }
+
+# settings, database, job queue and pid files are otto-only; code and logs are
+# readable by the group. Safe to rerun; it leaves settings and data alone.
+setup-annot: check-otto
+	umask 027; mkdir -p ${CELLSSERVER} ${ANNOT} ${CELLSSERVER}/logs
+	chmod 750 ${CELLSSERVER} ${ANNOT} ${CELLSSERVER}/logs
+	umask 077; mkdir -p ${CELLSSERVER}/etc ${CELLSSERVER}/db ${CELLSSERVER}/deJobs ${CELLSSERVER}/run
+	umask 027; ${SYSPYTHON} -m venv ${ANNOT}/venv
+	umask 027; ${ANNOT}/venv/bin/pip install -q --upgrade pip
+	umask 027; ${ANNOT}/venv/bin/pip install -q -r ../${ANNOTSRC}/requirements.txt
+	umask 027; ${DEPYTHON} -m venv ${CELLSSERVER}/deenv
+	umask 027; ${CELLSSERVER}/deenv/bin/pip install -q --upgrade pip
+	umask 027; ${CELLSSERVER}/deenv/bin/pip install -q -r ../${ANNOTSRC}/de/requirements.txt
+
+check-otto:
+	@test "`id -un`" = otto || { echo "run this as otto: sudo -u otto make $(MAKECMDGOALS)"; exit 1; }
+
+check-clean-annot:
+	@${GIT} diff --quiet HEAD -- ${ANNOTSRC} || \
+	  { echo "uncommitted changes in ${ANNOTSRC}; commit before installing"; exit 1; }
+	@${GIT} merge-base --is-ancestor HEAD origin/develop || \
+	  { echo "HEAD is not on origin/develop: push, then git fetch (as yourself), then install"; exit 1; }
+
+check-annot-prefix:
+	@test -x ${ANNOT}/venv/bin/gunicorn -a -x ${CELLSSERVER}/deenv/bin/python || \
+	  { echo "${CELLSSERVER} is not set up; run 'sudo -u otto make setup-annot' once first"; exit 1; }
+
+.PHONY: install validate setup check-clean check-prefix \
+	install-annot validate-annot setup-annot check-otto check-clean-annot check-annot-prefix

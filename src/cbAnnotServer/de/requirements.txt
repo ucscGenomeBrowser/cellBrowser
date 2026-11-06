@@ -1,0 +1,6 @@
+# The DE worker's python (deenv): runDeJob.py needs only these. Pinned to the
+# versions the numpy Wilcoxon was checked against; "make setup-annot" in ucsc/
+# builds it from /usr/bin/python3.13, which hgwdev and hgcompute-08 both have.
+numpy==2.4.6
+scipy==1.17.1
+pandas==3.0.5

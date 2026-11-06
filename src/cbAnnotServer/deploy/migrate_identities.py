@@ -18,7 +18,7 @@ What it does, in one transaction:
 
 Usage (run once, with the service stopped, after backing up the DB):
 
-    CBANNOT_DATABASE_URI=sqlite:////hive/data/inside/cells/cbAnnotServer/cbAnnot.db \\
+    CBANNOT_DATABASE_URI=sqlite:////cluster/home/otto/cellsServer/db/cbAnnot.db \\
         python3 deploy/migrate_identities.py
 
 Idempotent: if users.oauth_provider is already gone it reports "already
@@ -78,7 +78,7 @@ USER_COLS = ("id, email, password_hash, display_name, email_verified, "
 
 def main():
     uri = os.environ.get("CBANNOT_DATABASE_URI") \
-        or "sqlite:////hive/data/inside/cells/cbAnnotServer/cbAnnot.db"
+        or "sqlite:////cluster/home/otto/cellsServer/db/cbAnnot.db"
     path = db_path_from_uri(uri)
     if not os.path.exists(path):
         sys.exit(f"database not found: {path}")

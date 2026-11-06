@@ -38,7 +38,7 @@ WorkingDirectory=REPLACE_ABSOLUTE_PATH/src/cbAnnotServer
 # restart. Generate once with: python -c 'import secrets; print(secrets.token_hex(32))'
 Environment=CBANNOT_SECRET_KEY=REPLACE_WITH_LONG_RANDOM_STRING
 # SQLite on GPFS (/hive) works; switch to postgresql://... when scale warrants.
-Environment=CBANNOT_DATABASE_URI=sqlite:////hive/data/inside/cells/cbAnnotServer/cbAnnot.db
+Environment=CBANNOT_DATABASE_URI=sqlite:////cluster/home/otto/cellsServer/db/cbAnnot.db
 # Must match the ProxyPass target in apache-cells-api.conf.
 Environment=CBANNOT_BIND=127.0.0.1:5051
 # Site is HTTPS in production, so keep the login cookie off plain HTTP.

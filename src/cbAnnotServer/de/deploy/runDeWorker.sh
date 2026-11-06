@@ -5,7 +5,7 @@
 # python, pidfile/heartbeat paths, etc., then execs the worker so the process the
 # watchdog/systemd tracks IS the python daemon (not a wrapper shell).
 #
-#   DE_ENV_FILE=/hive/data/inside/cells/cbAnnotServer/de.env  runDeWorker.sh
+#   DE_ENV_FILE=/cluster/home/otto/cellsServer/etc/de.env  runDeWorker.sh
 set -uo pipefail
 
 if [ -n "${DE_ENV_FILE:-}" ] && [ -f "${DE_ENV_FILE}" ]; then

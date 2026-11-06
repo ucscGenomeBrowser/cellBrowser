@@ -12,7 +12,7 @@ set -uo pipefail
 
 MODE="${1:-graceful}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${DE_ENV_FILE:-/hive/data/inside/cells/cbAnnotServer/de.env}"
+ENV_FILE="${DE_ENV_FILE:-/cluster/home/otto/cellsServer/etc/de.env}"
 
 # Source de.env so we know the pidfile location (and to pass it to the watchdog).
 if [ -f "$ENV_FILE" ]; then

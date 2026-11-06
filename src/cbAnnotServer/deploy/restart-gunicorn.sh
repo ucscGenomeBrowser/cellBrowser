@@ -16,7 +16,7 @@ set -uo pipefail
 MODE="${1:-reload}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HEALTH_URL="${CBANNOT_HEALTH_URL:-http://127.0.0.1:5051/api/health}"
-ENV_FILE="${CBANNOT_ENV_FILE:-/hive/data/inside/cells/cbAnnotServer/cbAnnot.env}"
+ENV_FILE="${CBANNOT_ENV_FILE:-/cluster/home/otto/cellsServer/etc/cbAnnot.env}"
 
 find_master() {
     # master = gunicorn process owned by the current user whose parent is init

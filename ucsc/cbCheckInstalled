@@ -14,6 +14,9 @@ which "make install" writes. Each installed script is compared with:
   - the md5sum recorded in INSTALLED.txt  (was it edited after install?)
   - the same file on develop on GitHub    (has develop moved past the install?)
 
+The same check runs on the login/annotation/DE server that "make install-annot"
+puts in ANNOT_DIR, when that has an INSTALLED.txt.
+
 GitHub is the reference, rather than a checkout, so the answer does not depend
 on the state of anyone's working tree.
 
@@ -32,6 +35,8 @@ import requests
 REPO = "ucscGenomeBrowser/cellBrowser"
 BRANCH = "develop"
 INSTALL_DIR = "/hive/data/inside/cells/scripts"
+# the login/annotation/DE server, installed by "make install-annot" (RM #38664)
+ANNOT_DIR = "/cluster/home/otto/cellsServer/cbAnnotServer"
 
 def md5(data):
     return hashlib.md5(data).hexdigest()
@@ -50,24 +55,30 @@ def readInstalled(installDir):
     return commit, md5s
 
 def developHead():
-    """Return the commit develop points at now. Files are then fetched at that
+    """Return the commit develop points at now. Files are then compared at that
     commit, so a push landing mid-check cannot mix two versions."""
     url = "https://api.github.com/repos/%s/commits/%s" % (REPO, BRANCH)
     r = requests.get(url, timeout=60)
     r.raise_for_status()
     return r.json()["sha"]
 
-def developFile(commit, name):
-    """Return the contents of ucsc/<name> at commit, or None if it is not there."""
-    url = "https://raw.githubusercontent.com/%s/%s/ucsc/%s" % (REPO, commit, name)
+def developBlobs(commit):
+    """Return {repo path: git blob id} for every file at commit, in one request."""
+    url = "https://api.github.com/repos/%s/git/trees/%s?recursive=1" % (REPO, commit)
     r = requests.get(url, timeout=60)
-    if r.status_code == 404:
-        return None
     r.raise_for_status()
-    return r.content
+    tree = r.json()
+    if tree.get("truncated"):
+        sys.exit("GitHub truncated the file list for %s; cannot check" % commit)
+    return {e["path"]: e["sha"] for e in tree["tree"] if e["type"] == "blob"}
 
-def check(installDir):
-    """Return a list of problems, empty when all is in sync."""
+def gitBlobId(data):
+    """The id git gives a file with these contents."""
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+def check(installDir, repoDir="ucsc", headCommit=None, blobs=None, makeTarget="install"):
+    """Return a list of problems, empty when all is in sync. installDir holds an
+    install of the repo directory repoDir, listed in its INSTALLED.txt."""
     try:
         installedCommit, installedMd5s = readInstalled(installDir)
     except OSError as e:
@@ -75,35 +86,34 @@ def check(installDir):
     if not installedMd5s:
         return ["INSTALLED.txt in %s lists no scripts" % installDir]
 
-    headCommit = developHead()
+    headCommit = headCommit or developHead()
+    blobs = blobs or developBlobs(headCommit)
     problems = []
     behind = []
     for name in sorted(installedMd5s):
         path = os.path.join(installDir, name)
         try:
             with open(path, "rb") as f:
-                current = md5(f.read())
+                data = f.read()
         except OSError as e:
             problems.append("%s: cannot read installed copy: %s" % (name, e))
             continue
-        if current != installedMd5s[name]:
+        onDevelop = blobs.get(repoDir + "/" + name)
+        if md5(data) != installedMd5s[name]:
+            # reported once here rather than again as drift below
             problems.append("%s: edited in place since install. Copy the change into git, then reinstall." % name)
-
-        # compare what was installed, not what is there now, so an edit in
-        # place is reported once above rather than again as drift
-        onDevelop = developFile(headCommit, name)
-        if onDevelop is None:
+        elif onDevelop is None:
             problems.append("%s: installed, but no longer on %s" % (name, BRANCH))
-        elif md5(onDevelop) != installedMd5s[name]:
+        elif gitBlobId(data) != onDevelop:
             behind.append(name)
 
     if behind:
         problems.append("%s on %s differs from the installed copy: %s" % (
-            "this script" if len(behind) == 1 else "these scripts", BRANCH, ", ".join(behind)))
+            "this file" if len(behind) == 1 else "these files", BRANCH, ", ".join(behind)))
         problems.append("  installed: %s" % installedCommit)
         problems.append("  %s:   %s" % (BRANCH, headCommit))
         problems.append("  changes:   https://github.com/%s/compare/%s...%s" % (REPO, installedCommit, headCommit))
-        problems.append("If develop is right, run: make -C <your cellBrowser>/ucsc install")
+        problems.append("If develop is right, run \"make %s\" in your cellBrowser checkout's ucsc/ directory" % makeTarget)
     return problems
 
 def main():
@@ -111,11 +121,20 @@ def main():
         description="Report Cell Browser cron scripts that differ from develop on GitHub. Silent when in sync.")
     parser.add_argument("-d", "--installDir", default=INSTALL_DIR,
         help="directory holding the installed scripts and INSTALLED.txt, default %(default)s")
+    parser.add_argument("-a", "--annotDir", default=ANNOT_DIR,
+        help="directory holding the installed cbAnnotServer, default %(default)s")
     args = parser.parse_args()
 
-    problems = check(args.installDir)
+    headCommit = developHead()
+    blobs = developBlobs(headCommit)
+    problems = check(args.installDir, headCommit=headCommit, blobs=blobs)
+    annotDir = args.annotDir
+    if os.path.exists(os.path.join(annotDir, "INSTALLED.txt")):
+        annotProblems = check(annotDir, "src/cbAnnotServer", headCommit, blobs, "install-annot")
+        if annotProblems:
+            problems += ([""] if problems else []) + ["In %s:" % annotDir] + annotProblems
     if problems:
-        print("The Cell Browser scripts that otto runs from %s are out of sync.\n" % args.installDir)
+        print("The Cell Browser code that otto runs is out of sync with %s.\n" % BRANCH)
         for p in problems:
             print(p)
 

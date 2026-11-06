@@ -5,7 +5,7 @@
 # HTTP and must never contain a secret. The service warns at startup if this
 # file is group- or world-readable.
 #
-# Install to /hive/data/inside/cells/cbAnnotServer/providers.conf, or point
+# Install to /cluster/home/otto/cellsServer/etc/providers.conf, or point
 # CBANNOT_PROVIDERS_CONF somewhere else. Changes take effect on gunicorn
 # restart; no code change and no release are needed to add a provider.
 #

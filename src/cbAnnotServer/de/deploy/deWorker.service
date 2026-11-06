@@ -17,8 +17,8 @@ Type=simple
 User=otto
 # The queue location, scanpy python, dataset roots, timeouts. Same file the cron
 # watchdog sources. Keep it non-world-readable if it ever holds a secret.
-EnvironmentFile=/hive/data/inside/cells/cbAnnotServer/de.env
-ExecStart=/hive/data/inside/cells/cbAnnotServer/cellBrowser/src/cbAnnotServer/de/deploy/runDeWorker.sh
+EnvironmentFile=/cluster/home/otto/cellsServer/etc/de.env
+ExecStart=/cluster/home/otto/cellsServer/cbAnnotServer/de/deploy/runDeWorker.sh
 Restart=always
 RestartSec=5
 # Give a long-running job room; SIGTERM lets the daemon finish the current job.

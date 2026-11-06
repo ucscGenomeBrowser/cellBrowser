@@ -13,7 +13,7 @@ class Config:
     # SQLite works reliably there and the dev DB persists across reboots.
     # Override with CBANNOT_DATABASE_URI (e.g. postgresql://...) in production.
     SQLALCHEMY_DATABASE_URI = os.environ.get("CBANNOT_DATABASE_URI") \
-        or "sqlite:////hive/data/inside/cells/cbAnnotServer/cbAnnot.db"
+        or "sqlite:////cluster/home/otto/cellsServer/db/cbAnnot.db"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # Token TTLs
@@ -36,7 +36,7 @@ class Config:
 
     # ---- OAuth / OpenID Connect sign-in -----------------------------------
     # Providers are NOT configured here. They live in a server-side conf file
-    # (default /hive/data/inside/cells/cbAnnotServer/providers.conf, override
+    # (default /cluster/home/otto/cellsServer/etc/providers.conf, override
     # with CBANNOT_PROVIDERS_CONF), one [provider:slug] stanza each, so adding
     # Microsoft / CILogon / any other OIDC issuer is a config change plus a
     # restart -- no code, no release. See providers.py for the format and the

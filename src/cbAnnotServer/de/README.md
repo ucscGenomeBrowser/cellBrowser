@@ -110,7 +110,7 @@ DE_WORKER_PYTHON=/path/to/env/bin/python \
 ```
 
 Config via env (all optional; see `deWorker.py` header for the full list):
-`DE_JOBS_DIR` (default `/hive/data/inside/cells/deJobs`), `DE_CBBUILD_DIR`,
+`DE_JOBS_DIR` (default `/cluster/home/otto/cellsServer/deJobs`), `DE_CBBUILD_DIR`,
 `DE_WORKER_PYTHON`, `DE_POLL_SEC`, `DE_JOB_TIMEOUT`, `DE_MAX_CELLS_PER_GROUP`,
 `DE_RETENTION_DAYS`.
 
@@ -135,25 +135,20 @@ a *hung* worker, not just a dead one. A running job blocks the loop for up to
 **cron (otto crontab), the fallback where systemd can't be installed:**
 
 ```
-* * * * *  DE_ENV_FILE=/hive/data/inside/cells/cbAnnotServer/de.env  ~mspeir/cellBrowser/src/cbAnnotServer/de/deploy/deWorkerWatchdog.sh >> /hive/data/inside/cells/cbAnnotServer/logs/deWorker-watchdog.log 2>&1
-@reboot    DE_ENV_FILE=/hive/data/inside/cells/cbAnnotServer/de.env  ~mspeir/cellBrowser/src/cbAnnotServer/de/deploy/deWorkerWatchdog.sh >> /hive/data/inside/cells/cbAnnotServer/logs/deWorker-watchdog.log 2>&1
+* * * * *  DE_ENV_FILE=/cluster/home/otto/cellsServer/etc/de.env  /cluster/home/otto/cellsServer/cbAnnotServer/de/deploy/deWorkerWatchdog.sh >> /cluster/home/otto/cellsServer/logs/deWorker-watchdog.log 2>&1
+@reboot    DE_ENV_FILE=/cluster/home/otto/cellsServer/etc/de.env  /cluster/home/otto/cellsServer/cbAnnotServer/de/deploy/deWorkerWatchdog.sh >> /cluster/home/otto/cellsServer/logs/deWorker-watchdog.log 2>&1
 ```
 
 (mirrors the existing `cbAnnotServer` watchdog lines in `otto.crontab`.)
 
-**Relocating the scanpy env off a personal home** (otto must be able to read it):
+**The worker's python** only needs numpy, scipy and pandas, pinned in
+`requirements.txt` here. At UCSC, `make setup-annot` in `ucsc/` builds it as
+/cluster/home/otto/cellsServer/deenv from /usr/bin/python3.13, which hgwdev and
+hgcompute-08 both have, and `de.env` points `DE_WORKER_PYTHON` at it. Elsewhere:
 
 ```
-# one-time: pack the working dev env and unpack it under /hive
-conda install -n base -c conda-forge conda-pack        # if not present
-conda pack -n scanpyenv -o /tmp/scanpyenv.tar.gz
-mkdir -p /hive/data/inside/cells/cbAnnotServer/scanpyenv
-tar -xzf /tmp/scanpyenv.tar.gz -C /hive/data/inside/cells/cbAnnotServer/scanpyenv
-/hive/data/inside/cells/cbAnnotServer/scanpyenv/bin/conda-unpack   # fixes hardcoded paths
+python3 -m venv deenv && deenv/bin/pip install -r requirements.txt
 ```
-
-then set `DE_WORKER_PYTHON=/hive/data/inside/cells/cbAnnotServer/scanpyenv/bin/python`
-in `de.env`.
 
 ## Verified
 

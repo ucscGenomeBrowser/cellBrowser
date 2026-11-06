@@ -52,7 +52,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wilcoxon_np
 
-DE_JOBS_DIR = os.environ.get("DE_JOBS_DIR", "/hive/data/inside/cells/deJobs")
+DE_JOBS_DIR = os.environ.get("DE_JOBS_DIR", "/cluster/home/otto/cellsServer/deJobs")
 # Root of the cbBuild web output (dataset dirs with exprMatrix.bin + meta.tsv).
 # This is the uniform format the frontend serves, so DE can run on any dataset a
 # user can open, reading exactly what the browser shows (see cbExprReader.py).

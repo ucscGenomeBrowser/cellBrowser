@@ -38,11 +38,9 @@ static Cell Browser served from the docroot.
    source venv/bin/activate
    pip install -r requirements.txt      # includes gunicorn
    ```
-2. **Database dir** (SQLite on GPFS/`hive`, which honors file locking):
-   ```
-   mkdir -p /hive/data/inside/cells/cbAnnotServer
-   ```
-   Postgres is a drop-in later via `CBANNOT_DATABASE_URI`.
+2. **Database dir**, private to the deploy user. At UCSC, `make setup-annot`
+   in `ucsc/` creates it with the rest of /cluster/home/otto/cellsServer.
+   Another database is a drop-in later via `CBANNOT_DATABASE_URI`.
 3. **Secret key** — generate once and keep it stable so logins survive restarts:
    ```
    python -c 'import secrets; print(secrets.token_hex(32))'
@@ -56,7 +54,7 @@ cron watchdog sources). See `config.py` for the full list.
 | Variable | Production value |
 |----------|------------------|
 | `CBANNOT_SECRET_KEY` | the long random string from step 3 |
-| `CBANNOT_DATABASE_URI` | `sqlite:////hive/data/inside/cells/cbAnnotServer/cbAnnot.db` |
+| `CBANNOT_DATABASE_URI` | `sqlite:////cluster/home/otto/cellsServer/db/cbAnnot.db` |
 | `CBANNOT_BIND` | `127.0.0.1:5051` (must match the ProxyPass target) |
 | `CBANNOT_COOKIE_SECURE` | `true` (site is HTTPS) |
 | `CBANNOT_SITE_BASE_URL` | `https://cells.ucsc.edu` (used in email links) |
@@ -64,8 +62,8 @@ cron watchdog sources). See `config.py` for the full list.
 | `CBANNOT_MAIL_SERVER` | SMTP host, e.g. `localhost` (hgwdev/cells run a local Sendmail on port 25) |
 | `CBANNOT_MAIL_PORT` | `25` for the local MTA |
 | `CBANNOT_MAIL_FROM` | envelope/from address, e.g. `noreply@cells.ucsc.edu` |
-| `CBANNOT_PROVIDERS_CONF` | path to the sign-in provider conf file; default `/hive/data/inside/cells/cbAnnotServer/providers.conf` (see OAuth below) |
-| `DE_QUEUE_DIR` | dev side only (has `/hive`): the DE job queue, e.g. `/hive/data/inside/cells/deJobs`. Selects *direct* mode |
+| `CBANNOT_PROVIDERS_CONF` | path to the sign-in provider conf file; default `/cluster/home/otto/cellsServer/etc/providers.conf` (see OAuth below) |
+| `DE_QUEUE_DIR` | dev side only (has `/hive`): the DE job queue, e.g. `/cluster/home/otto/cellsServer/deJobs`. Selects *direct* mode |
 | `DE_RELAY_URL` | production only (no `/hive`): the dev-side DE endpoint, e.g. `https://cells-test.gi.ucsc.edu/api/de`. Selects *proxy* mode |
 | `DE_RELAY_KEY` | the same random string on both tiers; lets the dev side trust who the production side says asked (see `de/README.md`) |
 | `DE_DATA_HOSTS` | optional; hosts a DE job may fetch data from. The default covers the cells sites |
@@ -94,7 +92,7 @@ gunicorn, and the button appears in the sign-in dialog. No code change, no
 release, no frontend edit.
 
 Copy `deploy/providers.conf.sample` to
-`/hive/data/inside/cells/cbAnnotServer/providers.conf` (or set
+`/cluster/home/otto/cellsServer/etc/providers.conf` (or set
 `CBANNOT_PROVIDERS_CONF`) and fill in credentials:
 
 ```ini
@@ -188,7 +186,7 @@ Two one-off scripts, both idempotent, both backing the DB up first. Run with
 the service stopped, oldest first — each is a no-op if it does not apply:
 
 ```
-export CBANNOT_DATABASE_URI=sqlite:////hive/data/inside/cells/cbAnnotServer/cbAnnot.db
+export CBANNOT_DATABASE_URI=sqlite:////cluster/home/otto/cellsServer/db/cbAnnot.db
 ./venv/bin/python3 deploy/migrate_oauth.py       # pre-OAuth DBs: nullable email/password + oauth columns
 ./venv/bin/python3 deploy/migrate_identities.py  # moves those columns into oauth_identities
 ```
@@ -216,6 +214,11 @@ the deploy user's crontab:
 * * * * *  /ABS/PATH/src/cbAnnotServer/deploy/watchdog.sh >> /var/log/cbAnnotServer/watchdog.log 2>&1
 @reboot    /ABS/PATH/src/cbAnnotServer/deploy/watchdog.sh >> /var/log/cbAnnotServer/watchdog.log 2>&1
 ```
+Point it at an installed copy that only the service's maintainers can write,
+never at a developer's checkout: anyone who can edit the code runs it as the
+deploy user. On hgwdev and hgcompute-08, otto runs the copy that
+`make install-annot` puts in /cluster/home/otto/cellsServer/cbAnnotServer
+(see ucsc/README.md).
 
 ## Apache
 
