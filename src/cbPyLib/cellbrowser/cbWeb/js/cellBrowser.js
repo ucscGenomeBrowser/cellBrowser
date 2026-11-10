@@ -4928,12 +4928,20 @@ var cellbrowser = function() {
         return fieldName;
     }
 
+    function layoutShowsLabels(coordIdx) {
+        /* a layout's own showLabels setting wins over the dataset-wide one. Labels are on if neither is set. */
+        var coordInfo = db.conf.coords[coordIdx];
+        if (coordInfo && coordInfo.showLabels!==undefined)
+            return coordInfo.showLabels;
+        return db.conf.showLabels!==false;
+    }
+
     function getActiveLabelField() {
         /* return default label field or from URL */
         let fieldName = getVar("label");
         //if (fieldName===undefined)
             //fieldName = renderer.getLabelField();
-        if (fieldName===undefined && db.conf.showLabels===false)
+        if (fieldName===undefined && !layoutShowsLabels(parseInt(getVar("layout", "0"))))
             fieldName = null;
         if (fieldName===undefined)
             fieldName = db.conf.labelField;
@@ -6086,7 +6094,8 @@ var cellbrowser = function() {
        renderer.initPlot(rendConf);
        renderer.clear(); // remove stale image from previous dataset while new one loads
 
-       if (db.conf.showLabels===false || db.conf.labelField===undefined || db.conf.labelField===null) {
+       renderer.labelsHiddenByLayout = !layoutShowsLabels(coordIdx);
+       if (renderer.labelsHiddenByLayout || db.conf.labelField===undefined || db.conf.labelField===null) {
            renderer.setLabelField(null);
         }
 
@@ -8063,6 +8072,17 @@ var cellbrowser = function() {
         var colorOnMetaField = db.conf.coords[coordIdx].colorOnMeta;
         rend.background = null; // remove the background image
         rend.shareBackground = false; // split screen: the other panel no longer shows our layout
+
+        // layouts can turn labels off, e.g. on a spatial slide where cluster labels pile up in the middle
+        var labelsWereHidden = (rend.labelsHiddenByLayout===true);
+        rend.labelsHiddenByLayout = !layoutShowsLabels(coordIdx);
+        if (rend.labelsHiddenByLayout) {
+            labelFieldName = null;
+            if (targetRenderer)
+                targetLabelField = null;
+        }
+        else if (labelsWereHidden && labelFieldName===null && !targetRenderer)
+            labelFieldName = db.conf.labelField || null; // coming back from a layout without labels
 
         db.loadCoords(coordIdx,
                 function(coords, info, clusterMids) {

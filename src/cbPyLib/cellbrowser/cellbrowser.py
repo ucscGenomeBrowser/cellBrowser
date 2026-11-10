@@ -4339,6 +4339,8 @@ def convertCoords(inDir, inConf, outConf, sampleNames, outMeta, outDir):
             coordInfo["annots"] = inCoordInfo["annots"]
         if "colorOnMeta" in inCoordInfo:
             coordInfo["colorOnMeta"] = inCoordInfo["colorOnMeta"]
+        if "showLabels" in inCoordInfo:
+            coordInfo["showLabels"] = bool(inCoordInfo["showLabels"])
         if "keepAspectRatio" in inCoordInfo:
             coordInfo["keepAspectRatio"] = inCoordInfo["keepAspectRatio"]
         elif "spatial" in basename(coordFname).lower() or "spatial" in coordLabel.lower():

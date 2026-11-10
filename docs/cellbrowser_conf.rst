@@ -70,6 +70,7 @@ These settings must be present in every ``cellbrowser.conf``.
    - ``shortLabel``: (required) human-readable label shown in the layout dropdown
    - ``flipY``: set to ``True`` if y-coordinates need to be flipped (common with R/Matplotlib output). Default: ``False``
    - ``colorOnMeta``: a metadata field name to automatically color on when this layout is activated
+   - ``showLabels``: set to ``False`` to hide the cluster labels on this layout only, e.g. on a spatial slide where the labels of cell types spread over the whole slide would pile up in the middle. Overrides the dataset-wide ``showLabels``. Default: the dataset-wide setting
    - ``lineFile``: path to a TSV file with columns ``x1, x2, y1, y2`` to overlay lines (e.g. trajectory trees) on top of cells
    - ``lineFlipY``: set to ``True`` to flip the y-axis of the lines relative to the points. Default: ``False``
    - ``annots``: a list of ``[x, y, "text"]`` entries to manually add text annotations at specific positions
@@ -374,6 +375,7 @@ Visual Display Settings
 
 ``showLabels``
    Whether cluster labels are shown on the scatter plot by default. Default: ``True``.
+   To turn labels off for only one layout, use ``showLabels`` inside that layout's entry in ``coords``.
 
    ::
 
