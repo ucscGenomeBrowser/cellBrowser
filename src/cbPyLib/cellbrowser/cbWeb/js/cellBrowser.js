@@ -9039,8 +9039,20 @@ var cellbrowser = function() {
                 fullUrl = "https://genome.ucsc.edu/cgi-bin/hgTracks?hubUrl="+hubUrl+"&genome="+ucscDb;
             }
 
-            if (geneSym && !geneSym.startsWith("atac-"))
-                fullUrl += "&position="+geneSym+"&singleSearch=knownCanonical";
+            if (geneSym && !geneSym.startsWith("atac-")) {
+                // ATAC peaks are "chr8|71497881|71498280", several joined with "+". The Genome Browser
+                // can't search for these, so show one range around all peaks on the first peak's chromosome.
+                var peaks = geneSym.split("+").map(function(p) { return p.split("|"); });
+                var isPeaks = peaks.every(function(p) { return p.length===3 && /^\d+$/.test(p[1]) && /^\d+$/.test(p[2]); });
+                if (isPeaks) {
+                    var chrom = peaks[0][0];
+                    var onChrom = peaks.filter(function(p) { return p[0]===chrom; });
+                    var start = Math.min.apply(null, onChrom.map(function(p) { return parseInt(p[1]); }));
+                    var end = Math.max.apply(null, onChrom.map(function(p) { return parseInt(p[2]); }));
+                    fullUrl += "&position="+chrom+":"+(start+1)+"-"+end; // peaks are 0-based, positions 1-based
+                } else
+                    fullUrl += "&position="+geneSym+"&singleSearch=knownCanonical";
+            }
 
             return fullUrl;
     }
