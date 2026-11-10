@@ -4098,7 +4098,6 @@ def computeDotplotCache(datasetDir, inConf, outConf, sampleNames):
     metaFname = join(datasetDir, "meta.tsv")
     with open(metaFname) as f:
         header = f.readline().rstrip("\n\r").split("\t")
-    idField = header[0]
     if clusterField not in header:
         logging.warn("Dot plot cache: clusterField '%s' not found in meta.tsv, skipping" % clusterField)
         return
@@ -4107,8 +4106,11 @@ def computeDotplotCache(datasetDir, inConf, outConf, sampleNames):
     # keep_default_na/na_filter=False: an empty cell in meta.tsv is a literal "" category elsewhere in
     # the build pipeline (e.g. a cell with no annotation), not a missing value. Without this, pandas'
     # default NaN-sniffing turns "" into NaN, pd.factorize codes it -1, and np.bincount rejects that.
-    metaDf = pd.read_csv(metaFname, sep="\t", usecols=[idField, clusterField], dtype=str, index_col=idField,
+    # select columns by position and set the index afterwards: the ID column header can be empty, and
+    # index_col= ignores dtype=str, so numeric-looking cell IDs would become ints and not match sampleNames
+    metaDf = pd.read_csv(metaFname, sep="\t", usecols=[0, header.index(clusterField)], dtype=str,
             keep_default_na=False, na_filter=False)
+    metaDf = metaDf.set_index(metaDf.columns[0])
     clusterSeries = metaDf.loc[sampleNames, clusterField]
     codes, uniqueLabels = pd.factorize(clusterSeries.values)
     codes = np.asarray(codes)
