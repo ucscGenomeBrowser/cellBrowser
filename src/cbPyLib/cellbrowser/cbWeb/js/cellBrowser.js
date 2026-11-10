@@ -11083,6 +11083,28 @@ var cellbrowser = function() {
             return;
         }
 
+        // the plots split the cells by a cell annotation. If the cells are colored by a number and the
+        // dataset's default color field is a number, too (e.g. a zonation score), there is nothing to fall
+        // back to below, so say so, like for ATAC, instead of opening a window that cannot work
+        let splitInfo = db.findMetaInfo(getVar("exprMeta", getActiveColorField()));
+        let defColorInfo = db.findMetaInfo(db.getDefaultColorField());
+        if ((!splitInfo || splitInfo.type!=="enum") && (!defColorInfo || defColorInfo.type!=="enum")) {
+            let enumLabels = db.conf.metaFields.filter(function(f) { return f.type==="enum"; })
+                .map(function(f) { return '"'+(f.label || f.name)+'"'; });
+            // when a gene is shown, getActiveColorField() still returns the default field, so don't name it
+            let colorNote = "";
+            if (getVar("gene")===undefined && splitInfo)
+                colorNote = "The cells are now colored by \""+(splitInfo.label || splitInfo.name)+"\", which is a number. ";
+            if (enumLabels.length===0)
+                alert("Gene expression plots split the cells by a cell annotation, like a cluster or cell type. "+
+                    "This dataset has no such annotation, so these plots are not available here.");
+            else
+                alert("Gene expression plots split the cells by a cell annotation, like a cluster or cell type. "+
+                    colorNote+
+                    "Please color the cells by "+enumLabels.join(", ")+" first, then click 'Gene Expression Plots' again.");
+            return;
+        }
+
         if (db.exprData===undefined)
             db.exprData = null; // mark the object to be initialized on first start
 
