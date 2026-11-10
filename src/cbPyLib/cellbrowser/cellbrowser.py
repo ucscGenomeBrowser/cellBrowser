@@ -2682,6 +2682,17 @@ def readMatrixSampleNames(fname):
         names = readHeaders(fname)[1:]
         return names
 
+def allNumbers(values):
+    " return True if all values are numbers or empty/NA "
+    for val in values:
+        if val in ["", "NA", "nan", "NaN", "None"]:
+            continue
+        try:
+            float(val)
+        except ValueError:
+            return False
+    return True
+
 def metaReorderFilter(matrixFname, metaFname, fixedMetaFname, keepFields):
     """ check and reorder the meta data, has to be in the same order as the
     expression matrix, write to fixedMetaFname. Remove single value fields from the meta data, except if they are in keepFields. """
@@ -2753,7 +2764,9 @@ def metaReorderFilter(matrixFname, metaFname, fixedMetaFname, keepFields):
                     "but check with submitter if this makes sense." % fieldName)
             else:
                 skipFields.add(fieldIdx)
-        elif len(values)>maxValCount:
+        elif len(values)>maxValCount and fieldName not in keepFields and not allNumbers(values):
+            # text fields with a different value in nearly every cell are leftover IDs. Numbers like
+            # percent.mt or spot deconvolution scores are naturally different everywhere, keep them.
             logging.info("Field %d, '%s', has more than %d different values. Too many. Removing this field from meta data." %
                     (fieldIdx, fieldName, maxValCount))
             skipFields.add(fieldIdx)
