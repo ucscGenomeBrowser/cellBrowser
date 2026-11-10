@@ -4933,6 +4933,8 @@ var cellbrowser = function() {
         let fieldName = getVar("label");
         //if (fieldName===undefined)
             //fieldName = renderer.getLabelField();
+        if (fieldName===undefined && db.conf.showLabels===false)
+            fieldName = null;
         if (fieldName===undefined)
             fieldName = db.conf.labelField;
         if (fieldName===undefined)
@@ -11699,7 +11701,7 @@ var cellbrowser = function() {
         htmls = htmlAddInfoIcon(htmls, "Choose a field to generate labels for. Labels will be placed in the center between all the cells with "+
                 "this annotation, so this is most useful for fields that label cells that are close together. Numerical "+
                 "fields or fields with several hundred values cannot be selected here, as the labels would fill the screen.", "bottom");
-        buildMetaFieldCombo(htmls, "tpLabelComboBox", "tpLabelCombo", 0, db.conf.labelField, "doLabels");
+        buildMetaFieldCombo(htmls, "tpLabelComboBox", "tpLabelCombo", 0, getActiveLabelField(), "doLabels");
 
         htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px; padding-right:8px" id="tpHoverHint" class="tpHint">Hover over a '+gSampleDesc+' to update data below</div>');
         htmls.push('<div style="padding-top:4px; padding-bottom: 4px; padding-left:2px; padding-right:8px; display: none" id="tpSelectHint" class="tpHint">Cells are selected. No update on hover.</div>');
