@@ -1713,6 +1713,10 @@ function MaxPlot(div, top, left, width, height, args) {
             const ppu = Math.min((canvas.width - 2*margin) / spanX, (canvas.height - 2*margin) / spanY);
             const centerX = (minX + maxX) / 2;
             const centerY = (minY + maxY) / 2;
+            // the data range that ends up at clip space -1..1, needed to place the background image and labels
+            const halfX = canvas.width / 2 / ppu;
+            const halfY = canvas.height / 2 / ppu;
+            self.coords.glRange = {minX: centerX-halfX, maxX: centerX+halfX, minY: centerY-halfY, maxY: centerY+halfY};
             for(let i = 0; i < coords.length / 2; i++) {
                 scaledCoords[2*i]   = (coords[i*2]   - centerX) * ppu / (canvas.width  / 2);
                 scaledCoords[2*i+1] = (coords[i*2+1] - centerY) * ppu / (canvas.height / 2);
@@ -1720,6 +1724,10 @@ function MaxPlot(div, top, left, width, height, args) {
         } else {
             const trueHalfSpanX = 1 - ((2 * margin) / canvas.width);
             const trueHalfSpanY = 1 - ((2 * margin) / canvas.height);
+            const halfX = spanX / 2 / trueHalfSpanX;
+            const halfY = spanY / 2 / trueHalfSpanY;
+            if (self.coords)
+                self.coords.glRange = {minX: minX+spanX/2-halfX, maxX: minX+spanX/2+halfX, minY: minY+spanY/2-halfY, maxY: minY+spanY/2+halfY};
             for(let i = 0; i < coords.length / 2; i++) {
                 const x = coords[i*2];
                 const y = coords[i*2 + 1];
@@ -2652,8 +2660,29 @@ function MaxPlot(div, top, left, width, height, args) {
         self.drawDots();
     };
 
-    this.setBackground = function(img) {
-        /* */
+    this.syncChildProjection = function() {
+        /* spatial split screen: the child panel has its own projection, copy our zoom/pan to it
+         * if it shows the same layout */
+        const child = self.childPlot;
+        if (!child || child.port.projection === self.port.projection || child.coords.orig !== self.coords.orig)
+            return;
+        // the panels can have different clip spaces (different canvas sizes), so go through data coordinates
+        const zr = self.port.projection.pxBounds(self.glRange(), self.canvas.width, self.canvas.height);
+        const gr = child.glRange();
+        const toGlX = (x) => 2 * (x - gr.minX) / (gr.maxX - gr.minX) - 1;
+        const toGlY = (y) => 2 * (y - gr.minY) / (gr.maxY - gr.minY) - 1;
+        child.port.projection.setBounds(toGlX(zr.minX), toGlX(zr.maxX), toGlY(zr.maxY), toGlY(zr.minY), false);
+        child.calcRadius();
+    };
+
+    this.glRange = function() {
+        /* return the data range that WebGL clip space -1..1 covers */
+        return (self.coords && self.coords.glRange) || self.port.initZoom;
+    };
+
+    this.setBackground = function(img, noShare) {
+        /* set the background image. In split screen, also give it to the other panel if it still
+         * shows the same layout as this one. noShare is used for that call, to avoid a loop. */
         if (self.background===undefined || self.background===null)
             self.background = {};
         self.background.image = img;
@@ -2666,8 +2695,10 @@ function MaxPlot(div, top, left, width, height, args) {
             // so it extends zoomRange for aspect-ratio AND recomputes coords.px to match.
             self.scaleData();
         }
-        if (self.childPlot)
-            self.childPlot.setBackground(img);
+        // a split from the URL happens before the image is loaded, so the image arrives here later
+        const other = self.childPlot || self.parentPlot;
+        if (other && !noShare && self.shareBackground && other.shareBackground)
+            other.setBackground(img, true);
     };
 
     function getSafeRect(width, height, sx, sy, sw, sh, dx, dy, dw, dh)  {
@@ -2721,9 +2752,14 @@ function MaxPlot(div, top, left, width, height, args) {
         // Since WebGL uses a projection matrix, this is determined differently depending on draw mode, but we will need the pixel range for later.
         let zr;
         if(zoomRange instanceof Matrix4) {
-            if(canvScaleX > canvScaleY) {
+            // The clip space -1..1 covers glRange, which has the canvas shape for keepAspectRatio
+            // coords but the data shape otherwise. Make the projection show data units at the same
+            // size on both axes, extending (never cropping) the view.
+            const glRange = self.glRange();
+            const glRatio = (glRange.maxX - glRange.minX) / (glRange.maxY - glRange.minY);
+            const newViewHeight = zoomRange.width * glRatio * canvHeight / canvWidth;
+            if(newViewHeight >= zoomRange.height) {
                 // Extend zoom range height to match width
-                const newViewHeight = zoomRange.width * canvHeight / canvWidth;
                 const viewYMidpoint = (zoomRange.top + zoomRange.bottom) / 2;
 
                 const newBottom = viewYMidpoint - newViewHeight / 2;
@@ -2732,7 +2768,7 @@ function MaxPlot(div, top, left, width, height, args) {
                 zoomRange.setBounds(zoomRange.left, zoomRange.right, newTop, newBottom, false);
             } else {
                 // Extend zoom range width to match height
-                const newViewWidth = zoomRange.height * canvWidth / canvHeight;
+                const newViewWidth = zoomRange.height / glRatio * canvWidth / canvHeight;
                 const viewXMidpoint = (zoomRange.right + zoomRange.left) / 2;
 
                 const newLeft = viewXMidpoint - newViewWidth / 2;
@@ -2741,7 +2777,7 @@ function MaxPlot(div, top, left, width, height, args) {
                 zoomRange.setBounds(newLeft, newRight, zoomRange.top, zoomRange.bottom, false);
             }
 
-            zr = zoomRange.pxBounds(dataRange, canvWidth, canvHeight);
+            zr = zoomRange.pxBounds(glRange, canvWidth, canvHeight);
         } else {
             const viewWidth = zoomRange.maxX - zoomRange.minX;
             const viewHeight = zoomRange.maxY - zoomRange.minY;
@@ -3354,7 +3390,7 @@ function MaxPlot(div, top, left, width, height, args) {
             if(DEBUG) console.time("draw lines");
             // If we're using webGL, we must scale the lines and draw to a separate canvas
             if(self.usesWebGL()) {
-                const projZoom = self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height);
+                const projZoom = self.port.projection.pxBounds(self.glRange(), self.canvas.width, self.canvas.height);
                 self.coords.pxLines = scaleLines(self.coords.lines, projZoom, self.canvas.width, self.canvas.height);
                 drawLines(self.labelCtx, self.coords.pxLines, self.canvas.width, self.canvas.height, self.coords.lineAttrs);
             } else if(self.coords.pxLines) {
@@ -3384,7 +3420,7 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.doDrawLabels && self.plotLabels && self.plotLabels.length > 0) {
             self.plotPxLabels = scaleLabels(
                 self.plotLabels,
-                self.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
+                self.usesWebGL() ? self.port.projection.pxBounds(self.glRange(), self.canvas.width, self.canvas.height) : self.port.zoomRange,
                 self.port.radius,
                 self.canvas.width,
                 self.canvas.height
@@ -3401,7 +3437,7 @@ function MaxPlot(div, top, left, width, height, args) {
         // draw annotations - look like labels, but cannot be clicked
         self.coords.pxAnnots = scaleLabels(
             self.coords.coordInfo.annots,
-            self.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
+            self.usesWebGL() ? self.port.projection.pxBounds(self.glRange(), self.canvas.width, self.canvas.height) : self.port.zoomRange,
             self.port.radius,
             self.canvas.width,
             self.canvas.height
@@ -3518,6 +3554,7 @@ function MaxPlot(div, top, left, width, height, args) {
             this.calcRadius();
             if (self.childPlot && self.childPlot.port.projection !== p)
                 self.childPlot.calcRadius();
+            self.syncChildProjection();
 
             // Redraw
             this.drawDots();
@@ -3564,6 +3601,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
             // Resize the radius accordingly
             this.calcRadius();
+            self.syncChildProjection();
         } else {
             var zr = self.port.zoomRange;
             var iz = self.port.initZoom;
@@ -3602,7 +3640,7 @@ function MaxPlot(div, top, left, width, height, args) {
         }
 
         // a special case for connected plots that are not sharing our pixel coordinates
-        if (self.childPlot && self.coords===self.childPlot.coords) {
+        if (self.childPlot && self.coords.orig===self.childPlot.coords.orig) {
             if (self.usesWebGL()) {
                 self.childPlot.calcRadius();
             } else {
@@ -3654,6 +3692,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
             // Translate the projection matrix
             self.port.projection.translate(-x, y);
+            self.syncChildProjection();
 
             self.drawDots();
         } else {
@@ -4041,7 +4080,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.scaleData();
 
         // a special case for connected plots that are not sharing our pixel coordinates
-        if (self.childPlot && self.coords===self.childPlot.coords) {
+        if (self.childPlot && self.coords.orig===self.childPlot.coords.orig) {
             self.childPlot.moveBy(xDiff, yDiff);
         }
     };
@@ -4608,7 +4647,7 @@ function MaxPlot(div, top, left, width, height, args) {
 
         self.plotPxLabels = scaleLabels(
             self.plotLabels,
-            self.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
+            self.usesWebGL() ? self.port.projection.pxBounds(self.glRange(), self.canvas.width, self.canvas.height) : self.port.zoomRange,
             self.port.radius,
             self.canvas.width,
             self.canvas.height
@@ -4617,7 +4656,7 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self.coords.annots) {
             let pxAnnots = scaleLabels(
                 self.coords.annots,
-                self.usesWebGL() ? self.port.projection.pxBounds(self.port.initZoom, self.canvas.width, self.canvas.height) : self.port.zoomRange,
+                self.usesWebGL() ? self.port.projection.pxBounds(self.glRange(), self.canvas.width, self.canvas.height) : self.port.zoomRange,
                 self.port.radius,
                 self.canvas.width,
                 self.canvas.height
@@ -4785,6 +4824,9 @@ function MaxPlot(div, top, left, width, height, args) {
 
         if (self.background)
             plot2.setBackground (self.background.image);
+        // both panels show the same layout until one of them changes it, see setBackground()
+        self.shareBackground = true;
+        plot2.shareBackground = true;
 
         self.setSize(newWidth, newHeight, false); // will call scaleData(), but not redraw.
         self.statusLine.style.width = (newWidth * 2) + "px"; // span both panels
@@ -4800,8 +4842,12 @@ function MaxPlot(div, top, left, width, height, args) {
         plot2.onWebglEvent = self.onWebglEvent;
 
         if(self.usesWebGL()) {
-            // Initialiaze WebGL buffers on child plot
-            plot2.bindBuffer(2, plot2.a_Position, plot2.coords.gl, plot2.ctx.FLOAT);
+            // Initialiaze WebGL buffers on child plot. keepAspectRatio coords depend on the canvas
+            // size, so the narrower child panel needs its own.
+            if (plot2.coords.keepAspectRatio)
+                plot2.setCoordsWebGL();
+            else
+                plot2.bindBuffer(2, plot2.a_Position, plot2.coords.gl, plot2.ctx.FLOAT);
 
             plot2.bindColors();     // binds a_Color and a_ColID
             plot2._bindSelected();  // binds a_Selected from shared selCells
@@ -4809,10 +4855,12 @@ function MaxPlot(div, top, left, width, height, args) {
             plot2.bindBuffer(1, plot2.a_Hidden, plot2.coords.hidden, plot2.ctx.UNSIGNED_BYTE);
         }
 
-        plot2.drawDots();
-
         self.childPlot = plot2;
         plot2.parentPlot = self;
+        if (self.usesWebGL())
+            self.syncChildProjection(); // start the child at our view
+
+        plot2.drawDots();
 
         const _borderStyle = `3px solid ${this.isLight() ? "black" : "white"}`;
         self.activeBorderDiv.style.borderTop    = _borderStyle;

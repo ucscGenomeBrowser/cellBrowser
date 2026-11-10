@@ -8060,6 +8060,7 @@ var cellbrowser = function() {
         var newRadius = db.conf.coords[coordIdx].radius;
         var colorOnMetaField = db.conf.coords[coordIdx].colorOnMeta;
         rend.background = null; // remove the background image
+        rend.shareBackground = false; // split screen: the other panel no longer shows our layout
 
         db.loadCoords(coordIdx,
                 function(coords, info, clusterMids) {
