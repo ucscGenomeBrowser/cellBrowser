@@ -683,6 +683,7 @@ function MaxPlot(div, top, left, width, height, args) {
         self.selCells = new CellSelection(0);  // selected cells (drawn in black), sized in setCoords
 
         self.fatIdx = null;        // Index of value that is in "fat mode" (=cells bigger, all other cells in light-grey)
+        self.hoverLabelIdx = null; // index of the cluster label under the mouse, drawn bigger
 
         self.doDrawLabels = true;  // should cluster labels be drawn?
         self.initPort(args);
@@ -2008,16 +2009,65 @@ function MaxPlot(div, top, left, width, height, args) {
         // cannot draw violin plots in SVG - no library for it
     };
 
-    function drawLabels(ctx, labelCoords, winWidth, winHeight, zoomFact, doGrey) {
+    function spreadLabels(ctx, labelCoords, winHeight) {
+        /* move overlapping labels apart vertically, so labels with close midpoints stay readable.
+         * labelCoords is an array of [x, y, text] or null, as made by scaleLabels(), changed in place. */
+        if (!labelCoords)
+            return;
+        const gap = 2; // min. pixels between two labels
+        const boxes = [];
+        ctx.save();
+        ctx.font = "bold "+gTextSize+"px Sans-serif";
+        for (const coord of labelCoords)
+            if (coord!==null)
+                boxes.push({coord: coord, halfW: ctx.measureText(coord[2]).width/2});
+        ctx.restore();
+        // the pairwise check gets slow with many labels, and so many labels overlap anyway
+        if (boxes.length < 2 || boxes.length > 300)
+            return;
+
+        // labels only move vertically, so sort them by x once and only compare labels close enough in x
+        boxes.sort((a, b) => a.coord[0] - b.coord[0]);
+        const maxHalfW = Math.max(...boxes.map(b => b.halfW));
+        const maxY = Math.max(winHeight - gTextSize, 0);
+
+        // a fixed number of passes, so the same view always gives the same label positions
+        for (let pass = 0; pass < 100; pass++) {
+            let moved = false;
+            for (let i = 0; i < boxes.length; i++) {
+                for (let j = i+1; j < boxes.length; j++) {
+                    const a = boxes[i].coord;
+                    const b = boxes[j].coord;
+                    if (b[0]-a[0] >= boxes[i].halfW + maxHalfW + gap)
+                        break; // all further labels are even further to the right
+                    if (b[0]-a[0] >= boxes[i].halfW + boxes[j].halfW + gap)
+                        continue;
+                    const overlap = gTextSize + gap - Math.abs(a[1]-b[1]);
+                    if (overlap <= 0)
+                        continue;
+                    // push the upper label up and the lower one down, by half of the overlap each
+                    // labels pushed off the canvas would not be drawn at all, so the edges stop them
+                    const [upper, lower] = (a[1] <= b[1]) ? [a, b] : [b, a];
+                    upper[1] = Math.max(upper[1] - Math.ceil(overlap/2), 0);
+                    lower[1] = Math.min(lower[1] + Math.ceil(overlap/2), maxY);
+                    moved = true;
+                }
+            }
+            if (!moved)
+                break;
+        }
+    }
+
+    function drawLabels(ctx, labelCoords, winWidth, winHeight, zoomFact, doGrey, hoverIdx) {
         /* given an array of [x, y, text], draw the text. returns bounding
-         * boxes as array of [x1, y1, x2, y2]  */
+         * boxes as array of [x1, y1, x2, y2]. The label at hoverIdx is drawn bigger and on top. */
         if (labelCoords===undefined)
             return undefined;
 
         if(DEBUG) console.time("labels");
 
         // Lazy-init the bitmap cache on first use after a reset.
-        // Key: "<text>|<n|g>|<lightMode>" so light/dark and grey-annot variants are separate.
+        // Key: "<text>|<n|g>|<lightMode>|<size>" so light/dark, grey-annot and hover sizes are separate.
         if (!self._labelCache) self._labelCache = {};
 
         // We need ctx.font set for measureText even though we draw via drawImage below.
@@ -2026,6 +2076,41 @@ function MaxPlot(div, top, left, width, height, args) {
 
         ctx.save();
         ctx.font = FONT;
+
+        function getLabelBitmap(text, size) {
+            /* return {canvas, textWidth} with the label pre-rendered at a font size, cached */
+            var cacheKey = text + "|" + (doGrey ? "g" : "n") + "|" + self.lightMode + "|" + size;
+            var entry = self._labelCache[cacheKey];
+            if (entry)
+                return entry;
+            var font = "bold "+size+"px Sans-serif";
+            ctx.font = font;
+            var textWidth = Math.round(ctx.measureText(text).width);
+            ctx.font = FONT;
+            var oc    = document.createElement('canvas');
+            oc.width  = textWidth + CACHE_PAD * 2;
+            oc.height = size + CACHE_PAD * 2;
+            var octx  = oc.getContext('2d');
+            octx.font         = font;
+            octx.textBaseline = "top";
+            octx.textAlign    = "left";
+            if (doGrey===undefined) {
+                octx.strokeStyle = "rgba(200, 200, 200, 0.3)";
+                octx.lineWidth   = 5;
+                octx.miterLimit  = 2;
+                octx.fillStyle   = "rgba(0,0,0,0.8)";
+                octx.shadowBlur  = 6;
+                octx.shadowColor = "white";
+                octx.strokeText(text, CACHE_PAD, CACHE_PAD);
+                octx.fillText  (text, CACHE_PAD, CACHE_PAD);
+            } else {
+                octx.fillStyle = self.isLight() ? "rgba(0,0,0,1.0)" : "rgba(255,255,255,1.0)";
+                octx.fillText(text, CACHE_PAD, CACHE_PAD);
+            }
+            entry = { canvas: oc, textWidth: textWidth };
+            self._labelCache[cacheKey] = entry;
+            return entry;
+        }
 
         var addMargin = 1; // how many pixels to extend the bbox around the text, make clicking easier
         var bboxArr = []; // array of click hit boxes
@@ -2041,35 +2126,7 @@ function MaxPlot(div, top, left, width, height, args) {
             var y     = coord[1];
             var text  = coord[2];
 
-            // --- bitmap cache lookup / build ---
-            var cacheKey = text + "|" + (doGrey ? "g" : "n") + "|" + self.lightMode;
-            var entry = self._labelCache[cacheKey];
-
-            if (!entry) {
-                var textWidth = Math.round(ctx.measureText(text).width);
-                var oc    = document.createElement('canvas');
-                oc.width  = textWidth + CACHE_PAD * 2;
-                oc.height = gTextSize  + CACHE_PAD * 2;
-                var octx  = oc.getContext('2d');
-                octx.font         = FONT;
-                octx.textBaseline = "top";
-                octx.textAlign    = "left";
-                if (doGrey===undefined) {
-                    octx.strokeStyle = "rgba(200, 200, 200, 0.3)";
-                    octx.lineWidth   = 5;
-                    octx.miterLimit  = 2;
-                    octx.fillStyle   = "rgba(0,0,0,0.8)";
-                    octx.shadowBlur  = 6;
-                    octx.shadowColor = "white";
-                    octx.strokeText(text, CACHE_PAD, CACHE_PAD);
-                    octx.fillText  (text, CACHE_PAD, CACHE_PAD);
-                } else {
-                    octx.fillStyle = self.isLight() ? "rgba(0,0,0,1.0)" : "rgba(255,255,255,1.0)";
-                    octx.fillText(text, CACHE_PAD, CACHE_PAD);
-                }
-                entry = { canvas: oc, textWidth: textWidth };
-                self._labelCache[cacheKey] = entry;
-            }
+            var entry = getLabelBitmap(text, gTextSize);
 
             // center label on origX, align top to y (matching original behaviour)
             var x = origX - Math.round(entry.textWidth * 0.5);
@@ -2080,9 +2137,21 @@ function MaxPlot(div, top, left, width, height, args) {
                 continue;
             }
 
-            ctx.drawImage(entry.canvas, x - CACHE_PAD, y - CACHE_PAD);
+            // the hovered label is drawn bigger below, the normal one would show through it
+            if (i!==hoverIdx)
+                ctx.drawImage(entry.canvas, x - CACHE_PAD, y - CACHE_PAD);
 
             bboxArr.push( [x-addMargin, y-addMargin, x+entry.textWidth+addMargin, y+gTextSize+addMargin] );
+        }
+
+        // the label under the mouse: draw it again on top, bigger, so it is clear which one it is
+        if (hoverIdx!==undefined && hoverIdx!==null && bboxArr[hoverIdx]) {
+            const coord = labelCoords[hoverIdx];
+            const hoverScale = 1.15;
+            const big = getLabelBitmap(coord[2], Math.round(gTextSize*hoverScale));
+            const bigX = coord[0] - Math.round(big.textWidth * 0.5);
+            const bigY = coord[1] - Math.round(gTextSize*(hoverScale-1)/2); // keep it centered on the label
+            ctx.drawImage(big.canvas, bigX - CACHE_PAD, bigY - CACHE_PAD);
         }
         ctx.restore();
         if(DEBUG) console.timeEnd("labels");
@@ -2469,8 +2538,12 @@ function MaxPlot(div, top, left, width, height, args) {
         ctx.uniform1f(self.u_Layer, 0);
         ctx.drawArrays(self.ctx.POINTS, 0, count);
         if(fatIdx !== null) {
+            // bigger like in the 2D renderer, and at least 1.5 pixels: on datasets with millions of
+            // cells the radius is below one pixel and the highlighted cells disappear among the grey ones
+            ctx.uniform1f(self.u_Radius, Math.max(radius * 1.5, 1.5));
             ctx.uniform1f(self.u_Layer, 1);
             ctx.drawArrays(self.ctx.POINTS, 0, count);
+            ctx.uniform1f(self.u_Radius, radius);
         }
         if(selCells.size > 0) {
             ctx.uniform1f(self.u_Radius, radius * 2);
@@ -3320,6 +3393,7 @@ function MaxPlot(div, top, left, width, height, args) {
         if (self._suppressDraw) return;
         // nothing can be drawn with WebGL until the browser restores the context. SVG export does not need it.
         if (self.glContextLost && doSvg===undefined) return;
+        self.drawCount = (self.drawCount || 0) + 1; // lets onMouseMove see if a callback already redrew
         if(DEBUG) console.time("draw");
 
         self.clear();
@@ -3418,19 +3492,30 @@ function MaxPlot(div, top, left, width, height, args) {
     this.drawLabels = function() {
         /* draw only the labels */
         if (self.doDrawLabels && self.plotLabels && self.plotLabels.length > 0) {
-            self.plotPxLabels = scaleLabels(
+            const pxLabels = scaleLabels(
                 self.plotLabels,
                 self.usesWebGL() ? self.port.projection.pxBounds(self.glRange(), self.canvas.width, self.canvas.height) : self.port.zoomRange,
                 self.port.radius,
                 self.canvas.width,
                 self.canvas.height
             );
+            // redraws without a change of view (e.g. on mouse hover) reuse the last spread positions,
+            // so the labels do not jump around
+            const spreadKey = JSON.stringify(pxLabels) + "|" + self.canvas.height;
+            if (spreadKey !== self.labelSpreadKey) {
+                spreadLabels(self.usesWebGL() ? this.labelCtx : self.ctx, pxLabels, self.canvas.height);
+                self.labelSpreadKey = spreadKey;
+                self.labelSpreadPx = pxLabels;
+            }
+            self.plotPxLabels = self.labelSpreadPx;
             self.plotLabelBbox = drawLabels(
                 self.usesWebGL() ? this.labelCtx : self.ctx,
                 self.plotPxLabels,
                 self.canvas.width,
                 self.canvas.height,
-                self.port.zoomFact
+                self.port.zoomFact,
+                undefined,
+                self.hoverLabelIdx
             );
         }
 
@@ -4306,6 +4391,9 @@ function MaxPlot(div, top, left, width, height, args) {
         // when the cursor is over a label, change it to a hand, but only when there is no marquee
         if (self.plotLabelBbox!==null && self.mouseDownX === null) {
             var labelInfo = self.labelAt(xCanvas, yCanvas);
+            const oldHoverIdx = self.hoverLabelIdx;
+            self.hoverLabelIdx = (labelInfo===null) ? null : labelInfo[1];
+            const drawCount = self.drawCount;
             if (labelInfo===null) {
                 self.canvas.style.cursor = self.canvasCursor;
                 self.onNoLabelHover(ev);
@@ -4314,6 +4402,9 @@ function MaxPlot(div, top, left, width, height, args) {
                 if (self.onLabelHover!==null)
                     self.onLabelHover(labelInfo[0], labelInfo[1], ev);
                 }
+            // the hover callbacks usually redraw (to fatten the cluster), but not always
+            if (self.hoverLabelIdx!==oldHoverIdx && self.drawCount===drawCount)
+                self.drawDots();
         }
 
         // when the cursor is over a line, trigger callback
@@ -4357,6 +4448,17 @@ function MaxPlot(div, top, left, width, height, args) {
         // save mouse pos for onNoMouseMove timer handler and WebGL panning
         self.lastMouseX = ev.clientX;
         self.lastMouseY = ev.clientY;
+    };
+
+    this.onMouseLeave = function(ev) {
+        /* when the mouse leaves the canvas while over a label, stop showing that label as hovered */
+        if (self.hoverLabelIdx===null)
+            return;
+        self.hoverLabelIdx = null;
+        const drawCount = self.drawCount;
+        self.onNoLabelHover(ev);
+        if (self.drawCount===drawCount)
+            self.drawDots();
     };
 
     this.onNoMouseMove = function() {
@@ -4601,6 +4703,7 @@ function MaxPlot(div, top, left, width, height, args) {
        // setup the mouse callbacks
        canvas.addEventListener('mousedown', self.onMouseDown);
        canvas.addEventListener("mousemove", self.onMouseMove);
+       canvas.addEventListener("mouseleave", self.onMouseLeave);
        canvas.addEventListener("mouseup", self.onMouseUp);
        // when the user moves the mouse, the mouse is often NOT on the canvas,
        // but on the marquee box, so connect this one, too.
