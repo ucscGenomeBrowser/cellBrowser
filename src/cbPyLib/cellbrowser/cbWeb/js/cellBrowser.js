@@ -7783,13 +7783,11 @@ var cellbrowser = function() {
             return null;
         }
 
-        var metaCounts = metaInfo.valCounts; // array of [count, value]
-
         // we are going to sort this list later, so we need to keep track of what the original
         // index in the list was, as every meta data value is stored by its index, not
-        // its label. Simply append the index as [2] of the metaCounts array.
-        for (var valIdx=0; valIdx < metaCounts.length; valIdx++)
-            metaCounts[valIdx].push(valIdx);
+        // its label: [2] is the original index. Sort a copy: metaInfo.valCounts must stay in
+        // the original order, as findMetaValIndex() and the Find cells dialog look values up by index
+        var metaCounts = metaInfo.valCounts.map(function(vc, valIdx) { return [vc[0], vc[1], valIdx]; });
 
         var oldSortBy = getFromUrl("SORT");
         // URL overrides default value
