@@ -5808,7 +5808,18 @@ var cellbrowser = function() {
 
        if (ignoreUrl!==true) {
            // allow to override coloring by URL args
-           if (getVar("gene")!==undefined) {
+           if (getVar("gene")!==undefined && db.isAtacMode()) {
+               // ATAC datasets have no values per gene, only per peak. Do what typing the gene into the
+               // search box does: list the peaks around the gene and keep the default coloring
+               if (!db.geneToTss)
+                   db.indexGenesAtac();
+               let geneId = db.mustFindOneGeneExact(getVar("gene"));
+               if (geneId!==null && geneId in db.geneToTss)
+                   updatePeakListWithGene(geneId);
+               changeUrl({"gene":null});
+               activateTab("gene");
+           }
+           else if (getVar("gene")!==undefined) {
                colorType = "gene";
                colorBy = getVar("gene");
                activateTab("gene");
