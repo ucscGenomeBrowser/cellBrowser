@@ -12200,6 +12200,13 @@ var cellbrowser = function() {
                 pal[0]='f4f7ff';
         }
 
+        // fixed-size palettes run out: Tatarize has 104 colors, Iwanthue 30 (and returns null above
+        // that). Keep their colors and give the remaining values rainbow colors, so none is left without one
+        if (!pal)
+            pal = [];
+        if (pal.length < n)
+            pal = pal.concat(palette("rainbow", n - pal.length));
+
         return pal;
     }
 
