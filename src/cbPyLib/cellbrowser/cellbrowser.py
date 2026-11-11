@@ -4120,12 +4120,29 @@ def computeDotplotCache(datasetDir, inConf, outConf, sampleNames):
     codes = np.asarray(codes)
     nClusters = len(uniqueLabels)
 
+    # A quick gene can be written as geneId|label, where the label is the wrangler's own (e.g. a
+    # zebrafish name) and need not match the matrix, whose key is geneId|matrixSymbol or a bare
+    # geneId when the matrix has no symbol. parseGeneInfo only checks the geneId part, so fall back
+    # to that here. The cache stays keyed by the quick gene string, which is what the JS asks for.
+    # Only IDs that occur once are used: a peak named chr1|100|200 must never fall back to "chr1".
+    offsById = {}
+    dupIds = set()
+    for key, offsLen in iterItems(geneOffsets):
+        keyId = key.split("|")[0]
+        if keyId in offsById:
+            dupIds.add(keyId)
+        offsById[keyId] = offsLen
+    for keyId in dupIds:
+        del offsById[keyId]
+
     cache = {}
     skipCount = 0
     with open(binFname, "rb") as bf:
         for quickGeneRow in quickGenes:
             geneId = quickGeneRow[0]
             offsLen = geneOffsets.get(geneId)
+            if offsLen is None:
+                offsLen = offsById.get(geneId.split("|")[0])
             if offsLen is None:
                 skipCount += 1
                 continue
