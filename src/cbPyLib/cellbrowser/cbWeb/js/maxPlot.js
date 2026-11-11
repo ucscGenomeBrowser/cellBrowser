@@ -2565,20 +2565,16 @@ function MaxPlot(div, top, left, width, height, args) {
             return;
         if(DEBUG) console.time("image");
 
-        //var ctxWidth = ctx.canvas.width; // size of the canvas on the screen in pixels
-        //var ctxHeight = ctx.canvas.height;
-
-        //var clipWidth = backuwidth;
-        //var clipHeight = back.height;
-
-        // arguments are: (imgObject, x/y coord on image for clipping, width / height of clipped image, where to place the image, width/height of image)
-        //var a = getSafeRect(back.image.width, back.image.height, back.clipX, back.clipY, back.image.width, back.image.height, 0, 0, ctxWidth, ctxHeight);
-        //if(DEBUG) console.log("drawing fixed coords", a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
-        //ctx.drawImage(back.image, a.sx, a.sy, a.sw, a.sh, a.dx, a.dy, a.dw, a.dh);
-        //ctx.drawImage(back.image, a.sx, a.sy, back.width, back.height, a.dx, a.dy, a.dw, a.dh);
-        if(DEBUG) console.log("drawImage sx, sy, sw, sh, dx, dy, dw, dh", back.sx, back.sy, back.sw, back.sh, back.dx,back.dy, back.dw, back.dh);
-        //ctx.drawImage(back.image, back.sx, back.sy, back.width, back.height, 0, 0, ctxWidth, ctxHeight);
-        ctx.drawImage(back.image, back.sx, back.sy, back.sw, back.sh, back.dx, back.dy, back.dw, back.dh);
+        // When zoomed out, the shown rectangle reaches past the edges of the image. Trim it to the image
+        // ourselves: Chrome and Firefox do this, but Safari stretches the image over the whole destination
+        // instead. ext/drawImage-clipper.js was meant to catch this, but its feature test uses a canvas
+        // as the source, which newer Safaris (seen in 27.2) handle fine, so it switches itself off.
+        var img = back.image;
+        var a = getSafeRect(img.naturalWidth || img.width, img.naturalHeight || img.height,
+            back.sx, back.sy, back.sw, back.sh, back.dx, back.dy, back.dw, back.dh);
+        if(DEBUG) console.log("drawImage sx, sy, sw, sh, dx, dy, dw, dh", a);
+        if (a[2] > 0 && a[3] > 0)
+            ctx.drawImage(img, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
 
         if(DEBUG) console.timeEnd("image");
     }
@@ -2798,6 +2794,14 @@ function MaxPlot(div, top, left, width, height, args) {
         const w_ratio = dw / sw;
         const h_ratio = dh / sh;
 
+        // the part of the destination that the trimmed source rectangle covers
+        return [
+            x1, y1, x2 - x1, y2 - y1,
+            dx + (x1 - sx) * w_ratio,
+            dy + (y1 - sy) * h_ratio,
+            (x2 - x1) * w_ratio,
+            (y2 - y1) * h_ratio
+        ];
     }
 
     this.scaleBackground = function(background, dataRange, zoomRange) {
