@@ -4865,8 +4865,12 @@ var cellbrowser = function() {
         /* update progress bars. The DOM elements of these were added in maxPlot (not optimal?)  */
         if(DEBUG) console.log(ev);
         if (ev.text!==undefined) {
-            // image loaders just show a little watermark
-            renderer.setWatermark(ev.text);
+            // image loaders just show a little watermark. When done (empty text), put back the
+            // split screen panel title that the loading message replaced, if there is one
+            if (ev.text==="" && renderer.isSplit() && gLegend && gLegend.type)
+                buildWatermark(renderer);
+            else
+                renderer.setWatermark(ev.text);
             return;
         }
 
