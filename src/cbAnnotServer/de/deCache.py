@@ -98,10 +98,17 @@ def _datasetKey(dataUrl):
 
 
 def _fetchToFile(url, destPath, onBytes=None):
-    """Stream url to destPath (a .tmp path), chunked. Calls onBytes(nSoFar) as it
-    goes so the caller can report progress. Raises on any HTTP/network error."""
+    """Stream url to destPath (a .tmp path), chunked. Calls onBytes(nSoFar, total)
+    as it goes so the caller can report progress; total is the Content-Length, or
+    None if the server didn't send one. Raises on any HTTP/network error, and if
+    fewer bytes arrive than Content-Length promised, so a dropped connection is
+    never cached as a complete file."""
     req = urllib.request.Request(url, headers={"User-Agent": "cbDeWorker"})
     with _opener.open(req, timeout=120) as resp:
+        try:
+            total = int(resp.headers.get("Content-Length"))
+        except (TypeError, ValueError):
+            total = None
         got = 0
         with open(destPath, "wb") as out:
             while True:
@@ -111,7 +118,10 @@ def _fetchToFile(url, destPath, onBytes=None):
                 out.write(block)
                 got += len(block)
                 if onBytes:
-                    onBytes(got)
+                    onBytes(got, total)
+    if total is not None and got != total:
+        raise IOError("incomplete download of %s: got %d of %d bytes"
+                      % (url, got, total))
     return got
 
 
@@ -249,10 +259,21 @@ def ensureDataset(dataUrl, cacheRoot, maxBytes=0, status=None):
             if status:
                 status("Fetching %s" % fname)
 
-            def onBytes(n, _f=fname):
+            def onBytes(n, total, _f=fname):
                 if status and _f == "exprMatrix.bin":
-                    status("Fetching expression (%d MB)" % (n // (1024 * 1024)))
-            _fetchToFile(base + "/" + fname, os.path.join(tmp, fname), onBytes)
+                    mb = 1024 * 1024
+                    if total:
+                        status("Fetching expression (%d of %d MB)"
+                               % (n // mb, total // mb))
+                    else:
+                        status("Fetching expression (%d MB)" % (n // mb))
+            try:
+                _fetchToFile(base + "/" + fname, os.path.join(tmp, fname),
+                             onBytes)
+            except BaseException:
+                # don't leave a partial download on /hive (it can be 100+ GB)
+                shutil.rmtree(tmp, ignore_errors=True)
+                raise
 
         shutil.rmtree(vdir, ignore_errors=True)
         os.replace(tmp, vdir)

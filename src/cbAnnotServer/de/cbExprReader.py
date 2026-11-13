@@ -22,10 +22,13 @@ if that ever changes. A handful of old datasets on disk are mis-built (bin is
 raise a clear error rather than silently returning garbage.
 """
 import csv
+import itertools
 import json
 import os
 import struct
 import zlib
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import scipy.sparse as sp
@@ -47,6 +50,17 @@ def _numpyDtype(matrixArrType):
     if dt is None:
         raise ValueError("unknown matrixArrType %r" % matrixArrType)
     return np.dtype(dt)
+
+
+def defaultThreads():
+    """Threads for inflating gene records: DE_READ_THREADS if set, else
+    DE_CPU_LIMIT (the job's CPU cap), capped at 16 and at the host's cores."""
+    val = os.environ.get("DE_READ_THREADS") or os.environ.get("DE_CPU_LIMIT")
+    try:
+        n = int(val) if val else 16
+    except ValueError:
+        n = 16
+    return max(1, min(n, 16, os.cpu_count() or 1))
 
 
 class CbExprReader:
@@ -81,14 +95,22 @@ class CbExprReader:
         return self._binFh
 
     def readGene(self, geneKey):
-        """Decode one gene's expression vector (length sampleCount)."""
+        """Decode one gene's expression vector (length sampleCount).
+
+        Reads with os.pread (no shared file position), so several threads can
+        call this at once on the same reader."""
         off, length = self.offsets[geneKey]
-        fh = self._fh()
-        fh.seek(int(off))
-        raw = zlib.decompress(fh.read(int(length)))
+        fd = self._fh().fileno()
+        comp = os.pread(fd, int(length), int(off))
+        if len(comp) != int(length):
+            raise ValueError("%s: short read from exprMatrix.bin" % geneKey)
+        expected = self.itemsize * self.sampleCount
+        # Size the output buffer up front (vector + header; the descriptor is a
+        # short gene id) so zlib doesn't grow it in steps, and slice through a
+        # memoryview so the vector isn't copied again.
+        raw = memoryview(zlib.decompress(comp, bufsize=expected + 1024))
         descLen = struct.unpack("<H", raw[:2])[0]
         body = raw[2 + descLen:]
-        expected = self.itemsize * self.sampleCount
         if len(body) != expected:
             raise ValueError(
                 "%s: expression record is %d bytes, expected %d "
@@ -98,7 +120,32 @@ class CbExprReader:
                    self.itemsize, self.conf["matrixArrType"]))
         return np.frombuffer(body, dtype=self.dtype)
 
-    def readMatrix(self, cellIdx=None, sparse=True):
+    def _mapGenes(self, fn, threads):
+        """Yield fn(geneKey) for every gene, in matrix order.
+
+        Most of a big job's time is inflating gene records; zlib and numpy drop
+        the GIL, so a thread pool scales close to linearly. At most 2*threads
+        genes are in flight, which bounds the extra memory to about 2*threads
+        full-length gene vectors."""
+        keys = self.geneKeys
+        if threads <= 1 or len(keys) < 2:
+            for key in keys:
+                yield fn(key)
+            return
+        window = 2 * threads
+        with ThreadPoolExecutor(max_workers=threads) as pool:
+            pending = deque()
+            it = iter(keys)
+            for key in itertools.islice(it, window):
+                pending.append(pool.submit(fn, key))
+            while pending:
+                result = pending.popleft().result()
+                nxt = next(it, None)
+                if nxt is not None:
+                    pending.append(pool.submit(fn, nxt))
+                yield result
+
+    def readMatrix(self, cellIdx=None, sparse=True, threads=None):
         """Build a (n_cells x n_genes) float32 matrix.
 
         cellIdx : optional 1-D int array of cell (row) positions to keep. When
@@ -110,10 +157,13 @@ class CbExprReader:
                   one-vs-rest on a large atlas and an OOM. Pass False for a dense
                   ndarray (handy for small tests).
 
-        Genes are decoded one at a time (each is a column), so peak memory is one
-        gene vector plus the accumulated nonzeros — never a dense n_cells x n_genes
-        block.
+        Genes are decoded a few at a time (each is a column), so peak memory is
+        about 2*threads gene vectors plus the accumulated nonzeros — never a dense
+        n_cells x n_genes block.
+        threads : how many genes to inflate at once. None = defaultThreads().
         """
+        if threads is None:
+            threads = defaultThreads()
         if cellIdx is None:
             rows = self.sampleCount
             take = None
@@ -125,19 +175,24 @@ class CbExprReader:
 
         if not sparse:
             M = np.empty((rows, nGenes), dtype=np.float32)
-            for j, key in enumerate(self.geneKeys):
-                vec = self.readGene(key)
-                M[:, j] = vec if take is None else vec[take]
+            cols = self._mapGenes(
+                lambda key: (self.readGene(key) if take is None
+                             else self.readGene(key)[take]), threads)
+            for j, vec in enumerate(cols):
+                M[:, j] = vec
             return M
 
-        data, indices, indptr = [], [], [0]   # CSC: one column per gene
-        for key in self.geneKeys:
+        def column(key):
             vec = self.readGene(key)
             if take is not None:
                 vec = vec[take]
             nz = np.flatnonzero(vec)
-            indices.append(nz.astype(np.int32))
-            data.append(vec[nz].astype(np.float32))
+            return nz.astype(np.int32), vec[nz].astype(np.float32)
+
+        data, indices, indptr = [], [], [0]   # CSC: one column per gene
+        for nz, vals in self._mapGenes(column, threads):
+            indices.append(nz)
+            data.append(vals)
             indptr.append(indptr[-1] + nz.size)
         data = np.concatenate(data) if data else np.zeros(0, np.float32)
         indices = (np.concatenate(indices) if indices
