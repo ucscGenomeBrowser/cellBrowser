@@ -4123,30 +4123,28 @@ def computeDotplotCache(datasetDir, inConf, outConf, sampleNames):
     # A quick gene can be written as geneId|label, where the label is the wrangler's own (e.g. a
     # zebrafish name) and need not match the matrix, whose key is geneId|matrixSymbol or a bare
     # geneId when the matrix has no symbol. parseGeneInfo only checks the geneId part, so fall back
-    # to that here. The cache stays keyed by the quick gene string, which is what the JS asks for.
+    # to that here.
     # Only IDs that occur once are used: a peak named chr1|100|200 must never fall back to "chr1".
-    offsById = {}
+    keyById = {}
     dupIds = set()
-    for key, offsLen in iterItems(geneOffsets):
+    for key in geneOffsets:
         keyId = key.split("|")[0]
-        if keyId in offsById:
+        if keyId in keyById:
             dupIds.add(keyId)
-        offsById[keyId] = offsLen
+        keyById[keyId] = key
     for keyId in dupIds:
-        del offsById[keyId]
+        del keyById[keyId]
 
     cache = {}
     skipCount = 0
     with open(binFname, "rb") as bf:
         for quickGeneRow in quickGenes:
             geneId = quickGeneRow[0]
-            offsLen = geneOffsets.get(geneId)
-            if offsLen is None:
-                offsLen = offsById.get(geneId.split("|")[0])
-            if offsLen is None:
+            matrixKey = geneId if geneId in geneOffsets else keyById.get(geneId.split("|")[0])
+            if matrixKey is None:
                 skipCount += 1
                 continue
-            offset, length = offsLen
+            offset, length = geneOffsets[matrixKey]
             bf.seek(offset)
             data = bf.read(length)
             geneDesc, exprArr = exprDecode(data, matType)
@@ -4155,6 +4153,10 @@ def computeDotplotCache(datasetDir, inConf, outConf, sampleNames):
             # element. The JS does the same unwrapping for the live-computed path.
             if geneDesc.startswith("["):
                 geneDesc = json.loads(geneDesc)[0]
+            elif "|" in matrixKey:
+                # geneId|symbol matrices store the geneId as the description; show the symbol, like
+                # the JS does when it computes the plot itself (cellBrowser.js, geneOffsets[id][2])
+                geneDesc = matrixKey.split("|", 1)[1]
             exprArr = exprArr.astype("float64")
 
             cellCounts = np.bincount(codes, minlength=nClusters)
@@ -4165,7 +4167,10 @@ def computeDotplotCache(datasetDir, inConf, outConf, sampleNames):
             geneRows = {}
             for i, label in enumerate(uniqueLabels):
                 geneRows[str(label)] = [int(cellCounts[i]), int(round(nonZeroCounts[i])), float(avgs[i])]
-            cache[geneId] = {"desc": geneDesc, "rows": geneRows}
+            # key by the geneId alone: for geneId|symbol matrices the JS looks genes up by the geneId
+            # (cbData.js indexGenes), so a geneId|symbol key would never be found. Symbol-only
+            # quick genes have no "|" and are unchanged.
+            cache[geneId.split("|")[0]] = {"desc": geneDesc, "rows": geneRows}
 
     if skipCount:
         logging.warn("Dot plot cache: %d of %d quick genes could not be found in the expression matrix, skipped" %
