@@ -9,7 +9,7 @@ without every server being locked to one interpreter.
 ```
 browser ──HTTPS──▶ Apache (cells vhost) ──/api──▶ gunicorn ──▶ Flask (wsgi.py)
          static files ◀── docroot (htdocs-cells)                      │
-                                                                 SQLite on /hive
+                                                         MySQL (hgcentral, cb* tables)
 ```
 
 Everything the frontend talks to is under `/api`; everything else is the normal
@@ -28,7 +28,8 @@ static Cell Browser served from the docroot.
 | `apache-cells-api.conf` | ProxyPass snippet to paste into the cells vhosts |
 | `cb.conf.sample` | Site config template for the docroot (read by the frontend) |
 | `providers.conf.sample` | Sign-in provider template (server-side, holds secrets, chmod 600) |
-| `migrate_identities.py` | One-off DB migration to the `oauth_identities` table |
+| `schema-mysql.sql` | The six `cb*` tables, to create by hand in hgcentral |
+| `copy_sqlite_to_mysql.py` | One-off copy of an old SQLite database into those tables |
 
 ## One-time setup
 
@@ -38,9 +39,11 @@ static Cell Browser served from the docroot.
    source venv/bin/activate
    pip install -r requirements.txt      # includes gunicorn
    ```
-2. **Database dir**, private to the deploy user. At UCSC, `make setup-annot`
-   in `ucsc/` creates it with the rest of /cluster/home/otto/cellsServer.
-   Another database is a drop-in later via `CBANNOT_DATABASE_URI`.
+2. **Database.** Create the tables once with `hgsql hgcentraltest < deploy/schema-mysql.sql`
+   (`hgcentral` on the RR). The service never creates tables on MySQL and stops
+   at startup if any is missing, so its MySQL account needs only SELECT, INSERT,
+   UPDATE and DELETE on the six `cb*` tables. For local development an
+   `sqlite:///` URI works too; the service then creates the tables itself.
 3. **Secret key** — generate once and keep it stable so logins survive restarts:
    ```
    python -c 'import secrets; print(secrets.token_hex(32))'
@@ -54,7 +57,8 @@ cron watchdog sources). See `config.py` for the full list.
 | Variable | Production value |
 |----------|------------------|
 | `CBANNOT_SECRET_KEY` | the long random string from step 3 |
-| `CBANNOT_DATABASE_URI` | `sqlite:////cluster/home/otto/cellsServer/db/cbAnnot.db` |
+| `CBANNOT_DATABASE_URI` | `mysql+pymysql://USER:PASSWORD@HOST/hgcentral?charset=utf8mb4` (URL-encode special characters in the password) |
+| `CBANNOT_MAX_CONTENT_LENGTH` | optional; largest request in bytes, default 12 MB so a save fits MySQL's 16 MB limits |
 | `CBANNOT_BIND` | `127.0.0.1:5051` (must match the ProxyPass target) |
 | `CBANNOT_COOKIE_SECURE` | `true` (site is HTTPS) |
 | `CBANNOT_SITE_BASE_URL` | `https://cells.ucsc.edu` (used in email links) |
@@ -180,21 +184,21 @@ An identity already bound to a *different* account is refused rather than moved:
 merging two accounts means merging their annotations and DE runs, which should
 not happen behind the user's back.
 
-### Database migrations
+### Moving from SQLite to MySQL
 
-Two one-off scripts, both idempotent, both backing the DB up first. Run with
-the service stopped, oldest first — each is a no-op if it does not apply:
+The tables were renamed for hgcentral (`users` became `cbUsers`, `annotations`
+became `cbAnnotations`, and so on), and this version refuses to start on an SQLite
+file that still has the old names rather than quietly starting with empty tables.
+To move an existing SQLite database over, create the tables, then copy:
 
 ```
-export CBANNOT_DATABASE_URI=sqlite:////cluster/home/otto/cellsServer/db/cbAnnot.db
-./venv/bin/python3 deploy/migrate_oauth.py       # pre-OAuth DBs: nullable email/password + oauth columns
-./venv/bin/python3 deploy/migrate_identities.py  # moves those columns into oauth_identities
+hgsql hgcentraltest < deploy/schema-mysql.sql
+CBANNOT_DATABASE_URI='mysql+pymysql://...' ./venv/bin/python3 deploy/copy_sqlite_to_mysql.py /path/to/cbAnnot.db
 ```
 
-`migrate_identities.py` copies every existing OAuth login into the new table and
-rebuilds `users` without `oauth_provider`/`oauth_sub` (SQLite cannot drop a
-column out of a UNIQUE constraint in place). A fresh install via
-`db.create_all()` or `schema.sql` already has the right shape.
+It opens the SQLite file read-only, copies into empty tables only, keeps row ids
+(so share links stay the same) and writes everything in one transaction. Then
+point `CBANNOT_DATABASE_URI` at MySQL and restart.
 
 ## Keeping it running
 

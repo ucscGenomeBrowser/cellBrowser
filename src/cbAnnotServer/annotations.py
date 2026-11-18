@@ -76,6 +76,8 @@ def load(dataset):
 @annotations_bp.post("/<path:dataset>")
 @login_required
 def save(dataset):
+    if len(dataset) > 255:                       # the dataset_name column's size
+        return _bad("dataset name too long")
     body = request.get_json(silent=True)
     if body is None or "data" not in body:
         return _bad('request body must be a JSON object with a "data" field')

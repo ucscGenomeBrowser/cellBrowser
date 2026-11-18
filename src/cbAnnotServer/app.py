@@ -76,12 +76,45 @@ def create_app(config_class=Config):
     def health():
         return jsonify({"ok": True})
 
+    @app.errorhandler(413)
+    def _too_large(_e):
+        mb = app.config["MAX_CONTENT_LENGTH"] / (1024 * 1024)
+        return jsonify({"error": "too large to save (the limit is %.0f MB)" % mb}), 413
+
     with app.app_context():
-        # SQLAlchemy creates tables for any model imported before this runs
-        import models  # noqa: F401
-        _create_all_once(app)
+        import models  # noqa: F401  (registers the tables with SQLAlchemy)
+        if db.engine.dialect.name == "sqlite":
+            _refuse_old_names()
+            _create_all_once(app)
+        else:
+            _check_tables(app)
 
     return app
+
+
+def _refuse_old_names():
+    """The tables were renamed (users -> cbUsers, ...) for the move to hgcentral.
+    On an SQLite file that still has the old names, create_all would quietly add
+    empty cb tables and every account and annotation would seem to vanish, so
+    stop instead. deploy/copy_sqlite_to_mysql.py reads the old names."""
+    from sqlalchemy import inspect
+    names = set(inspect(db.engine).get_table_names())
+    if "users" in names and "cbUsers" not in names:
+        raise RuntimeError("%s has the old table names (users, annotations, ...); "
+                           "this version uses cbUsers, cbAnnotations, ... -- copy the "
+                           "data with deploy/copy_sqlite_to_mysql.py" % db.engine.url.database)
+
+
+def _check_tables(app):
+    """On MySQL the tables are created by hand from deploy/schema-mysql.sql (the
+    service account only needs read/write on them), so just check they are
+    there and stop with a clear message if not."""
+    from sqlalchemy import inspect
+    missing = sorted(set(db.metadata.tables) - set(inspect(db.engine).get_table_names()))
+    if missing:
+        raise RuntimeError("database %s is missing tables %s; create them with "
+                           "deploy/schema-mysql.sql" % (db.engine.url.database,
+                                                        ", ".join(missing)))
 
 
 def _create_all_once(app):

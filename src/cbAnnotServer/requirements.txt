@@ -12,6 +12,7 @@ SQLAlchemy==2.0.51
 gunicorn==23.0.0
 Authlib==1.6.12       # OpenID Connect sign-in (providers configured in providers.conf)
 requests==2.32.5      # HTTP transport Authlib uses to reach the OIDC endpoints; DE relay
+PyMySQL==1.2.3        # MySQL/MariaDB driver for hgcentral (CBANNOT_DATABASE_URI=mysql+pymysql://...)
 
 # pulled in by the above
 blinker==1.9.0

@@ -2,8 +2,8 @@
 """
 cbAnnotServer account admin — list, inspect, delete, and verify user accounts.
 
-Runs against the same database the service uses (CBANNOT_DATABASE_URI, or the
-default hive SQLite path). It goes through the Flask app + SQLAlchemy models, so
+Runs against the same database the service uses (CBANNOT_DATABASE_URI, so
+set it from the service's env file). It goes through the Flask app + SQLAlchemy models, so
 deleting a user also removes that user's annotations and DE analyses via the
 model cascades — no orphaned rows.
 

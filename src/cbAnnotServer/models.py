@@ -1,18 +1,36 @@
 """
-SQLAlchemy models. Schema matches schema.sql.
+SQLAlchemy models. Schema matches deploy/schema-mysql.sql (the MySQL tables).
 
 The `data` field on Annotation and the `results` field on DeAnalysis are stored
 as JSON strings — kept opaque at the DB layer so the frontend can evolve the
 shape without DB migrations.
+
+In production the tables live in hgcentral (MySQL/MariaDB) next to the Genome
+Browser's own tables, so every name starts with "cb" and is camelCase like the
+rest of hgcentral. Column names keep their original snake_case.
 """
 from datetime import datetime
 from flask_login import UserMixin
+from sqlalchemy.dialects import mysql
 
 from extensions import db
 
+# MySQL settings for every table. InnoDB: the ON DELETE CASCADE foreign keys need
+# it (hgcentral's default engine is MyISAM). utf8mb4: the server default is
+# latin1. utf8mb4_bin: share tokens are case-sensitive random strings, and a
+# binary collation also keeps email matching exactly as it was under SQLite.
+_MYSQL = {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4",
+          "mysql_collate": "utf8mb4_bin"}
+
+# Saved annotations and DE results are JSON that can run to megabytes. MySQL's
+# TEXT holds only 64 KB, so use MEDIUMTEXT (16 MB) there; SQLite's TEXT has no
+# limit. config.MAX_CONTENT_LENGTH keeps a request below what fits.
+LongText = db.Text().with_variant(mysql.MEDIUMTEXT(), "mysql", "mariadb")
+
 
 class User(UserMixin, db.Model):
-    __tablename__ = "users"
+    __tablename__ = "cbUsers"
+    __table_args__ = (_MYSQL,)
     # An account is identified by email+password, by one or more external OAuth
     # identities (see OAuthIdentity), or by both. Hence email and password_hash
     # are both nullable: an ORCID login may carry no email at all, and an
@@ -56,13 +74,14 @@ class OAuthIdentity(db.Model):
     federation's permanent subject-id. `email` and `display_name` are what that
     provider reported, kept per-identity because two providers may disagree.
     """
-    __tablename__ = "oauth_identities"
+    __tablename__ = "cbOauthIdentities"
     __table_args__ = (
         db.UniqueConstraint("provider", "subject", name="uq_identity_provider_subject"),
+        _MYSQL,
     )
 
     id           = db.Column(db.Integer, primary_key=True)
-    user_id      = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"),
+    user_id      = db.Column(db.Integer, db.ForeignKey("cbUsers.id", ondelete="CASCADE"),
                              nullable=False, index=True)
     provider     = db.Column(db.String(64), nullable=False)   # conf-file slug
     subject      = db.Column(db.String(255), nullable=False)  # stable id at that provider
@@ -73,41 +92,43 @@ class OAuthIdentity(db.Model):
 
 
 class Annotation(db.Model):
-    __tablename__ = "annotations"
-    __table_args__ = (db.UniqueConstraint("user_id", "dataset_name"),)
+    __tablename__ = "cbAnnotations"
+    __table_args__ = (db.UniqueConstraint("user_id", "dataset_name",
+                                          name="uq_annot_user_dataset"), _MYSQL)
 
     id           = db.Column(db.Integer, primary_key=True)
-    user_id      = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id      = db.Column(db.Integer, db.ForeignKey("cbUsers.id", ondelete="CASCADE"), nullable=False)
     dataset_name = db.Column(db.String(255), nullable=False)
-    data         = db.Column(db.Text, nullable=False)   # JSON blob
+    data         = db.Column(LongText, nullable=False)   # JSON blob
     updated_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     shares = db.relationship("SharedAnnotation", backref="annotation", cascade="all, delete-orphan")
 
 
 class SharedAnnotation(db.Model):
-    __tablename__ = "shared_annotations"
+    __tablename__ = "cbSharedAnnotations"
+    __table_args__ = (_MYSQL,)
 
     id            = db.Column(db.Integer, primary_key=True)
-    annotation_id = db.Column(db.Integer, db.ForeignKey("annotations.id", ondelete="CASCADE"), nullable=False)
+    annotation_id = db.Column(db.Integer, db.ForeignKey("cbAnnotations.id", ondelete="CASCADE"), nullable=False)
     token         = db.Column(db.String(64), unique=True, nullable=False)
     label         = db.Column(db.String(255))
     created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
 class DeAnalysis(db.Model):
-    __tablename__ = "de_analyses"
-    __table_args__ = (db.Index("idx_de_user_dataset", "user_id", "dataset_name"),)
+    __tablename__ = "cbDeAnalyses"
+    __table_args__ = (db.Index("idx_de_user_dataset", "user_id", "dataset_name"), _MYSQL)
 
     id              = db.Column(db.Integer, primary_key=True)
-    user_id         = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id         = db.Column(db.Integer, db.ForeignKey("cbUsers.id", ondelete="CASCADE"), nullable=False)
     dataset_name    = db.Column(db.String(255), nullable=False)
     label           = db.Column(db.String(255), nullable=False)
-    pop1_definition = db.Column(db.Text, nullable=False)   # JSON
-    pop2_definition = db.Column(db.Text, nullable=False)   # JSON
+    pop1_definition = db.Column(LongText, nullable=False)  # JSON; may list cell ids
+    pop2_definition = db.Column(LongText, nullable=False)  # JSON; may list cell ids
     method          = db.Column(db.String(64), nullable=False)
-    parameters      = db.Column(db.Text)                   # JSON
-    results         = db.Column(db.Text, nullable=False)   # JSON
+    parameters      = db.Column(LongText)                  # JSON
+    results         = db.Column(LongText, nullable=False)   # JSON
     created_at      = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at      = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -115,10 +136,11 @@ class DeAnalysis(db.Model):
 
 
 class SharedDeAnalysis(db.Model):
-    __tablename__ = "shared_de_analyses"
+    __tablename__ = "cbSharedDeAnalyses"
+    __table_args__ = (_MYSQL,)
 
     id             = db.Column(db.Integer, primary_key=True)
-    de_analysis_id = db.Column(db.Integer, db.ForeignKey("de_analyses.id", ondelete="CASCADE"), nullable=False)
+    de_analysis_id = db.Column(db.Integer, db.ForeignKey("cbDeAnalyses.id", ondelete="CASCADE"), nullable=False)
     token          = db.Column(db.String(64), unique=True, nullable=False)
     label          = db.Column(db.String(255))
     created_at     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)

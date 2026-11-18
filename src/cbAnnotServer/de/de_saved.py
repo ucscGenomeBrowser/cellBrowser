@@ -94,6 +94,8 @@ def list_saved(dataset):
 @bp.post("/<path:dataset>")
 @login_required
 def create(dataset):
+    if len(dataset) > 255:                       # the dataset_name column's size
+        return _bad("dataset name too long")
     body = request.get_json(silent=True) or {}
     for key in ("pop1", "pop2", "method"):
         if key not in body:

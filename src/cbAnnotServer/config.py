@@ -8,13 +8,31 @@ class Config:
     # Sessions
     SECRET_KEY = os.environ.get("CBANNOT_SECRET_KEY") or secrets.token_hex(32)
 
-    # Database. Default lives under the cells project area on /hive, which is
-    # GPFS — unlike NFS (/cluster/home), GPFS honors POSIX fcntl locking, so
-    # SQLite works reliably there and the dev DB persists across reboots.
-    # Override with CBANNOT_DATABASE_URI (e.g. postgresql://...) in production.
+    # Database. Production uses hgcentral on MySQL/MariaDB:
+    #   CBANNOT_DATABASE_URI=mysql+pymysql://USER:PASSWORD@HOST/hgcentral?charset=utf8mb4
+    # (URL-encode any special characters in the password). The tables must
+    # already exist there (deploy/schema-mysql.sql); the service never creates
+    # tables on MySQL. With an sqlite:/// URI it creates them itself, which is
+    # handy for local development.
     SQLALCHEMY_DATABASE_URI = os.environ.get("CBANNOT_DATABASE_URI") \
         or "sqlite:////cluster/home/otto/cellsServer/db/cbAnnot.db"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # pool_pre_ping/pool_recycle: MySQL drops idle connections after
+    # wait_timeout, and without these the first request after a quiet night
+    # fails with "MySQL server has gone away". Ignored by SQLite.
+    SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 3600}
+    if SQLALCHEMY_DATABASE_URI.startswith("mysql"):
+        # Strict mode: an over-long value is an error, not silently cut short
+        # (hgcentral's server default is non-strict).
+        SQLALCHEMY_ENGINE_OPTIONS["connect_args"] = {
+            "init_command": "SET SESSION sql_mode='STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION'"}
+
+    # Largest request body accepted, in bytes. A saved annotation or comparison
+    # has to fit in one MEDIUMTEXT column (16 MB) and one MySQL packet
+    # (max_allowed_packet, 16 MB on hgcentral), with room for JSON escaping and
+    # the rest of the row. Larger requests get a 413. The largest item saved on
+    # cells-test so far is 0.5 MB.
+    MAX_CONTENT_LENGTH = int(os.environ.get("CBANNOT_MAX_CONTENT_LENGTH", 12 * 1024 * 1024))
 
     # Token TTLs
     RESET_TOKEN_TTL_SECONDS = 3600          # 1 hour for password reset
