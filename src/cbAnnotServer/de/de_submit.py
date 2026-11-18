@@ -23,6 +23,9 @@ Config keys (app.config or env, env wins for the standalone dev server):
                     key matches. It is not required on every request, because
                     browsers on the dev-side sites post to the direct instance
                     without one.
+    DE_REQUIRE_RELAY_KEY  set to 1 on a direct instance that only the proxy
+                    talks to (hgw0 on the RR). It then refuses every request
+                    that lacks the key, so nobody else can queue jobs on it.
     DE_DATA_HOSTS   hosts a job's dataUrl may point at (see deCache.checkDataUrl)
     DE_MAX_JOBS_PER_REQUESTER  queued+running jobs one person may have (2)
     DE_MAX_JOBS_TOTAL          queued+running jobs across everyone (20)
@@ -303,24 +306,48 @@ def _readJson(path):
 
 # ---- proxy mode (no /hive) -----------------------------------------------
 
+# What the browser gets when the direct instance can't be reached or answers
+# with something that isn't JSON (hgw0 restarting, network trouble). Without
+# this the proxy returns Flask's HTML 500 page and the frontend shows a JSON
+# parse error. A poll answers with a status the frontend keeps polling on,
+# since the job is still on the direct side's disk and usually finishes.
+_UNREACHABLE = ("The comparison server can't be reached right now. "
+                "Please try again in a few minutes.")
+
+
+def _proxyCall(method, relay, **kw):
+    """One request to the direct instance -> (json body, http status), or
+    (None, None) if it failed or didn't answer with JSON."""
+    import requests
+    try:
+        r = requests.request(method, relay, timeout=15, **kw)
+        return r.json(), r.status_code
+    except (requests.RequestException, ValueError) as e:
+        current_app.logger.warning("DE relay %s %s failed: %s", method, relay, e)
+        return None, None
+
+
 def _submitProxy(relay, key, feSpec):
     """Forward a submit. Returns (body, http status) so a refusal from the
     direct side (e.g. 429 queue full) reaches the browser unchanged."""
-    import requests
     headers = {"Content-Type": "application/json"}
     if key:
         headers["X-DE-Key"] = key
         # who really asked; the direct side only sees this instance's address
         headers["X-DE-Requester"] = json.dumps(_localRequester())
-    r = requests.post(relay, json=feSpec, headers=headers, timeout=15)
-    return r.json(), r.status_code
+    body, code = _proxyCall("POST", relay, json=feSpec, headers=headers)
+    if body is None:
+        return {"status": "failed", "error": _UNREACHABLE}, 503
+    return body, code
 
 
 def _statusProxy(relay, key, jobId):
-    import requests
     headers = {"X-DE-Key": key} if key else {}
-    r = requests.get(relay, params={"jobId": jobId}, headers=headers, timeout=15)
-    return r.json()
+    body, code = _proxyCall("GET", relay, params={"jobId": jobId}, headers=headers)
+    if body is None:
+        return {"jobId": jobId, "status": "unavailable",
+                "stage": "waiting for the server"}, 503
+    return body, code
 
 
 # ---- cancel ---------------------------------------------------------------
@@ -341,10 +368,11 @@ def _cancelDirect(queue, jobId):
 
 
 def _cancelProxy(relay, key, jobId):
-    import requests
     headers = {"X-DE-Key": key} if key else {}
-    r = requests.delete(relay, params={"jobId": jobId}, headers=headers, timeout=15)
-    return r.json()
+    body, code = _proxyCall("DELETE", relay, params={"jobId": jobId}, headers=headers)
+    if body is None:
+        return {"status": "failed", "error": _UNREACHABLE}, 503
+    return body, code
 
 
 # ---- routes ---------------------------------------------------------------
@@ -354,6 +382,10 @@ def de():
     relay = _cfg("DE_RELAY_URL")
     queue = _cfg("DE_QUEUE_DIR")
     key = _cfg("DE_RELAY_KEY")
+
+    if queue and not relay and _cfg("DE_REQUIRE_RELAY_KEY", "") in ("1", "true", "yes") \
+            and not _relayKeyOk():
+        return jsonify({"status": "failed", "error": "forbidden"}), 403
 
     if request.method == "POST":
         feSpec = request.get_json(force=True, silent=True) or {}
@@ -377,14 +409,16 @@ def de():
     if request.method == "DELETE":     # cancel a running/queued job
         jobId = request.args.get("jobId")
         if relay:
-            return jsonify(_cancelProxy(relay, key, jobId))
+            body, code = _cancelProxy(relay, key, jobId)
+            return jsonify(body), code
         if queue:
             return jsonify(_cancelDirect(queue, jobId))
         return jsonify({"status": "failed", "error": "DE backend not configured"}), 503
 
     jobId = request.args.get("jobId")
     if relay:
-        return jsonify(_statusProxy(relay, key, jobId))
+        body, code = _statusProxy(relay, key, jobId)
+        return jsonify(body), code
     if queue:
         return jsonify(_statusDirect(queue, jobId))
     return jsonify({"status": "failed", "error": "DE backend not configured"}), 503

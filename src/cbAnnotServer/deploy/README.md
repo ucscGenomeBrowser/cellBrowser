@@ -70,6 +70,7 @@ cron watchdog sources). See `config.py` for the full list.
 | `DE_QUEUE_DIR` | dev side only (has `/hive`): the DE job queue, e.g. `/cluster/home/otto/cellsServer/deJobs`. Selects *direct* mode |
 | `DE_RELAY_URL` | production only (no `/hive`): the dev-side DE endpoint, e.g. `https://cells-test.gi.ucsc.edu/api/de`. Selects *proxy* mode |
 | `DE_RELAY_KEY` | the same random string on both tiers; lets the dev side trust who the production side says asked (see `de/README.md`) |
+| `DE_REQUIRE_RELAY_KEY` | `1` on a queue-side instance that only the relaying side talks to (hgw0 on the RR): requests without `DE_RELAY_KEY` get a 403 |
 | `DE_DATA_HOSTS` | optional; hosts a DE job may fetch data from. The default covers the cells sites |
 | `DE_MAX_JOBS_PER_REQUESTER` / `DE_MAX_JOBS_TOTAL` | optional, dev side; queue limits (2 / 20) |
 
