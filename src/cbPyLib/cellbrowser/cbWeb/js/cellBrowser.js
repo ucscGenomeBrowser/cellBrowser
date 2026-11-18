@@ -1628,31 +1628,51 @@ var cellbrowser = function() {
         return Object.entries(valLabels);
     }
 
-    function loadSearchIndex(onDone) {
-        /* fetch search.json once and build a MiniSearch index; cache for the session */
+    // facets of the top-level datasets that search.json does not have; copied into its documents
+    const cSearchFacets = ['assays', 'domains', 'projects', 'life_stages'];
+
+    function loadSearchIndex(datasetList, onDone) {
+        /* fetch search.json once and build a MiniSearch index; cache for the session.
+         * datasetList is the top-level collection: its facets (assays etc.) are added to the documents,
+         * a child dataset gets the facets of its top-level dataset. */
         if (gSearchIndex) { onDone(gSearchIndex); return; }
         gSearchIndexCallbacks.push(onDone);
         if (gSearchIndexLoading) return;
         gSearchIndexLoading = true;
         $.getJSON(cbUtil.dataUrl("search.json"), function(docs) {
+            var topByName = {};
+            for (var ds of (datasetList || []))
+                topByName[ds.name] = ds;
+            for (var doc of docs) {
+                var top = topByName[doc.parent || doc.name] || {};
+                for (var facet of cSearchFacets)
+                    if (!doc[facet])
+                        doc[facet] = (top[facet] || []).join(" ");
+            }
             var ms = new MiniSearch({
-                fields: ['shortLabel', 'title', 'abstract', 'paper', 'organisms', 'body_parts',
+                // "name" is the dataset directory, e.g. "whole-brain-perturb"; the tokenizer splits it on "-"
+                fields: ['name', 'shortLabel', 'title', 'abstract', 'paper', 'organisms', 'body_parts',
                          'diseases', 'lab', 'submitter', 'authors', 'institution',
                          'geo_series', 'arrayexpress', 'sra_study', 'bioproject',
                          'ega_study', 'ega_dataset', 'hca_dcp', 'zenodo', 'dbgap',
-                         'pmid', 'pmcid', 'doi', 'psypheno', 'tags'],
+                         'pmid', 'pmcid', 'doi', 'psypheno', 'tags'].concat(cSearchFacets),
                 storeFields: ['name', 'shortLabel', 'md5', 'parent', 'title', 'authors', 'institution', 'lab', 'submitter', 'paper',
                              'geo_series', 'pmid', 'pmcid', 'doi',
                              'arrayexpress', 'sra_study', 'bioproject', 'ega_study', 'ega_dataset', 'hca_dcp', 'zenodo', 'dbgap',
                              'psypheno', 'snippet'],
                 searchOptions: {
-                    boost: { title: 3, shortLabel: 3,
+                    boost: { name: 3, title: 3, shortLabel: 3, assays: 2,
                              geo_series: 2, arrayexpress: 2, sra_study: 2, bioproject: 2,
                              ega_study: 2, ega_dataset: 2, hca_dcp: 2, zenodo: 2, dbgap: 2,
                              psypheno: 2,
-                             pmid: 2, pmcid: 2, doi: 2 },
-                    fuzzy:  0.2,
-                    prefix: true,
+                             pmid: 2, pmcid: 2, doi: 2,
+                             abstract: 0.5 },
+                    // every word must match. With OR, "whole brain perturb" matched 573 documents
+                    combineWith: 'AND',
+                    // only the last word can be a prefix: it is the one still being typed
+                    prefix: function(term, i, terms) { return i === terms.length - 1; },
+                    // allow one typo, but only in longer words: short words matched too much
+                    fuzzy:  function(term) { return term.length >= 6 ? 0.2 : false; },
                 }
             });
             ms.addAll(docs);
@@ -1945,17 +1965,49 @@ var cellbrowser = function() {
             filterDatasetsDom();
         }
 
-        function applySearchResults(nameSet, childMap, resultMap, terms) {
-            childMap = childMap || {};
-            resultMap = resultMap || {};
-            terms = terms || [];
+        function setListOrder(names) {
+            /* move the dataset list items into the order of names (best match first), the rest after them
+             * in their original order. names=null restores the original order. */
+            var items = $(".tpListItem").get();
+            if (items.length === 0) return;
+            var rank = {};
+            (names || []).forEach(function(name, i) { rank[name] = i; });
+            items.sort(function(a, b) {
+                var ra = rank[a.getAttribute("data-name")], rb = rank[b.getAttribute("data-name")];
+                // the summary item always stays at the top
+                if (a.getAttribute("data-body") === "summary") ra = -1;
+                if (b.getAttribute("data-body") === "summary") rb = -1;
+                if (ra === undefined) ra = Infinity;
+                if (rb === undefined) rb = Infinity;
+                if (ra !== rb) return ra - rb;
+                return a.getAttribute("data-datasetid") - b.getAttribute("data-datasetid");
+            });
+            var parent = items[0].parentNode;
+            items.forEach(function(el) { parent.appendChild(el); });
+        }
+
+        function clearSearchDom() {
+            /* remove everything the search added to the dataset list */
             $(".tpSearchChild").remove();
             $(".tpSearchHint").remove();
-            // restore any previously highlighted labels
+            $(".tpSearchMore").remove();
             $(".tpDatasetLabel").each(function() {
                 var orig = this.getAttribute("data-label");
                 if (orig) this.innerHTML = orig;
             });
+        }
+
+        function applySearchResults(nameSet, childMap, resultMap, terms, opts) {
+            /* show only the datasets in nameSet or childMap. opts.order: dataset names, best first.
+             * opts.weak: names that match only in the abstract, folded away behind a "show more" link.
+             * opts.note: text after the match count */
+            childMap = childMap || {};
+            resultMap = resultMap || {};
+            terms = terms || [];
+            opts = opts || {};
+            var weak = opts.weak || {};
+            clearSearchDom();
+            setListOrder(opts.order || null);
             var matchCount = 0;
             $(".tpListItem").each(function() {
                 if (this.getAttribute("data-body") === "summary") return;
@@ -2015,7 +2067,39 @@ var cellbrowser = function() {
                     $(this).after($details);
                 }
             });
-            $("#tpDatasetCount").text("(" + matchCount + " datasets match)");
+
+            // datasets that only mention the words in their abstract: hide them behind a link
+            var $weakItems = $(".tpListItem").filter(function() {
+                return this.style.display !== "none" && weak[this.getAttribute("data-name")];
+            });
+            var weakCount = $weakItems.length;
+            if (weakCount > 0 && weakCount < matchCount) {
+                $weakItems.each(function() {
+                    this.style.display = "none";
+                    $(this).next(".tpSearchChild").hide();
+                });
+                var $more = $('<a role="button" class="list-group-item tpSearchMore" style="color:#337ab7; font-size:12px; padding:6px 10px"></a>')
+                    .text("Show " + weakCount + " more dataset" + (weakCount > 1 ? "s" : "") +
+                          " that only mention" + (weakCount > 1 ? "" : "s") + " this in the abstract");
+                $more.on("click", function() {
+                    $weakItems.each(function() {
+                        this.style.display = "";
+                        $(this).next(".tpSearchChild").show();
+                    });
+                    $more.remove();
+                });
+                $weakItems.first().before($more);
+                matchCount -= weakCount;
+            } else
+                weakCount = 0;
+
+            var countText = matchCount + " dataset" + (matchCount === 1 ? "" : "s") + " match";
+            if (matchCount === 1) countText += "es";
+            if (weakCount > 0)
+                countText += ", " + weakCount + " more mention it";
+            if (opts.note)
+                countText += "; " + opts.note;
+            $("#tpDatasetCount").text("(" + countText + ")");
         }
 
         function runLocalSearch(q) {
@@ -2040,22 +2124,48 @@ var cellbrowser = function() {
         }
 
         function runSearch(q) {
-            loadSearchIndex(function(ms) {
+            loadSearchIndex(datasetList, function(ms) {
                 if (ms) {
-                    var results = ms.search(q, { limit: 50 });
+                    // all words must match (the index default). If nothing does, accept any word.
+                    // MiniSearch has no "limit" option, all results come back, sorted by score.
+                    var note = "";
+                    var results = ms.search(q);
+                    if (results.length === 0) {
+                        results = ms.search(q, { combineWith: 'OR' });
+                        if (results.length !== 0)
+                            note = "none has all the words, showing those with any";
+                    }
                     var nameSet = {};
                     var childMap = {};
                     var resultMap = {};
-                    var terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+                    var topScore = {};  // top-level dataset -> best score of itself or a child
+                    var strong = {};    // top-level datasets that match outside of an abstract
+                    // the same split as the MiniSearch tokenizer, so "whole-brain-perturb" highlights each word
+                    var terms = q.toLowerCase().split(/[\s\p{P}]+/u).filter(Boolean);
                     results.forEach(function(r) {
                         nameSet[r.name] = r.score;
                         resultMap[r.name] = r;
+                        var top = r.parent || r.name;
                         if (r.parent) {
                             if (!childMap[r.parent]) childMap[r.parent] = [];
                             childMap[r.parent].push(r);
                         }
+                        topScore[top] = Math.max(topScore[top] || 0, r.score);
+                        Object.keys(r.match).forEach(function(term) {
+                            if (r.match[term].some(function(field) { return field !== "abstract"; }))
+                                strong[top] = true;
+                        });
                     });
-                    applySearchResults(nameSet, childMap, resultMap, terms);
+                    var weak = {};
+                    Object.keys(topScore).forEach(function(name) {
+                        if (!strong[name]) weak[name] = true;
+                    });
+                    // strong matches first, then abstract-only ones, each by score
+                    var order = Object.keys(topScore).sort(function(a, b) {
+                        if (!weak[a] !== !weak[b]) return weak[a] ? 1 : -1;
+                        return topScore[b] - topScore[a];
+                    });
+                    applySearchResults(nameSet, childMap, resultMap, terms, {order: order, weak: weak, note: note});
                 } else {
                     runLocalSearch(q);
                 }
@@ -2292,12 +2402,8 @@ var cellbrowser = function() {
             var q = $(this).val().trim();
             clearTimeout(searchTimer);
             if (q === "") {
-                $(".tpSearchChild").remove();
-                $(".tpSearchHint").remove();
-                $(".tpDatasetLabel").each(function() {
-                    var orig = this.getAttribute("data-label");
-                    if (orig) this.innerHTML = orig;
-                });
+                clearSearchDom();
+                setListOrder(null);
                 filterDatasetsDom();
                 return;
             }
