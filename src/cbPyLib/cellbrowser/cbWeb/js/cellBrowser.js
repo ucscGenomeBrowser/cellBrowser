@@ -98,6 +98,7 @@ var cellbrowser = function() {
     var gSearchIndex = null;         // MiniSearch instance, built on first use
     var gSearchIndexLoading = false; // true while search.json is being fetched
     var gSearchIndexCallbacks = [];  // queued callbacks waiting for the index
+    var gRunDatasetSearch = null;    // runSearch(query) of the open dataset dialog, so a filter change can re-run it
 
     // depending on the type of data, single cell or bulk RNA-seq, we call a circle a
     // "sample" or a "cell". This will adapt help menus, menus, etc.
@@ -1788,14 +1789,13 @@ var cellbrowser = function() {
         filterDatasetsDom();
     }
 
-    function filterDatasetsDom() {
-        /* keep only datasets that fulfill the filters */
+    const cFilterCategories = ["Body", "Dis", "Org", "Proj", "Stage", "Dom", "Assay", "Source"];
 
-        // read the current filter values of the dropboxes
-        var categories = ["Body", "Dis", "Org", "Proj", "Stage", "Dom", "Assay", "Source"];
+    function readDatasetFilters() {
+        /* return the values selected in the filter dropdowns: {vals: {category: [cleaned values]}, count: n} */
         var filtVals = {};
         var activeFilterCount = 0;
-        for (var category of categories) {
+        for (var category of cFilterCategories) {
             var vals = $("#tp"+category+"Combo").val();
             if (vals===undefined || vals===null)
                 vals = [];
@@ -1808,7 +1808,52 @@ var cellbrowser = function() {
 
             filtVals[category] = cleanVals;
         }
+        return {vals: filtVals, count: activeFilterCount};
+    }
 
+    function datasetPassesFilters(el, filters) {
+        /* true if the dataset list element el has one of the selected values in every filter category */
+        for (var category of cFilterCategories) {
+            var filtList = filters.vals[category];
+            if (filtList.length===0)
+                continue;
+            var domList = el.getAttribute("data-"+category.toLowerCase()) || "";
+            let found = false;
+            for (var filtVal of filtList)
+                if (domList.indexOf(filtVal)!=-1)
+                    found = true;
+            if (!found)
+                return false;
+        }
+        return true;
+    }
+
+    function updateFilterNote(activeFilterCount) {
+        /* note next to the "Filters" header, so active filters are visible when it is collapsed */
+        var noteEl = $('#tpFilterNote');
+        if (activeFilterCount===0)
+            noteEl.empty();
+        else {
+            var filtWord = (activeFilterCount===1 ? " filter is" : " filters are");
+            noteEl.html(": "+activeFilterCount+filtWord+" active, "+
+                "<span id='tpFilterClear' class='link'>click here to clear filters and show all datasets</span>");
+            $('#tpFilterClear').click(function(ev) {
+                ev.preventDefault(); // a click inside <summary> would also open/close the filters
+                clearDatasetFilters();
+            });
+        }
+    }
+
+    function filterDatasetsDom() {
+        /* keep only datasets that fulfill the filters. If there is text in the search box,
+         * re-run the search instead: it applies the filters to its results. */
+        var query = ($("#tpDatasetSearch").val() || "").trim();
+        if (query !== "" && gRunDatasetSearch) {
+            gRunDatasetSearch(query);
+            return;
+        }
+
+        var filters = readDatasetFilters();
         let elList = $(".tpListItem");
         var shownCount = 0;
         var hideCount = 0;
@@ -1816,31 +1861,7 @@ var cellbrowser = function() {
             // never touch the first/summary element
             if (el.getAttribute("data-body")==="summary")
                 continue
-            // read the values of the current DOM element
-            var domVals = {};
-            for (var category of categories)
-                domVals[category] = el.getAttribute("data-"+category.toLowerCase());
-
-            var isShown = true;
-            // now compare filtVals and domVals
-            for (var category of categories) {
-                var filtList = filtVals[category];
-                var domList = domVals[category];
-
-                let found = false;
-                if (filtList.length===0)
-                    found = true;
-                for (var filtVal of filtList)
-                    if (domList.indexOf(filtVal)!=-1)
-                        found = true;
-
-                if (!found) {
-                    isShown = false;
-                    break;
-                }
-            }
-            
-            if (isShown) {
+            if (datasetPassesFilters(el, filters)) {
                 el.style.display="";
                 shownCount++;
             }
@@ -1854,19 +1875,7 @@ var cellbrowser = function() {
         else
             $('#tpDatasetCount').text("("+shownCount+" dataset collections)");
 
-        // note next to the "Filters" header, so active filters are visible when it is collapsed
-        var noteEl = $('#tpFilterNote');
-        if (activeFilterCount===0)
-            noteEl.empty();
-        else {
-            var filtWord = (activeFilterCount===1 ? " filter is" : " filters are");
-            noteEl.html(": "+activeFilterCount+filtWord+" active, "+
-                "<span id='tpFilterClear' class='link'>click here to clear filters and show all datasets</span>");
-            $('#tpFilterClear').click(function(ev) {
-                ev.preventDefault(); // a click inside <summary> would also open/close the filters
-                clearDatasetFilters();
-            });
-        }
+        updateFilterNote(filters.count);
     }
 
     function openDatasetDialog(openDsInfo, selName, openTab) {
@@ -2008,11 +2017,17 @@ var cellbrowser = function() {
             var weak = opts.weak || {};
             clearSearchDom();
             setListOrder(opts.order || null);
+            var filters = readDatasetFilters();
+            var filteredOut = 0; // matches hidden by the filter dropdowns
             var matchCount = 0;
             $(".tpListItem").each(function() {
                 if (this.getAttribute("data-body") === "summary") return;
                 var name = this.getAttribute("data-name");
                 var shown = name && (nameSet[name] !== undefined || childMap[name]);
+                if (shown && !datasetPassesFilters(this, filters)) {
+                    shown = false;
+                    filteredOut++;
+                }
                 this.style.display = shown ? "" : "none";
                 if (!shown) return;
                 matchCount++;
@@ -2097,9 +2112,12 @@ var cellbrowser = function() {
             if (matchCount === 1) countText += "es";
             if (weakCount > 0)
                 countText += ", " + weakCount + " more mention it";
+            if (filteredOut > 0)
+                countText += "; " + filteredOut + " more hidden by the filters";
             if (opts.note)
                 countText += "; " + opts.note;
             $("#tpDatasetCount").text("(" + countText + ")");
+            updateFilterNote(filters.count);
         }
 
         function runLocalSearch(q) {
@@ -2173,6 +2191,8 @@ var cellbrowser = function() {
         }
 
         // -- end inline functions
+
+        gRunDatasetSearch = runSearch;
 
         gOpenDataset = openDsInfo;
         var activeIdx = 0;
