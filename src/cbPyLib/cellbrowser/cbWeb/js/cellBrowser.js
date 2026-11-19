@@ -1628,7 +1628,7 @@ var cellbrowser = function() {
         return Object.entries(valLabels);
     }
 
-    // facets of the top-level datasets that search.json does not have; copied into its documents
+    // facets of the top-level datasets, added to the search.json documents
     const cSearchFacets = ['assays', 'domains', 'projects', 'life_stages'];
 
     function loadSearchIndex(datasetList, onDone) {
@@ -1645,9 +1645,9 @@ var cellbrowser = function() {
                 topByName[ds.name] = ds;
             for (var doc of docs) {
                 var top = topByName[doc.parent || doc.name] || {};
+                // search.json can have some of these already (cbBuild adds "spatial" to assays), keep both
                 for (var facet of cSearchFacets)
-                    if (!doc[facet])
-                        doc[facet] = (top[facet] || []).join(" ");
+                    doc[facet] = ((doc[facet] || "") + " " + (top[facet] || []).join(" ")).trim();
             }
             var ms = new MiniSearch({
                 // "name" is the dataset directory, e.g. "whole-brain-perturb"; the tokenizer splits it on "-"
@@ -1661,7 +1661,7 @@ var cellbrowser = function() {
                              'arrayexpress', 'sra_study', 'bioproject', 'ega_study', 'ega_dataset', 'hca_dcp', 'zenodo', 'dbgap',
                              'psypheno', 'snippet'],
                 searchOptions: {
-                    boost: { name: 3, title: 3, shortLabel: 3, assays: 2,
+                    boost: { name: 3, title: 3, shortLabel: 3, assays: 6,
                              geo_series: 2, arrayexpress: 2, sra_study: 2, bioproject: 2,
                              ega_study: 2, ega_dataset: 2, hca_dcp: 2, zenodo: 2, dbgap: 2,
                              psypheno: 2,

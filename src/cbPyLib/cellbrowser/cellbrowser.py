@@ -6382,8 +6382,23 @@ def _descFieldAsStr(val):
         return " ".join(str(v) for v in val if v)
     return str(val)
 
+# a layout with one of these words in its label or name is spatial data, even without a background image
+_spatialLayoutRe = re.compile(r"spatial|spacial|visium|merfish|xenium|slide-?seq|cosmx|starmap|stereo-?seq|seqfish", re.I)
+
+def _hasSpatialLayout(dsConf):
+    " True if one of the dataset's layouts has a background image or a spatial-sounding label or name "
+    for coord in dsConf.get("coords", []):
+        if coord.get("images"):
+            return True
+        if _spatialLayoutRe.search(str(coord.get("shortLabel", "")) + " " + str(coord.get("name", ""))):
+            return True
+    return False
+
 def _collectSearchDocs(conf, outDir, docs):
-    " recursively collect searchable dataset fields from dataset.json + desc.json files "
+    """ recursively collect searchable dataset fields from dataset.json + desc.json files.
+    A dataset whose own layouts or whose children's layouts are spatial gets "spatial" in its assays.
+    Returns True if any dataset in conf is spatial. """
+    anySpatial = False
     for ds in conf.get("datasets", []):
         if ds["name"] == "":
             continue # "" is the reserved sentinel for "whole site root" (see e.g. the "parents" field);
@@ -6396,8 +6411,14 @@ def _collectSearchDocs(conf, outDir, docs):
             continue
         dsConf = readJson(confPath)
         desc = readJson(descPath) if isfile(descPath) else {}
+        isSpatial = _hasSpatialLayout(dsConf)
         if dsConf.get("datasets"):
-            _collectSearchDocs(dsConf, outDir, docs)
+            if _collectSearchDocs(dsConf, outDir, docs):
+                isSpatial = True
+        anySpatial = anySpatial or isSpatial
+        assays = list(dsConf.get("assays") or [])
+        if isSpatial and "spatial" not in [a.lower() for a in assays]:
+            assays.append("spatial")
         name = ds["name"]
         paperUrl = _descFieldAsStr(desc.get("paper_url"))
         paperParts = paperUrl.split(" ")
@@ -6437,7 +6458,9 @@ def _collectSearchDocs(conf, outDir, docs):
             "body_parts":   " ".join(dsConf.get("body_parts") or []),
             "diseases":     " ".join(dsConf.get("diseases") or []),
             "tags":         " ".join(dsConf.get("tags") or []),
+            "assays":       " ".join(assays),
         })
+    return anySpatial
 
 def buildSearchJson(outDir):
     " write search.json to outDir: a JSON array of all searchable dataset fields "
