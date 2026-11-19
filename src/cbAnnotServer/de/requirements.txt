@@ -1,6 +1,13 @@
-# The DE worker's python (deenv): runDeJob.py needs only these. Pinned to the
-# versions the numpy Wilcoxon was checked against; "make setup-annot" in ucsc/
-# builds it from /usr/bin/python3.13, which hgwdev and hgcompute-08 both have.
+# The DE worker's python (deenv). "make setup-annot" in ucsc/ builds it from
+# /usr/bin/python3.13 (the RHEL 9 python3.13 package).
+
+# runDeJob.py: pinned to the versions the numpy Wilcoxon was checked against
 numpy==2.4.6
 scipy==1.17.1
 pandas==3.0.5
+
+# deWorker.py reads and writes the cbDeJobs table; same versions as the web service
+SQLAlchemy==2.0.51
+PyMySQL==1.2.3
+greenlet==3.2.5
+typing_extensions==4.15.0

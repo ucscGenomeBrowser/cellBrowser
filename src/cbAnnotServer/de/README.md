@@ -1,18 +1,29 @@
 # Cell Browser differential-expression worker (#24912)
 
-The compute half of on-the-fly differential expression, driven by a filesystem
-job queue (no parasol, no scheduler). For cells-test it runs on **hgwdev** under
-the **otto** service account, next to the API that fills the queue, and reads the
-datasets from the local docroot (`DE_READ_LOCAL=1`). On the RR it runs the same
-way on hgw0. It can also run on a host with no docroot (hgcompute-08 did until
-2026-11) if that host shares the queue directory and fetches over HTTP.
+The compute half of on-the-fly differential expression. Two programs, which
+share only the database:
+
+- the **web service** (cbAnnotServer, which also does sign-in) takes a comparison
+  from the browser, adds it to the `cbDeJobs` table, and answers status requests
+  from that table. It can run on any number of web machines.
+- the **worker** (`deWorker.py`) runs on the one machine that has the datasets.
+  It takes queued jobs from the table, oldest first, one at a time, and writes
+  progress and the result back into the job's row.
+
+For cells-test both run on **hgwdev** as **otto**, with hgcentraltest as the
+database, and the worker reads the datasets from the local docroot
+(`DE_READ_LOCAL=1`). On the RR the web service runs on every web node and the
+worker on hgw0, with hgcentral as the database. No parasol, no scheduler, no
+shared filesystem, and no connection between the web nodes and hgw0 other than
+the database.
 
 ## Pieces
 
-- `deWorker.py` — long-running daemon. Watches the job queue, atomically claims
-  pending jobs (`worker.lock`, restart-safe), and runs each in its own subprocess
-  so a crash/OOM can't take down the daemon. Handles per-job timeout and
-  retention cleanup.
+- `de_submit.py` — the web side: the `/api/de` submit, status and cancel
+  endpoints, which add and read `cbDeJobs` rows (see "Web side" below).
+- `deWorker.py` — the worker daemon. Takes queued jobs from `cbDeJobs` and runs
+  each in its own subprocess so a crash or out-of-memory can't take down the
+  daemon. Handles cancel, the per-job timeout, and retention cleanup.
 - `runDeJob.py` — runs one job: reads `spec.json`, reads the dataset's expression
   from the cbBuild output (via `cbExprReader`), resolves the two populations to
   cell masks, dispatches to the method, writes `result.json` + `status.json`
@@ -72,54 +83,68 @@ A few old datasets on disk are mis-built (their `exprMatrix.bin` is 8-byte but
 `matrixArrType` says `Uint32`); the reader raises a clear error rather than
 returning garbage — the browser misrenders those datasets too.
 
-## Job queue protocol
+## Job queue
 
-Each job is a directory `DE_JOBS_DIR/<jobId>/`:
+One row per comparison in `cbDeJobs` (`models.DeJob`, `deploy/schema-mysql.sql`):
 
-| file | written by | meaning |
+| state | set by | meaning |
 |---|---|---|
-| `spec.json` | the enqueuer (CB backend) | the request (dataset, pop1, pop2, method, parameters) |
-| `worker.lock` | the worker | claim marker (PID) |
-| `cancel.flag` | the API (`DELETE /api/de?jobId=`) | cancel request; the worker kills a running job or skips an unstarted one |
-| `status.json` | the worker/kernel | `{state: running\|done\|failed\|canceled, stage, elapsed, error}` |
-| `result.json` | the kernel | `{genes: [...], n_pop1, n_pop2, filters}` on success |
+| `queued` | web service (POST) | waiting; the status reply says how many jobs are ahead |
+| `running` | worker | taken by a conditional UPDATE (queued -> running), so it can't be taken twice |
+| `done` | worker | `result` holds the gzipped result JSON (~6 MB of JSON is ~1.4 MB stored) |
+| `failed` | worker | `error` says why, in words the browser can show |
+| `canceled` | web service or worker | DELETE cancels a queued job directly, or sets `cancel_requested` on a running one, which the worker then kills |
 
-A job runs in its own process session, so on cancel or timeout the worker kills it
-and any children (`DE_CANCEL_POLL` sets how often a running job is checked for a
-cancel request). BLAS/OpenMP threads are capped per job by `DE_CPU_LIMIT`
-(default 20) so one job can't saturate the host.
+While a job runs, the worker copies its stage and progress into the row once a
+second, and checks `cancel_requested`. The job itself runs in a scratch dir,
+`DE_JOBS_DIR/<jobId>/` (spec.json in, status.json and result.json out), in its
+own process session, so on cancel or timeout the worker kills it and any
+children. The scratch dir is removed when the row is updated. BLAS/OpenMP
+threads are capped per job by `DE_CPU_LIMIT` (default 20).
+
+Housekeeping, all done by the worker:
+
+- at startup, jobs this host's earlier worker left `running` are marked failed
+  ("the server restarted"), so the browser stops waiting;
+- queued jobs older than `DE_QUEUE_STALE_SEC` (3600, the browser's own limit)
+  are marked failed instead of run, since nobody is waiting for them;
+- finished jobs older than `DE_RETENTION_DAYS` (7) are deleted.
+
+If the database is unreachable the worker logs it and keeps retrying; a running
+job carries on and its result is written once the database is back.
 
 ## Job log
 
 The worker appends one TSV row per finished job to `DE_JOB_LOG` (default
-`deJobs.tsv` next to the queue) — for seeing who uses the feature and how it
+`deJobs.tsv` next to `DE_JOBS_DIR`) — for seeing who uses the feature and how it
 performs. Columns: `timestamp, jobId, requester, remote, dataset, field, groupA,
 groupB, method, n_pop1, n_pop2, n_genes, runtime_s, status`. The requester
 (logged-in email, else client IP) is captured by the submit API into the spec's
 `_meta` and read back here; `status` is `done`/`failed`/`canceled`/`timeout`.
-
-A job is *pending* when it has `spec.json`, no result, and is unclaimed (or the
-lock is stale). The enqueuer just drops a `spec.json`; the worker does the rest.
 
 `spec.json` shape and the population selector types (`field`/`cluster`,
 `cellIds`, `cellIdx`) are documented in `runDeJob.py`'s header.
 
 ## Running it
 
-Needs a Python with **numpy, scipy, and pandas** — that's it. The runtime path
+Needs a Python with **numpy, scipy and pandas** for the computation, and
+SQLAlchemy + PyMySQL to reach the job table (`requirements.txt` here). The runtime path
 (`runDeJob` → `cbExprReader.readExpr` → `wilcoxon_np`) imports neither scanpy nor
 anndata; normalization and the Wilcoxon test are done in numpy/scipy. (scanpy is
 only needed to run the `methods/wilcoxon.py` validation oracle.) For a one-off run:
 
 ```
-DE_WORKER_PYTHON=/path/to/env/bin/python \
-  python3 deWorker.py
+CBANNOT_DATABASE_URI='mysql+pymysql://USER:PW@HOST/hgcentraltest?charset=utf8mb4' \
+DE_READ_LOCAL=1 DE_WORKER_PYTHON=/path/to/env/bin/python \
+  /path/to/env/bin/python deWorker.py
 ```
 
-Config via env (all optional; see `deWorker.py` header for the full list):
-`DE_JOBS_DIR` (default `/cluster/home/otto/cellsServer/deJobs`), `DE_CBBUILD_DIR`,
-`DE_WORKER_PYTHON`, `DE_POLL_SEC`, `DE_JOB_TIMEOUT`, `DE_MAX_CELLS_PER_GROUP`,
-`DE_RETENTION_DAYS`.
+`CBANNOT_DATABASE_URI` is required and is the same database the web service
+uses (an `sqlite:///` file works for local development). Everything else is
+optional; see the `deWorker.py` header for the list: `DE_JOBS_DIR` (scratch,
+default `/cluster/home/otto/cellsServer/deJobs`), `DE_READ_LOCAL`,
+`DE_CBBUILD_DIR`, `DE_WORKER_PYTHON`, `DE_POLL_SEC`, `DE_JOB_TIMEOUT`,
+`DE_MAX_CELLS_PER_GROUP`, `DE_RETENTION_DAYS`.
 
 ## Durability (deploy)
 
@@ -127,7 +152,7 @@ Everything the worker needs to run unattended under otto is in `deploy/`:
 
 | file | role |
 |---|---|
-| `de.env.sample` | copy to a private `de.env`; queue dir, scanpy python, pidfile/heartbeat/log paths |
+| `de.env.sample` | copy to a private `de.env` (it holds the database password): database, python, docroot, pidfile/heartbeat/log paths |
 | `runDeWorker.sh` | sources `DE_ENV_FILE` and `exec`s `deWorker.py` (so the tracked PID is the daemon) |
 | `deWorkerWatchdog.sh` | cron keep-alive: restarts the worker if its PID is gone **or** its heartbeat is stale |
 | `restart-worker.sh` | stop the worker and respawn it (to pick up new code / de.env); run as its owner (otto) |
@@ -148,10 +173,10 @@ a *hung* worker, not just a dead one. A running job blocks the loop for up to
 
 (mirrors the existing `cbAnnotServer` watchdog lines in `otto.crontab`.)
 
-**The worker's python** only needs numpy, scipy and pandas, pinned in
-`requirements.txt` here. At UCSC, `make setup-annot` in `ucsc/` builds it as
-/cluster/home/otto/cellsServer/deenv from /usr/bin/python3.13, which hgwdev and
-hgcompute-08 both have, and `de.env` points `DE_WORKER_PYTHON` at it. Elsewhere:
+**The worker's python** is pinned in `requirements.txt` here. At UCSC,
+`make setup-annot` in `ucsc/` builds it as /cluster/home/otto/cellsServer/deenv
+from /usr/bin/python3.13 (the RHEL 9 python3.13 package), and `de.env` points
+`DE_WORKER_PYTHON` at it. Elsewhere:
 
 ```
 python3 -m venv deenv && deenv/bin/pip install -r requirements.txt
@@ -163,52 +188,31 @@ python3 -m venv deenv && deenv/bin/pip install -r requirements.txt
 Wilcoxon DE on `adipose-tissue` (Diabetic vs NonDiabetic, 11,979 vs 14,371) in
 ~4 s, writing status=done + a ranked result.json (CST3, LUM, APOE, …).
 
-## Enqueuer
+## Web side
 
-`de_submit.py` is the Flask blueprint the frontend talks to (one URL: POST the
-builder spec, GET `?jobId=` for status/result). One codebase, two modes:
+`de_submit.py` is the Flask blueprint the frontend talks to, one URL: POST the
+builder spec, GET `?jobId=` for status and result, DELETE `?jobId=` to cancel.
+It translates the builder spec (groupA/groupB/field) into the worker spec,
+including one-vs-rest and the per-group metadata filter, and stores it in the
+job's row.
 
-- **direct** (`DE_QUEUE_DIR` set; instance has `/hive`): writes `spec.json` here,
-  reads status/result back. This is the dev-side service, run as otto.
-- **proxy** (`DE_RELAY_URL` set; production, no `/hive`): forwards to the direct
-  instance over HTTPS. Production has no `/hive` (Matt, 2026-08-12), so this tier
-  is required.
-
-It translates the builder spec (groupA/groupB/field) into the worker `spec.json`
-shape, including one-vs-rest and the per-group metadata filter. Run the standalone
-dev server (direct mode) with `python de_submit.py` (needs Flask).
-
-Because production forwards jobs from the open internet to a worker inside the
-firewall, every submit is checked before it is queued:
+Every submit is checked before it is queued:
 
 - **Dataset and dataUrl.** The dataset name must be a plain docroot-relative path
   (no `..`, not absolute). The dataUrl must be http(s), on the default port, with
   no user name, on a host matching `DE_DATA_HOSTS` (comma-separated wildcards;
   default in `deCache.DEFAULT_DATA_HOSTS`: cells.ucsc.edu, cells-*.gi.ucsc.edu and
-  their project subdomains). The worker repeats the check in
-  `deCache.ensureDataset` and refuses redirects to hosts off the list. Without
-  this, anyone could make hgcompute-08 fetch an internal URL.
-- **Queue limits** (direct mode): `DE_MAX_JOBS_PER_REQUESTER` (2) queued+running
-  jobs per person, `DE_MAX_JOBS_TOTAL` (20) overall. Over either, the POST
-  returns 429 with a message the UI shows. A person is the signed-in account, or
-  the client IP if anonymous. Unfinished jobs older than `DE_QUEUE_STALE_SEC`
-  (3600) stop counting, so a dead job can't jam the queue.
-- **Who asked, across the relay.** Behind Apache the client IP is the *last*
-  X-Forwarded-For entry. The proxy tier sends the real user and IP as
-  `X-DE-Requester` with `X-DE-Key`; the direct tier believes it only when the key
-  matches its own `DE_RELAY_KEY`, so set the same value on both. Without a valid
-  key the header is ignored and the job is charged to the caller's own address.
-
-Verified 2026-08-12: full loop on hgwdev — POST spec → direct Flask → queue →
-worker → poll done, real Wilcoxon on adipose-tissue (Diabetic vs rest, 11,979 vs
-14,371, 2006 genes).
+  their project subdomains). With `DE_READ_LOCAL` the worker ignores dataUrl;
+  without it, it repeats the check in `deCache.ensureDataset` and refuses
+  redirects to hosts off the list.
+- **Queue limits**: `DE_MAX_JOBS_PER_REQUESTER` (2) queued+running jobs per
+  person, `DE_MAX_JOBS_TOTAL` (20) overall. Over either, the POST returns 429
+  with a message the UI shows. A person is the signed-in account, or the client
+  IP if anonymous: behind Apache, the *last* X-Forwarded-For entry. Unfinished
+  jobs older than `DE_QUEUE_STALE_SEC` (3600) stop counting, so a dead job can't
+  jam the queue.
 
 ## Still to wire
 
-- Install the durability setup on the `/hive` host: relocate the scanpy env
-  (above), write `de.env`, add the cron watchdog lines (or the systemd unit).
-- Production cbAnnotServer registers the blueprint in proxy mode (`DE_RELAY_URL`)
-  and sets `deUrl` in cb.conf; the dev-side `de_submit.py` runs in direct mode.
-- `de_jobs` table + account tie-in on the production (proxy) tier (per plan).
 - Statistics: pseudoreplication caveat in the UI; Memento / pseudobulk as the
-  Phase-2 sounder method. Other scanpy tests (t-test, logreg) are easy adds.
+  Phase-2 sounder method. Other tests (t-test, logreg) are easy adds.

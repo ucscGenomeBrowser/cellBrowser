@@ -10,7 +10,13 @@ without every server being locked to one interpreter.
 browser ──HTTPS──▶ Apache (cells vhost) ──/api──▶ gunicorn ──▶ Flask (wsgi.py)
          static files ◀── docroot (htdocs-cells)                      │
                                                          MySQL (hgcentral, cb* tables)
+                                                                      │ cbDeJobs
+                                                  DE worker (de/deWorker.py, one machine)
 ```
+
+The DE worker is the only other piece: it takes comparisons queued in the
+`cbDeJobs` table and writes the results back there (see `de/README.md`). The web
+service and the worker share nothing but the database.
 
 Everything the frontend talks to is under `/api`; everything else is the normal
 static Cell Browser served from the docroot.
@@ -28,7 +34,7 @@ static Cell Browser served from the docroot.
 | `apache-cells-api.conf` | ProxyPass snippet to paste into the cells vhosts |
 | `cb.conf.sample` | Site config template for the docroot (read by the frontend) |
 | `providers.conf.sample` | Sign-in provider template (server-side, holds secrets, chmod 600) |
-| `schema-mysql.sql` | The six `cb*` tables, to create by hand in hgcentral |
+| `schema-mysql.sql` | The seven `cb*` tables, to create by hand in hgcentral |
 | `copy_sqlite_to_mysql.py` | One-off copy of an old SQLite database into those tables |
 
 ## One-time setup
@@ -42,7 +48,7 @@ static Cell Browser served from the docroot.
 2. **Database.** Create the tables once with `hgsql hgcentraltest < deploy/schema-mysql.sql`
    (`hgcentral` on the RR). The service never creates tables on MySQL and stops
    at startup if any is missing, so its MySQL account needs only SELECT, INSERT,
-   UPDATE and DELETE on the six `cb*` tables. For local development an
+   UPDATE and DELETE on the seven `cb*` tables. For local development an
    `sqlite:///` URI works too; the service then creates the tables itself.
 3. **Secret key** — generate once and keep it stable so logins survive restarts:
    ```
@@ -67,12 +73,8 @@ cron watchdog sources). See `config.py` for the full list.
 | `CBANNOT_MAIL_PORT` | `25` for the local MTA |
 | `CBANNOT_MAIL_FROM` | envelope/from address, e.g. `noreply@cells.ucsc.edu` |
 | `CBANNOT_PROVIDERS_CONF` | path to the sign-in provider conf file; default `/cluster/home/otto/cellsServer/etc/providers.conf` (see OAuth below) |
-| `DE_QUEUE_DIR` | dev side only (has `/hive`): the DE job queue, e.g. `/cluster/home/otto/cellsServer/deJobs`. Selects *direct* mode |
-| `DE_RELAY_URL` | production only (no `/hive`): the dev-side DE endpoint, e.g. `https://cells-test.gi.ucsc.edu/api/de`. Selects *proxy* mode |
-| `DE_RELAY_KEY` | the same random string on both tiers; lets the dev side trust who the production side says asked (see `de/README.md`) |
-| `DE_REQUIRE_RELAY_KEY` | `1` on a queue-side instance that only the relaying side talks to (hgw0 on the RR): requests without `DE_RELAY_KEY` get a 403 |
-| `DE_DATA_HOSTS` | optional; hosts a DE job may fetch data from. The default covers the cells sites |
-| `DE_MAX_JOBS_PER_REQUESTER` / `DE_MAX_JOBS_TOTAL` | optional, dev side; queue limits (2 / 20) |
+| `DE_DATA_HOSTS` | optional; hosts a DE job's dataUrl may name. The default covers the cells sites |
+| `DE_MAX_JOBS_PER_REQUESTER` / `DE_MAX_JOBS_TOTAL` | optional; DE queue limits (2 / 20) |
 
 ## Email (verification / password reset)
 

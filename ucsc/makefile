@@ -15,7 +15,7 @@
 # The login/annotation/DE server (src/cbAnnotServer) is installed by separate
 # targets, run as otto, into CELLSSERVER, a directory only otto can write
 # (RM #38664). Everything the server and the DE worker use lives there: code,
-# both pythons, settings, database, job queue and logs.
+# both pythons, settings, DE scratch space and logs. The database is hgcentraltest.
 #
 #   git fetch                                    first, as yourself; otto can't
 #   sudo -u otto make setup-annot                once, and after changing either

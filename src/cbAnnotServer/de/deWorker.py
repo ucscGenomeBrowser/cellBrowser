@@ -1,63 +1,102 @@
 #!/usr/bin/env python3
 """
-Differential-expression worker daemon (Redmine #24912).
+Differential-expression worker daemon (Redmine #24912, #38664).
 
-Long-running loop that watches the shared job queue on /hive, claims pending
-jobs, and runs the compute kernel (runDeJob.py) once per job. Designed for the
-"no parasol" model: a single server processing jobs locally (hgwdev for
-cells-test, hgw0 on the RR), run under a service account.
+Takes jobs from the cbDeJobs table in the same database the web service uses
+(CBANNOT_DATABASE_URI), oldest first, one at a time, and runs each with the
+compute kernel (runDeJob.py). Progress and the gzipped result go back into the
+job's row, where the web service reads them for the browser. The web service
+can be on any machine that reaches the database; this daemon runs on the one
+that has the datasets (hgwdev for cells-test, hgw0 on the RR).
 
-Transport is the filesystem: the Cell Browser backend (or the dev-side Flask
-service) writes DE_JOBS_DIR/<jobId>/spec.json; this daemon notices it, runs the
-job, and the kernel writes status.json + result.json to the same directory. No
-network, no scheduler: the API and the worker share the queue directory.
+Each job runs in its own subprocess, in its own session, so a crash or OOM in
+one job can't take down the daemon, memory is freed when it exits, and a cancel
+or timeout can kill it and any children. The subprocess works in a scratch
+directory (DE_JOBS_DIR/<jobId>/: spec.json in, status.json and result.json out),
+which is removed once the row is updated.
 
-Each job runs in its own subprocess so a crash or OOM in one job can't take down
-the daemon, and per-job memory (the AnnData load) is freed when it exits.
+Taking a job is a conditional UPDATE (state queued -> running), so two workers
+could share a queue safely, though one is the plan.
 
-Claiming is restart-safe: a job is claimed by atomically creating a `worker.lock`
-(O_EXCL). A job is "pending" if it has spec.json, no result, and either no lock
-or a stale lock (worker died mid-job).
-
-Config via environment (all optional):
-    DE_JOBS_DIR       job queue root         (default /cluster/home/otto/cellsServer/deJobs)
+Config via environment:
+    CBANNOT_DATABASE_URI  the database, as for the web service (required)
+    DE_JOBS_DIR       scratch directory for running jobs (default /cluster/home/otto/cellsServer/deJobs)
+    DE_JOB_LOG        append-only TSV, one row per finished job (default deJobs.tsv next to DE_JOBS_DIR)
     DE_CBBUILD_DIR    cbBuild web output root (dataset dirs; runDeJob reads it)
-    DE_WORKER_PYTHON  python that has scanpy (default this interpreter)
-    DE_POLL_SEC       queue poll interval    (default 2)
+    DE_WORKER_PYTHON  python with numpy/scipy/pandas for runDeJob (default this interpreter)
+    DE_POLL_SEC       how often to look for a new job, seconds (default 2)
     DE_JOB_TIMEOUT    per-job wall-clock cap, seconds (default 600)
-    DE_STALE_LOCK_SEC reclaim a lock older than this (default 1800)
-    DE_RETENTION_DAYS delete finished job dirs older than this (default 7; 0=keep)
+    DE_CANCEL_POLL    how often a running job is checked for a cancel, seconds (default 1)
+    DE_QUEUE_STALE_SEC  a queued job older than this is dropped, not run: nobody is
+                      waiting for it any more (default 3600, the browser's limit)
+    DE_RETENTION_DAYS delete finished jobs older than this (default 7; 0 = keep)
     DE_WORKER_PIDFILE write our PID here on start, remove on clean exit (optional)
     DE_WORKER_HEARTBEAT  touch this file every loop so a watchdog can tell a hung
                          worker from a healthy idle one (optional)
 """
-import os
-import sys
+import gzip
 import json
-import time
+import os
+import re
+import shutil
 import signal
+import socket
 import subprocess
+import sys
+import time
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import create_engine, text
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JOBS_DIR   = os.environ.get("DE_JOBS_DIR", "/cluster/home/otto/cellsServer/deJobs")
-# Append-only TSV, one row per finished job: who ran what, on which data, how long.
 DE_JOB_LOG = os.environ.get("DE_JOB_LOG",
     os.path.join(os.path.dirname(JOBS_DIR.rstrip("/")) or ".", "deJobs.tsv"))
 PYTHON     = os.environ.get("DE_WORKER_PYTHON", sys.executable)
 POLL_SEC   = float(os.environ.get("DE_POLL_SEC", "2"))
 JOB_TIMEOUT= int(os.environ.get("DE_JOB_TIMEOUT", "600"))
-STALE_LOCK = int(os.environ.get("DE_STALE_LOCK_SEC", "1800"))
+CANCEL_POLL= float(os.environ.get("DE_CANCEL_POLL", "1"))
+QUEUE_STALE= int(os.environ.get("DE_QUEUE_STALE_SEC", "3600"))
 RETENTION  = int(os.environ.get("DE_RETENTION_DAYS", "7"))
-CANCEL_POLL= float(os.environ.get("DE_CANCEL_POLL", "1"))  # how often a running job checks cancel.flag
 PIDFILE    = os.environ.get("DE_WORKER_PIDFILE")
 HEARTBEAT  = os.environ.get("DE_WORKER_HEARTBEAT")
+HOST       = socket.gethostname().split(".")[0]
+ME         = "%s:%d" % (HOST, os.getpid())
 
 _stop = False
+_engine = None
+
+
+def db():
+    """The database engine, made on first use. Short transactions only, so
+    every query sees rows the web service committed since the last one."""
+    global _engine
+    if _engine is None:
+        uri = os.environ.get("CBANNOT_DATABASE_URI")
+        if not uri:
+            raise SystemExit("set CBANNOT_DATABASE_URI (the web service's database)")
+        args = {}
+        if uri.startswith("mysql"):
+            args["connect_args"] = {"init_command":
+                "SET SESSION sql_mode='STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION'"}
+        _engine = create_engine(uri, pool_pre_ping=True, pool_recycle=3600, **args)
+    return _engine
+
+
+def sql(query, **params):
+    with db().begin() as c:
+        return c.execute(text(query), params)
+
+
+def now():
+    """UTC without a timezone, like the web service's datetime.utcnow() columns.
+    (utcnow itself is deprecated in Python 3.12+ and would warn on every call.)"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _beat():
-    """Touch the heartbeat file so the watchdog can distinguish a healthy idle
-    worker from a hung one. Best-effort; a failure here must not stop the loop."""
+    """Touch the heartbeat file so the watchdog can tell a hung worker from an
+    idle one. Best-effort; a failure here must not stop the loop."""
     if not HEARTBEAT:
         return
     try:
@@ -78,68 +117,79 @@ def _onsig(signum, frame):
     log("caught signal %d, finishing current job then exiting" % signum)
 
 
-def isFinished(jobdir):
-    """A job is finished if it has a result, or a terminal status."""
-    if os.path.isfile(os.path.join(jobdir, "result.json")):
-        return True
-    st = _readStatusState(jobdir)
-    return st in ("done", "failed", "canceled")
+# ---- the queue ------------------------------------------------------------
 
-
-def _readStatusState(jobdir):
-    import json
-    p = os.path.join(jobdir, "status.json")
-    if not os.path.isfile(p):
-        return None
-    try:
-        with open(p) as fh:
-            return json.load(fh).get("state")
-    except Exception:
-        return None
-
-
-def claim(jobdir):
-    """Atomically claim a job by creating worker.lock with O_EXCL. Returns True if
-    we now own it. Reclaims a stale lock (previous worker died)."""
-    lock = os.path.join(jobdir, "worker.lock")
-    try:
-        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        os.write(fd, ("%d\n" % os.getpid()).encode())
-        os.close(fd)
-        return True
-    except FileExistsError:
-        # someone holds it — reclaim only if it's stale AND the job never finished
-        try:
-            age = time.time() - os.path.getmtime(lock)
-        except OSError:
-            return False
-        if age > STALE_LOCK and not isFinished(jobdir) and _readStatusState(jobdir) != "running":
-            log("reclaiming stale lock on %s (age %ds)" % (os.path.basename(jobdir), int(age)))
-            try:
-                os.utime(lock, None)  # refresh so we own the window
-                return True
-            except OSError:
-                return False
-        return False
-
-
-def pendingJobs():
-    """Job dirs that have a spec, aren't finished, and are claimable, oldest first."""
-    if not os.path.isdir(JOBS_DIR):
-        return []
-    out = []
+def recoverOrphans():
+    """At startup: a job this host was running when its worker died will never
+    finish. Mark it failed so the browser stops waiting."""
+    n = sql("UPDATE cbDeJobs SET state='failed', finished_at=:t, "
+            "error='The server restarted while this comparison was running. Please run it again.' "
+            "WHERE state='running' AND worker LIKE :h", t=now(), h=HOST + ":%").rowcount
+    if n:
+        log("marked %d job(s) left running by an earlier worker on %s as failed" % (n, HOST))
+    # and their scratch dirs (only names this worker makes, nothing else there)
     for name in os.listdir(JOBS_DIR):
-        d = os.path.join(JOBS_DIR, name)
-        if not os.path.isdir(d):
-            continue
-        if not os.path.isfile(os.path.join(d, "spec.json")):
-            continue
-        if isFinished(d):
-            continue
-        out.append(d)
-    out.sort(key=lambda d: os.path.getmtime(os.path.join(d, "spec.json")))
-    return out
+        if re.match(r"^de_[0-9a-f]{12}$", name):
+            shutil.rmtree(os.path.join(JOBS_DIR, name), ignore_errors=True)
 
+
+def expireOld():
+    """Drop queued jobs nobody is waiting for any more (the browser stops
+    polling after an hour), e.g. after the worker was down for a while."""
+    n = sql("UPDATE cbDeJobs SET state='failed', finished_at=:t, "
+            "error='This comparison waited too long to start. Please run it again.' "
+            "WHERE state='queued' AND created_at < :cut",
+            t=now(), cut=now() - timedelta(seconds=QUEUE_STALE)).rowcount
+    if n:
+        log("dropped %d queued job(s) older than %ds" % (n, QUEUE_STALE))
+
+
+def takeNext():
+    """Claim the oldest queued job. Returns (job_id, spec dict) or None."""
+    row = sql("SELECT job_id FROM cbDeJobs WHERE state='queued' ORDER BY id LIMIT 1").first()
+    if row is None:
+        return None
+    jobId = row[0]
+    took = sql("UPDATE cbDeJobs SET state='running', worker=:me, started_at=:t, stage='Starting' "
+               "WHERE job_id=:j AND state='queued'", me=ME, t=now(), j=jobId).rowcount
+    if took != 1:          # canceled or taken in the meantime
+        return None
+    spec = sql("SELECT spec FROM cbDeJobs WHERE job_id=:j", j=jobId).scalar()
+    return jobId, json.loads(spec)
+
+
+def cancelRequested(jobId):
+    return bool(sql("SELECT cancel_requested FROM cbDeJobs WHERE job_id=:j", j=jobId).scalar())
+
+
+def pushProgress(jobId, st):
+    sql("UPDATE cbDeJobs SET stage=:stage, step=:step, n_steps=:n, progress=:p "
+        "WHERE job_id=:j AND state='running'",
+        stage=(st.get("stage") or None) and str(st["stage"])[:255],
+        step=st.get("step"), n=st.get("nSteps"), p=st.get("progress"), j=jobId)
+
+
+def finish(jobId, state, error=None, result=None, elapsed=None):
+    vals = dict(j=jobId, state=state, error=error, t=now(), el=elapsed,
+                res=None, n1=None, n2=None, ng=None)
+    if result is not None:
+        vals.update(res=gzip.compress(json.dumps(result).encode(), 6),
+                    n1=result.get("n_pop1"), n2=result.get("n_pop2"),
+                    ng=len(result["genes"]) if isinstance(result.get("genes"), list) else None)
+    sql("UPDATE cbDeJobs SET state=:state, error=:error, finished_at=:t, elapsed=:el, "
+        "result=:res, n_pop1=:n1, n_pop2=:n2, n_genes=:ng WHERE job_id=:j", **vals)
+
+
+def sweepRetention():
+    if RETENTION <= 0:
+        return
+    n = sql("DELETE FROM cbDeJobs WHERE state IN ('done','failed','canceled') AND created_at < :cut",
+            cut=now() - timedelta(days=RETENTION)).rowcount
+    if n:
+        log("retention: removed %d finished job(s) older than %d days" % (n, RETENTION))
+
+
+# ---- running one job ------------------------------------------------------
 
 def _killTree(p):
     """Stop the job subprocess and any children (it gets its own session, so we
@@ -163,25 +213,31 @@ def _killTree(p):
             pass
 
 
-def runJob(jobdir):
-    """Run one job in a subprocess via runDeJob.py <jobId>, polling for a cancel
-    request (cancel.flag written by the API) and the per-job timeout. Each job runs
-    in its own session so we can kill it and any children on cancel/timeout."""
-    jobId = os.path.basename(jobdir)
-    cancelFlag = os.path.join(jobdir, "cancel.flag")
-    if os.path.exists(cancelFlag):
-        log("job %s canceled before start" % jobId)
-        _writeState(jobdir, "canceled", "canceled before it started")
-        _logJob(jobdir, "canceled", 0.0)
-        return
+def _readJsonFile(path):
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
+def runJob(jobId, spec):
+    """Run one job in a subprocess (runDeJob.py <jobId>) in a scratch dir,
+    copying its progress to the row, checking for a cancel and the timeout."""
+    jobdir = os.path.join(JOBS_DIR, jobId)
+    shutil.rmtree(jobdir, ignore_errors=True)
+    os.makedirs(jobdir)
+    with open(os.path.join(jobdir, "spec.json"), "w") as fh:
+        json.dump(spec, fh)
 
     env = dict(os.environ)
     env["DE_JOBS_DIR"] = JOBS_DIR
     cmd = [PYTHON, os.path.join(HERE, "runDeJob.py"), jobId]
-    log("running job %s" % jobId)
+    log("running job %s (%s)" % (jobId, spec.get("dataset")))
     t0 = time.time()
-    # write child output to a per-job log file (not a PIPE) so a chatty job can't
-    # deadlock on a full pipe while we poll
+    statusPath = os.path.join(jobdir, "status.json")
+    lastStatus = None
+    # child output goes to a file, not a PIPE, so a chatty job can't deadlock
     logPath = os.path.join(jobdir, "run.log")
     with open(logPath, "wb") as logf:
         p = subprocess.Popen(cmd, env=env, stdout=logf, stderr=subprocess.STDOUT,
@@ -192,57 +248,58 @@ def runJob(jobdir):
                 p.wait(timeout=CANCEL_POLL)
                 break  # finished on its own
             except subprocess.TimeoutExpired:
-                if os.path.exists(cancelFlag):
-                    log("job %s canceled — killing it" % jobId)
+                pass
+            try:
+                if cancelRequested(jobId):
+                    log("job %s canceled, killing it" % jobId)
                     _killTree(p)
                     outcome = "canceled"
                     break
-                if time.time() - t0 > JOB_TIMEOUT:
-                    log("job %s TIMED OUT after %ds — killing it" % (jobId, JOB_TIMEOUT))
-                    _killTree(p)
-                    outcome = "timeout"
-                    break
+                st = _readJsonFile(statusPath)
+                if st and st != lastStatus:
+                    pushProgress(jobId, st)
+                    lastStatus = st
+            except Exception as e:      # database hiccup: keep the job running
+                log("job %s: could not reach the database: %s" % (jobId, e))
+            if time.time() - t0 > JOB_TIMEOUT:
+                log("job %s TIMED OUT after %ds, killing it" % (jobId, JOB_TIMEOUT))
+                _killTree(p)
+                outcome = "timeout"
+                break
 
     runtime = time.time() - t0
+    st = _readJsonFile(statusPath) or {}
+    res = None
     if outcome == "canceled":
-        _writeState(jobdir, "canceled", "canceled by the user")
+        finish(jobId, "canceled", "canceled by the user", elapsed=runtime)
         logStatus = "canceled"
     elif outcome == "timeout":
-        _writeState(jobdir, "failed", "job exceeded the %d s time limit" % JOB_TIMEOUT)
+        finish(jobId, "failed", "The comparison took longer than the %d minute limit."
+               % (JOB_TIMEOUT // 60), elapsed=runtime)
         logStatus = "timeout"
     else:
-        ok = (p.returncode == 0)
-        logStatus = "done" if ok else "failed"
-        log("job %s finished rc=%d in %.1fs" % (jobId, p.returncode, runtime))
-        if not ok:
+        res = _readJsonFile(os.path.join(jobdir, "result.json"))
+        if p.returncode == 0 and res is not None and st.get("state") != "failed":
+            finish(jobId, "done", result=res, elapsed=st.get("elapsed") or runtime)
+            logStatus = "done"
+        else:
+            finish(jobId, "failed", st.get("error") or "The comparison failed.", elapsed=runtime)
+            logStatus = "failed"
             try:
                 with open(logPath, "rb") as fh:
                     tail = fh.read()[-500:].decode(errors="replace")
                 log("job %s output tail: %s" % (jobId, tail))
             except OSError:
                 pass
-    _logJob(jobdir, logStatus, runtime)
-
-
-def _writeState(jobdir, state, error=None):
-    tmp = os.path.join(jobdir, "status.json.tmp")
-    with open(tmp, "w") as fh:
-        json.dump({"state": state, "error": error}, fh)
-    os.replace(tmp, os.path.join(jobdir, "status.json"))
+        log("job %s %s rc=%s in %.1fs" % (jobId, logStatus, p.returncode, runtime))
+    _logJob(jobId, spec, res or {}, logStatus, runtime)
+    shutil.rmtree(jobdir, ignore_errors=True)
 
 
 # ---- per-job TSV log ------------------------------------------------------
 
 _LOG_HEADER = ("timestamp\tjobId\trequester\tremote\tdataset\tfield\tgroupA\t"
                "groupB\tmethod\tn_pop1\tn_pop2\tn_genes\truntime_s\tstatus")
-
-
-def _readJsonFile(path):
-    try:
-        with open(path) as fh:
-            return json.load(fh)
-    except Exception:
-        return None
 
 
 def _popField(p):
@@ -271,15 +328,13 @@ def _tsv(v):
     return str(v).replace("\t", " ").replace("\r", " ").replace("\n", " ")
 
 
-def _logJob(jobdir, status, runtime_s):
+def _logJob(jobId, spec, res, status, runtime_s):
     """Append one TSV row for a finished job (any outcome). Best-effort."""
-    spec = _readJsonFile(os.path.join(jobdir, "spec.json")) or {}
-    res = _readJsonFile(os.path.join(jobdir, "result.json")) or {}
     meta = spec.get("_meta") or {}
     p1, p2 = spec.get("pop1"), spec.get("pop2")
     row = [
         time.strftime("%Y-%m-%d %H:%M:%S"),
-        os.path.basename(jobdir),
+        jobId,
         meta.get("requester") or "",
         meta.get("remote") or "",
         spec.get("dataset") or "",
@@ -304,23 +359,7 @@ def _logJob(jobdir, status, runtime_s):
         log("could not append to job log %s: %s" % (DE_JOB_LOG, e))
 
 
-def sweepRetention():
-    """Delete finished job dirs older than RETENTION days."""
-    if RETENTION <= 0 or not os.path.isdir(JOBS_DIR):
-        return
-    cutoff = time.time() - RETENTION * 86400
-    import shutil
-    for name in os.listdir(JOBS_DIR):
-        d = os.path.join(JOBS_DIR, name)
-        if not os.path.isdir(d) or not isFinished(d):
-            continue
-        try:
-            if os.path.getmtime(d) < cutoff:
-                shutil.rmtree(d)
-                log("retention: removed %s" % name)
-        except OSError:
-            pass
-
+# ---- main loop ------------------------------------------------------------
 
 def main():
     signal.signal(signal.SIGTERM, _onsig)
@@ -331,25 +370,40 @@ def main():
                 fh.write("%d\n" % os.getpid())
         except OSError as e:
             log("could not write pidfile %s: %s" % (PIDFILE, e))
-    log("starting; queue=%s python=%s" % (JOBS_DIR, PYTHON))
-    last_sweep = 0
+    os.makedirs(JOBS_DIR, exist_ok=True)
+    log("starting as %s; database %s; python=%s" % (ME, db().url.render_as_string(hide_password=True), PYTHON))
+    recovered = False
+    lastSweep = 0
     try:
         while not _stop:
             _beat()
-            did = False
-            for jobdir in pendingJobs():
-                if _stop:
-                    break
-                if claim(jobdir):
-                    runJob(jobdir)
-                    _beat()   # a long job shouldn't look hung to the watchdog
-                    did = True
-            now = time.time()
-            if now - last_sweep > 3600:
-                sweepRetention()
-                last_sweep = now
-            if not did:
+            try:
+                if not recovered:
+                    recoverOrphans()
+                    recovered = True
+                if time.time() - lastSweep > 3600:
+                    sweepRetention()
+                    lastSweep = time.time()
+                expireOld()
+                job = takeNext()
+            except Exception as e:
+                # database down or unreachable: keep trying, quietly
+                log("database error: %s" % str(e).splitlines()[0][:200])
+                job = None
+                time.sleep(max(POLL_SEC, 10))
+                continue
+            if job is None:
                 time.sleep(POLL_SEC)
+                continue
+            try:
+                runJob(*job)
+            except Exception as e:
+                log("job %s: worker error: %s" % (job[0], e))
+                try:
+                    finish(job[0], "failed", "The comparison failed on the server.")
+                except Exception:
+                    pass
+            _beat()   # a long job shouldn't look hung to the watchdog
     finally:
         if PIDFILE:
             try:

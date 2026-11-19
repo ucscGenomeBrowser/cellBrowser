@@ -1,59 +1,52 @@
 """
-Differential-expression submit/poll API (Redmine #24912).
+Differential-expression submit / status / cancel API (Redmine #24912, #38664).
 
-One Flask blueprint, two modes (chosen by config), so there is a single codebase
-for both tiers of the firewall-split deployment:
-
-  direct  — the instance has /hive: it writes spec.json into the DE job queue and
-            reads status.json/result.json back. (dev-side service, runs as otto.)
-  proxy   — the instance has no /hive (production): it forwards submit/poll to the
-            direct instance over HTTPS.
+The job queue is a table, cbDeJobs (models.DeJob). This service, which also
+handles sign-in, adds a row for each comparison and reads it back when the
+browser asks for status. The worker (deWorker.py), on whichever machine has the
+datasets, takes queued rows in order, runs them, and writes progress and the
+gzipped result into the row. The two only share the database, so every web
+node can take jobs and one machine runs them.
 
 The frontend (cellBrowser.js deSubmitJobHttp) speaks one URL:
-    POST  <deUrl>            body = the builder spec  -> {jobId, status}
-    GET   <deUrl>?jobId=...                            -> {status, stage, ...,
-                                                           result:{genes,n_pop1,n_pop2}}
+    POST   <deUrl>            body = the builder spec  -> {jobId, status}
+    GET    <deUrl>?jobId=...                            -> {status, stage, ...,
+                                                            result:{genes,n_pop1,n_pop2,filters}}
+    DELETE <deUrl>?jobId=...                            -> cancel
 
-Config keys (app.config or env, env wins for the standalone dev server):
-    DE_QUEUE_DIR    job queue root (enables *direct* mode)
-    DE_RELAY_URL    direct-instance URL (enables *proxy* mode)
-    DE_RELAY_KEY    shared secret, set to the same value on both tiers. The proxy
-                    sends it as X-DE-Key along with X-DE-Requester (who really
-                    asked); the direct side believes X-DE-Requester only when the
-                    key matches. It is not required on every request, because
-                    browsers on the dev-side sites post to the direct instance
-                    without one.
-    DE_REQUIRE_RELAY_KEY  set to 1 on a direct instance that only the proxy
-                    talks to (hgw0 on the RR). It then refuses every request
-                    that lacks the key, so nobody else can queue jobs on it.
-    DE_DATA_HOSTS   hosts a job's dataUrl may point at (see deCache.checkDataUrl)
+Settings (app.config or environment):
+    DE_DATA_HOSTS              hosts a job's dataUrl may point at (see deCache.checkDataUrl)
     DE_MAX_JOBS_PER_REQUESTER  queued+running jobs one person may have (2)
     DE_MAX_JOBS_TOTAL          queued+running jobs across everyone (20)
     DE_QUEUE_STALE_SEC         unfinished jobs older than this stop counting
                                toward those limits (3600)
 
-The builder spec (from deBuildSpec) is translated to the worker's spec.json shape
-(pop1/pop2 selectors + method + parameters). de_jobs DB tracking / account tie-in
-is added by the production (proxy) instance later; direct mode is pure filesystem.
+The builder spec (from deBuildSpec) is translated to the worker's spec shape
+(pop1/pop2 selectors + method + parameters) before it is stored.
 """
+import gzip
+import json
 import os
 import re
-import hmac
-import json
-import time
 import secrets
+from datetime import datetime, timedelta
 
 from flask import Blueprint, request, jsonify, current_app
 
+from extensions import db
+from models import DeJob
+
 try:
     from . import deCache
-except ImportError:          # run standalone (python de_submit.py)
+except ImportError:          # run standalone
     import deCache
 
 bp = Blueprint("de", __name__)
 
 # only the Wilcoxon kernel exists in Phase 1
 _TEST_TO_METHOD = {"wilcox": "wilcoxon", "wilcoxon": "wilcoxon"}
+
+_FINISHED = ("done", "failed", "canceled")
 
 
 def _cfg(key, default=None):
@@ -69,7 +62,7 @@ def _cfgInt(key, default):
 
 # A dataset name is a docroot-relative path, possibly collection-nested (a/b).
 # Anything else (absolute paths, "..") could walk the worker's local-docroot
-# fallback out of the docroot.
+# read out of the docroot.
 _DATASET_RE = re.compile(r"^[A-Za-z0-9_.+-]+(/[A-Za-z0-9_.+-]+)*$")
 
 
@@ -155,12 +148,6 @@ def translateSpec(fe):
     return out
 
 
-# ---- direct mode (has /hive) ---------------------------------------------
-
-def _jobDir(queue, jobId):
-    return os.path.join(queue, jobId)
-
-
 def _localRequester():
     """Who is asking, as seen by this instance: the logged-in email if there is a
     session, else the client IP. Behind Apache the client IP is the LAST
@@ -178,115 +165,76 @@ def _localRequester():
     return {"requester": user, "remote": remote}
 
 
-def _relayKeyOk():
-    """True if the request carries the shared relay key (and one is configured)."""
-    key = _cfg("DE_RELAY_KEY")
-    got = request.headers.get("X-DE-Key", "")
-    return bool(key) and hmac.compare_digest(got.encode(), key.encode())
-
-
-def _requesterMeta():
-    """Who submitted this job, for the DE job log and the queue limits. A request
-    relayed by the production instance carries the real user in X-DE-Requester;
-    that is believed only when the relay key matches, otherwise anyone could
-    claim to be anyone and dodge the per-requester limit."""
-    who = None
-    if request.headers.get("X-DE-Requester") and _relayKeyOk():
-        try:
-            fwd = json.loads(request.headers["X-DE-Requester"])
-            who = {"requester": (str(fwd["requester"])[:200] if fwd.get("requester") else None),
-                   "remote": str(fwd.get("remote") or "")[:100]}
-        except (ValueError, TypeError, AttributeError, KeyError):
-            who = None
-    if who is None:
-        who = _localRequester()
-    who["submitted_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    return who
-
-
-def _requesterKey(meta):
-    """The identity the per-requester limit counts: the account if signed in,
+def _requesterKey(who):
+    """The identity the per-person limit counts: the account if signed in,
     else the IP address."""
-    return (meta or {}).get("requester") or (meta or {}).get("remote") or "unknown"
+    return who.get("requester") or who.get("remote") or "unknown"
 
 
-def _queueBusy(queue, who):
-    """Return a message if the queue is too full to take another job from `who`,
-    else None. Counts unfinished jobs: queued or running, not done/failed/canceled.
-    Jobs older than DE_QUEUE_STALE_SEC are ignored so a dead job can't block the
-    queue forever. Two submits arriving at the same instant can both get in, so
-    the limits are approximate. That's fine, since they only exist to stop one
-    person from filling the queue."""
+def _queueBusy(key):
+    """Return a message if the queue is too full to take another job from `key`,
+    else None. Counts queued and running jobs younger than DE_QUEUE_STALE_SEC,
+    so a job stuck by a crash can't block anyone for long. Two submits at the
+    same instant can both get in; the limits only exist to stop one person
+    from filling the queue, so that's fine."""
     perUser = _cfgInt("DE_MAX_JOBS_PER_REQUESTER", 2)
     total = _cfgInt("DE_MAX_JOBS_TOTAL", 20)
-    cutoff = time.time() - _cfgInt("DE_QUEUE_STALE_SEC", 3600)
-    nAll = nMine = 0
-    try:
-        entries = list(os.scandir(queue))
-    except OSError:
-        return None
-    for e in entries:
-        spec = os.path.join(e.path, "spec.json")
-        try:
-            if not e.is_dir() or os.path.getmtime(spec) < cutoff:
-                continue
-        except OSError:
-            continue
-        st = _readJson(os.path.join(e.path, "status.json")) or {}
-        if st.get("state") in ("done", "failed", "canceled"):
-            continue
-        nAll += 1
-        try:
-            with open(os.path.join(e.path, "requester")) as fh:
-                if fh.read() == who:
-                    nMine += 1
-        except OSError:
-            pass
+    since = datetime.utcnow() - timedelta(seconds=_cfgInt("DE_QUEUE_STALE_SEC", 3600))
+    live = db.session.query(DeJob).filter(DeJob.state.in_(("queued", "running")),
+                                          DeJob.created_at >= since)
+    nMine = live.filter(DeJob.requester == key).count() if perUser > 0 else 0
     if perUser > 0 and nMine >= perUser:
         return ("You already have %d comparisons running or waiting. "
                 "Please wait for one to finish." % nMine)
-    if total > 0 and nAll >= total:
+    if total > 0 and live.count() >= total:
         return "The server is busy with other comparisons right now. Please try again in a few minutes."
     return None
 
 
-def _submitDirect(queue, feSpec, meta=None):
+def _submit(feSpec):
     spec = translateSpec(feSpec)
-    if meta:
-        spec["_meta"] = meta            # requester/remote/time, for the worker's job log
-    jobId = "de_" + secrets.token_hex(6)
-    d = _jobDir(queue, jobId)
-    os.makedirs(d, exist_ok=True)
-    # small side file so _queueBusy can count jobs per requester without
-    # parsing every spec (a cellIds spec can be megabytes)
-    with open(os.path.join(d, "requester"), "w") as fh:
-        fh.write(_requesterKey(meta))
-    tmp = os.path.join(d, "spec.json.tmp")
-    with open(tmp, "w") as fh:
-        json.dump(spec, fh)
-    os.replace(tmp, os.path.join(d, "spec.json"))   # atomic; the worker watches for this
-    return {"jobId": jobId, "status": "submitted"}
+    who = _localRequester()
+    key = _requesterKey(who)
+    busy = _queueBusy(key)
+    if busy:
+        return {"status": "failed", "error": busy}, 429
+    who["submitted_at"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    spec["_meta"] = who                 # for the worker's job log
+    job = DeJob(job_id="de_" + secrets.token_hex(6), state="queued",
+                requester=key[:255], remote=(who.get("remote") or "")[:100],
+                dataset=spec["dataset"], spec=json.dumps(spec))
+    db.session.add(job)
+    db.session.commit()
+    return {"jobId": job.job_id, "status": "submitted"}, 200
 
 
-def _statusDirect(queue, jobId):
-    if not jobId or "/" in jobId or ".." in jobId:
-        return {"status": "failed", "error": "bad jobId"}
-    d = _jobDir(queue, jobId)
-    if not os.path.isdir(d):
+def _job(jobId):
+    if not jobId or not isinstance(jobId, str) or len(jobId) > 32:
+        return None
+    return db.session.query(DeJob).filter_by(job_id=jobId).first()
+
+
+def _status(jobId):
+    job = _job(jobId)
+    if job is None:
         return {"status": "failed", "error": "unknown jobId"}
-    st = _readJson(os.path.join(d, "status.json")) or {"state": "submitted"}
     out = {
-        "jobId": jobId,
-        "status": st.get("state", "running"),
-        "stage": st.get("stage"),
-        "step": st.get("step"),
-        "nSteps": st.get("nSteps"),
-        "progress": st.get("progress"),
-        "elapsed": st.get("elapsed"),
-        "error": st.get("error"),
+        "jobId": job.job_id,
+        "status": job.state,
+        "stage": job.stage,
+        "step": job.step,
+        "nSteps": job.n_steps,
+        "progress": job.progress,
+        "elapsed": job.elapsed,
+        "error": job.error,
     }
-    if out["status"] == "done":
-        res = _readJson(os.path.join(d, "result.json")) or {}
+    if job.state == "queued":
+        ahead = db.session.query(DeJob).filter(DeJob.state.in_(("queued", "running")),
+                                               DeJob.id < job.id).count()
+        out["stage"] = ("Waiting for %d other comparison%s to finish" % (ahead, "" if ahead == 1 else "s")
+                        if ahead else "Starting")
+    if job.state == "done":
+        res = json.loads(gzip.decompress(job.result)) if job.result else {}
         out["result"] = {
             "genes": res.get("genes", []),
             "n_pop1": res.get("n_pop1"),
@@ -296,140 +244,35 @@ def _statusDirect(queue, jobId):
     return out
 
 
-def _readJson(path):
-    try:
-        with open(path) as fh:
-            return json.load(fh)
-    except Exception:
-        return None
-
-
-# ---- proxy mode (no /hive) -----------------------------------------------
-
-# What the browser gets when the direct instance can't be reached or answers
-# with something that isn't JSON (hgw0 restarting, network trouble). Without
-# this the proxy returns Flask's HTML 500 page and the frontend shows a JSON
-# parse error. A poll answers with a status the frontend keeps polling on,
-# since the job is still on the direct side's disk and usually finishes.
-_UNREACHABLE = ("The comparison server can't be reached right now. "
-                "Please try again in a few minutes.")
-
-
-def _proxyCall(method, relay, **kw):
-    """One request to the direct instance -> (json body, http status), or
-    (None, None) if it failed or didn't answer with JSON."""
-    import requests
-    try:
-        r = requests.request(method, relay, timeout=15, **kw)
-        return r.json(), r.status_code
-    except (requests.RequestException, ValueError) as e:
-        current_app.logger.warning("DE relay %s %s failed: %s", method, relay, e)
-        return None, None
-
-
-def _submitProxy(relay, key, feSpec):
-    """Forward a submit. Returns (body, http status) so a refusal from the
-    direct side (e.g. 429 queue full) reaches the browser unchanged."""
-    headers = {"Content-Type": "application/json"}
-    if key:
-        headers["X-DE-Key"] = key
-        # who really asked; the direct side only sees this instance's address
-        headers["X-DE-Requester"] = json.dumps(_localRequester())
-    body, code = _proxyCall("POST", relay, json=feSpec, headers=headers)
-    if body is None:
-        return {"status": "failed", "error": _UNREACHABLE}, 503
-    return body, code
-
-
-def _statusProxy(relay, key, jobId):
-    headers = {"X-DE-Key": key} if key else {}
-    body, code = _proxyCall("GET", relay, params={"jobId": jobId}, headers=headers)
-    if body is None:
-        return {"jobId": jobId, "status": "unavailable",
-                "stage": "waiting for the server"}, 503
-    return body, code
-
-
-# ---- cancel ---------------------------------------------------------------
-
-def _cancelDirect(queue, jobId):
-    if not jobId or "/" in jobId or ".." in jobId:
-        return {"status": "failed", "error": "bad jobId"}
-    d = _jobDir(queue, jobId)
-    if not os.path.isdir(d):
+def _cancel(jobId):
+    job = _job(jobId)
+    if job is None:
         return {"status": "failed", "error": "unknown jobId"}
-    # drop a marker the worker polls for: it kills a running job or skips one that
-    # hasn't started yet (see deWorker.runJob).
-    try:
-        open(os.path.join(d, "cancel.flag"), "w").close()
-    except OSError as e:
-        return {"status": "failed", "error": "could not request cancel: %s" % e}
-    return {"jobId": jobId, "status": "canceling"}
+    now = datetime.utcnow()
+    # a queued job is canceled here; the conditional update loses cleanly if the
+    # worker took it in the meantime, and then the worker stops it instead
+    n = db.session.query(DeJob).filter_by(id=job.id, state="queued").update(
+        {"state": "canceled", "error": "canceled before it started", "finished_at": now},
+        synchronize_session=False)
+    if not n:
+        db.session.query(DeJob).filter_by(id=job.id, state="running").update(
+            {"cancel_requested": True}, synchronize_session=False)
+    db.session.commit()
+    return {"jobId": job.job_id, "status": "canceling"}
 
-
-def _cancelProxy(relay, key, jobId):
-    headers = {"X-DE-Key": key} if key else {}
-    body, code = _proxyCall("DELETE", relay, params={"jobId": jobId}, headers=headers)
-    if body is None:
-        return {"status": "failed", "error": _UNREACHABLE}, 503
-    return body, code
-
-
-# ---- routes ---------------------------------------------------------------
 
 @bp.route("", methods=["GET", "POST", "DELETE"], strict_slashes=False)
 def de():
-    relay = _cfg("DE_RELAY_URL")
-    queue = _cfg("DE_QUEUE_DIR")
-    key = _cfg("DE_RELAY_KEY")
-
-    if queue and not relay and _cfg("DE_REQUIRE_RELAY_KEY", "") in ("1", "true", "yes") \
-            and not _relayKeyOk():
-        return jsonify({"status": "failed", "error": "forbidden"}), 403
-
     if request.method == "POST":
         feSpec = request.get_json(force=True, silent=True) or {}
         why = _checkSpec(feSpec)
         if why:
             return jsonify({"status": "failed", "error": why}), 400
         try:
-            if relay:
-                body, code = _submitProxy(relay, key, feSpec)
-                return jsonify(body), code
-            if queue:
-                meta = _requesterMeta()
-                busy = _queueBusy(queue, _requesterKey(meta))
-                if busy:
-                    return jsonify({"status": "failed", "error": busy}), 429
-                return jsonify(_submitDirect(queue, feSpec, meta))
-        except KeyError as e:
-            return jsonify({"status": "failed", "error": "missing field %s" % e}), 400
-        return jsonify({"status": "failed", "error": "DE backend not configured"}), 503
-
-    if request.method == "DELETE":     # cancel a running/queued job
-        jobId = request.args.get("jobId")
-        if relay:
-            body, code = _cancelProxy(relay, key, jobId)
-            return jsonify(body), code
-        if queue:
-            return jsonify(_cancelDirect(queue, jobId))
-        return jsonify({"status": "failed", "error": "DE backend not configured"}), 503
-
-    jobId = request.args.get("jobId")
-    if relay:
-        body, code = _statusProxy(relay, key, jobId)
+            body, code = _submit(feSpec)
+        except (KeyError, TypeError, AttributeError) as e:
+            return jsonify({"status": "failed", "error": "bad request (%s)" % e}), 400
         return jsonify(body), code
-    if queue:
-        return jsonify(_statusDirect(queue, jobId))
-    return jsonify({"status": "failed", "error": "DE backend not configured"}), 503
-
-
-# ---- standalone dev server (direct mode) for testing ----------------------
-
-if __name__ == "__main__":
-    from flask import Flask
-    app = Flask(__name__)
-    app.config["DE_QUEUE_DIR"] = os.environ.get("DE_QUEUE_DIR", "/tmp/deJobs")
-    os.makedirs(app.config["DE_QUEUE_DIR"], exist_ok=True)
-    app.register_blueprint(bp, url_prefix="/api/de")
-    app.run(host="127.0.0.1", port=int(os.environ.get("DE_DEV_PORT", "8899")))
+    if request.method == "DELETE":
+        return jsonify(_cancel(request.args.get("jobId")))
+    return jsonify(_status(request.args.get("jobId")))

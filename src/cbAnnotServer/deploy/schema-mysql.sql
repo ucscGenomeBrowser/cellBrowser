@@ -1,4 +1,5 @@
--- cbAnnotServer tables for hgcentral (MySQL/MariaDB), RM #38664.
+-- cbAnnotServer tables for hgcentral (MySQL/MariaDB), RM #38664: accounts,
+-- saved annotations and comparisons, and the DE job queue.
 --
 -- The service does not create tables on MySQL, so create these by hand once:
 --     hgsql hgcentraltest < schema-mysql.sql
@@ -96,4 +97,37 @@ CREATE TABLE IF NOT EXISTS `cbSharedDeAnalyses` (
     PRIMARY KEY (id),
     UNIQUE (token),
     FOREIGN KEY (de_analysis_id) REFERENCES `cbDeAnalyses` (id) ON DELETE CASCADE
+) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_bin;
+
+-- The DE job queue. The web service adds a row per comparison and reads it back
+-- for status; the DE worker (de/deWorker.py) takes queued rows in order and
+-- writes progress and the gzipped result JSON into them. Finished rows are
+-- deleted after DE_RETENTION_DAYS (7).
+CREATE TABLE IF NOT EXISTS `cbDeJobs` (
+    id               INTEGER NOT NULL AUTO_INCREMENT,
+    job_id           VARCHAR(32) NOT NULL,
+    state            VARCHAR(16) NOT NULL,
+    requester        VARCHAR(255) NOT NULL,
+    remote           VARCHAR(100),
+    dataset          VARCHAR(255) NOT NULL,
+    spec             MEDIUMTEXT NOT NULL,
+    cancel_requested BOOL NOT NULL,
+    stage            VARCHAR(255),
+    step             INTEGER,
+    n_steps          INTEGER,
+    progress         FLOAT,
+    error            TEXT,
+    result           MEDIUMBLOB,
+    n_pop1           INTEGER,
+    n_pop2           INTEGER,
+    n_genes          INTEGER,
+    elapsed          FLOAT,
+    worker           VARCHAR(100),
+    created_at       DATETIME NOT NULL,
+    started_at       DATETIME,
+    finished_at      DATETIME,
+    PRIMARY KEY (id),
+    UNIQUE (job_id),
+    INDEX idx_dejob_state (state, id),
+    INDEX idx_dejob_requester (requester, state)
 ) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_bin;

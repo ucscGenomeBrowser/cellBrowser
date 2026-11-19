@@ -144,3 +144,47 @@ class SharedDeAnalysis(db.Model):
     token          = db.Column(db.String(64), unique=True, nullable=False)
     label          = db.Column(db.String(255))
     created_at     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+# DE results are gzipped JSON. A result for ~20,000 genes is about 6 MB as
+# JSON and well under 2 MB compressed, which keeps it far below MySQL's 16 MB
+# packet limit. MEDIUMBLOB holds 16 MB; BLOB would stop at 64 KB.
+LongBlob = db.LargeBinary().with_variant(mysql.MEDIUMBLOB(), "mysql", "mariadb")
+
+
+class DeJob(db.Model):
+    """The DE job queue. The web service (any web node) adds a row and reads it
+    back for status; the worker (deWorker.py, one machine) takes queued rows in
+    order, runs them, and writes progress and the result into the row. Nothing
+    else connects the two, so they can be on different machines as long as both
+    reach the database. deWorker.py uses this table through plain SQL (it does
+    not import Flask); keep the two in step."""
+    __tablename__ = "cbDeJobs"
+    __table_args__ = (
+        db.Index("idx_dejob_state", "state", "id"),
+        db.Index("idx_dejob_requester", "requester", "state"),
+        _MYSQL,
+    )
+
+    id               = db.Column(db.Integer, primary_key=True)
+    job_id           = db.Column(db.String(32), unique=True, nullable=False)   # what the browser polls with
+    state            = db.Column(db.String(16), nullable=False, default="queued")  # queued running done failed canceled
+    requester        = db.Column(db.String(255), nullable=False)  # account email, else IP; the per-person limit
+    remote           = db.Column(db.String(100))                  # client IP
+    dataset          = db.Column(db.String(255), nullable=False)
+    spec             = db.Column(LongText, nullable=False)        # worker spec JSON; may list cell ids
+    cancel_requested = db.Column(db.Boolean, nullable=False, default=False)
+    stage            = db.Column(db.String(255))
+    step             = db.Column(db.Integer)
+    n_steps          = db.Column(db.Integer)
+    progress         = db.Column(db.Float)
+    error            = db.Column(db.Text)
+    result           = db.Column(LongBlob)                        # gzipped result JSON
+    n_pop1           = db.Column(db.Integer)
+    n_pop2           = db.Column(db.Integer)
+    n_genes          = db.Column(db.Integer)
+    elapsed          = db.Column(db.Float)                        # seconds the computation took
+    worker           = db.Column(db.String(100))                  # host:pid that ran it
+    created_at       = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    started_at       = db.Column(db.DateTime)
+    finished_at      = db.Column(db.DateTime)
