@@ -1631,6 +1631,9 @@ var cellbrowser = function() {
 
     // facets of the top-level datasets, added to the search.json documents
     const cSearchFacets = ['assays', 'domains', 'projects', 'life_stages'];
+    // facets that the search can be limited to, with the label of the button, see showFacetChips()
+    const cSearchFacetLabels = [['organisms', 'Species'], ['body_parts', 'Organ'], ['diseases', 'Disease'],
+        ['assays', 'Assay'], ['projects', 'Project'], ['life_stages', 'Life stage'], ['domains', 'Domain']];
 
     function loadSearchIndex(datasetList, onDone) {
         /* fetch search.json once and build a MiniSearch index; cache for the session.
@@ -2141,17 +2144,125 @@ var cellbrowser = function() {
             applySearchResults(nameSet);
         }
 
+        function searchTokens(text) {
+            /* lowercase words of text, split like the MiniSearch tokenizer. Text in () is dropped,
+             * so "Mouse (M. musculus)" is just "mouse" */
+            return text.toLowerCase().replace(/\([^)]*\)/g, " ").split(/[\s\p{P}]+/u).filter(Boolean);
+        }
+
+        function phrasePos(tokens, phrase) {
+            /* index of the word sequence phrase in tokens, or -1 */
+            for (var i = 0; i + phrase.length <= tokens.length; i++) {
+                var found = true;
+                for (var j = 0; j < phrase.length; j++)
+                    if (tokens[i+j] !== phrase[j]) { found = false; break; }
+                if (found) return i;
+            }
+            return -1;
+        }
+
+        function getFacetValues() {
+            /* all facet values of the datasets in this list: [{field, label, value, tokens, key}] */
+            if (facetValues) return facetValues;
+            facetValues = [];
+            var seen = {};
+            for (var [field, label] of cSearchFacetLabels) {
+                for (var ds of datasetList) {
+                    for (var val of (ds[field] || [])) {
+                        var tokens = searchTokens(String(val));
+                        var key = field + "|" + tokens.join(" ");
+                        if (tokens.length === 0 || seen[key]) continue;
+                        seen[key] = true;
+                        var shown = String(val).replace(/\([^)]*\)/g, "").trim();
+                        facetValues.push({field: field, label: label, value: shown, tokens: tokens, key: key});
+                    }
+                }
+            }
+            return facetValues;
+        }
+
+        function findFacetMatches(tokens) {
+            /* facet values whose words appear in tokens, in the same order. A value inside a longer match
+             * of the same field is skipped: "whole brain" gives Organ: whole brain, not also Organ: brain */
+            var matches = getFacetValues().filter(function(fv) { return phrasePos(tokens, fv.tokens) !== -1; });
+            return matches.filter(function(fv) {
+                return !matches.some(function(other) {
+                    return other !== fv && other.field === fv.field && other.tokens.length > fv.tokens.length &&
+                        phrasePos(other.tokens, fv.tokens) !== -1;
+                });
+            });
+        }
+
+        function showFacetChips(q, matches) {
+            /* the "Limit to:" buttons under the search box, one per facet value found in the query.
+             * A pressed button searches its words only in that facet, a second click undoes it. */
+            var $div = $("#tpSearchFacets");
+            if (matches.length === 0) {
+                $div.empty().hide();
+                return;
+            }
+            $div.empty().append("<span style='margin-right:4px'>Limit to:</span>");
+            matches.forEach(function(fv) {
+                var isOn = facetLocks[fv.key] !== undefined;
+                var $chip = $("<button type='button' class='tpFacetChip'></button>")
+                    .text(fv.label + ": " + fv.value + (isOn ? " \u00d7" : ""))
+                    .attr("title", isOn ?
+                        "Click to search \"" + fv.tokens.join(" ") + "\" in all text again" :
+                        "Only find datasets where " + fv.label + " is \"" + fv.value + "\", not those that only mention it")
+                    .css({"border": "1px solid " + (isOn ? "#337ab7" : "#bbb"), "border-radius": "10px",
+                          "background": isOn ? "#337ab7" : "#fff", "color": isOn ? "#fff" : "#333",
+                          "padding": "0 8px", "margin": "0 4px 2px 0", "font-size": "12px"});
+                $chip.on("click", function() {
+                    if (isOn)
+                        delete facetLocks[fv.key];
+                    else
+                        facetLocks[fv.key] = fv;
+                    $("#tpDatasetSearch").focus(); // so typing goes on in the search box
+                    runSearch(q);
+                });
+                $div.append($chip);
+            });
+            $div.show();
+        }
+
         function runSearch(q) {
             loadSearchIndex(datasetList, function(ms) {
                 if (ms) {
+                    var tokens = searchTokens(q);
+                    var facetMatches = findFacetMatches(tokens);
+                    // forget pressed facet buttons whose words are no longer in the query
+                    for (var key of Object.keys(facetLocks))
+                        if (!facetMatches.some(function(fv) { return fv.key === key; }))
+                            delete facetLocks[key];
+                    showFacetChips(q, facetMatches);
+
+                    // the words of a pressed facet button are searched only in that facet field,
+                    // without typos or prefixes. The other words are searched as usual.
+                    var subQueries = [];
+                    var freeTokens = tokens.slice();
+                    for (var fv of Object.values(facetLocks)) {
+                        var pos = phrasePos(freeTokens, fv.tokens);
+                        if (pos !== -1)
+                            freeTokens.splice(pos, fv.tokens.length);
+                        subQueries.push({queries: fv.tokens, fields: [fv.field], combineWith: 'AND',
+                                         prefix: false, fuzzy: false});
+                    }
+
                     // all words must match (the index default). If nothing does, accept any word.
                     // MiniSearch has no "limit" option, all results come back, sorted by score.
                     var note = "";
-                    var results = ms.search(q);
-                    if (results.length === 0) {
-                        results = ms.search(q, { combineWith: 'OR' });
-                        if (results.length !== 0)
-                            note = "none has all the words, showing those with any";
+                    var results;
+                    if (subQueries.length === 0) {
+                        results = ms.search(q);
+                        if (results.length === 0) {
+                            results = ms.search(q, { combineWith: 'OR' });
+                            if (results.length !== 0)
+                                note = "none has all the words, showing those with any";
+                        }
+                    } else {
+                        if (freeTokens.length !== 0)
+                            subQueries.push(freeTokens.join(" "));
+                        results = ms.search({combineWith: 'AND', queries: subQueries});
                     }
                     var nameSet = {};
                     var childMap = {};
@@ -2193,6 +2304,8 @@ var cellbrowser = function() {
         // -- end inline functions
 
         gRunDatasetSearch = runSearch;
+        var facetValues = null; // filled by getFacetValues()
+        var facetLocks = {};    // pressed "Limit to:" buttons: facet value key -> facet value
 
         gOpenDataset = openDsInfo;
         var activeIdx = 0;
@@ -2245,7 +2358,8 @@ var cellbrowser = function() {
                 "<input id='tpDatasetSearch' type='search' placeholder='Search datasets...' " +
                 "style='width:250px; padding:4px 8px; font-size:13px; border:1px solid #ccc; border-radius:3px'>" +
                 "<span id='tpDatasetCount' style='white-space:nowrap; color:#666; font-size:12px'></span>" +
-                "</div>");
+                "</div>" +
+                "<div id='tpSearchFacets' style='display:none; margin-bottom:6px; font-size:12px; color:#666'></div>");
 
             if (doFilters) {
                 noteLines.push("<details id='tpFilterDetails' style='margin-bottom:6px'>" +
@@ -2424,6 +2538,8 @@ var cellbrowser = function() {
             if (q === "") {
                 clearSearchDom();
                 setListOrder(null);
+                facetLocks = {};
+                $("#tpSearchFacets").empty().hide();
                 filterDatasetsDom();
                 return;
             }
