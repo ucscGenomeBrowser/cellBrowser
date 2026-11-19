@@ -23,6 +23,9 @@
 #   sudo -u otto make install-annot              copy the committed src/cbAnnotServer
 #                                                to ANNOT, record it in INSTALLED.txt,
 #                                                then restart it with the commands it prints
+#   sudo -u otto make setup-annot install-annot CELLSSERVER=/usr/local/cellsServer
+#                                                the copy cellsPush sends to the RR
+#                                                (cells.ucsc.edu); nothing runs from it here
 #   make validate-annot                          report any difference from this checkout
 #
 # Unlike SCRIPTS, nothing there is group-writable: the server keeps passwords
@@ -87,9 +90,14 @@ install-annot: check-otto check-annot-prefix check-clean-annot
 	    echo "installed `date '+%Y-%m-%d %H:%M'` by $${SUDO_USER:-$$USER}"; \
 	    md5sum $$files ) > INSTALLED.txt
 	@head -2 ${ANNOT}/INSTALLED.txt
+ifeq (${CELLSSERVER},/cluster/home/otto/cellsServer)
 	@echo "Now restart both, as otto on hgwdev:"
 	@echo "  ${ANNOT}/deploy/restart-gunicorn.sh hard"
 	@echo "  ${ANNOT}/de/deploy/restart-worker.sh"
+else
+	@echo "Nothing runs from ${CELLSSERVER} on this machine, so there is nothing to restart."
+	@echo "If this is the copy for cells.ucsc.edu, cellsPush sends it to the RR nodes."
+endif
 
 validate-annot: check-annot-prefix
 	@tmp=`mktemp -d` && ${GIT} archive HEAD:${ANNOTSRC} | tar -x -C $$tmp && \
