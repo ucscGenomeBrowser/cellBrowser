@@ -39,7 +39,11 @@ under the **otto** service account, driven by a filesystem job queue on `/hive`
 ## Where the expression comes from
 
 `runDeJob.py` reads the **cbBuild web output** — the same files the frontend
-serves, so DE runs on any dataset a user can open, with no source `.h5ad`. If
+serves, so DE runs on any dataset a user can open, with no source `.h5ad`. Where
+the worker runs on a web host with the datasets in its docroot (hgw0, hgwdev),
+set `DE_READ_LOCAL=1` and every job reads `DE_CBBUILD_DIR/<dataset>/` directly,
+ignoring the job's `dataUrl`: no downloads, no cache. Without it, a job's
+`dataUrl` is fetched over HTTP into a cache (hgcompute-08, which has no docroot). If
 `DE_CBBUILD_DIR/<dataset>/` has `dataset.json` + `exprMatrix.bin` +
 `exprMatrix.json` + `meta.tsv`, `cbExprReader` decodes it; a dataset missing those
 is a clear job error. `DE_CBBUILD_DIR` defaults to `/usr/local/apache/htdocs-cells`.

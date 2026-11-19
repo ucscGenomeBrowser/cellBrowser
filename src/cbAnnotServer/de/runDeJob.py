@@ -70,6 +70,12 @@ MAX_CELLS_PER_GROUP = int(os.environ.get("DE_MAX_CELLS_PER_GROUP", "50000"))
 DE_CACHE_DIR = os.environ.get(
     "DE_CACHE_DIR", "/hive/data/inside/cells/cbAnnotServer/exprCache")
 DE_CACHE_MAX_GB = float(os.environ.get("DE_CACHE_MAX_GB", "100"))
+# DE_READ_LOCAL=1: the worker runs on a web host whose docroot (DE_CBBUILD_DIR)
+# holds the datasets, e.g. hgw0 or hgwdev. Every job then reads the dataset
+# from there and the job's dataUrl is ignored, so nothing is downloaded and no
+# cache is needed. A dataset that isn't in the docroot is an error, not a
+# download. Unset: jobs with a dataUrl are fetched over HTTP (hgcompute-08).
+DE_READ_LOCAL = os.environ.get("DE_READ_LOCAL", "").strip().lower() in ("1", "true", "yes", "on")
 
 METHODS = {
     "wilcoxon": wilcoxon_np.wilcoxon_np,   # numpy/scipy kernel (no scanpy/anndata)
@@ -83,6 +89,10 @@ def datasetCbBuildDir(dataset, cbbuild_dir):
     that same path under the doc root."""
     if not cbbuild_dir:
         return None
+    # Check the name, not the resolved path: some datasets in the docroot are
+    # symlinks to directories elsewhere. The submit API already refuses these.
+    if os.path.isabs(dataset) or ".." in dataset.split("/"):
+        return None
     d = os.path.join(cbbuild_dir, dataset)
     need = ["dataset.json", "exprMatrix.bin", "exprMatrix.json", "meta.tsv"]
     if all(os.path.isfile(os.path.join(d, f)) for f in need):
@@ -93,11 +103,17 @@ def datasetCbBuildDir(dataset, cbbuild_dir):
 def resolveDatasetDir(spec, cbbuild_dir, status=None):
     """Return a local directory holding the dataset's four cbBuild files.
 
-    Preferred path: the job carries spec['dataUrl'] (the absolute dataset URL the
-    browser loaded from), so we fetch the served files over HTTP into the /hive
-    cache and return that dir -- this is what lets the worker run on a compute
-    host with no view of the web docroot. Fallback: no dataUrl, so read a local
-    docroot (DE_CBBUILD_DIR), for a worker co-located with the web host."""
+    With DE_READ_LOCAL set, always the local docroot (DE_CBBUILD_DIR). Otherwise,
+    if the job carries spec['dataUrl'] (the absolute dataset URL the browser
+    loaded from), fetch the served files over HTTP into the cache and return
+    that dir -- this is what lets the worker run on a compute host with no view
+    of the web docroot. Fallback: no dataUrl, so read the local docroot."""
+    if DE_READ_LOCAL:
+        cbdir = datasetCbBuildDir(spec["dataset"], cbbuild_dir)
+        if not cbdir:
+            # the message reaches the browser, so it names no server paths
+            raise ValueError("dataset %r is not on this server" % spec["dataset"])
+        return cbdir
     dataUrl = spec.get("dataUrl")
     if dataUrl:
         import deCache
