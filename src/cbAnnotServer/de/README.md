@@ -1,8 +1,11 @@
 # Cell Browser differential-expression worker (#24912)
 
-The compute half of on-the-fly differential expression. Runs on **hgcompute-08**
-under the **otto** service account, driven by a filesystem job queue on `/hive`
-(hgwdev and hgcompute-08 share `/hive`; no parasol, no scheduler).
+The compute half of on-the-fly differential expression, driven by a filesystem
+job queue (no parasol, no scheduler). For cells-test it runs on **hgwdev** under
+the **otto** service account, next to the API that fills the queue, and reads the
+datasets from the local docroot (`DE_READ_LOCAL=1`). On the RR it runs the same
+way on hgw0. It can also run on a host with no docroot (hgcompute-08 did until
+2026-11) if that host shares the queue directory and fetches over HTTP.
 
 ## Pieces
 

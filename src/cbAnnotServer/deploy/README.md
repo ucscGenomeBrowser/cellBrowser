@@ -221,7 +221,7 @@ the deploy user's crontab:
 ```
 Point it at an installed copy that only the service's maintainers can write,
 never at a developer's checkout: anyone who can edit the code runs it as the
-deploy user. On hgwdev and hgcompute-08, otto runs the copy that
+deploy user. On hgwdev, otto runs the copy that
 `make install-annot` puts in /cluster/home/otto/cellsServer/cbAnnotServer
 (see ucsc/README.md).
 

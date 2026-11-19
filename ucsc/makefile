@@ -15,8 +15,7 @@
 # The login/annotation/DE server (src/cbAnnotServer) is installed by separate
 # targets, run as otto, into CELLSSERVER, a directory only otto can write
 # (RM #38664). Everything the server and the DE worker use lives there: code,
-# both pythons, settings, database, job queue and logs. Only the DE download
-# cache stays on /hive.
+# both pythons, settings, database, job queue and logs.
 #
 #   git fetch                                    first, as yourself; otto can't
 #   sudo -u otto make setup-annot                once, and after changing either
@@ -39,7 +38,7 @@ SYSPYTHON = /usr/bin/python3
 CELLSSERVER = /cluster/home/otto/cellsServer
 ANNOT = ${CELLSSERVER}/cbAnnotServer
 ANNOTSRC = src/cbAnnotServer
-# the DE worker's python; hgwdev and hgcompute-08 both have it
+# the DE worker's python (RHEL 9 python3.13 package; hgw0 needs it too)
 DEPYTHON = /usr/bin/python3.13
 # otto runs git in someone else's checkout; -c (this command only) stops git
 # refusing it as "dubious ownership". GIT_OPTIONAL_LOCKS=0 keeps it from trying
@@ -88,9 +87,9 @@ install-annot: check-otto check-annot-prefix check-clean-annot
 	    echo "installed `date '+%Y-%m-%d %H:%M'` by $${SUDO_USER:-$$USER}"; \
 	    md5sum $$files ) > INSTALLED.txt
 	@head -2 ${ANNOT}/INSTALLED.txt
-	@echo "Now restart both, as otto:"
-	@echo "  ${ANNOT}/deploy/restart-gunicorn.sh hard          (on hgwdev)"
-	@echo "  ${ANNOT}/de/deploy/restart-worker.sh              (on hgcompute-08)"
+	@echo "Now restart both, as otto on hgwdev:"
+	@echo "  ${ANNOT}/deploy/restart-gunicorn.sh hard"
+	@echo "  ${ANNOT}/de/deploy/restart-worker.sh"
 
 validate-annot: check-annot-prefix
 	@tmp=`mktemp -d` && ${GIT} archive HEAD:${ANNOTSRC} | tar -x -C $$tmp && \

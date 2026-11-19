@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run one differential-expression job on the worker (hgcompute-08).
+Run one differential-expression job on the worker.
 
 Reads a job spec, reads the dataset's expression from the cbBuild web output
 (exprMatrix.bin + meta.tsv, via cbExprReader), resolves the two populations to

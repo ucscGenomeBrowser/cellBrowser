@@ -4,13 +4,13 @@ Differential-expression worker daemon (Redmine #24912).
 
 Long-running loop that watches the shared job queue on /hive, claims pending
 jobs, and runs the compute kernel (runDeJob.py) once per job. Designed for the
-"no parasol" model: a single server (hgcompute-08) processing jobs locally, run
-under the `otto` service account.
+"no parasol" model: a single server processing jobs locally (hgwdev for
+cells-test, hgw0 on the RR), run under a service account.
 
 Transport is the filesystem: the Cell Browser backend (or the dev-side Flask
 service) writes DE_JOBS_DIR/<jobId>/spec.json; this daemon notices it, runs the
 job, and the kernel writes status.json + result.json to the same directory. No
-network, no scheduler — hgwdev and hgcompute-08 share /hive.
+network, no scheduler: the API and the worker share the queue directory.
 
 Each job runs in its own subprocess so a crash or OOM in one job can't take down
 the daemon, and per-job memory (the AnnData load) is freed when it exits.
