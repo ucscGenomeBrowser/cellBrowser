@@ -3522,6 +3522,140 @@ def parseImageTsv(fname):
 
     return out
 
+# settings in a track hub that point to files. Track settings are relative to the trackDb file,
+# genome settings to genomes.txt, hub settings to hub.txt
+cHubTrackFileKeys = ["bigDataUrl", "bigDataIndex", "linkDataUrl", "summary", "frames",
+    "barChartMatrixUrl", "barChartSampleUrl", "searchTrix", "html"]
+cHubGenomeFileKeys = ["trackDb", "htmlPath", "twoBitPath", "twoBitBptUrl", "groups", "chromSizes",
+    "chromAliasBb", "descriptionUrl"]
+
+def readHubRa(fname):
+    " return the (key, value) pairs of a track hub .ra file, ignoring the stanzas "
+    pairs = []
+    with io.open(fname, encoding="utf8", errors="replace") as ifh:
+        for line in ifh:
+            parts = line.strip().split(None, 1)
+            if len(parts)==2 and not parts[0].startswith("#"):
+                pairs.append((parts[0], parts[1].strip()))
+    return pairs
+
+def hubLocalFiles(hubFname):
+    """ return the local files that a track hub refers to, as a list of absolute paths, including
+    hub.txt itself and the index files of bigDataUrl files. Also return the referenced paths that
+    do not exist. URLs are skipped. """
+    found, missing = [], []
+
+    def addFile(baseDir, path, altExts=[]):
+        " add a file to found or missing. If it does not exist, try the alternative extensions "
+        if "://" in path or path.startswith("/"):
+            return None
+        fname = os.path.normpath(join(baseDir, path))
+        for cand in [fname] + [fname+ext for ext in altExts]:
+            if isfile(cand):
+                if cand not in found:
+                    found.append(cand)
+                return cand
+        missing.append(fname)
+        return None
+
+    def addTrackFiles(key, val, baseDir):
+        if key=="html":
+            addFile(baseDir, val, [".html"])
+        elif key=="searchTrix":
+            fname = addFile(baseDir, val)
+            if fname:
+                addFile(dirname(fname), basename(fname)+"x")
+        elif key=="bigDataUrl":
+            fname = addFile(baseDir, val)
+            if fname: # bam, cram and vcf.gz need an index next to the file
+                for ext in [".bai", ".csi", ".crai", ".tbi"]:
+                    if isfile(fname+ext) and fname+ext not in found:
+                        found.append(fname+ext)
+        else:
+            addFile(baseDir, val)
+
+    def walkTrackDb(fname, baseDir, depth):
+        " includes are relative to the including file, all other paths are relative to the top trackDb file "
+        if depth > 10:
+            errAbort("Track hub include loop in %s" % fname)
+        for key, val in readHubRa(fname):
+            if key=="include":
+                incFname = addFile(dirname(fname), val.split()[0])
+                if incFname:
+                    walkTrackDb(incFname, baseDir, depth+1)
+            elif key in cHubTrackFileKeys:
+                addTrackFiles(key, val, baseDir)
+
+    found.append(os.path.normpath(hubFname))
+    hubDir = dirname(hubFname)
+    hubPairs = readHubRa(hubFname)
+    hubSettings = dict(hubPairs)
+    if hubSettings.get("useOneFile")=="on":
+        for key, val in hubPairs:
+            if key in cHubGenomeFileKeys and key!="trackDb": # the hub.txt is the trackDb, a trackDb line is ignored
+                addFile(hubDir, val)
+        walkTrackDb(hubFname, hubDir, 0)
+    else:
+        if "descriptionUrl" in hubSettings:
+            addFile(hubDir, hubSettings["descriptionUrl"])
+        genomesFname = addFile(hubDir, hubSettings.get("genomesFile", "genomes.txt"))
+        if genomesFname:
+            genomesDir = dirname(genomesFname)
+            for key, val in readHubRa(genomesFname):
+                if key=="trackDb":
+                    tdbFname = addFile(genomesDir, val)
+                    if tdbFname:
+                        walkTrackDb(tdbFname, dirname(tdbFname), 0)
+                elif key in cHubGenomeFileKeys:
+                    addFile(genomesDir, val)
+    return found, missing
+
+def checkCopyHub(inDir, hubUrl, outDir):
+    """ For a relative hubUrl: make sure that the hub exists, and copy hub.txt and all files it
+    refers to into the output directory if they are missing or older there. Aborts if the hub file
+    is neither in the input nor in the output directory. Absolute URLs are not checked, and neither are
+    values without a slash: these are track names on genome.ucsc.edu, see makeHubUrl() in cellBrowser.js """
+    if not hubUrl or "/" not in hubUrl or "://" in hubUrl or hubUrl.startswith("/"):
+        return
+    inHub = os.path.normpath(join(inDir, hubUrl))
+    outHub = os.path.normpath(join(outDir, hubUrl))
+    if not isfile(inHub):
+        if isfile(outHub):
+            logging.warning("hubUrl=%s: %s does not exist, but the output directory has %s. "
+                "Not checking the track hub files." % (hubUrl, inHub, outHub))
+            return
+        errAbort("hubUrl=%s in cellbrowser.conf: the track hub file %s does not exist, and it is also not in "
+            "the output directory as %s. Fix the path, it is relative to the directory of cellbrowser.conf." % \
+            (hubUrl, inHub, outHub))
+
+    inFnames, missing = hubLocalFiles(inHub)
+    inHubDir, outHubDir = dirname(inHub), dirname(outHub)
+
+    for inFname in missing:
+        outFname = os.path.normpath(join(outHubDir, relpath(inFname, inHubDir)))
+        if not isfile(outFname):
+            logging.warning("Track hub %s refers to %s, but this file does not exist, also not as %s" % \
+                (inHub, inFname, outFname))
+
+    copyCount = 0
+    for inFname in inFnames:
+        outFname = os.path.normpath(join(outHubDir, relpath(inFname, inHubDir)))
+        if isfile(outFname):
+            if os.path.samefile(inFname, outFname): # e.g. the output hub directory is a symlink to the input
+                continue
+            if getmtime(outFname) >= getmtime(inFname):
+                if getsize(outFname)!=getsize(inFname):
+                    logging.warning("Track hub file %s is newer than %s but has a different size, not overwriting it" % \
+                        (outFname, inFname))
+                continue
+        makeDir(dirname(outFname))
+        logging.info("Track hub: copying %s to %s" % (inFname, outFname))
+        tmpFname = outFname+".cbBuildTmp"
+        shutil.copy2(inFname, tmpFname) # keeps the mtime, so the file is not copied again next time
+        renameFile(tmpFname, outFname)
+        copyCount += 1
+    logging.info("Track hub %s: %d files referenced, %d copied to %s" % (hubUrl, len(inFnames), copyCount, outHubDir))
+
 def writeDatasetDesc(inDir, outConf, datasetDir, coordFiles=None, matrixFname=None):
     " write a json file that describes the dataset abstract/methods/downloads "
     confFname = join(inDir, "datasetDesc.conf")
@@ -5101,6 +5235,8 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
     the matrix won't be converted again, which saves a lot of time.
     """
     checkConfig(inConf, isTopLevel)
+    # before anything is written, so a wrong hubUrl does not leave a half-converted dataset behind
+    checkCopyHub(inDir, inConf.get("hubUrl"), datasetDir)
 
     inMatrixFname = getExprMatrixFname(inConf)
 
@@ -6235,6 +6371,7 @@ def rebuildCollections(dataRoot, webRoot, collList):
 
         collInfo["md5"] = md5ForList([json.dumps(collInfo)])[:MD5LEN]
 
+        checkCopyHub(dirname(collFname), collInfo.get("hubUrl"), webCollDir)
         writeDatasetDesc(dirname(collFname), collInfo, webCollDir, coordFiles=None)
 
         writeJson(collInfo, collOutFname)

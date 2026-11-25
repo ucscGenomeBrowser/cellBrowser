@@ -498,6 +498,16 @@ Genome Browser Integration
    Browser as a full URL on the server that serves the dataset. Use this instead of a
    hand-written Genome Browser link in ``other_url`` of ``desc.conf``.
 
+   For a relative path, ``cbBuild`` checks the hub: it stops with an error if the hub.txt
+   exists neither in the input nor in the output directory. It reads the hub.txt,
+   genomes.txt, trackDb files and includes, and copies the hub.txt and every file they
+   refer to (bigDataUrl and its .bai/.tbi index, html, description pages, ...) into the
+   output directory, at the same relative path, when the file is missing there or older
+   than the input file. Other files in the hub directory are not copied. A hub directory
+   in the output that is a symlink to the input directory is left alone. A value without
+   a slash is the name of a native track on genome.ucsc.edu (e.g. ``tabulaMuris``) and is
+   not checked.
+
    ::
 
       hubUrl = "hub/hub.txt"
