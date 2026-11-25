@@ -1043,11 +1043,6 @@ var cellbrowser = function() {
                 url = url.slice(0,spcPos);
             }
 
-            if (key==="hubUrl") {
-                url = makeHubUrl(null);
-                urlLabel = "Connect Track Hub";
-            }
-
             if (!url.startsWith("http"))
                 url = descUrls[key]+url;
 
@@ -1372,7 +1367,7 @@ var cellbrowser = function() {
         htmlAddLink(htmls, desc, "biorxiv_url");
         htmlAddLink(htmls, desc, "paper_url");
         htmlAddLink(htmls, desc, "other_url");
-        htmlAddLink(htmls, db.conf, "hubUrl");
+        htmlAddHubLinks(htmls, desc, datasetInfo.name);
         htmlAddLink(htmls, desc, "geo_series");
         htmlAddLink(htmls, desc, "pmid");
         htmlAddLink(htmls, desc, "dbgap");
@@ -9281,9 +9276,12 @@ var cellbrowser = function() {
         return url;
     }
 
-    function makeHubUrl(geneSym) {
-        /* return URL of the hub.txt file, possibly jumping to a given gene  */
-            var hubUrl = db.conf.hubUrl;
+    function makeHubUrl(geneSym, hubConf) {
+        /* return URL of the hub.txt file, possibly jumping to a given gene. hubConf is an object with
+         * hubUrl, ucscDb and name (the dataset name), the default is the currently loaded dataset. */
+            if (!hubConf)
+                hubConf = loadedHubConf();
+            var hubUrl = hubConf.hubUrl;
 
             if (hubUrl===undefined)
                 return null;
@@ -9292,7 +9290,7 @@ var cellbrowser = function() {
             if (hubUrl && hubUrl.indexOf("genome.ucsc.edu/s/")!==-1)
                 return hubUrl;
 
-            var ucscDb = db.conf.ucscDb;
+            var ucscDb = hubConf.ucscDb;
             if (ucscDb===undefined) {
                 alert("Internal error: ucscDb is not defined in cellbrowser.conf. Example values: hg19, hg38, mm10, etc. You have to set this variable to make track hubs work.");
                 return "";
@@ -9311,7 +9309,7 @@ var cellbrowser = function() {
                     // qualified, and it has to point at the data tree (which
                     // cb.conf dataRoot may put on another host) rather than at
                     // whatever directory served this page.
-                    hubUrl = cbUtil.absDataUrl([db.name, hubUrl]);
+                    hubUrl = cbUtil.absDataUrl([hubConf.name, hubUrl]);
                 }
                 // URL is an absolute link to a hub.txt URL
                 fullUrl = "https://genome.ucsc.edu/cgi-bin/hgTracks?hubUrl="+hubUrl+"&genome="+ucscDb;
@@ -9343,6 +9341,287 @@ var cellbrowser = function() {
 
         var fullUrl = makeHubUrl(actSym);
         db.gbWin = window.open(fullUrl, 'gbTab');
+        return false;
+    }
+
+    // ---- track hub links: UCSC Genome Browser and IGV Desktop ----
+
+    function loadedHubConf() {
+        /* return hubUrl, ucscDb and dataset name of the currently loaded dataset */
+        return {hubUrl:db.conf.hubUrl, ucscDb:db.conf.ucscDb, name:db.name};
+    }
+
+    function hubTxtUrl(hubConf) {
+        /* return the absolute URL of the hub.txt file, or null if hubUrl is not a hub.txt URL
+         * but a track name or a UCSC session link */
+        var hubUrl = hubConf.hubUrl;
+        if (!hubUrl || hubUrl.indexOf("/")===-1 || hubUrl.indexOf("genome.ucsc.edu/s/")!==-1)
+            return null;
+        if (hubUrl.startsWith("http"))
+            return hubUrl;
+        return cbUtil.absDataUrl([hubConf.name, hubUrl]);
+    }
+
+    function igvLinkAttrs(hubConf) {
+        /* return the data- attributes that the IGV click handler needs */
+        return "data-hub='"+encodeURIComponent(hubTxtUrl(hubConf))+"' data-db='"+encodeURIComponent(hubConf.ucscDb)+"'";
+    }
+
+    function htmlAddHubLinks(htmls, desc, dsName) {
+        /* add links to the dataset's track hub on the UCSC Genome Browser and IGV Desktop to the dataset
+         * info pane. hubUrl and ucscDb come from the dataset's desc.json, copied there by cbBuild from
+         * cellbrowser.conf */
+        var hubConf = {hubUrl:desc.hubUrl, ucscDb:desc.ucscDb, name:dsName};
+        if (!hubConf.hubUrl && db && db.name===dsName && db.conf.hubUrl) // desc.json from an older cbBuild
+            hubConf = loadedHubConf();
+        if (!hubConf.hubUrl || !hubConf.ucscDb)
+            return;
+
+        htmls.push("<b>Genome browser tracks: </b>");
+        htmls.push("<a target=_blank href='"+makeHubUrl(null, hubConf)+"'>Open on UCSC Genome Browser</a>");
+        if (hubTxtUrl(hubConf)!==null) {
+            htmls.push(" | <a href='#' class='tpIgvLink' "+igvLinkAttrs(hubConf)+
+                " title='Load the bigWig/bigBed files of this dataset into IGV Desktop on your computer'>Open in IGV</a>");
+            htmls.push(" <span class='tpIgvNote' style='color:#666'>(IGV Desktop must be running)</span>");
+        }
+        htmls.push("<br>");
+    }
+
+    // track types in a trackDb that IGV Desktop can load from a URL
+    var cIgvTypes = ["bigWig", "bigBed", "bigNarrowPeak", "bigGenePred", "bigPsl", "bigBarChart", "bigLolly",
+        "bam", "vcfTabix"];
+
+    function parseRaStanzas(text) {
+        /* parse a UCSC .ra file (hub.txt, genomes.txt, trackDb.txt) into a list of objects, one per stanza */
+        var stanzas = [];
+        var cur = null;
+        var lines = text.split(/\r?\n/);
+        for (var i=0; i<lines.length; i++) {
+            var line = lines[i].trim();
+            // a line can be continued with a backslash at the end
+            while (line.endsWith("\\") && i+1<lines.length) {
+                line = line.slice(0,-1) + " " + lines[++i].trim();
+            }
+            if (line==="") {
+                cur = null;
+                continue;
+            }
+            if (line.startsWith("#"))
+                continue;
+            var spcPos = line.search(/\s/);
+            var key = (spcPos===-1 ? line : line.slice(0, spcPos));
+            var val = (spcPos===-1 ? "" : line.slice(spcPos).trim());
+            if (cur===null) {
+                cur = {};
+                stanzas.push(cur);
+            }
+            cur[key] = val;
+        }
+        return stanzas;
+    }
+
+    async function fetchText(url) {
+        /* return the text of a URL, throw an Error on HTTP errors */
+        var resp = await fetch(url);
+        if (!resp.ok)
+            throw new Error("Could not load "+url+" (HTTP status "+resp.status+")");
+        return await resp.text();
+    }
+
+    async function trackDbIgvTracks(url, baseUrl, tracks, depth) {
+        /* parse a trackDb file, follow its 'include' lines, append the IGV-loadable tracks to tracks.
+         * The include lines are found in the raw text, they can be anywhere in the file. An include path is
+         * relative to the file with the include line, but like on the UCSC Genome Browser, a bigDataUrl is
+         * always relative to the top trackDb file (or hub.txt), baseUrl. */
+        if (depth > 5)
+            return;
+        var text = await fetchText(url);
+        var includes = text.match(/^\s*include\s+\S+/gm) || [];
+        addIgvTracks(parseRaStanzas(text), baseUrl, tracks);
+        for (var inc of includes)
+            await trackDbIgvTracks(new URL(inc.trim().split(/\s+/)[1], url).href, baseUrl, tracks, depth+1);
+    }
+
+    function addIgvTracks(stanzas, baseUrl, tracks) {
+        /* append {url, name} for all stanzas with a bigDataUrl of a type IGV can load to tracks.
+         * Subtracks that are off by default ('parent x off') are skipped, like on the UCSC Genome Browser */
+        for (var st of stanzas) {
+            if (!st.track || !st.bigDataUrl || !st.type)
+                continue;
+            var type = st.type.split(/\s+/)[0];
+            if (cIgvTypes.indexOf(type)===-1)
+                continue;
+            if (st.parent && st.parent.split(/\s+/)[1]==="off")
+                continue;
+            var name = (st.shortLabel || st.track).replace(/,/g, " ");
+            tracks.push({url:new URL(st.bigDataUrl, baseUrl).href, name:name});
+        }
+    }
+
+    async function hubIgvTracks(hubUrl, ucscDb) {
+        /* return a list of {url, name} of the files in a track hub that IGV can load, for the assembly ucscDb.
+         * Handles single-file hubs ('useOneFile on') and hubs with genomes.txt and trackDb files. */
+        var hubText = await fetchText(hubUrl);
+        var stanzas = parseRaStanzas(hubText);
+        var tracks = [];
+        var hubStanza = stanzas[0] || {};
+
+        if (hubStanza.useOneFile==="on") {
+            // after a 'genome' stanza, all tracks belong to that genome
+            var curGenome = null;
+            var genomeStanzas = [];
+            for (var st of stanzas.slice(1)) {
+                if (st.genome)
+                    curGenome = st.genome;
+                else if (curGenome===ucscDb)
+                    genomeStanzas.push(st);
+            }
+            addIgvTracks(genomeStanzas, hubUrl, tracks);
+            var includes = hubText.match(/^\s*include\s+\S+/gm) || [];
+            for (var inc of includes)
+                await trackDbIgvTracks(new URL(inc.trim().split(/\s+/)[1], hubUrl).href, hubUrl, tracks, 1);
+            return tracks;
+        }
+
+        if (!hubStanza.genomesFile)
+            throw new Error("The hub.txt file "+hubUrl+" has no genomesFile line and is not a useOneFile hub.");
+        var genomesUrl = new URL(hubStanza.genomesFile, hubUrl).href;
+        var genomes = parseRaStanzas(await fetchText(genomesUrl));
+        for (var gSt of genomes) {
+            if (gSt.genome===ucscDb && gSt.trackDb) {
+                var trackDbUrl = new URL(gSt.trackDb, genomesUrl).href;
+                await trackDbIgvTracks(trackDbUrl, trackDbUrl, tracks, 0);
+            }
+        }
+        return tracks;
+    }
+
+    var cIgvPort = "http://localhost:60151";
+
+    async function igvIsRunning() {
+        /* return true if IGV Desktop answers on its batch port. The response is opaque (no-cors), but the
+         * fetch only fails if nothing listens on the port, or if the browser blocks the request (Safari, or
+         * Chrome 142+ when the user denies 'local network access'). The timeout is long, as Chrome holds the
+         * request while its permission prompt is open. A port without a listener fails right away. */
+        var ctrl = new AbortController();
+        var timer = setTimeout(function() { ctrl.abort(); }, 30000);
+        try {
+            await fetch(cIgvPort+"/echo", {mode:"no-cors", signal:ctrl.signal});
+            return true;
+        } catch (e) {
+            return false;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    async function igvSendTracks(tracks, ucscDb) {
+        /* send track URLs to a running IGV Desktop with its batch port 'load' command, in chunks so the
+         * URL does not get too long. The genome is only sent with the first chunk, so IGV switches to it once. */
+        var chunkSize = 20;
+        for (var i=0; i<tracks.length; i+=chunkSize) {
+            var chunk = tracks.slice(i, i+chunkSize);
+            var url = cIgvPort+"/load?merge=true"+
+                "&file="+encodeURIComponent(chunk.map(function(t) {return t.url;}).join(","))+
+                "&name="+encodeURIComponent(chunk.map(function(t) {return t.name;}).join(","));
+            if (i===0)
+                url += "&genome="+encodeURIComponent(ucscDb);
+            await fetch(url, {mode:"no-cors"});
+        }
+    }
+
+    function igvEsc(s) {
+        /* escape a string for HTML */
+        return String(s).replace(/[&<>"']/g, function(c) {
+            return {"&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;"}[c]; });
+    }
+
+    function igvShowHelpDialog(tracks, ucscDb, retryFunc, errMsg) {
+        /* explain how to start IGV Desktop, with the list of URLs for loading the files by hand. Uses its
+         * own dialog element: showDialogBox() would replace the dataset dialog that may be open below. */
+        $("#tpIgvDialog").remove();
+        var htmls = [];
+        htmls.push("<div id='tpIgvDialog' title='Open in IGV Desktop'>");
+        if (errMsg) {
+            htmls.push("<p><b>Error:</b> "+igvEsc(errMsg)+"</p>");
+        } else {
+            htmls.push("<p>IGV Desktop is not running on this computer, or this web browser cannot connect to it.</p>");
+            htmls.push("<ol>");
+            htmls.push("<li>Start IGV Desktop. If you do not have it yet, download it from ");
+            htmls.push("<a target=_blank href='https://igv.org/download/'>igv.org/download</a>.</li>");
+            htmls.push("<li>In IGV, check that <i>View &gt; Preferences &gt; Advanced &gt; Enable port</i> is on, with port 60151 (this is the default).</li>");
+            htmls.push("<li>Click <i>Try again</i> below. If your web browser asks whether this page may access other apps and devices on your computer or local network, allow it.</li>");
+            htmls.push("</ol>");
+            htmls.push("<p>If you blocked this before: click the icon left of the address bar, open the site settings and allow <i>Local network access</i>, then reload the page.</p>");
+            htmls.push("<p>Safari does not allow web pages to connect to IGV. Use Chrome, Edge or Firefox, or load the files by hand.</p>");
+        }
+        if (tracks && tracks.length!==0) {
+            htmls.push("<p>To load the files by hand: in IGV, select the genome <b>"+igvEsc(ucscDb)+"</b>, then ");
+            htmls.push("<i>File &gt; Load from URL</i> and paste one of these URLs (you can also paste several, separated by commas):</p>");
+            var urls = tracks.map(function(t) {return t.url;}).join("\n");
+            htmls.push("<textarea readonly style='width:100%; height:150px; font-size:11px; white-space:pre'>"+
+                igvEsc(urls)+"</textarea>");
+        }
+        htmls.push("</div>");
+        $(document.body).append(htmls.join(""));
+
+        var buttons = [];
+        if (retryFunc)
+            buttons.push({text:"Try again", click:function() { $(this).dialog("close"); retryFunc(); }});
+        buttons.push({text:"Close", click:function() { $(this).dialog("close"); }});
+        $("#tpIgvDialog").dialog({modal:true, width:Math.min(700, $(window).width()-40), buttons:buttons});
+    }
+
+    async function onIgvLinkClick(ev) {
+        /* user clicked an 'Open in IGV' link or button: load the hub, send its files to IGV Desktop */
+        ev.preventDefault();
+        var el = $(ev.currentTarget);
+        var hubUrl = decodeURIComponent(el.attr("data-hub"));
+        var ucscDb = decodeURIComponent(el.attr("data-db"));
+        // the status goes into the note next to the link, if there is one, or into a dialog
+        var noteEl = el.nextAll(".tpIgvNote").first();
+        function setStatus(msg) {
+            if (noteEl.length!==0)
+                noteEl.text(msg);
+        }
+
+        var tracks = null;
+        setStatus("(loading track list...)");
+        try {
+            tracks = await hubIgvTracks(hubUrl, ucscDb);
+        } catch (e) {
+            setStatus("(IGV Desktop must be running)");
+            igvShowHelpDialog(null, ucscDb, null, "Could not read the track hub: "+e.message);
+            return false;
+        }
+        if (tracks.length===0) {
+            setStatus("(IGV Desktop must be running)");
+            igvShowHelpDialog(null, ucscDb, null, "The track hub has no files for "+ucscDb+" that IGV can load.");
+            return false;
+        }
+
+        async function sendToIgv() {
+            setStatus("(connecting to IGV...)");
+            if (!(await igvIsRunning())) {
+                setStatus("(IGV Desktop must be running)");
+                igvShowHelpDialog(tracks, ucscDb, sendToIgv);
+                return;
+            }
+            setStatus("(sending "+tracks.length+" files to IGV...)");
+            try {
+                await igvSendTracks(tracks, ucscDb);
+            } catch (e) {
+                setStatus("(IGV Desktop must be running)");
+                igvShowHelpDialog(tracks, ucscDb, sendToIgv);
+                return;
+            }
+            var doneMsg = tracks.length+" files sent to IGV, switch to the IGV window to see them.";
+            if (noteEl.length!==0)
+                setStatus("- "+doneMsg);
+            else
+                alert(doneMsg);
+        }
+        await sendToIgv();
         return false;
     }
 
@@ -11625,6 +11904,8 @@ var cellbrowser = function() {
         if (db.conf.hubUrl!==undefined) {
             htmls.push('<a target=_blank href="#" id="tpOpenGenome" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-left: 3px; margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Show sequencing read coverage and gene expression on UCSC Genome Browser" data-placement="bottom">Genome Browser</a>');
             //nextLeft += 155;
+            if (db.conf.ucscDb && hubTxtUrl(loadedHubConf())!==null)
+                htmls.push('<a href="#" id="tpOpenIgv" class="tpIgvLink gradientBackground ui-button ui-widget ui-corner-all" '+igvLinkAttrs(loadedHubConf())+' style="margin-left: 3px; margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Load the bigWig/bigBed files of this dataset into IGV Desktop. IGV Desktop must be running on your computer." data-placement="bottom">IGV</a>');
         }
 
         var xenaId = db.conf.xenaId;
@@ -15290,6 +15571,8 @@ function onClusterNameHover(clusterName, nameIdx, ev, isLegend, doScroll, intKey
 
         changeUrl({"nc":null});
         setupKeyboard();
+        // 'Open in IGV' links in the dataset info pane and the IGV toolbar button
+        $(document).on("click", ".tpIgvLink", onIgvLinkClick);
         buildMenuBar();
         checkLoginState();  // updates the account menu once /api/auth/me responds
         // Report and clear the ?cbAuth=... an OAuth callback redirected us back

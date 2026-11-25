@@ -486,11 +486,30 @@ Genome Browser Integration
    URL to a UCSC track hub with BAM file reads and expression values, or a full link
    to a UCSC Genome Browser session. When set, "genome" links appear next to gene symbols
    in the marker gene pop-up and clicking them opens the Genome Browser centered on
-   that gene.
+   that gene. The dataset information page shows the line "Genome browser tracks: Open on
+   UCSC Genome Browser | Open in IGV", and the toolbar gets the buttons "Genome Browser"
+   and "IGV". "Open in IGV" reads the hub.txt, collects the bigWig, bigBed, BAM and VCF
+   files of the ``ucscDb`` assembly and sends them to IGV Desktop on the user's
+   computer, which must be running (it listens on port 60151). If IGV cannot be reached,
+   a dialog explains how to start it and lists the file URLs for loading by hand.
+
+   The hub.txt path can be relative to the dataset directory, e.g. ``hub/hub.txt`` or,
+   in a dataset of a collection, ``../hub/hub.txt``. It is always given to the Genome
+   Browser as a full URL on the server that serves the dataset. Use this instead of a
+   hand-written Genome Browser link in ``other_url`` of ``desc.conf``.
 
    ::
 
+      hubUrl = "hub/hub.txt"
       hubUrl = "http://cells.ucsc.edu/cortex-dev/hub/hub.txt"
+
+``ucscDb``
+   UCSC assembly name of the track hub files, e.g. ``hg38``, ``hg19``, ``mm10``.
+   Required with ``hubUrl``.
+
+   ::
+
+      ucscDb = "hg38"
 
 
 Split-Screen Startup

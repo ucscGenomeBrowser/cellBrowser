@@ -5174,6 +5174,12 @@ def convertDataset(inDir, inConf, outConf, datasetDir, redo, isTopLevel):
 
     coordFiles, clusterLabels = convertCoords(inDir, inConf, outConf, sampleNames, outMetaFname, datasetDir)
 
+    # writeDatasetDesc() copies the track hub into desc.json, for the hub links on the dataset info page.
+    # The general pass-through of settings to outConf happens only further down, so copy them here.
+    for tag in ["hubUrl", "ucscDb"]:
+        if tag in inConf:
+            outConf[tag] = inConf[tag]
+
     foundConf = writeDatasetDesc(inConf["inDir"], outConf, datasetDir, coordFiles, outMatrixFname)
 
     if geneToSym==-1:
