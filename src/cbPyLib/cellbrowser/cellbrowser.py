@@ -7195,8 +7195,10 @@ def copyStatic(baseDir, outDir):
     copyAndReplace(join(baseDir, "js", "cellBrowser.js"), join(outDir, "js"))
     copyMarkers(outDir)
 
-def writeVersionedLink(ofh, mask, webDir, relFname, addVersion=True):
-    " write sprintf-formatted mask to ofh, but add ?md5 to jsFname first. Goal is to force cache reload in browser. "
+def writeVersionedLink(ofh, mask, webDir, relFname, addVersion=True, outDir=None):
+    """ write sprintf-formatted mask to ofh, but add ?md5 to jsFname first. Goal is to force cache reload in browser.
+    The md5 is of the file in outDir, the one the web server sends. The copy in webDir can differ:
+    cbUpgrade without --code copies nothing, and copyAndReplace changes cellBrowser.js while copying. """
     # hack for jquery - avoid jquery button overriding any other button function
     if relFname.endswith("jquery-ui.min.js"):
         ofh.write("""<script>
@@ -7206,6 +7208,8 @@ def writeVersionedLink(ofh, mask, webDir, relFname, addVersion=True):
 """)
 
     filePath = join(webDir, relFname)
+    if outDir is not None and isfile(join(outDir, relFname)):
+        filePath = join(outDir, relFname)
     md5 = md5WithPython(filePath)
     if addVersion:
         verFname = relFname+"?"+md5[:MD5LEN]
@@ -7343,7 +7347,7 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
     addVersion = not devMode
 
     for cssFname in cssFnames:
-        writeVersionedLink(ofh, '<link rel="stylesheet" href="%s">', baseDir, cssFname, addVersion=addVersion)
+        writeVersionedLink(ofh, '<link rel="stylesheet" href="%s">', baseDir, cssFname, addVersion=addVersion, outDir=outDir)
 
     extJsFnames = ["ext/FileSaver.1.1.20151003.min.js", "ext/jquery.3.1.1.min.js",
         "ext/palette.js", "ext/spectrum.min.js", "ext/jsurl2.js",
@@ -7385,10 +7389,10 @@ def makeIndexHtml(baseDir, outDir, devMode=False):
         ]
 
     for jsFname in ourJsFnames:
-        writeVersionedLink(ofh, '<script src="%s"></script>', baseDir, jsFname, addVersion=addVersion)
+        writeVersionedLink(ofh, '<script src="%s"></script>', baseDir, jsFname, addVersion=addVersion, outDir=outDir)
 
     for jsFname in extJsFnames:
-        writeVersionedLink(ofh, '<script src="%s"></script>', baseDir, jsFname, addVersion=addVersion)
+        writeVersionedLink(ofh, '<script src="%s"></script>', baseDir, jsFname, addVersion=addVersion, outDir=outDir)
 
     # at UCSC, for grant reports, we need to get some idea how many people are using the cell browser
     ofh.write('<script async defer src="https://cells.ucsc.edu/js/cbTrackUsage.js"></script>\n')
