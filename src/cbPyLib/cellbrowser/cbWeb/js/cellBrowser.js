@@ -5073,6 +5073,7 @@ var cellbrowser = function() {
        //}
 
        $("#tpToolBar").css("width", rendererWidth+"px");
+       fitToolBar();
 
        $("#tpToolBar").css("height", toolBarHeight+"px");
        $("#tpLeftSidebar").css("height", (window.innerHeight - menuBarHeight)+"px");
@@ -11864,9 +11865,90 @@ var cellbrowser = function() {
         buildGeneExprPlotsAddGenes(geneIds, metaName); 
     }
 
+    // toolbar buttons that move into the 'More' menu when the window is too narrow, in this order
+    var cToolBarCollapseOrder = ["tpOpenXena", "tpOpenGenome", "tpOpenImgButton", "tpHeatButton",
+        "tpOpenExprButton", "tpClusterMarkersBtn", "tpOpenDatasetButton"];
+
+    function toolBarOverflows(toolBar) {
+        /* true if a visible toolbar element extends past the left edge of the legend bar */
+        var limit = window.innerWidth - legendBarWidth;
+        var kids = toolBar.children;
+        for (var i = 0; i < kids.length; i++) {
+            if (kids[i].style.display!=="none" && kids[i].getBoundingClientRect().right > limit)
+                return true;
+        }
+        return false;
+    }
+
+    function fitToolBar() {
+        /* hide the toolbar buttons that do not fit the window width and list them in the 'More' menu instead */
+        var toolBar = getById("tpToolBar");
+        var moreButton = getById("tpToolBarMore");
+        var moreList = getById("tpToolBarMoreList");
+        if (!toolBar || !moreButton || !moreList)
+            return;
+
+        moreList.style.display = "none";
+        moreList.innerHTML = "";
+        moreButton.style.display = "none";
+        for (var i = 0; i < cToolBarCollapseOrder.length; i++) {
+            var el = getById(cToolBarCollapseOrder[i]);
+            if (el) el.style.display = "";
+        }
+        if (!toolBarOverflows(toolBar))
+            return;
+
+        moreButton.style.display = "";
+        for (i = 0; i < cToolBarCollapseOrder.length; i++) {
+            el = getById(cToolBarCollapseOrder[i]);
+            if (!el) continue;
+            el.style.display = "none";
+            if (!toolBarOverflows(toolBar))
+                break;
+        }
+
+        // the menu lists the hidden buttons in toolbar order
+        var htmls = [];
+        var kids = toolBar.children;
+        for (i = 0; i < kids.length; i++) {
+            var kid = kids[i];
+            if (kid.style.display==="none" && cToolBarCollapseOrder.indexOf(kid.id)!==-1)
+                htmls.push("<li><a href='#' data-target='"+kid.id+"'>"+kid.innerHTML+"</a></li>");
+        }
+        moreList.innerHTML = htmls.join("");
+    }
+
+    function onToolBarMoreClick(ev) {
+        /* show or hide the 'More' menu under its button */
+        ev.stopPropagation();
+        var list = $('#tpToolBarMoreList');
+        $('#tpClusterMarkersList').hide();
+        if (list.is(":visible")) {
+            list.hide();
+            return false;
+        }
+        var rect = this.getBoundingClientRect();
+        list.css({top: rect.bottom + 'px', left: rect.left + 'px'}).show();
+        // keep the menu inside the window
+        var overRight = rect.left + list.outerWidth() - window.innerWidth + 5;
+        if (overRight > 0)
+            list.css("left", Math.max(0, rect.left - overRight) + "px");
+        return false;
+    }
+
+    function onToolBarMoreItemClick(ev) {
+        /* user clicked an entry in the 'More' menu: click the hidden toolbar button that it stands for */
+        ev.preventDefault();
+        ev.stopPropagation();
+        $('#tpToolBarMoreList').hide();
+        $('#' + this.getAttribute("data-target")).trigger("click");
+    }
+
     function buildToolBar (coordInfo, dataset, fromLeft, fromTop) {
     /* add the tool bar with icons of tools and add under body to the DOM */
         $("#tpToolBar").remove();
+        $("#tpToolBarMoreList").remove();
+        $("#tpClusterMarkersList").remove();
 
         var htmls = [];
 
@@ -11904,8 +11986,7 @@ var cellbrowser = function() {
         if (db.conf.hubUrl!==undefined) {
             htmls.push('<a target=_blank href="#" id="tpOpenGenome" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-left: 3px; margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Show sequencing read coverage and gene expression on UCSC Genome Browser" data-placement="bottom">Genome Browser</a>');
             //nextLeft += 155;
-            if (db.conf.ucscDb && hubTxtUrl(loadedHubConf())!==null)
-                htmls.push('<a href="#" id="tpOpenIgv" class="tpIgvLink gradientBackground ui-button ui-widget ui-corner-all" '+igvLinkAttrs(loadedHubConf())+' style="margin-left: 3px; margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Load the bigWig/bigBed files of this dataset into IGV Desktop. IGV Desktop must be running on your computer." data-placement="bottom">IGV</a>');
+            // no IGV button here, to save space: 'Open in IGV' is in the Info & Download dialog
         }
 
         var xenaId = db.conf.xenaId;
@@ -11913,6 +11994,10 @@ var cellbrowser = function() {
             htmls.push('<a target=_blank href="#" id="tpOpenXena" class="gradientBackground ui-button ui-widget ui-corner-all" style="margin-left: 3px; margin-top:3px; height: 24px; border-radius:3px; padding-top:3px" title="Show gene expression heatmap on UCSC Xena Browser, creates heatmap of current gene (if coloring by gene) and all dataset genes. Click this button also if you have an active Xena window open and want to update the view there." data-placement="bottom">Xena</a>');
             //nextLeft += 80;
         }
+
+        // shown by fitToolBar() when some buttons do not fit the window width
+        htmls.push('<button id="tpToolBarMore" class="gradientBackground ui-button ui-widget ui-corner-all" style="display:none; margin-top:3px; margin-left: 3px; height: 24px; border-radius:3px; padding-top:3px" title="The buttons that do not fit the window width">More</button>');
+        $('body').append('<ul id="tpToolBarMoreList" class="dropdown-menu" style="display:none; position:fixed; z-index:9999"></ul>');
 
         if (coordInfo && coordInfo.length>0 && coordInfo[coordInfo.length-1].shortLabel.length > 20)
             //$('.chosen-drop').css({"width": "300px"});
@@ -12001,23 +12086,33 @@ var cellbrowser = function() {
         $('#tpOpenExprButton').click(buildExprViewWindow);
         if (db.conf.showHeatmap) $('#tpHeatButton').click(switchToHeat);
 
+        $('#tpToolBarMore').click(onToolBarMoreClick);
+        // buildToolBar runs on every dataset change: .off() first, so the document handlers are bound only once
+        $(document).off('.tpToolBar');
+        $(document).on('click.tpToolBar', '#tpToolBarMoreList a', onToolBarMoreItemClick);
+        $(document).on('click.tpToolBar', function() {
+            $('#tpToolBarMoreList').hide();
+            $('#tpClusterMarkersList').hide();
+        });
+
         if (db.conf.markers && db.conf.markers.length > 0) {
             $('#tpClusterMarkersBtn').click(function(e) {
                 e.stopPropagation();
                 var list = $('#tpClusterMarkersList');
-                var rect = this.getBoundingClientRect();
+                // when the button is in the 'More' menu, open the list under the 'More' button
+                var anchor = (this.style.display==="none") ? getById("tpToolBarMore") : this;
+                var rect = anchor.getBoundingClientRect();
                 list.css({top: rect.bottom + 'px', left: rect.left + 'px'});
                 list.toggle();
             });
-            $(document).on('click', '.tpClusterMarkersItem', function() {
+            $(document).on('click.tpToolBar', '.tpClusterMarkersItem', function() {
                 var clusterName = $(this).attr('data-cluster');
                 $('#tpClusterMarkersList').hide();
                 onClusterNameClick(clusterName, clusterName, {}, true);
             });
-            $(document).click(function() {
-                $('#tpClusterMarkersList').hide();
-            });
         }
+
+        fitToolBar();
     }
 
     function metaFieldToLabel(fieldName) {
